@@ -1,0 +1,85 @@
+# gevrek for Arch, built from the repository's newest commit
+# (`makepkg -si` in this folder). Not built on an Arch machine yet: the
+# names of the packages are the ones Arch has for what the Fedora build
+# links against.
+
+pkgname=gevrek-git
+pkgver=0.6.0
+pkgrel=1
+pkgdesc="A tiling window manager and desktop for Wayland"
+arch=('x86_64')
+url="https://github.com/ulaas/gevrek"
+license=('MIT')
+depends=('libinput' 'seatd' 'mesa' 'libdrm' 'libxkbcommon' 'pixman'
+         'wayland' 'systemd-libs' 'pam' 'polkit' 'libpipewire')
+makedepends=('cargo' 'git' 'clang' 'pkgconf')
+optdepends=('xdg-desktop-portal: what sandboxed programs ask the desktop'
+            'xdg-desktop-portal-gtk: file dialogs'
+            'xorg-xwayland: programs that still speak X11'
+            'pipewire: the sound module of the panel'
+            'foot: a terminal for the default shortcut')
+provides=('gevrek')
+conflicts=('gevrek')
+backup=('etc/pam.d/gevrek-lock' 'etc/pam.d/gevrek-dm' 'etc/pam.d/gevrek-greeter')
+source=("gevrek::git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd gevrek
+    printf '0.6.0.r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short=9 HEAD)"
+}
+
+prepare() {
+    cd gevrek
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd gevrek
+    cargo build --release --frozen --bins \
+        -p gevrek -p gevrek-smithay -p gevrek-studio -p gevrek-shell -p gevrek-lock \
+        -p gevrek-dm
+}
+
+package() {
+    cd gevrek
+    local program unit
+    for program in gevrek gevrek-wl gevrek-studio gevrek-shell gevrek-lock gevrek-dm; do
+        install -Dm755 "target/release/$program" "$pkgdir/usr/bin/$program"
+    done
+    install -Dm755 resources/gevrek-session "$pkgdir/usr/bin/gevrek-session"
+    # The units name the programs by their place.
+    install -d "$pkgdir/usr/lib/systemd/user"
+    for unit in gevrek.service gevrek-safe.service gevrek-shell.service gevrek-shutdown.target; do
+        sed 's|@BIN@|/usr/bin|g' "resources/systemd/$unit" > "$pkgdir/usr/lib/systemd/user/$unit"
+        chmod 644 "$pkgdir/usr/lib/systemd/user/$unit"
+    done
+    install -Dm644 resources/gevrek.desktop "$pkgdir/usr/share/wayland-sessions/gevrek.desktop"
+    install -Dm644 resources/gevrek-studio.desktop "$pkgdir/usr/share/applications/gevrek-studio.desktop"
+    # gevrek's icon, by the name the application's entry gives (`Icon=gevrek`).
+    local size
+    for size in 16 24 32 48 64 128 256 512; do
+        install -Dm644 "assets/brand/app-icon/linux/hicolor/${size}x${size}/apps/gevrek.png" \
+            "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/gevrek.png"
+    done
+    install -Dm644 assets/brand/app-icon/linux/hicolor/scalable/apps/gevrek.svg \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/gevrek.svg"
+    install -Dm644 resources/gevrek-portals.conf "$pkgdir/usr/share/xdg-desktop-portal/gevrek-portals.conf"
+    install -Dm644 resources/gevrek.portal "$pkgdir/usr/share/xdg-desktop-portal/portals/gevrek.portal"
+    # The lock screen checks the password as every login on the system does.
+    install -d "$pkgdir/etc/pam.d"
+    cat > "$pkgdir/etc/pam.d/gevrek-lock" <<'PAM'
+#%PAM-1.0
+auth       include      system-auth
+account    include      system-auth
+PAM
+    # gevrek's own display manager (resources/dm/README.md). Installed,
+    # not enabled: `systemctl enable gevrek-dm` in place of another.
+    install -Dm644 resources/dm/gevrek-dm.service "$pkgdir/usr/lib/systemd/system/gevrek-dm.service"
+    install -Dm644 resources/dm/pam-gevrek-dm "$pkgdir/etc/pam.d/gevrek-dm"
+    install -Dm644 resources/dm/pam-gevrek-greeter "$pkgdir/etc/pam.d/gevrek-greeter"
+    install -Dm644 resources/dm/sysusers.conf "$pkgdir/usr/lib/sysusers.d/gevrek-dm.conf"
+    install -Dm644 resources/dm/tmpfiles.conf "$pkgdir/usr/lib/tmpfiles.d/gevrek-dm.conf"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/gevrek-git/LICENSE"
+    install -Dm644 docs/LINUX.md "$pkgdir/usr/share/doc/gevrek-git/LINUX.md"
+}

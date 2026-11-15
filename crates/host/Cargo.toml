@@ -1,0 +1,15 @@
+[package]
+name = "gevrek-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "What every gevrek host process shares: configuration store, file watcher, started programs, commands, heartbeat."
+
+[dependencies]
+gevrek-model = { path = "../model" }
+anyhow = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }

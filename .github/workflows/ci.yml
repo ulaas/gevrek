@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # The backend-neutral crates must build and test on Linux.
+  portable:
+    name: Linux (model and engine)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test backend-neutral crates
+        run: cargo test -p gevrek-model -p gevrek-engine --all-targets
+      - name: No Windows, UI, or async dependency
+        run: |
+          if grep -rnE '(^|[^:A-Za-z_])windows::|\begui\b|\beframe\b|\btokio\b' crates/model crates/engine --include='*.rs' | grep -vE '^\S+:[0-9]+:\s*//'; then
+            echo "Backend-neutral crates use a forbidden dependency"
+            exit 1
+          fi
+
+      - name: The settings program builds without the Windows API
+        run: |
+          cargo check -p gevrek-studio --all-targets
+          if grep -rnE '(^|[^:A-Za-z_])windows::|gevrek_win32' crates/studio --include='*.rs' | grep -vE '^\S+:[0-9]+:\s*//'; then
+            echo "The studio crate uses the Windows API or the Windows backend"
+            exit 1
+          fi
+
+  linux:
+    name: Linux (everything but the Windows backend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libwayland-dev libxkbcommon-dev libegl1-mesa-dev libgles2-mesa-dev libudev-dev libinput-dev libgbm-dev libseat-dev libdrm-dev libpam0g-dev libpipewire-0.3-dev clang
+      # The Wayland backend is tested headless: real Wayland clients in the
+      # test process, nothing is drawn. The gRPC server, the CLI and the
+      # editor run their tests here as on Windows.
+      - name: Test
+        run: cargo test --workspace --exclude gevrek-win32 --no-fail-fast
+      # End to end, with no display: gevrek-wl with outputs in memory, a real
+      # terminal as its client, made-up keys and mouse input.
+      - name: Nested checks
+        if: hashFiles('tests/nested/checks.py') != ''
+        run: |
+          sudo apt-get install -y foot
+          cargo build -p gevrek-smithay -p gevrek -p gevrek-testclient
+          cargo build -p gevrek-ui --example gallery
+          python3 tests/nested/checks.py
+
+  # What may be a dependency: no known fault, no licence that MIT cannot
+  # be combined with, nothing from outside crates.io (deny.toml).
+  dependencies:
+    name: Dependencies (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
+  windows:
+    name: Windows (everything)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --workspace --all-targets --no-fail-fast
+      - name: Clippy (no errors)
+        run: cargo clippy --workspace --all-targets

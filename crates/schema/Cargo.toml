@@ -1,0 +1,12 @@
+[package]
+name = "gevrek-schema"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The configuration's JSON Schema and the catalogue of settings made from it: what the studio builds its forms and its search from."
+
+[dependencies]
+gevrek-model = { path = "../model" }
+schemars = { workspace = true }
+serde_json = { workspace = true }

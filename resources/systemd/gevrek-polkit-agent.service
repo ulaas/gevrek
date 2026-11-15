@@ -1,0 +1,11 @@
+[Unit]
+Description=Another authentication agent for the gevrek session (not started by it: gevrek-shell is the agent)
+PartOf=graphical-session.target
+After=gevrek.service gevrek-safe.service gevrek-previous.service
+
+[Service]
+Slice=session.slice
+# The first agent that is installed.
+ExecStart=/bin/sh -c 'for agent in /usr/libexec/kf6/polkit-kde-authentication-agent-1 /usr/lib/x86_64-linux-gnu/libexec/polkit-kde-authentication-agent-1 /usr/lib/polkit-kde-authentication-agent-1 /usr/libexec/hyprpolkitagent /usr/libexec/polkit-gnome-authentication-agent-1 /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 /usr/libexec/polkit-mate-authentication-agent-1 /usr/bin/lxqt-policykit-agent; do [ -x "$agent" ] && exec "$agent"; done; echo "No polkit authentication agent is installed" >&2; exit 0'
+Restart=on-failure
+RestartSec=2

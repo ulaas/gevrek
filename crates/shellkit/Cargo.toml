@@ -1,0 +1,39 @@
+[package]
+name = "gevrek-shellkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Surfaces for gevrek's shell: a place on the screen (a panel, a launcher, a notification) that egui draws into and that gets input, on each system's own terms."
+
+[dependencies]
+egui = "0.37"
+egui-wgpu = "0.37"
+gevrek-ui = { path = "../ui" }
+anyhow = { workspace = true }
+log = { workspace = true }
+pollster = "1"
+
+# Linux: layer-shell surfaces of a Wayland compositor.
+[target.'cfg(target_os = "linux")'.dependencies]
+smithay-client-toolkit = "0.19"
+wayland-client = "0.31"
+# (And text-input, for input methods in the shell's own text fields.)
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+# The system's own libwayland, loaded when the program runs: the graphics
+# library needs the display and the surface as that library knows them.
+wayland-backend = { version = "0.3", features = ["client_system", "dlopen"] }
+raw-window-handle = "0.6"
+# What is drawn, told to screen readers and other aids (AT-SPI): the
+# toolkit describes each surface as a tree, and this carries it over.
+accesskit_unix = "0.24"
+
+# Windows: borderless tool windows.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
+raw-window-handle = "0.6"
+# What is drawn, told to screen readers and other aids (UI Automation).
+accesskit_windows = "0.35"
+
+[dev-dependencies]
+env_logger = { workspace = true }

@@ -1,0 +1,51 @@
+[package]
+name = "gevrek-system"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "What gevrek's shell asks of the system it runs on: the installed applications first; icons, sound, brightness, the session as they are needed."
+
+[dependencies]
+log = { workspace = true }
+dirs = { workspace = true }
+# Icons: pictures (PNG) and drawings (SVG).
+image = { version = "0.25", default-features = false, features = ["png"] }
+resvg = { version = "0.45", default-features = false }
+
+# Linux: the sound server, spoken to in its own protocol (PulseAudio's,
+# which PipeWire serves too), with no library of C.
+[target.'cfg(target_os = "linux")'.dependencies]
+pulseaudio = "0.3"
+
+# Windows: the Start menu and the shell's pictures of what is in it.
+[target.'cfg(windows)'.dependencies]
+# (And the network the machine is on: its adapters, and what the system
+# calls the network each is connected to.)
+windows = { workspace = true, features = [
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
+    "Win32_Networking_NetworkListManager",
+    # (The wireless radio and the networks in reach.)
+    "Win32_NetworkManagement_WiFi",
+    # (Bluetooth's radio and the devices the machine knows.)
+    "Devices_Radios",
+    "Devices_Bluetooth",
+    "Devices_Enumeration",
+    "Foundation",
+    "Foundation_Collections",
+    "Win32_System_IO",
+    # (The names of the devices to play on.)
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    # (What was copied, for the launcher.)
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    # (A window's picture, for the window switcher.)
+    "Win32_Storage_Xps",
+] }
+# The same crate `windows` is built on, by its own name: what answers the
+# system's calls back (the sound's changes) is written with a macro that
+# names it so.
+windows-core = "0.58"

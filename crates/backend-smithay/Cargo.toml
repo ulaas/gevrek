@@ -1,0 +1,71 @@
+[package]
+name = "gevrek-smithay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The Wayland backend of gevrek: a Smithay compositor that implements the engine's Desktop contract."
+
+# Everything here is Linux-only. On other systems the crate is empty, so the
+# workspace still builds and tests as a whole.
+[dependencies]
+gevrek-model = { path = "../model" }
+# The time of the day, for the night light.
+chrono = { workspace = true }
+gevrek-engine = { path = "../engine" }
+gevrek-host = { path = "../host" }
+gevrek-server = { path = "../server" }
+gevrek-protocol = { path = "../protocol" }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+ctrlc = { workspace = true, features = ["termination"] }
+
+[[bin]]
+name = "gevrek-wl"
+path = "src/bin/gevrek-wl.rs"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Stackbar titles: a font of the system, drawn with ab_glyph; the built-in
+# 8x8 font where the system has none.
+ab_glyph = "0.2"
+# The pictures of the pointer, from the cursor theme of the system.
+xcursor = "0.3"
+font8x8 = "0.3"
+# The wallpaper's file.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+smithay = { version = "0.7", default-features = false, features = [
+    "desktop",
+    "wayland_frontend",
+    "backend_winit",
+    "renderer_gl",
+    # No display at all (headless.rs): drawn in memory, for checks and CI.
+    "renderer_pixman",
+    "xwayland",
+    # Real hardware (udev.rs): compiled, not run yet.
+    "backend_drm",
+    "backend_gbm",
+    "backend_egl",
+    "backend_udev",
+    "backend_libinput",
+    "backend_session_libseat",
+] }
+
+# Nested in another Wayland session: asking the host to leave its shortcuts
+# alone (host_keys.rs), on the connection the window library opened.
+wayland-client = "0.31"
+wayland-backend = { version = "0.3", features = ["client_system"] }
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+# The signal that asks the login's gevrek to go under its veil.
+libc = "0.2"
+# What an X11 window says of itself before it is shown, which the window
+# manager's own line to the X server (the library's) does not read.
+x11rb = "0.13"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+# The dmabuf example makes a buffer on the display device with ioctls.
+libc = "0.2"
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }

@@ -1,0 +1,17 @@
+; gevrek's display manager under SELinux.
+;
+; The system's policy has a domain for display managers (xdm_t): what
+; runs in it may check a password, open a session for a person and start
+; that session under the person's own label. A program gets into that
+; domain by the label of its file. This module gives gevrek-dm that
+; label, and the places it keeps things the labels a display manager's
+; have, so that it runs as one and not as a service nobody confines
+; (unconfined_service_t), whose label the whole session would keep.
+;
+; Installed with `semodule -i gevrek-dm.cil` and `restorecon` on the
+; files (scripts/install-dm.sh does both where SELinux is on).
+
+(filecon "/usr/bin/gevrek-dm" file (system_u object_r xdm_exec_t ((s0) (s0))))
+(filecon "/usr/local/bin/gevrek-dm" file (system_u object_r xdm_exec_t ((s0) (s0))))
+(filecon "/var/lib/gevrek-greeter(/.*)?" any (system_u object_r xdm_var_lib_t ((s0) (s0))))
+(filecon "/run/gevrek-dm(/.*)?" any (system_u object_r xdm_var_run_t ((s0) (s0))))

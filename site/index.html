@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gevrek: a tiling desktop for Windows and Linux</title>
+<meta name="description" content="gevrek arranges your windows for you and brings the rest of a desktop with it: a panel, a launcher, a control centre, notifications and a settings program. The same on Windows and Linux.">
+<meta property="og:title" content="gevrek">
+<meta property="og:description" content="A tiling window manager and desktop shell for Windows and Linux. One configuration, one set of keys, one look, on both.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#21110A">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to the page</a>
+
+<header class="top">
+  <a class="brand" href="#" aria-label="gevrek, to the top">
+    <img src="assets/gevrek-mark-on-dark.svg" width="34" height="34" alt="">
+    <span>gevrek</span>
+  </a>
+  <nav aria-label="On this page">
+    <a href="#shell">Shell</a>
+    <a href="#studio">Studio</a>
+    <a href="#learn">Tutorial</a>
+    <a href="#desktop">Programs</a>
+    <a href="#build">Build</a>
+    <a class="out" href="https://github.com/ulaas/gevrek">GitHub</a>
+  </nav>
+</header>
+
+<main id="main">
+
+<section class="hero">
+  <div class="hero-words">
+    <h1>Windows that arrange themselves.</h1>
+    <p class="lede">gevrek gives every window its share of the display. None lies over another, and a few keys take you between them. It brings the rest of a desktop with it, and it is the same on Windows and Linux.</p>
+    <p class="actions">
+      <a class="button" href="#build">Build it</a>
+      <a class="button quiet" href="https://github.com/ulaas/gevrek">Read the source</a>
+    </p>
+  </div>
+
+  <div class="stage" id="demo" aria-label="A small gevrek to try">
+    <div class="panel" aria-hidden="true">
+      <img src="assets/gevrek-mark-small-on-dark.svg" width="18" height="18" alt="">
+      <span class="space on">1</span><span class="space">2</span><span class="space">3</span>
+      <span class="layout-name" id="layout-name">Dwindle</span>
+      <span class="clock" id="clock">10:42</span>
+    </div>
+    <div class="display" id="display"></div>
+    <div class="keys">
+      <button type="button" data-do="open"><kbd>N</kbd> Open a window</button>
+      <button type="button" data-do="close"><kbd>Q</kbd> Close it</button>
+      <button type="button" data-do="layout"><kbd>L</kbd> Next layout</button>
+      <button type="button" data-do="swap"><kbd>M</kbd> Make it the first</button>
+      <span class="hint">Press a window to give it the keyboard. The keys work too.</span>
+    </div>
+  </div>
+</section>
+
+<section class="plain" id="how">
+  <div class="split">
+    <h2>You say where. gevrek does the placing.</h2>
+    <div class="prose">
+      <p>Open a window and it gets a place; close one and the others take its room. Twelve layouts decide how the room is shared: dwindle, main and stack, columns, a grid, a scrolling strip as long as it has to be, and plain floating when that is what you want.</p>
+      <p>Workspaces keep things apart, on each display. Windows can share a place as tabs, wait out of sight in a scratchpad, or follow rules that say where a program's windows go. Every one of these has a key, and the pointer and the touchpad can do all of it too.</p>
+    </div>
+  </div>
+</section>
+
+<section class="plain" id="shell">
+  <div class="split">
+    <h2>The rest of a desktop, drawn by the same hand.</h2>
+    <div class="prose">
+      <p>A window manager alone leaves you looking for a panel, a launcher and a way to turn the sound down. gevrek's shell has them, in one look, on both systems.</p>
+    </div>
+  </div>
+
+  <div class="shell-grid">
+    <figure class="f-launcher">
+      <img src="img/launcher.png" width="640" height="536" loading="lazy" alt="The launcher: a field to type in, a row of recently used programs with buttons for the settings, the control centre and notifications, and a list of programs">
+      <figcaption><b>The launcher</b> finds a program by a few letters. After a <code>&gt;</code> it finds everything gevrek can do; after a <code>:</code>, what you copied.</figcaption>
+    </figure>
+    <figure class="f-control">
+      <img src="img/control.png" width="380" height="1000" loading="lazy" alt="The control centre: tiles for wireless, bluetooth, do not disturb, night light, power and screen recording, then sound, brightness and what is playing">
+      <figcaption><b>The control centre</b> shows what is in use. Press a tile and its list opens.</figcaption>
+    </figure>
+    <figure class="f-notes">
+      <img src="img/notes.png" width="400" height="760" loading="lazy" alt="The notification centre: notifications grouped by the program that sent them">
+      <figcaption><b>Notifications</b> are kept by program until you clear them.</figcaption>
+    </figure>
+    <figure class="f-overview">
+      <img src="img/overview.png" width="1114" height="616" loading="lazy" alt="The overview of every workspace on two displays, each drawn small with its windows">
+      <figcaption><b>The overview</b> shows every workspace of every display. Enter goes there.</figcaption>
+    </figure>
+  </div>
+  <p class="aside"><span>Also there: a panel on every display, on-screen displays for volume and brightness, a window switcher and a power menu. On Linux the shell is the lock screen, the wallpaper, screenshots and the clipboard as well.</span></p>
+</section>
+
+<section class="light" id="studio">
+  <div class="split">
+    <h2>Nothing has to be written by hand.</h2>
+    <div class="prose">
+      <p>gevrek studio has every setting in a form, with a search over all of them. It talks to the gevrek that is running, so what you change is what you see.</p>
+    </div>
+  </div>
+  <figure class="wide">
+    <img src="img/studio-bindings.png" width="1280" height="800" loading="lazy" alt="gevrek studio on its Key bindings page: a searchable list of 116 keys and what each does">
+  </figure>
+  <div class="three">
+    <div>
+      <h3>Tried before it is kept</h3>
+      <p>A change that could lock you out, such as new keys or no panel, is applied for fifteen seconds. Unless you keep it, the configuration from before comes back by itself.</p>
+    </div>
+    <div>
+      <h3>An automation graph</h3>
+      <p>What gevrek does by itself when something happens, wired from node to node: a window opens, a key is pressed, a workspace is shown.</p>
+    </div>
+    <div>
+      <h3>Looks to start from</h3>
+      <p>Aurora, Focus Stage, Neon Grid, Paper and more. Loading one keeps what is yours: your keyboard, your displays, your own rules.</p>
+    </div>
+  </div>
+  <figure class="wide">
+    <img src="img/studio-graph.png" width="1280" height="800" loading="lazy" alt="The automation graph in gevrek studio: nodes for events and actions joined by wires, with a list of nodes to add">
+  </figure>
+</section>
+
+<section class="plain" id="learn">
+  <div class="split">
+    <h2>It teaches itself.</h2>
+    <div class="prose">
+      <p>The first time gevrek runs, your windows stay exactly where they are. A welcome asks how you want them arranged, which look you like and where the panel goes, and nothing changes until you say so.</p>
+      <p>Then a tour, if you want it: short lessons on practice windows of their own, on a workspace of their own. Each step waits until you have done it, with the keys your configuration has for it.</p>
+    </div>
+  </div>
+  <div class="learn-grid">
+    <figure>
+      <img src="img/welcome-setup.png" width="900" height="640" loading="lazy" alt="The welcome's setup page: five layouts drawn small, four looks, and where the panel is">
+    </figure>
+    <figure class="coach">
+      <img src="img/coach.png" width="640" height="196" loading="lazy" alt="The tutorial's card: go to the window on the right, with the keys for it and a small drawing of what happens">
+      <figcaption>The tutorial's card sits at the foot of the display and never takes the keyboard from you.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="plain" id="systems">
+  <div class="split">
+    <h2>One desktop, two systems.</h2>
+    <div class="prose">
+      <p>The part of gevrek that arranges windows knows nothing of the system under it. Each system is a backend, so what is written once works on all of them.</p>
+    </div>
+  </div>
+  <dl class="systems">
+    <div>
+      <dt>Windows 10 and 11</dt>
+      <dd>gevrek arranges the windows of the Windows desktop, and its shell stands in for the taskbar. Stop it and every window is put back. The most complete of the two.</dd>
+    </div>
+    <div>
+      <dt>Linux, on Wayland</dt>
+      <dd>gevrek is the compositor itself, built on Smithay, with its own display manager to sign in with. X11 programs run through Xwayland.</dd>
+    </div>
+    <div>
+      <dt>macOS</dt>
+      <dd>Planned. Nothing is written yet.</dd>
+    </div>
+  </dl>
+</section>
+
+<section class="plain" id="desktop">
+  <div class="split">
+    <h2>Programs for the rest of the day.</h2>
+    <div class="prose">
+      <p>A desktop wants programs on it. These are by the same hands, each a project of its own, each keyboard-first and drawn with egui like gevrek itself.</p>
+    </div>
+  </div>
+  <ul class="programs">
+    <li><a href="https://ulaas.github.io/soyuz/"><span class="name">Soyuz</span><span class="what">A file explorer whose window never stops answering. Every copy and move is a job you can pause.</span></a></li>
+    <li><a href="https://ulaas.github.io/gitem/"><span class="name">gitem</span><span class="what">A Git client: the graph, your changes, an editor, and its own diff and merge tools.</span></a></li>
+    <li><a href="https://ulaas.github.io/peek/"><span class="name">Peek</span><span class="what">A quiet remote desktop client for RDP and VNC, with tabs and a library of connections.</span></a></li>
+    <li><a href="https://ulaas.github.io/corrent/"><span class="name">Corrent</span><span class="what">Your own media server and player, with a torrent client built in.</span></a></li>
+    <li><a href="https://ulaas.github.io/walle/"><span class="name">walle</span><span class="what">Browse, shortlist, compare and set wallpapers from nine sources.</span></a></li>
+  </ul>
+</section>
+
+<section class="plain" id="build">
+  <div class="split">
+    <h2>Build it.</h2>
+    <div class="prose">
+      <p>gevrek is at version 0.6 and young. It is built from source with a current stable Rust toolchain. <code>gevrek stop all</code> is the way out: it puts every window back.</p>
+    </div>
+  </div>
+  <div class="code-pair">
+    <div>
+      <h3>Windows</h3>
+<pre><code>git clone https://github.com/ulaas/gevrek
+cd gevrek
+cargo build --release --bins
+cargo build --release -p gevrek-shell
+cargo xtask install
+gevrek start all</code></pre>
+    </div>
+    <div>
+      <h3>Linux</h3>
+<pre><code>git clone https://github.com/ulaas/gevrek
+cd gevrek
+cargo build --release -p gevrek-smithay \
+  -p gevrek -p gevrek-studio -p gevrek-shell --bins
+scripts/run-nested.sh</code></pre>
+      <p class="note">The libraries it needs are listed in <a href="https://github.com/ulaas/gevrek/blob/HEAD/docs/LINUX.md">docs/LINUX.md</a>. The last line runs gevrek as a window inside the session you are in.</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="thanks">
+    <h2>Thanks</h2>
+    <p>gevrek stands on the work of others. <a href="https://github.com/Smithay/smithay">Smithay</a> is the Wayland compositor library under its Linux backend. <a href="https://github.com/emilk/egui">egui</a> draws every one of its programs. <a href="https://github.com/gfx-rs/wgpu">wgpu</a>, <a href="https://github.com/microsoft/windows-rs">windows-rs</a>, <a href="https://github.com/hyperium/tonic">tonic</a> and <a href="https://phosphoricons.com">Phosphor Icons</a> are in it too, with many more listed in the <a href="https://github.com/ulaas/gevrek/blob/HEAD/THIRD-PARTY-NOTICES.md">third-party notices</a>.</p>
+  </div>
+  <div class="made">
+    <img src="assets/gevrek-mark-on-dark.svg" width="56" height="56" alt="">
+    <p>gevrek was developed fully with AI, with a hint of human taste.</p>
+    <p class="small">A gevrek is a ring of bread covered in sesame. The mark is one seen from above, cut into five panes, with one of them lit: the window that has the keyboard.</p>
+    <p class="small">MIT licence. <a href="https://github.com/ulaas/gevrek">github.com/ulaas/gevrek</a></p>
+  </div>
+</footer>
+
+<script src="demo.js"></script>
+</body>
+</html>

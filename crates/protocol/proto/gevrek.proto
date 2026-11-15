@@ -1,0 +1,992 @@
+syntax = "proto3";
+
+package gevrek;
+
+// ============================================================================
+// Services
+// ============================================================================
+
+service WindowManager {
+  // Push a new node graph to the WM for execution
+  rpc PushGraph(NodeGraph) returns (PushGraphResponse);
+
+  // Pause execution of the node graph
+  rpc PauseExecution(Empty) returns (StatusResponse);
+
+  // Resume execution of the node graph
+  rpc ResumeExecution(Empty) returns (StatusResponse);
+
+  // Trigger a manual event node
+  rpc TriggerManualEvent(TriggerRequest) returns (StatusResponse);
+
+  // Execute a typed window-manager command
+  rpc Dispatch(DispatchRequest) returns (StatusResponse);
+
+  // The same, with the command as the JSON the configuration uses for it
+  // (`{"command": "exec", "program": "kitty"}`). A new command needs no
+  // change of this protocol: every command a binding can hold can be sent.
+  rpc DispatchCommand(CommandDocument) returns (StatusResponse);
+
+  // For automated checks: feed made-up input (a JSON array of steps, see
+  // gevrek-host's input_injection) through the window manager's own input
+  // path. Refused unless the window manager was started to accept it.
+  rpc InjectInput(CommandDocument) returns (StatusResponse);
+
+  // Execute validated typed commands as one uninterrupted runtime batch.
+  rpc DispatchBatch(DispatchBatchRequest) returns (DispatchBatchResponse);
+
+  // Query current WM state (workspaces, windows, etc.)
+  rpc QueryState(Empty) returns (WMState);
+
+  // Subscribe to execution events (streaming)
+  rpc SubscribeToEvents(Empty) returns (stream ExecutionEvent);
+
+  // Health check
+  rpc HealthCheck(Empty) returns (HealthStatus);
+
+  // Discover protocol, configuration, dispatcher, node, and feature support.
+  rpc GetCapabilities(Empty) returns (CapabilitiesResponse);
+
+  // Get available node definitions (for dynamic editor)
+  rpc GetNodeDefinitions(Empty) returns (GetNodeDefinitionsResponse);
+
+  // Get the current active node graph from WM
+  rpc GetCurrentGraph(Empty) returns (NodeGraph);
+
+  // Get the complete versioned desktop configuration.
+  rpc GetConfiguration(Empty) returns (ConfigurationDocument);
+
+  // Validate, persist, and atomically apply the complete desktop configuration.
+  // A document whose `base_revision` is not the running revision is refused
+  // (`conflict` in the response): someone else changed the configuration.
+  rpc UpdateConfiguration(ConfigurationDocument) returns (UpdateConfigurationResponse);
+
+  // Update the working (collaborative) graph
+  rpc UpdateWorkingGraph(NodeGraph) returns (StatusResponse);
+
+  // Get the current working graph (collaborative draft)
+  rpc GetWorkingGraph(Empty) returns (NodeGraph);
+
+  // Get overlay/debug data for display
+  rpc GetOverlayData(Empty) returns (OverlayDataResponse);
+
+  // Gracefully shutdown the window manager
+  rpc Shutdown(ShutdownRequest) returns (StatusResponse);
+}
+
+// Shutdown request with optional parameters
+message ShutdownRequest {
+  // Whether to save config before shutdown
+  bool save_config = 1;
+  // Delay in milliseconds before shutdown (allows clients to disconnect)
+  uint32 delay_ms = 2;
+}
+
+// ============================================================================
+// Core Messages
+// ============================================================================
+
+message Empty {}
+
+message ConfigurationDocument {
+  string json = 1;
+  string version = 2;
+  // From GetConfiguration: the revision of the running configuration. It
+  // increases with every change, whoever makes it (a client, the file
+  // watcher, a runtime toggle).
+  uint64 revision = 3;
+  // For UpdateConfiguration: the revision this document was edited from.
+  // 0 applies unconditionally.
+  uint64 base_revision = 4;
+  // For UpdateConfiguration: who is changing it. Echoed in
+  // ConfigurationChanged so a client can ignore its own change.
+  string client_id = 5;
+}
+
+message UpdateConfigurationResponse {
+  bool success = 1;
+  optional string error = 2;
+  // The running revision: the new one on success, the current one on a
+  // conflict.
+  uint64 revision = 3;
+  // The document was based on an older revision and was not applied.
+  bool conflict = 4;
+}
+
+// The running configuration changed.
+message ConfigurationChanged {
+  uint64 revision = 1;
+  // The client_id of the UpdateConfiguration that made the change; empty
+  // for any other source (file edit, runtime toggle, graph push).
+  string origin_client_id = 2;
+  int64 timestamp_ms = 3;
+}
+
+message StatusResponse {
+  bool success = 1;
+  optional string error = 2;
+}
+
+message PushGraphResponse {
+  bool success = 1;
+  optional string error = 2;
+  uint32 node_count = 3;
+  uint32 connection_count = 4;
+  // The configuration revision the push produced; when `conflict` is set,
+  // the revision the WM runs.
+  uint64 revision = 5;
+  // Refused: the configuration changed since `base_revision`.
+  bool conflict = 6;
+}
+
+message TriggerRequest {
+  string node_id = 1;
+}
+
+enum DispatchType {
+  DISPATCH_TYPE_UNSPECIFIED = 0;
+  DISPATCH_TYPE_FOCUS_NEXT = 1;
+  DISPATCH_TYPE_FOCUS_PREVIOUS = 2;
+  DISPATCH_TYPE_FOCUS_DIRECTION = 3;
+  DISPATCH_TYPE_SWAP_NEXT = 4;
+  DISPATCH_TYPE_SWAP_PREVIOUS = 5;
+  DISPATCH_TYPE_SWAP_DIRECTION = 6;
+  DISPATCH_TYPE_MOVE_ACTIVE = 7;
+  DISPATCH_TYPE_RESIZE_ACTIVE = 8;
+  DISPATCH_TYPE_CLOSE_ACTIVE = 9;
+  DISPATCH_TYPE_MINIMIZE_ACTIVE = 10;
+  DISPATCH_TYPE_TOGGLE_MAXIMIZED = 11;
+  DISPATCH_TYPE_TOGGLE_FULLSCREEN = 12;
+  DISPATCH_TYPE_TOGGLE_PINNED = 13;
+  DISPATCH_TYPE_TOGGLE_FLOATING = 14;
+  DISPATCH_TYPE_SWITCH_WORKSPACE = 15;
+  DISPATCH_TYPE_MOVE_TO_WORKSPACE = 16;
+  DISPATCH_TYPE_CYCLE_NEXT_LAYOUT = 19;
+  DISPATCH_TYPE_CYCLE_PREVIOUS_LAYOUT = 20;
+  DISPATCH_TYPE_TOGGLE_EXPOSE = 21;
+  DISPATCH_TYPE_TOGGLE_SCRATCHPAD = 22;
+  DISPATCH_TYPE_TOGGLE_GROUP = 23;
+  DISPATCH_TYPE_TOGGLE_GROUP_LOCK = 24;
+  DISPATCH_TYPE_CYCLE_GROUP_NEXT = 25;
+  DISPATCH_TYPE_CYCLE_GROUP_PREVIOUS = 26;
+  DISPATCH_TYPE_MERGE_GROUP_NEXT = 27;
+  DISPATCH_TYPE_MERGE_GROUP_PREVIOUS = 28;
+  DISPATCH_TYPE_UNGROUP_ACTIVE = 29;
+  DISPATCH_TYPE_SET_LAYOUT = 30;
+  DISPATCH_TYPE_SET_LAYOUT_RATIO = 31;
+  DISPATCH_TYPE_ADJUST_LAYOUT_RATIO = 32;
+  DISPATCH_TYPE_SET_MASTER_COUNT = 33;
+  DISPATCH_TYPE_ADJUST_MASTER_COUNT = 34;
+  DISPATCH_TYPE_ROTATE_LAYOUT = 35;
+  DISPATCH_TYPE_SET_LAYOUT_GAP = 36;
+  DISPATCH_TYPE_ADJUST_LAYOUT_GAP = 37;
+  DISPATCH_TYPE_PROMOTE_TO_MASTER = 38;
+  DISPATCH_TYPE_SET_DWINDLE_DIRECTION = 39;
+  DISPATCH_TYPE_CYCLE_DWINDLE_DIRECTION = 40;
+  DISPATCH_TYPE_TOGGLE_DWINDLE_PRESERVE_SPLIT = 41;
+  DISPATCH_TYPE_TOGGLE_PSEUDOTILE = 42;
+  DISPATCH_TYPE_ADD_WINDOW_TAG = 43;
+  DISPATCH_TYPE_REMOVE_WINDOW_TAG = 44;
+  DISPATCH_TYPE_TOGGLE_WINDOW_TAG = 45;
+  DISPATCH_TYPE_ENABLE_RULE = 46;
+  DISPATCH_TYPE_DISABLE_RULE = 47;
+  DISPATCH_TYPE_TOGGLE_RULE = 48;
+  DISPATCH_TYPE_SNAP_ACTIVE_TO_ZONE = 49;
+  DISPATCH_TYPE_CYCLE_ACTIVE_ZONE_NEXT = 50;
+  DISPATCH_TYPE_CYCLE_ACTIVE_ZONE_PREVIOUS = 51;
+  DISPATCH_TYPE_SET_BINDING_SUBMAP = 52;
+  DISPATCH_TYPE_RESET_BINDING_SUBMAP = 53;
+  DISPATCH_TYPE_LAUNCH_STARTUP = 54;
+  DISPATCH_TYPE_STOP_STARTUP = 55;
+  DISPATCH_TYPE_RESTART_STARTUP = 56;
+  DISPATCH_TYPE_FOCUS_MONITOR = 57;
+  DISPATCH_TYPE_MOVE_WORKSPACE_TO_MONITOR = 58;
+  DISPATCH_TYPE_SWAP_ACTIVE_WORKSPACES = 59;
+  DISPATCH_TYPE_MOVE_TO_WORKSPACE_AND_FOLLOW = 60;
+  DISPATCH_TYPE_RENAME_WORKSPACE = 61;
+  DISPATCH_TYPE_SET_PINNED = 62;
+  DISPATCH_TYPE_SET_FLOATING = 63;
+  DISPATCH_TYPE_CENTER_ACTIVE = 64;
+  DISPATCH_TYPE_RAISE_ACTIVE = 65;
+  DISPATCH_TYPE_LOWER_ACTIVE = 66;
+  DISPATCH_TYPE_CLEAR_WINDOW_TAGS = 67;
+  DISPATCH_TYPE_FOCUS_WINDOW = 68;
+  DISPATCH_TYPE_FOCUS_LAST = 69;
+  DISPATCH_TYPE_CLOSE_WINDOW = 70;
+  DISPATCH_TYPE_TOGGLE_WINDOW_PINNED = 71;
+  DISPATCH_TYPE_SET_WINDOW_PINNED = 72;
+  DISPATCH_TYPE_TOGGLE_WINDOW_FLOATING = 73;
+  DISPATCH_TYPE_SET_WINDOW_FLOATING = 74;
+  DISPATCH_TYPE_CENTER_WINDOW = 75;
+  DISPATCH_TYPE_RAISE_WINDOW = 76;
+  DISPATCH_TYPE_LOWER_WINDOW = 77;
+  DISPATCH_TYPE_MOVE_WINDOW = 78;
+  DISPATCH_TYPE_RESIZE_WINDOW = 79;
+  DISPATCH_TYPE_TOGGLE_WINDOW_FULLSCREEN = 80;
+  DISPATCH_TYPE_TOGGLE_WINDOW_PSEUDOTILE = 81;
+  DISPATCH_TYPE_CLEAR_SELECTED_WINDOW_TAGS = 82;
+  DISPATCH_TYPE_ADD_SELECTED_WINDOW_TAG = 83;
+  DISPATCH_TYPE_REMOVE_SELECTED_WINDOW_TAG = 84;
+  DISPATCH_TYPE_TOGGLE_SELECTED_WINDOW_TAG = 85;
+  DISPATCH_TYPE_MOVE_SELECTED_TO_WORKSPACE = 86;
+  DISPATCH_TYPE_MOVE_SELECTED_TO_WORKSPACE_AND_FOLLOW = 87;
+  DISPATCH_TYPE_TOGGLE_WINDOW_GROUP = 88;
+  DISPATCH_TYPE_TOGGLE_WINDOW_GROUP_LOCK = 89;
+  DISPATCH_TYPE_CYCLE_WINDOW_GROUP = 90;
+  DISPATCH_TYPE_FOCUS_GROUP_INDEX = 91;
+  DISPATCH_TYPE_FOCUS_WINDOW_GROUP_INDEX = 92;
+  DISPATCH_TYPE_MOVE_GROUP_WINDOW = 93;
+  DISPATCH_TYPE_MOVE_WINDOW_IN_GROUP = 94;
+  DISPATCH_TYPE_MOVE_WINDOW_TO_MONITOR = 95;
+  DISPATCH_TYPE_MOVE_WINDOW_TO_MONITOR_AND_FOLLOW = 96;
+  DISPATCH_TYPE_RETILE = 97;
+  DISPATCH_TYPE_TOGGLE_TILING = 98;
+  DISPATCH_TYPE_TOGGLE_WORKSPACE_TILING = 99;
+  DISPATCH_TYPE_TOGGLE_WORKSPACE_FLOAT_OVERRIDE = 100;
+  DISPATCH_TYPE_TOGGLE_TITLE_BAR = 101;
+  DISPATCH_TYPE_TOGGLE_WINDOW_TITLE_BAR = 102;
+  DISPATCH_TYPE_FOCUS_MONITOR_AT_CURSOR = 103;
+  DISPATCH_TYPE_FOCUS_MONITOR_WORKSPACE = 104;
+  DISPATCH_TYPE_TOGGLE_MOUSE_FOLLOWS_FOCUS = 105;
+  DISPATCH_TYPE_MANAGE_WINDOW = 106;
+  DISPATCH_TYPE_UNMANAGE_WINDOW = 107;
+  DISPATCH_TYPE_RESTORE_WINDOWS = 108;
+  DISPATCH_TYPE_RESIZE_EDGE = 109;
+  DISPATCH_TYPE_RESIZE_AXIS = 110;
+  DISPATCH_TYPE_SET_RESIZE_DELTA = 111;
+  DISPATCH_TYPE_FLIP_LAYOUT = 112;
+  DISPATCH_TYPE_TOGGLE_MONOCLE = 113;
+  DISPATCH_TYPE_TOGGLE_LAYOUT_LOCK = 114;
+  DISPATCH_TYPE_STACK_ALL = 115;
+  DISPATCH_TYPE_UNSTACK_ALL = 116;
+  DISPATCH_TYPE_PROMOTE = 117;
+  DISPATCH_TYPE_PROMOTE_FOCUS = 118;
+  DISPATCH_TYPE_PROMOTE_WINDOW = 119;
+  DISPATCH_TYPE_TOGGLE_STACKBAR = 120;
+  DISPATCH_TYPE_SAVE_RESIZE = 121;
+  DISPATCH_TYPE_LOAD_RESIZE = 122;
+  DISPATCH_TYPE_QUICK_SAVE_RESIZE = 123;
+  DISPATCH_TYPE_QUICK_LOAD_RESIZE = 124;
+  DISPATCH_TYPE_WATCH_CONFIGURATION = 125;
+  DISPATCH_TYPE_TOGGLE_TRANSPARENCY = 126;
+  DISPATCH_TYPE_SET_TRANSPARENCY_ALPHA = 127;
+  DISPATCH_TYPE_SET_GLOBAL_WORK_AREA_OFFSET = 128;
+  DISPATCH_TYPE_SET_WORKSPACE_WORK_AREA_OFFSET = 129;
+  DISPATCH_TYPE_SET_WORKSPACE_PADDING = 130;
+  DISPATCH_TYPE_ADJUST_WORKSPACE_PADDING = 131;
+  DISPATCH_TYPE_SET_CONTAINER_PADDING = 132;
+  DISPATCH_TYPE_ADJUST_CONTAINER_PADDING = 133;
+  DISPATCH_TYPE_FORCE_FOCUS_WINDOW = 134;
+  DISPATCH_TYPE_NEW_WORKSPACE = 135;
+  DISPATCH_TYPE_CLOSE_WORKSPACE = 136;
+  DISPATCH_TYPE_ENSURE_WORKSPACES = 137;
+  DISPATCH_TYPE_ENSURE_NAMED_WORKSPACE = 138;
+  DISPATCH_TYPE_TOGGLE_WINDOW_CONTAINER_BEHAVIOUR = 139;
+  DISPATCH_TYPE_TOGGLE_WORKSPACE_WINDOW_CONTAINER_BEHAVIOUR = 140;
+  DISPATCH_TYPE_SHOW_SHORTCUTS = 141;
+  // Start a program: the file in `argument`, its arguments as a JSON array
+  // of strings in `secondary_argument` (empty: none).
+  DISPATCH_TYPE_EXEC = 142;
+  // Put the floating windows of the shown workspace out of the way, or
+  // bring them back.
+  DISPATCH_TYPE_TOGGLE_FLOATING_ASIDE = 143;
+}
+
+enum Direction {
+  DIRECTION_UNSPECIFIED = 0;
+  DIRECTION_LEFT = 1;
+  DIRECTION_RIGHT = 2;
+  DIRECTION_UP = 3;
+  DIRECTION_DOWN = 4;
+}
+
+message DispatchRequest {
+  DispatchType command = 1;
+  Direction direction = 2;
+  // Numeric dispatcher arguments. Pixel delta for move/resize/gap,
+  // thousandths for layout ratio, and an integer for master count.
+  int32 x = 3;
+  int32 y = 4;
+  // Dispatcher-specific text: scratchpad ID, layout name, Dwindle direction,
+  // window tag, named rule, workspace selector, or monitor selector.
+  // Monitor selectors: primary, index, name:<name>, next, or previous.
+  // Resize-edge/axis sizing ("increase"/"decrease") and flip/resize axis
+  // ("horizontal"/"vertical"/"horizontal-and-vertical") also travel here.
+  // Save/load-resize file paths travel here as well. Work-area offsets
+  // travel as comma-separated "left,top,right,bottom". NewWorkspace's
+  // optional name travels here; EnsureWorkspaces carries the monitor
+  // selector here with the count in x, and EnsureNamedWorkspace carries the
+  // monitor selector here with the workspace name in secondary_argument.
+  string argument = 5;
+  // A second textual argument for typed commands such as workspace rename.
+  string secondary_argument = 6;
+}
+
+message CommandDocument {
+  string json = 1;
+}
+
+message DispatchBatchRequest {
+  repeated DispatchRequest requests = 1;
+  bool stop_on_error = 2;
+}
+
+message DispatchBatchItemResult {
+  uint32 index = 1;
+  bool success = 2;
+  bool skipped = 3;
+  optional string error = 4;
+}
+
+message DispatchBatchResponse {
+  bool success = 1;
+  repeated DispatchBatchItemResult results = 2;
+}
+
+message HealthStatus {
+  bool healthy = 1;
+  string version = 2;
+  int64 uptime_seconds = 3;
+  optional string message = 4;
+}
+
+message DispatcherCapability {
+  int32 value = 1;
+  string id = 2;
+  string display_name = 3;
+  string argument_kind = 4;
+}
+
+message CapabilitiesResponse {
+  string server_version = 1;
+  string protocol_version = 2;
+  uint32 config_schema_version = 3;
+  string platform = 4;
+  repeated string features = 5;
+  repeated DispatcherCapability dispatchers = 6;
+  repeated string node_types = 7;
+  // The backend that runs: "win32" or "smithay".
+  string backend = 8;
+}
+
+// ============================================================================
+// Node Graph Structure
+// ============================================================================
+
+message NodeGraph {
+  // Legacy per-node encoding. No longer written or read: the graph travels
+  // as `json`. Kept so old field numbers are not reused.
+  repeated Node nodes = 1;
+  repeated Connection connections = 2;
+  string version = 3;
+  string editor_id = 4; // ID of the editor that created/modified this graph
+  // ID allocation counters. They can exceed max(id) + 1 after deletions;
+  // carrying them keeps new IDs from reusing deleted ones across a round trip.
+  uint64 next_node_id = 5;
+  uint64 next_pin_id = 6;
+  // The graph as the serde JSON used in the configuration file. An empty
+  // string means "no graph" (PushGraph then applies the working graph).
+  string json = 8;
+  // Sizes of the graph in `json`, for logs and listings.
+  uint32 node_count = 9;
+  uint32 connection_count = 10;
+  // PushGraph: the configuration revision the graph was edited from. The WM
+  // refuses the push if it runs a different revision; 0 pushes
+  // unconditionally (scripts, the CLI).
+  uint64 base_revision = 11;
+}
+
+message Node {
+  string id = 1;
+  NodeType type = 2;
+  Position position = 3;
+  repeated Pin input_pins = 4;
+  repeated Pin output_pins = 5;
+  optional NodeData data = 6;
+}
+
+message Position {
+  float x = 1;
+  float y = 2;
+}
+
+message Pin {
+  string id = 1;
+  string name = 2;
+  PinType type = 3;
+  PinKind kind = 4;
+  optional string value = 5; // JSON-serialized value
+}
+
+message Connection {
+  string from_node = 1;
+  string from_pin = 2;
+  string to_node = 3;
+  string to_pin = 4;
+}
+
+// Node-specific data (for value nodes, etc.)
+message NodeData {
+  // JSON-serialized field values. `node_json` holds the complete serde JSON
+  // of the node type and is authoritative when present; the per-field keys
+  // remain for older readers.
+  map<string, string> fields = 1;
+}
+
+// ============================================================================
+// Enums
+// ============================================================================
+
+enum NodeType {
+  NODE_TYPE_UNSPECIFIED = 0;
+
+  // Events
+  ON_STARTUP = 1;
+  ON_STARTUP_COMPLETED = 2;
+  ON_WINDOW_CREATED = 3;
+  ON_WINDOW_DESTROYED = 4;
+  ON_WINDOW_FOCUSED = 5;
+  ON_WINDOW_MOVED = 6;
+  ON_WINDOW_RESIZED = 7;
+  ON_KEY_PRESS = 8;
+  MANUAL_TRIGGER = 9;
+
+  // Actions
+  LAUNCH_PROCESS = 10;
+  MOVE_WINDOW = 11;
+  RESIZE_WINDOW = 12;
+  CLOSE_WINDOW = 13;
+  SET_WINDOW_TITLE = 14;
+  ANIMATE_WINDOW = 15;
+  SET_WINDOW_ARRANGEMENT = 16;
+  BRING_TO_FRONT = 17;
+  SEND_TO_BACK = 18;
+  SET_ALWAYS_ON_TOP = 19;
+  DECORATE_WINDOW = 20;
+
+  // Conditions
+  WINDOW_EXISTS = 30;
+  WINDOW_HAS_TITLE = 31;
+  MATCH_WINDOW = 32;
+
+  // Data
+  GET_WINDOW_POSITION = 40;
+  GET_WINDOW_SIZE = 41;
+  GET_ACTIVE_WINDOW = 42;
+  GET_ALL_WINDOWS = 43;
+  GET_WINDOW_INFO = 44;
+  GET_MONITOR_FOR_WINDOW = 45;
+
+  // Math
+  ADD = 50;
+  SUBTRACT = 51;
+  MULTIPLY = 52;
+  DIVIDE = 53;
+
+  // Values
+  NUMBER_VALUE = 60;
+  STRING_VALUE = 61;
+  BOOL_VALUE = 62;
+  COLOR_VALUE = 63;
+  BORDER_STYLE_VALUE = 64;
+
+  // Helpers
+  FOR_EACH = 70;
+  WINDOW_LIST_TO_SINGLE = 71;
+
+  // Workspaces
+  SWITCH_TO_WORKSPACE = 80;
+  MOVE_WINDOW_TO_WORKSPACE = 81;
+  GET_CURRENT_WORKSPACE = 82;
+  NEXT_WORKSPACE = 83;
+  PREVIOUS_WORKSPACE = 84;
+  FOCUS_WORKSPACE = 85;
+
+  // Window Navigation
+  FOCUS_NEXT_WINDOW = 86;
+  FOCUS_PREVIOUS_WINDOW = 87;
+  SWAP_WITH_NEXT = 88;
+  SWAP_WITH_PREVIOUS = 89;
+  MOVE_TO_NEXT_WORKSPACE = 111;
+  MOVE_TO_PREVIOUS_WORKSPACE = 112;
+  TOGGLE_FLOATING = 113;
+
+  // Monitors
+  GET_MONITORS = 90;
+  GET_MONITOR_INFO = 91;
+  CREATE_WORKSPACE = 92;
+
+  // Rules
+  CREATE_FLOAT_RULE = 100;
+  CREATE_IGNORE_RULE = 101;
+  CREATE_MANAGE_RULE = 102;
+  WINDOW_MODE_SELECTOR = 103;
+  APPLY_SYSTEM_FILTERS = 104;
+  CREATE_RULE = 105;
+  COMBINE_RULES = 106;
+
+  // Debug
+  LOG_MESSAGE = 110;
+}
+
+enum PinType {
+  PIN_TYPE_UNSPECIFIED = 0;
+  EXECUTION = 1;
+  WINDOW_HANDLE = 2;
+  WINDOW_LIST = 3;
+  NUMBER = 4;
+  STRING = 5;
+  BOOL = 6;
+  MONITOR = 7;
+  MONITOR_LIST = 8;
+  LAYOUT = 9;
+  COLOR = 10;
+  BORDER_STYLE = 11;
+  WINDOW_RULE = 12;
+  MATCH_KIND = 13;
+  MATCH_STRATEGY = 14;
+  RULE = 15;
+  RULE_LIST = 16;
+  LIST = 17;
+  ITEM = 18;
+}
+
+enum PinKind {
+  PIN_KIND_UNSPECIFIED = 0;
+  INPUT = 1;
+  OUTPUT = 2;
+}
+
+// ============================================================================
+// Execution Events (for live feedback)
+// ============================================================================
+
+message ExecutionEvent {
+  oneof event {
+    NodeExecutionStarted node_started = 1;
+    NodeExecutionCompleted node_completed = 2;
+    NodeExecutionFailed node_failed = 3;
+    GraphExecutionStarted graph_started = 4;
+    GraphExecutionCompleted graph_completed = 5;
+    LogEvent log_event = 6;
+    WorkingGraphUpdated working_graph_updated = 7;
+    RuntimeEvent runtime_event = 8;
+    EventsDropped events_dropped = 9;
+    ConfigurationChanged configuration_changed = 10;
+  }
+}
+
+// The subscriber fell behind and `count` events were skipped. The stream
+// continues; clients should refetch any state they derive from events.
+message EventsDropped {
+  uint64 count = 1;
+}
+
+message NodeExecutionStarted {
+  string node_id = 1;
+  NodeType node_type = 2;
+  int64 timestamp_ms = 3;
+}
+
+message NodeExecutionCompleted {
+  string node_id = 1;
+  NodeType node_type = 2;
+  int64 timestamp_ms = 3;
+  int64 duration_ms = 4;
+  map<string, string> outputs = 5; // pin_id -> JSON value
+}
+
+message NodeExecutionFailed {
+  string node_id = 1;
+  NodeType node_type = 2;
+  int64 timestamp_ms = 3;
+  string error = 4;
+}
+
+message GraphExecutionStarted {
+  string trigger_type = 1; // e.g., "OnStartup", "OnWindowCreated"
+  int64 timestamp_ms = 2;
+}
+
+message GraphExecutionCompleted {
+  string trigger_type = 1;
+  int64 timestamp_ms = 2;
+  int64 duration_ms = 3;
+  uint32 nodes_executed = 4;
+}
+
+message LogEvent {
+  string message = 1;
+  LogLevel level = 2;
+  int64 timestamp_ms = 3;
+}
+
+message WorkingGraphUpdated {
+  int64 timestamp_ms = 1;
+  string editor_id = 2; // ID of the editor that made the change
+}
+
+enum LogLevel {
+  LOG_LEVEL_UNSPECIFIED = 0;
+  DEBUG = 1;
+  INFO = 2;
+  WARN = 3;
+  ERROR = 4;
+}
+
+// ============================================================================
+// WM State
+// ============================================================================
+
+message WMState {
+  repeated WorkspaceState workspaces = 1;
+  repeated WindowInfo windows = 2;
+  repeated MonitorInfo monitors = 3;
+  optional string active_workspace_id = 4;
+  bool execution_paused = 5;
+  bool animations_enabled = 6;
+  uint32 active_animations = 7;
+  uint32 animation_duration_ms = 8;
+  string animation_curve = 9;
+  bool animate_layout = 10;
+  bool animate_workspace = 11;
+  bool animate_borders = 12;
+  repeated RuleState rules = 13;
+  repeated ScratchpadState scratchpads = 14;
+  string active_binding_submap = 15;
+  bool dim_inactive = 16;
+  uint32 inactive_window_opacity = 17;
+  bool dim_fullscreen = 18;
+  string shadow_policy = 19;
+  repeated StartupState startup = 20;
+  repeated AnimationChannelState animation_channels = 21;
+  GestureState gesture = 22;
+  bool tiling_suspended = 23;
+}
+
+// Stable external extension event envelope. Event names and field keys are
+// versioned through the capabilities feature "extension_events_v1".
+message RuntimeEvent {
+  string kind = 1;
+  int64 timestamp_ms = 2;
+  // The window the event is about (the id the WM gave it; not an OS handle).
+  optional uint64 window_id = 3;
+  map<string, string> fields = 4;
+}
+
+message AnimationChannelState {
+  string scope = 1;
+  bool enabled = 2;
+  uint32 duration_ms = 3;
+  string curve = 4;
+  string enter_style = 5;
+  string exit_style = 6;
+}
+
+message GestureState {
+  bool available = 1;
+  string backend = 2;
+  uint32 device_count = 3;
+  uint32 configured_count = 4;
+  optional GestureProgress active = 5;
+  optional string last_error = 6;
+}
+
+message GestureProgress {
+  string phase = 1;
+  uint32 fingers = 2;
+  optional string direction = 3;
+  float progress = 4;
+  float delta_x = 5;
+  float delta_y = 6;
+}
+
+message WorkspaceState {
+  string id = 1;
+  string name = 2;
+  string monitor_id = 3;
+  repeated string window_ids = 4;
+  string layout_type = 5;
+  string dwindle_direction = 6;
+  bool dwindle_preserve_split = 7;
+  uint32 pseudotiled_windows = 8;
+  string master_position = 9;
+  string new_window_placement = 10;
+  bool tiling_enabled = 11;
+  bool float_override = 12;
+  // Per-workspace window container behaviour: "Column" or "Append".
+  string window_container_behaviour = 13;
+}
+
+message WindowInfo {
+  // The id the WM gave the window. It names the window in commands
+  // (`handle:<id>` selectors); it is not an OS handle.
+  uint64 window_id = 1;
+  string title = 2;
+  string class = 3;
+  string exe = 4;
+  Position position = 5;
+  Size size = 6;
+  bool is_focused = 7;
+  bool is_minimized = 8;
+  bool is_maximized = 9;
+  repeated string tags = 10;
+  repeated string matched_rules = 11;
+  repeated string effective_rule_effects = 12;
+  uint32 effective_opacity = 13;
+  bool is_dimmed = 14;
+  string shadow_policy = 15;
+  // What the program calls itself: the Wayland application id; on Windows
+  // the program name without its extension.
+  string app_id = 16;
+}
+
+message RuleState {
+  string name = 1;
+  bool enabled = 2;
+  bool dynamic = 3;
+}
+
+message ScratchpadState {
+  string id = 1;
+  bool enabled = 2;
+  optional uint64 window_id = 3;
+  bool visible = 4;
+  bool pending_spawn = 5;
+}
+
+message StartupState {
+  string id = 1;
+  string name = 2;
+  bool enabled = 3;
+  string status = 4;
+  optional uint32 pid = 5;
+  uint32 restart_count = 6;
+  optional int32 last_exit_code = 7;
+  optional string last_error = 8;
+}
+
+message MonitorInfo {
+  // 1 was the id as text; `output_id` replaced it.
+  reserved 1;
+  string name = 2;
+  Position position = 3;
+  Size size = 4;
+  bool is_primary = 5;
+  Position work_position = 6;
+  Size work_size = 7;
+  int32 reserved_left = 8;
+  int32 reserved_top = 9;
+  int32 reserved_right = 10;
+  int32 reserved_bottom = 11;
+  bool is_focused = 12;
+  // The id the WM gave the output, and the name of its connector or device.
+  uint64 output_id = 13;
+  string connector = 14;
+}
+
+message Size {
+  int32 width = 1;
+  int32 height = 2;
+}
+
+// ============================================================================
+// Node Definitions (Server-Defined Nodes)
+// ============================================================================
+
+message GetNodeDefinitionsResponse {
+  repeated NodeDefinition definitions = 1;
+  string version = 2; // WM version providing these definitions
+}
+
+message NodeDefinition {
+  string type_id = 1;           // Unique identifier (e.g., "OnWindowCreated")
+  string display_name = 2;      // UI display name (e.g., "On Window Created")
+  string category = 3;          // Category for grouping (e.g., "Events", "Actions")
+  string description = 4;       // Help text
+  repeated PinDefinition inputs = 5;
+  repeated PinDefinition outputs = 6;
+  repeated PropertyDefinition properties = 7;
+  NodeType legacy_type = 8;    // For backward compatibility with old enum
+}
+
+message PinDefinition {
+  string name = 1;              // Pin display name (e.g., "Window")
+  PinType type = 2;             // Data type
+  bool required = 3;            // Whether this pin must be connected
+  optional string default_value = 4; // Default value (JSON serialized)
+  string description = 5;       // Help text for this pin
+}
+
+message PropertyDefinition {
+  string key = 1;               // Property key (e.g., "workspace_name")
+  PropertyType type = 2;        // Property data type
+  string display_name = 3;      // UI label
+  optional string default_value = 4;
+  string description = 5;
+  repeated string enum_values = 6; // For enum/select properties
+}
+
+enum PropertyType {
+  PROPERTY_TYPE_UNSPECIFIED = 0;
+  STRING_PROPERTY = 1;
+  NUMBER_PROPERTY = 2;
+  BOOL_PROPERTY = 3;
+  ENUM_PROPERTY = 4;           // Select from enum_values
+  COLOR_PROPERTY = 5;
+  LAYOUT_PROPERTY = 6;
+}
+
+// ============================================================================
+// Overlay/Debug Data
+// ============================================================================
+
+message OverlayDataResponse {
+  int64 timestamp_ms = 1;
+  repeated MonitorOverlayData monitors = 2;
+  uint32 graph_node_count = 3;
+  uint32 total_windows = 4;
+  double event_loop_fps = 5;
+  optional string last_event = 6;
+  repeated ScratchpadState scratchpads = 7;
+  string active_binding_submap = 8;
+  bool dim_inactive = 9;
+  uint32 inactive_window_opacity = 10;
+  bool dim_fullscreen = 11;
+  string shadow_policy = 12;
+  repeated StartupState startup = 13;
+  GestureState gesture = 14;
+  // What the window manager has to tell the person at the machine, for as
+  // long as it is so (another program on the same keys, ...).
+  repeated Notice notices = 15;
+  // The accent the desktop has now where it is not the configuration's
+  // own (the wallpaper's colour), as 0xRRGGBB.
+  optional uint32 accent_rgb = 16;
+  // The keyboard layout in use (where the system tells it).
+  optional KeyboardLayoutState keyboard_layout = 17;
+  // How the frames of each display got there (a compositor: Linux).
+  repeated DisplayFrames frames = 18;
+}
+
+// How the frames of a display got there since the window manager started.
+message DisplayFrames {
+  // The display's name ("DP-1").
+  string output = 1;
+  // Frames that were a window's own picture, handed to the display as it
+  // drew them (a window that covers the display, a game).
+  uint64 direct = 2;
+  // Frames the window manager drew.
+  uint64 composed = 3;
+  // The last frame was a window's own picture.
+  bool direct_now = 4;
+}
+
+message KeyboardLayoutState {
+  // As it is written in the configuration ("tr"), or the first letters
+  // of its name.
+  string short = 1;
+  // Its full name ("Turkish").
+  string name = 2;
+  // Its place among the layouts, from 0, and how many there are.
+  uint32 index = 3;
+  uint32 count = 4;
+}
+
+message Notice {
+  // The same for the same cause ("fancyzones-shift-drag").
+  string id = 1;
+  string title = 2;
+  string text = 3;
+}
+
+message MonitorOverlayData {
+  // 1 was the handle as text; `output_id` replaced it.
+  reserved 1;
+  string name = 2;
+  bool is_primary = 3;
+  // Focused workspace, retained for compact consumers.
+  WorkspaceOverlayData workspace = 4;
+  Position position = 5;  // Monitor screen position
+  Size size = 6;          // Monitor screen size
+  Position work_position = 7;
+  Size work_size = 8;
+  int32 reserved_left = 9;
+  int32 reserved_top = 10;
+  int32 reserved_right = 11;
+  int32 reserved_bottom = 12;
+  // Every materialized workspace in WM ring order.
+  repeated WorkspaceOverlayData workspaces = 13;
+  uint32 active_workspace_id = 14;
+  bool is_focused = 15;
+  // As in MonitorInfo.
+  uint64 output_id = 16;
+  string connector = 17;
+  // Where the bar belongs on this monitor; absent when there is none.
+  Position bar_position = 18;
+  Size bar_size = 19;
+  // Device pixels per logical pixel. 0 from a WM that does not say.
+  double scale = 20;
+  // The refresh rate now, in thousandths of a hertz; 0 when not known.
+  int32 refresh_millihertz = 21;
+  // The modes the display offers, where the WM sets them (Linux on
+  // hardware). Empty where it does not.
+  repeated OutputModeInfo modes = 22;
+}
+
+// One mode a display offers.
+message OutputModeInfo {
+  int32 width = 1;
+  int32 height = 2;
+  int32 refresh_millihertz = 3;
+  // The one the display asks for.
+  bool preferred = 4;
+  // The one it is in.
+  bool current = 5;
+}
+
+message WorkspaceOverlayData {
+  uint32 id = 1;
+  string name = 2;
+  string layout_type = 3;
+  uint32 total_windows = 4;
+  uint32 tiled_windows = 5;
+  uint32 floating_windows = 6;
+  uint32 container_count = 7;
+  repeated WindowInfo windows = 8;
+  repeated DetailedWindowInfo detailed_windows = 9;  // Detailed window information
+  string master_position = 10;
+  string new_window_placement = 11;
+  bool tiling_enabled = 12;
+  bool float_override = 13;
+  // Per-workspace window container behaviour: "Column" or "Append".
+  string window_container_behaviour = 14;
+}
+
+message DetailedWindowInfo {
+  uint64 window_id = 1;
+  string title = 2;
+  string class = 3;
+  string exe = 4;
+  Position position = 5;
+  Size size = 6;
+  bool is_focused = 7;
+  bool is_minimized = 8;
+  bool is_maximized = 9;
+  bool is_managed = 10;        // Whether window is managed by WM
+  bool is_tiled = 11;          // Window is in tiling layout (not floating)
+  bool is_floating = 12;       // Window is floating
+  bool has_border = 13;        // Window has decorative border
+  bool is_border_window = 14;  // This IS a border window (internal)
+  uint32 workspace_id = 15;    // Which workspace contains this window
+  repeated string tags = 16;
+  repeated string matched_rules = 17;
+  repeated string effective_rule_effects = 18;
+  uint32 effective_opacity = 19;
+  bool is_dimmed = 20;
+  string shadow_policy = 21;
+  string app_id = 22; // see WindowInfo.app_id
+  // The picture the window's program gave this window itself: a name out
+  // of the icon theme, or the path of a file of its pixels. Empty where
+  // it gave none (the window's picture is then its program's).
+  string icon = 23;
+}

@@ -1,0 +1,146 @@
+[
+  {
+    "name": "close",
+    "group": "window",
+    "file": "symbolic/gevrek-close-symbolic.svg",
+    "hasAccent": false
+  },
+  {
+    "name": "minimize",
+    "group": "window",
+    "file": "symbolic/gevrek-minimize-symbolic.svg",
+    "hasAccent": false
+  },
+  {
+    "name": "maximize",
+    "group": "window",
+    "file": "symbolic/gevrek-maximize-symbolic.svg",
+    "hasAccent": false
+  },
+  {
+    "name": "restore",
+    "group": "window",
+    "file": "symbolic/gevrek-restore-symbolic.svg",
+    "hasAccent": false
+  },
+  {
+    "name": "fullscreen",
+    "group": "window",
+    "file": "symbolic/gevrek-fullscreen-symbolic.svg",
+    "hasAccent": false
+  },
+  {
+    "name": "float",
+    "group": "window",
+    "file": "symbolic/gevrek-float-symbolic.svg",
+    "hasAccent": false
+  },
+  {
+    "name": "tile-left",
+    "group": "layout",
+    "file": "symbolic/gevrek-tile-left-symbolic.svg",
+    "hasAccent": true
+  },
+  {
+    "name": "tile-right",
+    "group": "layout",
+    "file": "symbolic/gevrek-tile-right-symbolic.svg",
+    "hasAccent": true
+  },
+  {
+    "name": "master-stack",
+    "group": "layout",
+    "file": "symbolic/gevrek-master-stack-symbolic.svg",
+    "hasAccent": false
+  },
+  {
+    "name": "grid",
+    "group": "layout",
+    "file": "symbolic/gevrek-grid-symbolic.svg",
+    "hasAccent": false
+  },
+  {
+    "name": "stacked",
+    "group": "layout",
+    "file": "symbolic/gevrek-stacked-symbolic.svg",
+    "hasAccent": false
+  },
+  {
+    "name": "workspaces",
+    "group": "layout",
+    "file": "symbolic/gevrek-workspaces-symbolic.svg",
+    "hasAccent": true
+  },
+  {
+    "name": "launcher",
+    "group": "panel",
+    "file": "symbolic/gevrek-launcher-symbolic.svg",
+    "hasAccent": true
+  },
+  {
+    "name": "search",
+    "group": "panel",
+    "file": "symbolic/gevrek-search-symbolic.svg",
+    "hasAccent": false
+  },
+  {
+    "name": "terminal",
+    "group": "panel",
+    "file": "symbolic/gevrek-terminal-symbolic.svg",
+    "hasAccent": false
+  },
+  {
+    "name": "files",
+    "group": "panel",
+    "file": "symbolic/gevrek-files-symbolic.svg",
+    "hasAccent": false
+  },
+  {
+    "name": "settings",
+    "group": "panel",
+    "file": "symbolic/gevrek-settings-symbolic.svg",
+    "hasAccent": false
+  },
+  {
+    "name": "notifications",
+    "group": "panel",
+    "file": "symbolic/gevrek-notifications-symbolic.svg",
+    "hasAccent": false
+  },
+  {
+    "name": "network",
+    "group": "system",
+    "file": "symbolic/gevrek-network-symbolic.svg",
+    "hasAccent": true
+  },
+  {
+    "name": "volume",
+    "group": "system",
+    "file": "symbolic/gevrek-volume-symbolic.svg",
+    "hasAccent": false
+  },
+  {
+    "name": "battery",
+    "group": "system",
+    "file": "symbolic/gevrek-battery-symbolic.svg",
+    "hasAccent": true
+  },
+  {
+    "name": "clock",
+    "group": "system",
+    "file": "symbolic/gevrek-clock-symbolic.svg",
+    "hasAccent": false
+  },
+  {
+    "name": "lock",
+    "group": "system",
+    "file": "symbolic/gevrek-lock-symbolic.svg",
+    "hasAccent": false
+  },
+  {
+    "name": "power",
+    "group": "system",
+    "file": "symbolic/gevrek-power-symbolic.svg",
+    "hasAccent": false
+  }
+]

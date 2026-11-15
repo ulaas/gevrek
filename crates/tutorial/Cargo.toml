@@ -1,0 +1,13 @@
+[package]
+name = "gevrek-tutorial"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "gevrek's tutorial: the lessons as data, what a step waits for, and how far a person has come. No window, no system: the shell and the studio draw it."
+
+[dependencies]
+gevrek-model = { path = "../model" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }

@@ -1,0 +1,651 @@
+{
+  "version": "0.6.0",
+  "desktop": {
+    "schema_version": 24,
+    "focus": {
+      "history_size": 20,
+      "focus_follows_mouse": false,
+      "mouse_follows_focus": false,
+      "focus_delay_ms": 100,
+      "prevent_focus_steal": true,
+      "focus_steal_whitelist": [],
+      "focus_next_on_close": true
+    },
+    "apply_system_rules": true,
+    "watch_configuration": true,
+    "manage_existing_on_startup": true,
+    "restore_session_on_startup": false,
+    "appearance": {
+      "border_enabled": true,
+      "border_width": 4,
+      "border_offset": -1,
+      "border_style": "Rounded",
+      "active_border_color": [
+        0,
+        170,
+        255
+      ],
+      "inactive_border_color": [
+        70,
+        80,
+        95
+      ],
+      "active_border_alpha": 255,
+      "inactive_border_alpha": 180,
+      "window_opacity": 255,
+      "dim_inactive": false,
+      "inactive_window_opacity": 220,
+      "dim_fullscreen": false,
+      "stackbar": {
+        "enabled": false,
+        "height": 30,
+        "background_color": [
+          22,
+          22,
+          28
+        ],
+        "active_text_color": [
+          64,
+          224,
+          208
+        ],
+        "inactive_text_color": [
+          170,
+          172,
+          184
+        ]
+      },
+      "transparency_enabled": true,
+      "high_contrast": false,
+      "theme": {
+        "palette": null,
+        "accent": null
+      },
+      "invisible_borders": {
+        "enabled": false,
+        "size": 8
+      },
+      "effects": {
+        "corner_radius": 10,
+        "shadow": {
+          "enabled": false,
+          "radius": 28,
+          "offset_x": 0,
+          "offset_y": 8,
+          "color": [
+            0,
+            0,
+            0
+          ],
+          "opacity": 150,
+          "inactive_opacity": 90
+        },
+        "glow": {
+          "enabled": false,
+          "radius": 18,
+          "color": null,
+          "opacity": 170,
+          "inactive_opacity": 0
+        },
+        "gradient": {
+          "enabled": false,
+          "active_end": [
+            200,
+            80,
+            255
+          ],
+          "inactive_end": [
+            40,
+            45,
+            60
+          ],
+          "angle": 45.0,
+          "spin_seconds": 0.0
+        },
+        "tint": {
+          "enabled": false,
+          "color": [
+            12,
+            16,
+            32
+          ],
+          "inactive_opacity": 70,
+          "active_opacity": 0
+        }
+      },
+      "floating": {
+        "separate": true,
+        "border_enabled": true,
+        "border_width": 3,
+        "border_offset": -1,
+        "active_border_color": null,
+        "inactive_border_color": null,
+        "active_border_alpha": null,
+        "inactive_border_alpha": null,
+        "glow_radius": 12,
+        "glow_opacity": 114,
+        "glow_inactive_opacity": 0
+      }
+    },
+    "platform": {
+      "windows": {
+        "backdrop": "Auto",
+        "corners": "Round",
+        "shadow": "default",
+        "hide_taskbar": true,
+        "own_windows_key": true,
+        "drag_with_windows_key": true,
+        "cut_columns_at_displays": false
+      },
+      "wayland": {
+        "xwayland": true,
+        "cursor_theme": "",
+        "cursor_size": 0,
+        "output_scale": 1.0,
+        "output_scales": {},
+        "blur_behind_windows": true,
+        "share_card_buffers": false
+      }
+    },
+    "animations": {
+      "enabled": false,
+      "reduce_motion": false,
+      "fps": 60,
+      "layout": {
+        "enabled": true,
+        "duration_ms": 180,
+        "curve": "ease_in_out"
+      },
+      "workspace": {
+        "enabled": true,
+        "duration_ms": 240,
+        "curve": "cubic_out"
+      },
+      "border": {
+        "enabled": true,
+        "duration_ms": 140,
+        "curve": "ease_out"
+      },
+      "window": {
+        "enabled": true,
+        "duration_ms": 220,
+        "curve": "back_out"
+      },
+      "window_enter_style": "scale",
+      "window_exit_style": "fade",
+      "workspace_style": "slide",
+      "session": {
+        "enabled": true,
+        "duration_ms": 480,
+        "blur": true,
+        "vignette": true
+      }
+    },
+    "work_area_offset": {
+      "left": 0,
+      "top": 0,
+      "right": 0,
+      "bottom": 0
+    },
+    "monitors": [],
+    "workspaces": [
+      {
+        "enabled": true,
+        "name": "game",
+        "monitor": "Any",
+        "layout": "Monocle",
+        "default": true,
+        "persistent": true,
+        "on_created_empty": null,
+        "gaps_in": 5,
+        "gaps_out": 10,
+        "work_area_offset": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
+        "master_ratio": 0.5,
+        "master_count": 1,
+        "master_position": "Left",
+        "new_window_placement": "StackEnd",
+        "window_container_behaviour": "column",
+        "dwindle_direction": "Alternate",
+        "dwindle_preserve_split": false,
+        "appearance_override": true,
+        "border_enabled": true,
+        "border_width": 4,
+        "border_offset": -1,
+        "border_style": "Rounded",
+        "active_border_color": [
+          0,
+          170,
+          255
+        ],
+        "inactive_border_color": [
+          70,
+          80,
+          95
+        ],
+        "active_border_alpha": 255,
+        "inactive_border_alpha": 180
+      },
+      {
+        "enabled": true,
+        "name": "social",
+        "monitor": "Any",
+        "layout": "Grid",
+        "default": false,
+        "persistent": true,
+        "on_created_empty": null,
+        "gaps_in": 5,
+        "gaps_out": 10,
+        "work_area_offset": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
+        "master_ratio": 0.5,
+        "master_count": 1,
+        "master_position": "Left",
+        "new_window_placement": "StackEnd",
+        "window_container_behaviour": "column",
+        "dwindle_direction": "Alternate",
+        "dwindle_preserve_split": false,
+        "appearance_override": true,
+        "border_enabled": true,
+        "border_width": 4,
+        "border_offset": -1,
+        "border_style": "Rounded",
+        "active_border_color": [
+          0,
+          170,
+          255
+        ],
+        "inactive_border_color": [
+          70,
+          80,
+          95
+        ],
+        "active_border_alpha": 255,
+        "inactive_border_alpha": 180
+      }
+    ],
+    "zones": {
+      "behavior": {
+        "enabled": true,
+        "show_preview": true,
+        "highlight_zones": true,
+        "snap_threshold": 0.3,
+        "activation_modifier": "Shift",
+        "preview_opacity": 0.3,
+        "preview_color": [
+          0,
+          120,
+          215
+        ]
+      },
+      "default_layout": {
+        "id": "columns_2",
+        "name": "Two Columns",
+        "description": "Two equal-width columns",
+        "zones": [
+          {
+            "id": 0,
+            "name": "Left",
+            "x_percent": 0.0,
+            "y_percent": 0.0,
+            "width_percent": 0.5,
+            "height_percent": 1.0,
+            "gap": 8,
+            "priority": 0
+          },
+          {
+            "id": 1,
+            "name": "Right",
+            "x_percent": 0.5,
+            "y_percent": 0.0,
+            "width_percent": 0.5,
+            "height_percent": 1.0,
+            "gap": 8,
+            "priority": 0
+          }
+        ]
+      },
+      "monitor_layouts": []
+    },
+    "startup": [],
+    "scratchpads": [],
+    "bindings": [
+      {
+        "name": "Toggle game rule",
+        "enabled": true,
+        "key": "G",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "toggle_rule",
+          "name": "Fullscreen games"
+        }
+      },
+      {
+        "name": "Back to previous workspace",
+        "enabled": true,
+        "key": "Escape",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "switch_workspace_selector",
+          "selector": {
+            "kind": "previous_visited"
+          }
+        }
+      }
+    ],
+    "gestures": {
+      "enabled": true,
+      "idle_timeout_ms": 350,
+      "axis_lock_ratio": 1.25,
+      "scroll_fingers": 3,
+      "profiles": []
+    },
+    "window_rules": [
+      {
+        "name": "Fullscreen games",
+        "enabled": true,
+        "dynamic": true,
+        "mode": "All",
+        "predicates": [
+          {
+            "kind": "Exe",
+            "strategy": "Regex",
+            "value": "(?i)(game|steam_app|valorant|eldenring).*\\.exe",
+            "negate": false,
+            "case_sensitive": false
+          }
+        ],
+        "effects": [
+          "Fullscreen",
+          {
+            "AlwaysOnTop": true
+          },
+          {
+            "BorderColor": "Hidden"
+          },
+          {
+            "Corners": "DoNotRound"
+          },
+          {
+            "Backdrop": "None"
+          },
+          {
+            "AddTag": "game"
+          }
+        ]
+      },
+      {
+        "name": "Social apps off the game workspace",
+        "enabled": true,
+        "dynamic": false,
+        "mode": "All",
+        "predicates": [
+          {
+            "kind": "Exe",
+            "strategy": "Regex",
+            "value": "(discord|steamwebhelper)\\.exe",
+            "negate": false,
+            "case_sensitive": false
+          }
+        ],
+        "effects": [
+          {
+            "MoveToWorkspace": {
+              "monitor_index": null,
+              "workspace_index": 1
+            }
+          }
+        ]
+      }
+    ],
+    "shell": {
+      "panel": {
+        "enabled": true,
+        "edge": "top",
+        "style": "bar",
+        "fit": "full",
+        "width": 0,
+        "align": "centre",
+        "floating": false,
+        "height": 36,
+        "margin": 6,
+        "corner_radius": 10,
+        "padding": 10,
+        "spacing": 8,
+        "opacity": 235,
+        "background": [
+          17,
+          19,
+          27
+        ],
+        "text": [
+          214,
+          220,
+          232
+        ],
+        "accent": null,
+        "left": [
+          "launcher",
+          "workspaces",
+          "layout",
+          "title"
+        ],
+        "centre": [],
+        "right": [
+          "tray",
+          "network",
+          "sound",
+          "battery",
+          "clock"
+        ],
+        "title_width": 260,
+        "task_width": 150,
+        "clock_format": "%a %d %b  %H:%M",
+        "older_tray_icons": true,
+        "displays": []
+      },
+      "notifications": {
+        "corner": "top_right",
+        "shown": 5,
+        "stay_seconds": 6,
+        "sound": false
+      },
+      "screenshots": {
+        "folder": "",
+        "clipboard": true,
+        "save": true,
+        "record_sound": false
+      },
+      "glass": {
+        "enabled": true,
+        "tint": 165
+      },
+      "osd": {
+        "volume": true
+      }
+    },
+    "input": {
+      "keyboard": {
+        "layouts": [],
+        "switch_with": "alt_shift",
+        "options": [],
+        "model": "",
+        "repeat_delay_ms": 400,
+        "repeat_rate": 30,
+        "numlock": false
+      },
+      "mouse": {
+        "speed": 0.0,
+        "accel_profile": "default",
+        "natural_scroll": false,
+        "left_handed": false
+      },
+      "touchpad": {
+        "tap": true,
+        "tap_drag": true,
+        "natural_scroll": true,
+        "disable_while_typing": true,
+        "speed": 0.0,
+        "accel_profile": "default",
+        "scroll_method": "default",
+        "left_handed": false,
+        "middle_emulation": false
+      }
+    },
+    "outputs": [],
+    "session": {
+      "environment": {},
+      "lock_after_minutes": 0,
+      "dim_before_lock_seconds": 10,
+      "lock_before_sleep": true,
+      "awake_while_fullscreen": true,
+      "lock_shows_wallpaper": true,
+      "displays_off_after_minutes": 0
+    },
+    "wallpaper": {
+      "image": "",
+      "fit": "fill",
+      "color": [
+        18,
+        18,
+        23
+      ],
+      "outputs": [],
+      "slideshow": {
+        "folder": "",
+        "every_minutes": 30,
+        "shuffle": false
+      }
+    },
+    "night_light": {
+      "enabled": false,
+      "temperature": 4000,
+      "from": "20:00",
+      "to": "07:00"
+    },
+    "layer_rules": []
+  },
+  "node_graph": {
+    "nodes": {
+      "0": {
+        "id": 0,
+        "node_type": "OnStartup",
+        "position": [
+          80.0,
+          120.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 0,
+            "name": "Event",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "1": {
+        "id": 1,
+        "node_type": {
+          "ApplySystemFilters": {
+            "enabled": true
+          }
+        },
+        "position": [
+          340.0,
+          120.0
+        ],
+        "inputs": [
+          {
+            "id": 1,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 2,
+            "name": "Then",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 3,
+            "name": "Count",
+            "pin_type": "Number"
+          }
+        ]
+      },
+      "2": {
+        "id": 2,
+        "node_type": {
+          "LogMessage": {
+            "message": "System filters and desktop profile are active",
+            "level": "Info"
+          }
+        },
+        "position": [
+          610.0,
+          120.0
+        ],
+        "inputs": [
+          {
+            "id": 4,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 5,
+            "name": "Text",
+            "pin_type": "String"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 6,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      }
+    },
+    "connections": [
+      {
+        "from_node": 0,
+        "from_pin": 0,
+        "to_node": 1,
+        "to_pin": 1
+      },
+      {
+        "from_node": 1,
+        "from_pin": 2,
+        "to_node": 2,
+        "to_pin": 4
+      }
+    ],
+    "next_node_id": 3,
+    "next_pin_id": 7
+  }
+}

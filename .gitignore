@@ -1,0 +1,10 @@
+/target
+*.exe
+*.pdb
+/examples
+config.json
+# What Python keeps of the checks' scripts once they have run.
+__pycache__/
+*.pyc
+# Tools' own working folders.
+.claude/

@@ -1,0 +1,33 @@
+[package]
+name = "gevrek-win32"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# Test helpers (windows registered without a real HWND, an inert event
+# monitor) for crates that test against the backend.
+test-support = []
+
+[dependencies]
+# (And the displays' colour ramps, for the night light.)
+windows = { workspace = true, features = ["Win32_UI_ColorSystem", "Win32_Devices_Display"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+chrono = { workspace = true }
+regex = { workspace = true }
+dirs = { workspace = true }
+tokio = { workspace = true }
+# The system's wallpaper, read for its colour (a theme whose accent is the
+# wallpaper's).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp"] }
+
+gevrek-model = { path = "../model" }
+gevrek-engine = { path = "../engine" }
+gevrek-host = { path = "../host" }
+
+[dev-dependencies]
+gevrek-engine = { path = "../engine", features = ["test-support"] }

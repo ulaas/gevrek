@@ -1,0 +1,6 @@
+[Unit]
+Description=End of a gevrek session
+DefaultDependencies=no
+StopWhenUnneeded=true
+Conflicts=graphical-session.target graphical-session-pre.target
+After=graphical-session.target graphical-session-pre.target

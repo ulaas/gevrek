@@ -1,0 +1,20 @@
+[package]
+name = "gevrek-testclient"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A Wayland client for gevrek's end-to-end checks: a window that does what it is told on its standard input and says what it was sent."
+
+# Linux only; on other systems it builds to a program that says so.
+[target.'cfg(target_os = "linux")'.dependencies]
+smithay-client-toolkit = "0.19"
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+# (Input methods, for the check of them.)
+wayland-protocols-misc = { version = "0.3", features = ["client"] }
+libc = "0.2"
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+# (Buffers of the graphics card's own memory, for the check of pictures
+# of the screen drawn straight into one.)
+gbm = { version = "0.18", default-features = false, features = ["drm-support"] }

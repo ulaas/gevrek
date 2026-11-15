@@ -1,0 +1,17 @@
+[Unit]
+Description=gevrek, the build installed before the current one
+BindsTo=graphical-session.target
+Before=graphical-session.target
+Wants=graphical-session-pre.target
+After=graphical-session-pre.target
+# Programs of the session that are services: they start once gevrek has
+# said it is ready (their units are ordered after this one).
+Wants=gevrek-shell.service gevrek-polkit-agent.service
+# The autostart entries of the system and the user.
+Wants=xdg-desktop-autostart.target
+Before=xdg-desktop-autostart.target
+
+[Service]
+Slice=session.slice
+Type=notify
+ExecStart=@PREVIOUS@/gevrek-wl --session

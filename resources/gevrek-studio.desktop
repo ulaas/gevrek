@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=gevrek studio
+GenericName=Settings
+Comment=The settings of gevrek
+Exec=gevrek-studio
+Icon=gevrek
+Categories=Settings;DesktopSettings;
+Keywords=gevrek;settings;preferences;configuration;
+StartupWMClass=gevrek-studio

@@ -1,0 +1,36 @@
+[package]
+name = "gevrek-dm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "gevrek's display manager: a system service that asks for the password, opens the user's session and switches between the login and the desktop. Linux only; it starts gevrek and nothing else."
+
+[[bin]]
+name = "gevrek-dm"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = { workspace = true }
+# What the login takes over from a person's configuration.
+gevrek-model = { path = "../model" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The system's own way of checking a password and opening a session (needs
+# the PAM development files to build, as gevrek-lock does).
+pam = "0.8"
+users = "0.10"
+libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.build-dependencies]
+# Not used by this crate itself. PAM's bindings are made at build time by a
+# bindgen that does not load libclang when it runs, and PipeWire's (the
+# shell's screen sharing) by one that does and switches that way on in the
+# loader the two share: built together, PAM's then stopped with "a libclang
+# shared library is not loaded on this thread". Named here with that way
+# switched on, both load it.
+bindgen = { version = "0.69", features = ["runtime"] }

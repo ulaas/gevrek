@@ -1,0 +1,10 @@
+[Unit]
+Description=gevrek's shell (panel, launcher, notifications, on-screen displays)
+PartOf=graphical-session.target
+After=gevrek.service gevrek-safe.service gevrek-previous.service
+
+[Service]
+Slice=session.slice
+ExecStart=@BIN@/gevrek-shell
+Restart=on-failure
+RestartSec=1

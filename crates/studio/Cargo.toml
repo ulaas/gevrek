@@ -1,0 +1,58 @@
+[package]
+name = "gevrek-studio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "gevrek's settings program: every setting in a form made from the model, with the running window manager on the other end."
+
+[[bin]]
+name = "gevrek-studio"
+path = "src/bin/gevrek-studio.rs"
+
+[dependencies]
+egui = "0.37"
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "wayland", "x11", "default_fonts", "accesskit"] }
+gevrek-ui = { path = "../ui" }
+# Which commit this was built from (the list of shortcuts shows it).
+gevrek-build = { path = "../build" }
+gevrek-schema = { path = "../schema" }
+gevrek-model = { path = "../model" }
+gevrek-engine = { path = "../engine" }
+gevrek-protocol = { path = "../protocol" }
+gevrek-link = { path = "../link" }
+# What the tutorial remembers: that the person was welcomed.
+gevrek-tutorial = { path = "../tutorial" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+clap = { workspace = true }
+env_logger = { workspace = true }
+dirs = { workspace = true }
+# The time of the day, marked on the night light's band.
+chrono = { workspace = true }
+# The wallpaper's picture, read to be shown small on the wallpaper's page.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+
+# The system's own idle times, shown on the Session page.
+[target.'cfg(windows)'.dependencies]
+gevrek-system = { path = "../system" }
+
+# Recording a binding's keys: asking the compositor for every key, on the
+# toolkit's own connection (all_keys.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
+wayland-client = "0.31"
+wayland-backend = { version = "0.3", features = ["client_system"] }
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+anyhow = { workspace = true }
+log = { workspace = true }
+
+[build-dependencies]
+embed-resource = "3"
+
+[dev-dependencies]
+# The pictures of the pages: drawn without a window and compared.
+gevrek-ui = { path = "../ui", features = ["picture"] }

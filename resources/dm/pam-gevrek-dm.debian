@@ -1,0 +1,21 @@
+#%PAM-1.0
+# A person logging in through gevrek's display manager, on a system that
+# names the shared parts as Debian and Ubuntu do. (pam-gevrek-dm is the
+# same for Fedora and Arch; what the lines are for is said there.)
+auth       requisite    pam_nologin.so
+@include common-auth
+-auth      optional     pam_gnome_keyring.so
+-auth      optional     pam_kwallet6.so
+-auth      optional     pam_kwallet5.so
+@include common-account
+@include common-password
+# (Under SELinux, where it is installed: the session is given its
+# person's own label.)
+-session   required     pam_selinux.so close
+session    required     pam_loginuid.so
+-session   required     pam_selinux.so open
+session    optional     pam_keyinit.so force revoke
+@include common-session
+-session   optional     pam_gnome_keyring.so auto_start
+-session   optional     pam_kwallet6.so auto_start
+-session   optional     pam_kwallet5.so auto_start

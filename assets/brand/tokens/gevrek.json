@@ -1,0 +1,20 @@
+{
+  "color": {
+    "molasses": "#21110A",
+    "crust": "#D9701F",
+    "crustDeep": "#C75F14",
+    "ember": "#E58A3C",
+    "sesame": "#F4E2BC",
+    "surface": "#2E1A10",
+    "muted": "#C4A482",
+    "mutedOnLight": "#5E3D26"
+  },
+  "font": {
+    "display": "Outfit",
+    "mono": "JetBrains Mono"
+  },
+  "icon": {
+    "grid": 24,
+    "stroke": 1.75
+  }
+}

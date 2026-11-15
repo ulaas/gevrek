@@ -1,0 +1,32 @@
+[package]
+name = "gevrek-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The design system of gevrek's programs: palettes, style, fonts, icons, widgets."
+
+[dependencies]
+# (The built-in fonts are asked for by name: since 0.37 egui does not
+# bring them unless asked, and a program built alone had no letters.)
+egui = { version = "0.37", features = ["default_fonts"] }
+# Only the icon font and its names are taken from this: it is still tied to
+# egui 0.36, so the font goes into our egui by our own hands (theme.rs).
+egui-phosphor = "0.14"
+csscolorparser = "0.9"
+# The brand's pictures (the mark, the program's icon) are PNG files.
+# (The other kinds of picture: for the file browser's preview.)
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "webp", "gif"] }
+# The brand's icons are drawings (SVG).
+resvg = { version = "0.45", default-features = false }
+# A frame drawn into a picture without a window (`picture.rs`): only
+# where it is asked for, by tests.
+egui-wgpu = { version = "0.37", optional = true }
+pollster = { version = "1", optional = true }
+
+[features]
+picture = ["dep:egui-wgpu", "dep:pollster"]
+
+[dev-dependencies]
+# For the gallery example only: a window to show the widgets in.
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "wayland", "x11", "default_fonts", "accesskit"] }

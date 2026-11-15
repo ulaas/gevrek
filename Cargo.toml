@@ -1,0 +1,147 @@
+[workspace]
+members = ["crates/*", "xtask"]
+# The root package (WM, CLI) and the settings program: `cargo build
+# --bins` and `cargo run --bin gevrek-studio` from the root cover both.
+default-members = [".", "crates/studio"]
+resolver = "2"
+
+[workspace.package]
+version = "0.6.0"
+edition = "2021"
+authors = ["Gevrek Contributors"]
+license = "MIT"
+repository = "https://github.com/ulaas/gevrek"
+homepage = "https://ulaas.github.io/gevrek/"
+
+[workspace.dependencies]
+# The configuration's JSON Schema, derived from the model (crates/schema).
+schemars = { version = "1", features = ["preserve_order"] }
+# gRPC and Protobuf
+tonic = "0.12"
+prost = "0.13"
+tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "sync", "time", "net", "io-util"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+ctrlc = "3.4"
+
+# Windows API
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Dwm",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
+    "Win32_System_Console",
+    "Win32_UI_Shell",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Input",
+    "Win32_Devices_HumanInterfaceDevice",
+    "Win32_UI_Accessibility",
+    "Win32_UI_HiDpi",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_DirectComposition",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Foundation_Numerics",
+    "Win32_System_Com",
+    "Win32_System_Registry",
+    "Win32_Storage_FileSystem",
+    "Win32_UI_Shell_Common",
+    # The shell: how loud the sound is, and ending the session.
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_System_Shutdown",
+    "Win32_System_Power",
+    "implement",
+] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error Handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Utilities
+log = "0.4"
+env_logger = "0.11"
+dirs = "5.0"
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1.10"
+
+[package]
+name = "gevrek"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "A tiling window manager for Windows and Linux, growing into a cross-platform desktop environment."
+
+[lib]
+name = "gevrek"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gevrek"
+path = "src/bin/gevrek.rs"
+
+[[bin]]
+name = "gevrek-wm"
+path = "src/bin/wm.rs"
+
+[dependencies]
+gevrek-protocol = { path = "crates/protocol" }
+gevrek-model = { path = "crates/model" }
+gevrek-schema = { path = "crates/schema" }
+gevrek-engine = { path = "crates/engine" }
+gevrek-host = { path = "crates/host" }
+gevrek-server = { path = "crates/server" }
+
+# Workspace dependencies
+tonic = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+dirs = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+clap = { workspace = true }
+ctrlc = { workspace = true }
+
+# The Windows backend and the Windows API: gevrek-wm, and the process
+# handling of the CLI. On Linux the WM is gevrek-wl (crates/backend-smithay).
+[target.'cfg(windows)'.dependencies]
+gevrek-win32 = { path = "crates/backend-win32" }
+# The system's own idle times, which `gevrek health` reports.
+gevrek-system = { path = "crates/system" }
+windows = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# The settings program's session logic, against a real server
+# (tests/grpc_integration_tests.rs).
+[dev-dependencies]
+gevrek-studio = { path = "crates/studio" }
+
+# The programs' icon on Windows (build.rs).
+[build-dependencies]
+embed-resource = "3"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

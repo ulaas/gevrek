@@ -1,0 +1,147 @@
+//! Matching windows against a pattern: by title, class, executable or path,
+//! and by the title or class a window had when it appeared.
+
+use crate::contract::Desktop;
+use crate::rules::{MatchKind, MatchStrategy};
+use crate::WindowHandle;
+
+/// Whether `value` matches `pattern` under `strategy`. A regular expression
+/// that does not compile matches nothing.
+pub fn text_matches(
+    value: &str,
+    pattern: &str,
+    strategy: &MatchStrategy,
+    case_sensitive: bool,
+) -> bool {
+    if matches!(strategy, MatchStrategy::Regex) {
+        return regex::RegexBuilder::new(pattern)
+            .case_insensitive(!case_sensitive)
+            .build()
+            .is_ok_and(|regex| regex.is_match(value));
+    }
+    let (value, pattern) = if case_sensitive {
+        (value.to_string(), pattern.to_string())
+    } else {
+        (value.to_lowercase(), pattern.to_lowercase())
+    };
+    match strategy {
+        MatchStrategy::Equals => value == pattern,
+        MatchStrategy::Contains => value.contains(&pattern),
+        MatchStrategy::StartsWith => value.starts_with(&pattern),
+        MatchStrategy::EndsWith => value.ends_with(&pattern),
+        MatchStrategy::Regex => unreachable!("handled above"),
+    }
+}
+
+/// Whether a window's title, class, executable or path matches. Other
+/// kinds of match (window state) never match here.
+pub fn window_matches(
+    desktop: &dyn Desktop,
+    id: WindowHandle,
+    pattern: &str,
+    kind: &MatchKind,
+    strategy: &MatchStrategy,
+    case_sensitive: bool,
+) -> bool {
+    let value = match kind {
+        MatchKind::Title => desktop.title(id),
+        MatchKind::Class => desktop.class(id),
+        MatchKind::Exe => desktop.exe(id),
+        MatchKind::Path => desktop.path(id),
+        MatchKind::AppId => desktop.app_id(id),
+        _ => return false,
+    };
+    text_matches(&value, pattern, strategy, case_sensitive)
+}
+
+/// Every tracked window that matches.
+pub fn find_windows_by_match(
+    desktop: &dyn Desktop,
+    pattern: &str,
+    kind: &MatchKind,
+    strategy: &MatchStrategy,
+    case_sensitive: bool,
+) -> Vec<WindowHandle> {
+    desktop
+        .windows()
+        .into_iter()
+        .map(|window| window.handle)
+        .filter(|id| window_matches(desktop, *id, pattern, kind, strategy, case_sensitive))
+        .collect()
+}
+
+/// Every tracked window whose class (`class`) or title, as it was when the
+/// window appeared, matches.
+pub fn find_windows_by_initial_match(
+    desktop: &dyn Desktop,
+    pattern: &str,
+    class: bool,
+    strategy: &MatchStrategy,
+    case_sensitive: bool,
+) -> Vec<WindowHandle> {
+    desktop
+        .windows()
+        .into_iter()
+        .map(|window| window.handle)
+        .filter(|id| {
+            let value = if class {
+                desktop.initial_class(*id)
+            } else {
+                desktop.initial_title(*id)
+            };
+            text_matches(&value, pattern, strategy, case_sensitive)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_matching_follows_the_strategy_and_the_case_setting() {
+        use MatchStrategy::*;
+        assert!(text_matches("Notepad", "notepad", &Equals, false));
+        assert!(!text_matches("Notepad", "notepad", &Equals, true));
+        assert!(text_matches(
+            "Untitled - Notepad",
+            "notepad",
+            &Contains,
+            false
+        ));
+        assert!(text_matches(
+            "Untitled - Notepad",
+            "untitled",
+            &StartsWith,
+            false
+        ));
+        assert!(text_matches(
+            "Untitled - Notepad",
+            "Notepad",
+            &EndsWith,
+            true
+        ));
+        assert!(!text_matches(
+            "Untitled - Notepad",
+            "Untitled",
+            &EndsWith,
+            true
+        ));
+        assert!(text_matches(
+            "report-2026.txt",
+            r"^report-\d{4}",
+            &Regex,
+            true
+        ));
+        assert!(text_matches(
+            "REPORT-2026.txt",
+            r"^report-\d{4}",
+            &Regex,
+            false
+        ));
+        assert!(
+            !text_matches("anything", "(unclosed", &Regex, false),
+            "a bad pattern matches nothing"
+        );
+    }
+}

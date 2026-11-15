@@ -1,0 +1,42 @@
+[package]
+name = "gevrek-lock"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "gevrek's lock screen: covers every display until the user's password is given."
+
+[[bin]]
+name = "gevrek-lock"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+egui = "0.37"
+gevrek-ui = { path = "../ui" }
+gevrek-shellkit = { path = "../shellkit" }
+gevrek-model = { path = "../model" }
+# What the login's greeter says to the display manager.
+gevrek-dm = { path = "../dm" }
+serde_json = { workspace = true }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# The wallpaper behind the clock.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+# The system's own way of checking a password (needs the PAM development
+# files to build: pam-devel on Fedora, libpam0g-dev on Debian and Ubuntu).
+pam = "0.8"
+# The signal that asks the login's compositor for the next keyboard layout.
+libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.build-dependencies]
+# Not used by this crate itself. PAM's bindings are made at build time by a
+# bindgen that does not load libclang when it runs, and PipeWire's (the
+# shell's screen sharing) by one that does and switches that way on in the
+# loader the two share: built together, PAM's then stopped with "a libclang
+# shared library is not loaded on this thread". Named here with that way
+# switched on, both load it.
+bindgen = { version = "0.69", features = ["runtime"] }

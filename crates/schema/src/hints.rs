@@ -1,0 +1,183 @@
+//! What the types do not say about a number: the range worth offering, the
+//! step, the unit. By the name of the setting, which is how they are
+//! consistent in the model (`*_ms` is always milliseconds).
+//!
+//! A range here is what a slider offers, not a limit: the model's own
+//! validation decides what is accepted, and a value outside the range is
+//! shown as it is.
+
+/// How to offer a number.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Hint {
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
+    pub unit: &'static str,
+}
+
+const fn of(min: f64, max: f64, step: f64, unit: &'static str) -> Hint {
+    Hint {
+        min,
+        max,
+        step,
+        unit,
+    }
+}
+
+/// By the whole pointer, for the names that mean different things in
+/// different places.
+const PLACES: &[(&str, Hint)] = &[
+    (
+        "/desktop/animations/session/duration_ms",
+        of(100.0, 3000.0, 20.0, "ms"),
+    ),
+    ("/desktop/shell/panel/height", of(20.0, 64.0, 1.0, "px")),
+    ("/desktop/shell/panel/margin", of(0.0, 32.0, 1.0, "px")),
+    ("/desktop/shell/panel/width", of(0.0, 3840.0, 10.0, "px")),
+    ("/desktop/shell/panel/padding", of(0.0, 40.0, 1.0, "px")),
+    ("/desktop/shell/glass/tint", of(0.0, 255.0, 5.0, "")),
+    (
+        "/desktop/shell/panel/title_width",
+        of(0.0, 800.0, 10.0, "px"),
+    ),
+    (
+        "/desktop/shell/panel/task_width",
+        of(0.0, 400.0, 10.0, "px"),
+    ),
+    ("/desktop/shell/panel/spacing", of(0.0, 32.0, 1.0, "px")),
+    (
+        "/desktop/shell/panel/corner_radius",
+        of(0.0, 32.0, 1.0, "px"),
+    ),
+    (
+        "/desktop/platform/wayland/cursor_size",
+        of(0.0, 96.0, 1.0, "px"),
+    ),
+    (
+        "/desktop/platform/wayland/output_scale",
+        of(0.5, 4.0, 0.05, "×"),
+    ),
+    ("/desktop/animations/fps", of(30.0, 360.0, 1.0, "fps")),
+    ("/desktop/focus/history_size", of(1.0, 256.0, 1.0, "")),
+    ("/desktop/schema_version", of(0.0, 1000.0, 1.0, "")),
+    ("/version", of(0.0, 1000.0, 1.0, "")),
+];
+
+/// By the last part of the name.
+const NAMES: &[(&str, Hint)] = &[
+    ("duration_ms", of(0.0, 2000.0, 10.0, "ms")),
+    ("focus_delay_ms", of(0.0, 1000.0, 10.0, "ms")),
+    ("idle_timeout_ms", of(50.0, 2000.0, 10.0, "ms")),
+    ("repeat_delay_ms", of(100.0, 2000.0, 10.0, "ms")),
+    ("repeat_rate", of(1.0, 100.0, 1.0, "/s")),
+    ("spin_seconds", of(0.0, 60.0, 0.5, "s")),
+    ("lock_after_minutes", of(0.0, 120.0, 1.0, "min")),
+    ("displays_off_after_minutes", of(0.0, 120.0, 1.0, "min")),
+    ("every_minutes", of(1.0, 1440.0, 1.0, "min")),
+    ("angle", of(0.0, 360.0, 1.0, "°")),
+    ("border_width", of(0.0, 16.0, 1.0, "px")),
+    ("border_offset", of(-16.0, 16.0, 1.0, "px")),
+    ("corner_radius", of(0.0, 48.0, 1.0, "px")),
+    ("radius", of(0.0, 96.0, 1.0, "px")),
+    ("glow_radius", of(0.0, 96.0, 1.0, "px")),
+    ("shown", of(1.0, 10.0, 1.0, "")),
+    ("temperature", of(1000.0, 6500.0, 100.0, "K")),
+    ("stay_seconds", of(1.0, 60.0, 1.0, "s")),
+    ("dim_before_lock_seconds", of(0.0, 120.0, 1.0, "s")),
+    ("size", of(0.0, 96.0, 1.0, "px")),
+    ("offset_x", of(-64.0, 64.0, 1.0, "px")),
+    ("offset_y", of(-64.0, 64.0, 1.0, "px")),
+    ("height", of(0.0, 96.0, 1.0, "px")),
+    ("margin", of(0.0, 64.0, 1.0, "px")),
+    ("left", of(0.0, 400.0, 1.0, "px")),
+    ("top", of(0.0, 400.0, 1.0, "px")),
+    ("right", of(0.0, 400.0, 1.0, "px")),
+    ("bottom", of(0.0, 400.0, 1.0, "px")),
+    ("gap", of(0.0, 64.0, 1.0, "px")),
+    ("padding", of(0.0, 64.0, 1.0, "px")),
+    ("snap_threshold", of(0.0, 200.0, 1.0, "px")),
+    ("axis_lock_ratio", of(1.0, 4.0, 0.05, "")),
+    ("distance_percent", of(1.0, 100.0, 1.0, "%")),
+    ("speed", of(-1.0, 1.0, 0.05, "")),
+    ("scale", of(0.5, 4.0, 0.05, "×")),
+    ("ratio", of(0.05, 0.95, 0.01, "")),
+    ("fingers", of(3.0, 5.0, 1.0, "")),
+    ("scroll_fingers", of(0.0, 5.0, 1.0, "")),
+];
+
+/// Names that end like this are a part of 255 (how see-through, how strong).
+const BYTE_ENDINGS: &[&str] = &["opacity", "alpha"];
+
+/// The settings whose change cannot take effect while the session runs
+/// (the plan's principle 7: every other one does, at once): when it
+/// holds, in a word or two for beside the setting's name, and why.
+const WAITS: &[(&str, &str, &str)] = &[
+    (
+        "/desktop/platform/wayland/xwayland",
+        "next session",
+        "Holds from the next start of the session: X11 programs run on Xwayland, and \
+         ending it would end every one of them.",
+    ),
+    (
+        "/desktop/session/environment",
+        "new programs",
+        "For programs started from now on: one that runs already keeps the variables it \
+         was started with.",
+    ),
+    (
+        "/desktop/manage_existing_on_startup",
+        "at the start",
+        "Looked at once, when gevrek starts: the windows that are there then.",
+    ),
+    (
+        "/desktop/restore_session_on_startup",
+        "at the start",
+        "Looked at once, when gevrek starts.",
+    ),
+];
+
+/// When a change of the setting at `pointer` holds, if not at once: a
+/// word or two, and the reason. `None`: it takes effect while the
+/// session runs, as every setting does that can.
+pub fn waits(pointer: &str) -> Option<(&'static str, &'static str)> {
+    WAITS
+        .iter()
+        .find(|(place, _, _)| *place == pointer)
+        .map(|(_, when, why)| (*when, *why))
+}
+
+/// How to offer the number at `pointer`, when its name says.
+pub fn hint(pointer: &str) -> Option<Hint> {
+    if let Some((_, hint)) = PLACES.iter().find(|(place, _)| *place == pointer) {
+        return Some(*hint);
+    }
+    let name = pointer.rsplit('/').next().unwrap_or(pointer);
+    if let Some((_, hint)) = NAMES.iter().find(|(known, _)| *known == name) {
+        return Some(*hint);
+    }
+    if BYTE_ENDINGS.iter().any(|ending| name.ends_with(ending)) {
+        return Some(of(0.0, 255.0, 1.0, ""));
+    }
+    if name.ends_with("_ms") {
+        return Some(of(0.0, 5000.0, 10.0, "ms"));
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_settings_that_wait_are_settings_and_say_why() {
+        for (place, when, why) in WAITS {
+            assert!(
+                crate::schema().at(place).is_some(),
+                "{place} is no setting of the schema"
+            );
+            assert!(!when.is_empty() && why.len() > 20, "{place}");
+            assert_eq!(waits(place), Some((*when, *why)));
+        }
+        assert_eq!(waits("/desktop/animations/enabled"), None);
+    }
+}

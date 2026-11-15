@@ -1,0 +1,27 @@
+[package]
+name = "gevrek-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tonic = { workspace = true }
+prost = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+gevrek-model = { path = "../model" }
+# The local endpoint (a Unix socket, a named pipe) under tonic's client.
+hyper-util = { version = "0.1", features = ["tokio"] }
+tower = { version = "0.4", features = ["util"] }
+
+[dev-dependencies]
+gevrek-engine = { path = "../engine" }
+
+[build-dependencies]
+protoc-bin-vendored = "3"
+tonic-build = "0.12"

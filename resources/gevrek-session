@@ -1,0 +1,70 @@
+#!/bin/sh
+# Start gevrek as the session of this login, as a systemd user service, and
+# wait until it ends. This is what the login manager runs
+# (resources/gevrek.desktop).
+#
+#   gevrek-session              the installed build
+#   gevrek-session --safe       ignore the configuration file
+#   gevrek-session --previous   the build that was installed before this one
+#
+# Without systemd it runs gevrek-wl directly.
+
+# Through a login shell, so that the profile's environment is there.
+if [ -n "$SHELL" ] && grep -q "$SHELL" /etc/shells 2>/dev/null \
+   && ! (echo "$SHELL" | grep -q "false") && ! (echo "$SHELL" | grep -q "nologin"); then
+    if [ "$1" != '-l' ]; then
+        exec "$SHELL" -l -c "exec '$0' -l $*"
+    else
+        shift
+    fi
+fi
+
+here=$(dirname "$(command -v "$0")")
+unit=gevrek.service
+for argument in "$@"; do
+    case "$argument" in
+        --safe) unit=gevrek-safe.service ;;
+        --previous) unit=gevrek-previous.service ;;
+    esac
+done
+
+if ! command -v systemctl >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1; then
+    # No service manager for the user: gevrek starts what it starts itself.
+    case "$unit" in
+        gevrek-safe.service) exec "$here/gevrek-wl" --session --safe ;;
+        gevrek-previous.service) exec "$here/../lib/gevrek/previous/gevrek-wl" --session ;;
+        *) exec "$here/gevrek-wl" --session ;;
+    esac
+fi
+
+if systemctl --user -q is-active gevrek.service gevrek-safe.service gevrek-previous.service; then
+    echo 'A gevrek session is already running.'
+    exit 1
+fi
+
+# One graphical session for a user at a time: its services hang on
+# graphical-session.target, and the end of gevrek takes that target down.
+if systemctl --user -q is-active graphical-session.target; then
+    echo 'Another graphical session of yours is running (Plasma, GNOME, niri, ...): log out of it first.'
+    echo 'To try gevrek beside it, from a text console: scripts/try-console.sh in the repository,'
+    echo "or $here/gevrek-wl --backend drm -- <a terminal>"
+    exit 1
+fi
+
+systemctl --user reset-failed
+# What the login gave this shell is what the session's programs get.
+# (By name: importing everything without a list is deprecated by systemd.)
+names=$(awk 'BEGIN { for (name in ENVIRON) if (name ~ /^[A-Za-z_][A-Za-z0-9_]*$/ && name != "_" && name != "SHLVL" && name != "PWD" && name != "OLDPWD" && name != "AWKPATH" && name != "AWKLIBPATH") print name }')
+# shellcheck disable=SC2086
+systemctl --user import-environment $names
+if command -v dbus-update-activation-environment >/dev/null 2>&1; then
+    dbus-update-activation-environment --all
+fi
+
+# Until gevrek ends.
+systemctl --user --wait start "$unit"
+
+# The session's own targets and services go down with it, and the next
+# session does not inherit this one's display.
+systemctl --user start --job-mode=replace-irreversibly gevrek-shutdown.target
+systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP

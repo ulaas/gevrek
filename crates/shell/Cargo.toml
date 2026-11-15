@@ -1,0 +1,63 @@
+[package]
+name = "gevrek-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "gevrek's shell: what a desktop has around its windows. The panel on Linux and Windows; on Linux the launcher, notifications and the rest too."
+
+[[bin]]
+name = "gevrek-shell"
+path = "src/main.rs"
+
+[dependencies]
+egui = "0.37"
+gevrek-ui = { path = "../ui" }
+# Which commit this was built from (the list of shortcuts shows it).
+gevrek-build = { path = "../build" }
+gevrek-shellkit = { path = "../shellkit" }
+gevrek-system = { path = "../system" }
+gevrek-tutorial = { path = "../tutorial" }
+gevrek-schema = { path = "../schema" }
+gevrek-model = { path = "../model" }
+gevrek-protocol = { path = "../protocol" }
+gevrek-link = { path = "../link" }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+clap = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The session's message bus (the notification service).
+zbus = "4"
+# An answer that is waited for without holding a thread (the agent).
+async-channel = "2"
+# Pictures of the screen: asked of the compositor, written as PNG.
+smithay-client-toolkit = "0.19"
+wayland-client = "0.31"
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+# A keyboard and a pointer made up for an application that was let
+# control the desktop (the RemoteDesktop portal): the keyboard's
+# protocol, and the keys' names and what is held with them.
+wayland-protocols-misc = { version = "0.3", features = ["client"] }
+xkbcommon = "0.8"
+# Pictures of single windows (the window switcher).
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+# Screen sharing: the stream of pictures another program takes (needs
+# PipeWire's development files and clang to build).
+pipewire = { version = "0.10", features = ["v0_3_34"] }
+libc = "0.2"
+# Screen sharing without a copy: the stream's buffers made in the
+# graphics card's memory.
+gbm = { version = "0.18", default-features = false, features = ["drm-support"] }
+# (The wallpaper too, for the frosted surfaces: whatever kind it is.)
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+
+[build-dependencies]
+embed-resource = "3"
+
+[dev-dependencies]
+# The surfaces drawn into pictures without a window, to be looked at.
+gevrek-ui = { path = "../ui", features = ["picture"] }

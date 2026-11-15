@@ -1,0 +1,1902 @@
+{
+  "version": "0.1.0",
+  "desktop": {
+    "schema_version": 20,
+    "focus": {
+      "history_size": 20,
+      "focus_follows_mouse": false,
+      "mouse_follows_focus": false,
+      "focus_delay_ms": 100,
+      "prevent_focus_steal": true,
+      "focus_steal_whitelist": []
+    },
+    "apply_system_rules": true,
+    "watch_configuration": true,
+    "manage_existing_on_startup": false,
+    "appearance": {
+      "border_enabled": true,
+      "border_width": 4,
+      "border_offset": -1,
+      "border_style": "Rounded",
+      "active_border_color": [
+        0,
+        170,
+        255
+      ],
+      "inactive_border_color": [
+        70,
+        80,
+        95
+      ],
+      "active_border_alpha": 255,
+      "inactive_border_alpha": 180,
+      "window_opacity": 255,
+      "dim_inactive": false,
+      "inactive_window_opacity": 220,
+      "dim_fullscreen": false,
+      "shadow": "default",
+      "backdrop": "Auto",
+      "corners": "Round",
+      "stackbar": {
+        "enabled": false,
+        "height": 40,
+        "background_color": [
+          32,
+          32,
+          32
+        ],
+        "active_text_color": [
+          0,
+          170,
+          255
+        ],
+        "inactive_text_color": [
+          180,
+          180,
+          180
+        ]
+      },
+      "transparency_enabled": true,
+      "theme": {
+        "palette": null,
+        "accent": null
+      },
+      "invisible_borders": {
+        "enabled": false,
+        "size": 8
+      }
+    },
+    "animations": {
+      "enabled": true,
+      "fps": 60,
+      "layout": {
+        "enabled": true,
+        "duration_ms": 180,
+        "curve": "ease_in_out"
+      },
+      "workspace": {
+        "enabled": true,
+        "duration_ms": 240,
+        "curve": "cubic_out"
+      },
+      "border": {
+        "enabled": true,
+        "duration_ms": 140,
+        "curve": "ease_out"
+      },
+      "window": {
+        "enabled": true,
+        "duration_ms": 220,
+        "curve": "back_out"
+      },
+      "window_enter_style": "scale",
+      "window_exit_style": "fade"
+    },
+    "work_area_offset": {
+      "left": 0,
+      "top": 0,
+      "right": 0,
+      "bottom": 0
+    },
+    "monitors": [],
+    "workspaces": [
+      {
+        "enabled": true,
+        "name": "one",
+        "monitor": "Primary",
+        "layout": "BSP",
+        "default": true,
+        "persistent": true,
+        "on_created_empty": null,
+        "gaps_in": 8,
+        "gaps_out": 8,
+        "work_area_offset": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
+        "master_ratio": 0.5,
+        "master_count": 1,
+        "master_position": "Left",
+        "new_window_placement": "StackEnd",
+        "window_container_behaviour": "column",
+        "dwindle_direction": "Alternate",
+        "dwindle_preserve_split": false,
+        "appearance_override": true,
+        "border_enabled": true,
+        "border_width": 4,
+        "border_offset": -1,
+        "border_style": "Rounded",
+        "active_border_color": [
+          0,
+          170,
+          255
+        ],
+        "inactive_border_color": [
+          70,
+          80,
+          95
+        ],
+        "active_border_alpha": 255,
+        "inactive_border_alpha": 180
+      },
+      {
+        "enabled": true,
+        "name": "two",
+        "monitor": "Primary",
+        "layout": "BSP",
+        "default": false,
+        "persistent": true,
+        "on_created_empty": null,
+        "gaps_in": 8,
+        "gaps_out": 8,
+        "work_area_offset": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
+        "master_ratio": 0.5,
+        "master_count": 1,
+        "master_position": "Left",
+        "new_window_placement": "StackEnd",
+        "window_container_behaviour": "column",
+        "dwindle_direction": "Alternate",
+        "dwindle_preserve_split": false,
+        "appearance_override": true,
+        "border_enabled": true,
+        "border_width": 4,
+        "border_offset": -1,
+        "border_style": "Rounded",
+        "active_border_color": [
+          0,
+          170,
+          255
+        ],
+        "inactive_border_color": [
+          70,
+          80,
+          95
+        ],
+        "active_border_alpha": 255,
+        "inactive_border_alpha": 180
+      },
+      {
+        "enabled": true,
+        "name": "three",
+        "monitor": "Primary",
+        "layout": "BSP",
+        "default": false,
+        "persistent": true,
+        "on_created_empty": null,
+        "gaps_in": 8,
+        "gaps_out": 8,
+        "work_area_offset": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
+        "master_ratio": 0.5,
+        "master_count": 1,
+        "master_position": "Left",
+        "new_window_placement": "StackEnd",
+        "window_container_behaviour": "column",
+        "dwindle_direction": "Alternate",
+        "dwindle_preserve_split": false,
+        "appearance_override": true,
+        "border_enabled": true,
+        "border_width": 4,
+        "border_offset": -1,
+        "border_style": "Rounded",
+        "active_border_color": [
+          0,
+          170,
+          255
+        ],
+        "inactive_border_color": [
+          70,
+          80,
+          95
+        ],
+        "active_border_alpha": 255,
+        "inactive_border_alpha": 180
+      }
+    ],
+    "zones": {
+      "behavior": {
+        "enabled": true,
+        "show_preview": true,
+        "highlight_zones": true,
+        "snap_threshold": 0.3,
+        "activation_modifier": null,
+        "preview_opacity": 0.3,
+        "preview_color": [
+          0,
+          120,
+          215
+        ]
+      },
+      "default_layout": {
+        "id": "columns_2",
+        "name": "Two Columns",
+        "description": "Two equal-width columns",
+        "zones": [
+          {
+            "id": 0,
+            "name": "Left",
+            "x_percent": 0.0,
+            "y_percent": 0.0,
+            "width_percent": 0.5,
+            "height_percent": 1.0,
+            "gap": 8,
+            "priority": 0
+          },
+          {
+            "id": 1,
+            "name": "Right",
+            "x_percent": 0.5,
+            "y_percent": 0.0,
+            "width_percent": 0.5,
+            "height_percent": 1.0,
+            "gap": 8,
+            "priority": 0
+          }
+        ]
+      },
+      "monitor_layouts": []
+    },
+    "startup": [],
+    "scratchpads": [],
+    "bindings": [
+      {
+        "name": "win-alt-f9 next workspace",
+        "enabled": true,
+        "key": "F9",
+        "ctrl": false,
+        "alt": true,
+        "shift": false,
+        "win": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 0,
+        "command": {
+          "command": "switch_workspace_selector",
+          "selector": {
+            "kind": "next"
+          }
+        }
+      },
+      {
+        "name": "alt-f10 retile",
+        "enabled": true,
+        "key": "F10",
+        "ctrl": false,
+        "alt": true,
+        "shift": false,
+        "win": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 0,
+        "command": {
+          "command": "retile"
+        }
+      },
+      {
+        "name": "ctrl-alt-f11 focus next",
+        "enabled": true,
+        "key": "F11",
+        "ctrl": true,
+        "alt": true,
+        "shift": false,
+        "win": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 0,
+        "command": {
+          "command": "focus_next"
+        }
+      }
+    ],
+    "gestures": {
+      "enabled": true,
+      "idle_timeout_ms": 350,
+      "axis_lock_ratio": 1.25,
+      "profiles": []
+    },
+    "window_rules": []
+  },
+  "node_graph": {
+    "nodes": {
+      "8": {
+        "id": 8,
+        "node_type": "GetMonitors",
+        "position": [
+          1300.0,
+          100.0
+        ],
+        "inputs": [
+          {
+            "id": 480,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 481,
+            "name": "Then",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 482,
+            "name": "Monitors",
+            "pin_type": "MonitorList"
+          }
+        ]
+      },
+      "32": {
+        "id": 32,
+        "node_type": "CycleNextLayout",
+        "position": [
+          300.0,
+          1600.0
+        ],
+        "inputs": [
+          {
+            "id": 483,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 484,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "26": {
+        "id": 26,
+        "node_type": "MoveToNextWorkspace",
+        "position": [
+          300.0,
+          1300.0
+        ],
+        "inputs": [
+          {
+            "id": 485,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 486,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "0": {
+        "id": 0,
+        "node_type": "OnStartup",
+        "position": [
+          50.0,
+          100.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 487,
+            "name": "Event",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "28": {
+        "id": 28,
+        "node_type": "MoveToPreviousWorkspace",
+        "position": [
+          300.0,
+          1400.0
+        ],
+        "inputs": [
+          {
+            "id": 488,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 489,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "22": {
+        "id": 22,
+        "node_type": "NextWorkspace",
+        "position": [
+          300.0,
+          1100.0
+        ],
+        "inputs": [
+          {
+            "id": 490,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 491,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "36": {
+        "id": 36,
+        "node_type": "ToggleExposeMode",
+        "position": [
+          300.0,
+          1800.0
+        ],
+        "inputs": [
+          {
+            "id": 492,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 493,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "7": {
+        "id": 7,
+        "node_type": {
+          "CreateFloatRule": {
+            "match_kind": "Title",
+            "match_strategy": "Contains",
+            "pattern": "",
+            "rules": []
+          }
+        },
+        "position": [
+          1050.0,
+          100.0
+        ],
+        "inputs": [
+          {
+            "id": 494,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 495,
+            "name": "Rules",
+            "pin_type": "RuleList"
+          },
+          {
+            "id": 496,
+            "name": "Pattern",
+            "pin_type": "String"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 497,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "25": {
+        "id": 25,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "L",
+            "ctrl": true,
+            "alt": false,
+            "shift": true,
+            "win": false
+          }
+        },
+        "position": [
+          50.0,
+          1300.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 498,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 499,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 500,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 501,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 502,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 503,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "10": {
+        "id": 10,
+        "node_type": {
+          "CreateWorkspace": {
+            "workspace_name": "Workspace",
+            "layout": "Columns",
+            "padding_x": 5,
+            "padding_y": 5,
+            "workspace_padding_x": 10,
+            "workspace_padding_y": 10,
+            "border_enabled": true,
+            "border_width": 4,
+            "border_offset": -1,
+            "border_style": "Rounded",
+            "active_border_color": [
+              255,
+              0,
+              0
+            ],
+            "inactive_border_color": [
+              0,
+              0,
+              255
+            ],
+            "active_border_alpha": 255,
+            "inactive_border_alpha": 200
+          }
+        },
+        "position": [
+          1800.0,
+          100.0
+        ],
+        "inputs": [
+          {
+            "id": 504,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 505,
+            "name": "Monitor",
+            "pin_type": "Monitor"
+          },
+          {
+            "id": 506,
+            "name": "Name",
+            "pin_type": "String"
+          },
+          {
+            "id": 507,
+            "name": "Layout",
+            "pin_type": "Layout"
+          },
+          {
+            "id": 508,
+            "name": "PaddingX",
+            "pin_type": "Number"
+          },
+          {
+            "id": 509,
+            "name": "PaddingY",
+            "pin_type": "Number"
+          },
+          {
+            "id": 510,
+            "name": "WorkspacePaddingX",
+            "pin_type": "Number"
+          },
+          {
+            "id": 511,
+            "name": "WorkspacePaddingY",
+            "pin_type": "Number"
+          },
+          {
+            "id": 512,
+            "name": "BorderEnabled",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 513,
+            "name": "BorderWidth",
+            "pin_type": "Number"
+          },
+          {
+            "id": 514,
+            "name": "BorderOffset",
+            "pin_type": "Number"
+          },
+          {
+            "id": 515,
+            "name": "BorderStyle",
+            "pin_type": "BorderStyle"
+          },
+          {
+            "id": 516,
+            "name": "ActiveBorderColor",
+            "pin_type": "Color"
+          },
+          {
+            "id": 517,
+            "name": "InactiveBorderColor",
+            "pin_type": "Color"
+          },
+          {
+            "id": 518,
+            "name": "ActiveBorderAlpha",
+            "pin_type": "Number"
+          },
+          {
+            "id": 519,
+            "name": "InactiveBorderAlpha",
+            "pin_type": "Number"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 520,
+            "name": "Then",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 521,
+            "name": "Workspace",
+            "pin_type": "Number"
+          },
+          {
+            "id": 522,
+            "name": "Name",
+            "pin_type": "String"
+          },
+          {
+            "id": 523,
+            "name": "Layout",
+            "pin_type": "Layout"
+          }
+        ]
+      },
+      "14": {
+        "id": 14,
+        "node_type": "FocusNextWindow",
+        "position": [
+          300.0,
+          700.0
+        ],
+        "inputs": [
+          {
+            "id": 524,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 525,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "19": {
+        "id": 19,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "K",
+            "ctrl": true,
+            "alt": false,
+            "shift": true,
+            "win": false
+          }
+        },
+        "position": [
+          50.0,
+          1000.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 526,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 527,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 528,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 529,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 530,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 531,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "35": {
+        "id": 35,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "E",
+            "ctrl": true,
+            "alt": true,
+            "shift": false,
+            "win": false
+          }
+        },
+        "position": [
+          50.0,
+          1800.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 532,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 533,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 534,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 535,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 536,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 537,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "15": {
+        "id": 15,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "K",
+            "ctrl": true,
+            "alt": true,
+            "shift": false,
+            "win": false
+          }
+        },
+        "position": [
+          50.0,
+          800.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 538,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 539,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 540,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 541,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 542,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 543,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "11": {
+        "id": 11,
+        "node_type": "OnWindowCreated",
+        "position": [
+          50.0,
+          500.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 544,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 545,
+            "name": "Window",
+            "pin_type": "WindowHandle"
+          }
+        ]
+      },
+      "6": {
+        "id": 6,
+        "node_type": "CombineRules",
+        "position": [
+          800.0,
+          100.0
+        ],
+        "inputs": [
+          {
+            "id": 546,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 547,
+            "name": "Rule 1",
+            "pin_type": "Rule"
+          },
+          {
+            "id": 548,
+            "name": "Rule 2",
+            "pin_type": "Rule"
+          },
+          {
+            "id": 549,
+            "name": "Rule 3",
+            "pin_type": "Rule"
+          },
+          {
+            "id": 550,
+            "name": "Rule 4",
+            "pin_type": "Rule"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 551,
+            "name": "Then",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 552,
+            "name": "Rules",
+            "pin_type": "RuleList"
+          }
+        ]
+      },
+      "13": {
+        "id": 13,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "J",
+            "ctrl": true,
+            "alt": true,
+            "shift": false,
+            "win": false
+          }
+        },
+        "position": [
+          50.0,
+          700.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 553,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 554,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 555,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 556,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 557,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 558,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "24": {
+        "id": 24,
+        "node_type": "PreviousWorkspace",
+        "position": [
+          300.0,
+          1200.0
+        ],
+        "inputs": [
+          {
+            "id": 559,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 560,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "3": {
+        "id": 3,
+        "node_type": {
+          "StringValue": {
+            "value": "Settings"
+          }
+        },
+        "position": [
+          550.0,
+          0.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 561,
+            "name": "Value",
+            "pin_type": "String"
+          }
+        ]
+      },
+      "23": {
+        "id": 23,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "H",
+            "ctrl": true,
+            "alt": true,
+            "shift": false,
+            "win": false
+          }
+        },
+        "position": [
+          50.0,
+          1200.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 562,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 563,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 564,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 565,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 566,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 567,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "18": {
+        "id": 18,
+        "node_type": "SwapWithNext",
+        "position": [
+          300.0,
+          900.0
+        ],
+        "inputs": [
+          {
+            "id": 568,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 569,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "9": {
+        "id": 9,
+        "node_type": "ForEach",
+        "position": [
+          1550.0,
+          100.0
+        ],
+        "inputs": [
+          {
+            "id": 570,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 571,
+            "name": "List",
+            "pin_type": "List"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 572,
+            "name": "Loop Body",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 573,
+            "name": "Item",
+            "pin_type": "Item"
+          },
+          {
+            "id": 574,
+            "name": "Index",
+            "pin_type": "Number"
+          },
+          {
+            "id": 575,
+            "name": "Completed",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "34": {
+        "id": 34,
+        "node_type": "CyclePreviousLayout",
+        "position": [
+          300.0,
+          1700.0
+        ],
+        "inputs": [
+          {
+            "id": 576,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 577,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "1": {
+        "id": 1,
+        "node_type": {
+          "ApplySystemFilters": {
+            "enabled": true
+          }
+        },
+        "position": [
+          300.0,
+          100.0
+        ],
+        "inputs": [
+          {
+            "id": 578,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 579,
+            "name": "Then",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 580,
+            "name": "Count",
+            "pin_type": "Number"
+          }
+        ]
+      },
+      "31": {
+        "id": 31,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "Space",
+            "ctrl": true,
+            "alt": true,
+            "shift": false,
+            "win": false
+          }
+        },
+        "position": [
+          50.0,
+          1600.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 581,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 582,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 583,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 584,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 585,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 586,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "33": {
+        "id": 33,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "Space",
+            "ctrl": true,
+            "alt": false,
+            "shift": true,
+            "win": false
+          }
+        },
+        "position": [
+          50.0,
+          1700.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 587,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 588,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 589,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 590,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 591,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 592,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "21": {
+        "id": 21,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "L",
+            "ctrl": true,
+            "alt": true,
+            "shift": false,
+            "win": false
+          }
+        },
+        "position": [
+          50.0,
+          1100.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 593,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 594,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 595,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 596,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 597,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 598,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "29": {
+        "id": 29,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "F",
+            "ctrl": true,
+            "alt": true,
+            "shift": false,
+            "win": false
+          }
+        },
+        "position": [
+          50.0,
+          1500.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 599,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 600,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 601,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 602,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 603,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 604,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "30": {
+        "id": 30,
+        "node_type": "ToggleFloating",
+        "position": [
+          300.0,
+          1500.0
+        ],
+        "inputs": [
+          {
+            "id": 605,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 606,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "17": {
+        "id": 17,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "J",
+            "ctrl": true,
+            "alt": false,
+            "shift": true,
+            "win": false
+          }
+        },
+        "position": [
+          50.0,
+          900.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 607,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 608,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 609,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 610,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 611,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 612,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "16": {
+        "id": 16,
+        "node_type": "FocusPreviousWindow",
+        "position": [
+          300.0,
+          800.0
+        ],
+        "inputs": [
+          {
+            "id": 613,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 614,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "20": {
+        "id": 20,
+        "node_type": "SwapWithPrevious",
+        "position": [
+          300.0,
+          1000.0
+        ],
+        "inputs": [
+          {
+            "id": 615,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 616,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "4": {
+        "id": 4,
+        "node_type": {
+          "CreateRule": {
+            "pattern": "",
+            "match_kind": "Title",
+            "match_strategy": "Contains"
+          }
+        },
+        "position": [
+          550.0,
+          180.0
+        ],
+        "inputs": [
+          {
+            "id": 617,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 618,
+            "name": "Pattern",
+            "pin_type": "String"
+          },
+          {
+            "id": 619,
+            "name": "Match Kind",
+            "pin_type": "MatchKind"
+          },
+          {
+            "id": 620,
+            "name": "Match Strategy",
+            "pin_type": "MatchStrategy"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 621,
+            "name": "Then",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 622,
+            "name": "Rule",
+            "pin_type": "Rule"
+          }
+        ]
+      },
+      "27": {
+        "id": 27,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "H",
+            "ctrl": true,
+            "alt": false,
+            "shift": true,
+            "win": false
+          }
+        },
+        "position": [
+          50.0,
+          1400.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 623,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 624,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 625,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 626,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 627,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 628,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "5": {
+        "id": 5,
+        "node_type": {
+          "StringValue": {
+            "value": "Properties"
+          }
+        },
+        "position": [
+          550.0,
+          130.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 629,
+            "name": "Value",
+            "pin_type": "String"
+          }
+        ]
+      },
+      "2": {
+        "id": 2,
+        "node_type": {
+          "CreateRule": {
+            "pattern": "",
+            "match_kind": "Title",
+            "match_strategy": "Contains"
+          }
+        },
+        "position": [
+          550.0,
+          50.0
+        ],
+        "inputs": [
+          {
+            "id": 630,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 631,
+            "name": "Pattern",
+            "pin_type": "String"
+          },
+          {
+            "id": 632,
+            "name": "Match Kind",
+            "pin_type": "MatchKind"
+          },
+          {
+            "id": 633,
+            "name": "Match Strategy",
+            "pin_type": "MatchStrategy"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 634,
+            "name": "Then",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 635,
+            "name": "Rule",
+            "pin_type": "Rule"
+          }
+        ]
+      },
+      "12": {
+        "id": 12,
+        "node_type": {
+          "SetWindowArrangement": {
+            "mode": "Tiled"
+          }
+        },
+        "position": [
+          300.0,
+          500.0
+        ],
+        "inputs": [
+          {
+            "id": 636,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 637,
+            "name": "Window",
+            "pin_type": "WindowHandle"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 638,
+            "name": "Then",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 639,
+            "name": "Window",
+            "pin_type": "WindowHandle"
+          }
+        ]
+      }
+    },
+    "connections": [
+      {
+        "from_node": 1,
+        "from_pin": 579,
+        "to_node": 2,
+        "to_pin": 630
+      },
+      {
+        "from_node": 3,
+        "from_pin": 561,
+        "to_node": 2,
+        "to_pin": 631
+      },
+      {
+        "from_node": 2,
+        "from_pin": 634,
+        "to_node": 4,
+        "to_pin": 617
+      },
+      {
+        "from_node": 5,
+        "from_pin": 629,
+        "to_node": 4,
+        "to_pin": 618
+      },
+      {
+        "from_node": 4,
+        "from_pin": 621,
+        "to_node": 6,
+        "to_pin": 546
+      },
+      {
+        "from_node": 2,
+        "from_pin": 635,
+        "to_node": 6,
+        "to_pin": 547
+      },
+      {
+        "from_node": 4,
+        "from_pin": 622,
+        "to_node": 6,
+        "to_pin": 548
+      },
+      {
+        "from_node": 6,
+        "from_pin": 551,
+        "to_node": 7,
+        "to_pin": 494
+      },
+      {
+        "from_node": 6,
+        "from_pin": 552,
+        "to_node": 7,
+        "to_pin": 495
+      },
+      {
+        "from_node": 0,
+        "from_pin": 487,
+        "to_node": 1,
+        "to_pin": 578
+      },
+      {
+        "from_node": 7,
+        "from_pin": 497,
+        "to_node": 8,
+        "to_pin": 480
+      },
+      {
+        "from_node": 8,
+        "from_pin": 481,
+        "to_node": 9,
+        "to_pin": 570
+      },
+      {
+        "from_node": 8,
+        "from_pin": 482,
+        "to_node": 9,
+        "to_pin": 571
+      },
+      {
+        "from_node": 9,
+        "from_pin": 572,
+        "to_node": 10,
+        "to_pin": 504
+      },
+      {
+        "from_node": 9,
+        "from_pin": 573,
+        "to_node": 10,
+        "to_pin": 505
+      },
+      {
+        "from_node": 11,
+        "from_pin": 544,
+        "to_node": 12,
+        "to_pin": 636
+      },
+      {
+        "from_node": 11,
+        "from_pin": 545,
+        "to_node": 12,
+        "to_pin": 637
+      },
+      {
+        "from_node": 13,
+        "from_pin": 553,
+        "to_node": 14,
+        "to_pin": 524
+      },
+      {
+        "from_node": 15,
+        "from_pin": 538,
+        "to_node": 16,
+        "to_pin": 613
+      },
+      {
+        "from_node": 17,
+        "from_pin": 607,
+        "to_node": 18,
+        "to_pin": 568
+      },
+      {
+        "from_node": 19,
+        "from_pin": 526,
+        "to_node": 20,
+        "to_pin": 615
+      },
+      {
+        "from_node": 21,
+        "from_pin": 593,
+        "to_node": 22,
+        "to_pin": 490
+      },
+      {
+        "from_node": 23,
+        "from_pin": 562,
+        "to_node": 24,
+        "to_pin": 559
+      },
+      {
+        "from_node": 25,
+        "from_pin": 498,
+        "to_node": 26,
+        "to_pin": 485
+      },
+      {
+        "from_node": 27,
+        "from_pin": 623,
+        "to_node": 28,
+        "to_pin": 488
+      },
+      {
+        "from_node": 29,
+        "from_pin": 599,
+        "to_node": 30,
+        "to_pin": 605
+      },
+      {
+        "from_node": 31,
+        "from_pin": 581,
+        "to_node": 32,
+        "to_pin": 483
+      },
+      {
+        "from_node": 33,
+        "from_pin": 587,
+        "to_node": 34,
+        "to_pin": 576
+      },
+      {
+        "from_node": 35,
+        "from_pin": 532,
+        "to_node": 36,
+        "to_pin": 492
+      }
+    ],
+    "next_node_id": 37,
+    "next_pin_id": 640
+  }
+}

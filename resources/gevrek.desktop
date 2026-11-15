@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=gevrek
+Comment=A tiling window manager and desktop
+Exec=gevrek-session
+Type=Application
+DesktopNames=gevrek

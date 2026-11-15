@@ -1,0 +1,469 @@
+use anyhow::{anyhow, Result};
+use gevrek_model::settings::{LaunchProfile, StartupProfile, StartupRestartPolicy};
+use std::collections::{BTreeSet, HashMap};
+use std::process::{Child, Command, ExitStatus};
+use std::time::{Duration, Instant};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartupProcessState {
+    pub id: String,
+    pub name: String,
+    pub enabled: bool,
+    pub status: String,
+    pub pid: Option<u32>,
+    pub restart_count: u32,
+    pub last_exit_code: Option<i32>,
+    pub last_error: Option<String>,
+}
+
+struct ProcessRecord {
+    child: Option<Child>,
+    status: String,
+    next_launch: Option<Instant>,
+    restart_count: u32,
+    last_exit_code: Option<i32>,
+    last_error: Option<String>,
+    suppress_restart: bool,
+}
+
+impl ProcessRecord {
+    fn scheduled(at: Instant) -> Self {
+        Self {
+            child: None,
+            status: "scheduled".to_string(),
+            next_launch: Some(at),
+            restart_count: 0,
+            last_exit_code: None,
+            last_error: None,
+            suppress_restart: false,
+        }
+    }
+
+    fn disabled() -> Self {
+        Self {
+            child: None,
+            status: "disabled".to_string(),
+            next_launch: None,
+            restart_count: 0,
+            last_exit_code: None,
+            last_error: None,
+            suppress_restart: true,
+        }
+    }
+}
+
+pub struct StartupProcessManager {
+    profiles: HashMap<String, StartupProfile>,
+    order: Vec<String>,
+    records: HashMap<String, ProcessRecord>,
+}
+
+impl Default for StartupProcessManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StartupProcessManager {
+    pub fn new() -> Self {
+        Self {
+            profiles: HashMap::new(),
+            order: Vec::new(),
+            records: HashMap::new(),
+        }
+    }
+
+    pub fn configure(&mut self, profiles: &[StartupProfile], reload: bool) {
+        let now = Instant::now();
+        let incoming = profiles
+            .iter()
+            .map(|profile| (normalize_id(&profile.id), profile.clone()))
+            .collect::<HashMap<_, _>>();
+        let incoming_ids = incoming.keys().cloned().collect::<BTreeSet<_>>();
+        let removed = self
+            .profiles
+            .keys()
+            .filter(|id| !incoming_ids.contains(*id))
+            .cloned()
+            .collect::<Vec<_>>();
+        for id in removed {
+            if self
+                .profiles
+                .get(&id)
+                .is_some_and(|profile| profile.terminate_on_exit)
+            {
+                let _ = self.stop_record(&id, "removed");
+            }
+            self.records.remove(&id);
+        }
+
+        self.order = profiles
+            .iter()
+            .map(|profile| normalize_id(&profile.id))
+            .collect();
+        self.profiles = incoming;
+
+        for id in self.order.clone() {
+            let Some(profile) = self.profiles.get(&id).cloned() else {
+                continue;
+            };
+            if !profile.enabled {
+                if profile.terminate_on_exit {
+                    let _ = self.stop_record(&id, "disabled");
+                }
+                self.records.insert(id, ProcessRecord::disabled());
+                continue;
+            }
+
+            if reload && profile.restart_on_reload {
+                let _ = self.stop_record(&id, "reloading");
+                self.records.insert(
+                    id,
+                    ProcessRecord::scheduled(now + Duration::from_millis(profile.delay_ms.into())),
+                );
+            } else {
+                self.records.entry(id).or_insert_with(|| {
+                    ProcessRecord::scheduled(now + Duration::from_millis(profile.delay_ms.into()))
+                });
+            }
+        }
+    }
+
+    pub fn tick(&mut self) {
+        let now = Instant::now();
+        for id in self.order.clone() {
+            self.observe_exit(&id, now);
+            let due = self
+                .records
+                .get(&id)
+                .and_then(|record| record.next_launch)
+                .is_some_and(|deadline| deadline <= now);
+            if due {
+                let _ = self.spawn_profile(&id);
+            }
+        }
+    }
+
+    pub fn launch(&mut self, id: &str) -> Result<()> {
+        let id = self.resolve_id(id)?;
+        if self
+            .records
+            .get(&id)
+            .and_then(|record| record.child.as_ref())
+            .is_some()
+        {
+            return Err(anyhow!("Startup application '{id}' is already running"));
+        }
+        if let Some(record) = self.records.get_mut(&id) {
+            record.suppress_restart = false;
+            record.restart_count = 0;
+            record.next_launch = None;
+        }
+        self.spawn_profile(&id)
+    }
+
+    pub fn stop(&mut self, id: &str) -> Result<()> {
+        let id = self.resolve_id(id)?;
+        self.stop_record(&id, "stopped")
+    }
+
+    pub fn restart(&mut self, id: &str) -> Result<()> {
+        let id = self.resolve_id(id)?;
+        self.stop_record(&id, "restarting")?;
+        if let Some(record) = self.records.get_mut(&id) {
+            record.suppress_restart = false;
+            record.restart_count = 0;
+            record.next_launch = Some(Instant::now());
+            record.status = "scheduled".to_string();
+        }
+        Ok(())
+    }
+
+    pub fn states(&self) -> Vec<StartupProcessState> {
+        self.order
+            .iter()
+            .filter_map(|id| {
+                let profile = self.profiles.get(id)?;
+                let record = self.records.get(id);
+                Some(StartupProcessState {
+                    id: profile.id.clone(),
+                    name: profile.name.clone(),
+                    enabled: profile.enabled,
+                    status: record
+                        .map(|record| record.status.clone())
+                        .unwrap_or_else(|| "idle".to_string()),
+                    pid: record
+                        .and_then(|record| record.child.as_ref())
+                        .map(Child::id),
+                    restart_count: record.map_or(0, |record| record.restart_count),
+                    last_exit_code: record.and_then(|record| record.last_exit_code),
+                    last_error: record.and_then(|record| record.last_error.clone()),
+                })
+            })
+            .collect()
+    }
+
+    pub fn shutdown(&mut self) {
+        let ids = self.order.clone();
+        for id in ids {
+            if self
+                .profiles
+                .get(&id)
+                .is_some_and(|profile| profile.terminate_on_exit)
+            {
+                let _ = self.stop_record(&id, "stopped");
+            }
+        }
+    }
+
+    fn resolve_id(&self, id: &str) -> Result<String> {
+        let id = normalize_id(id);
+        if id.is_empty() {
+            return Err(anyhow!("Startup application ID cannot be empty"));
+        }
+        self.profiles
+            .contains_key(&id)
+            .then_some(id.clone())
+            .ok_or_else(|| anyhow!("No startup application named '{id}' exists"))
+    }
+
+    fn spawn_profile(&mut self, id: &str) -> Result<()> {
+        let profile = self
+            .profiles
+            .get(id)
+            .cloned()
+            .ok_or_else(|| anyhow!("No startup application named '{id}' exists"))?;
+        if !profile.enabled {
+            return Err(anyhow!("Startup application '{}' is disabled", profile.id));
+        }
+
+        match spawn_launch(&profile.launch) {
+            Ok(child) => {
+                let pid = child.id();
+                let record = self
+                    .records
+                    .entry(id.to_string())
+                    .or_insert_with(ProcessRecord::disabled);
+                record.child = Some(child);
+                record.status = "running".to_string();
+                record.next_launch = None;
+                record.last_error = None;
+                record.last_exit_code = None;
+                record.suppress_restart = false;
+                log::info!(
+                    "Started startup application '{}' as process {}",
+                    profile.id,
+                    pid
+                );
+                Ok(())
+            }
+            Err(error) => {
+                let message = error.to_string();
+                let record = self
+                    .records
+                    .entry(id.to_string())
+                    .or_insert_with(ProcessRecord::disabled);
+                record.child = None;
+                record.status = "failed".to_string();
+                record.last_error = Some(message.clone());
+                record.next_launch = None;
+                if should_restart(&profile, None, record.restart_count) {
+                    record.restart_count = record.restart_count.saturating_add(1);
+                    record.status = "restart pending".to_string();
+                    record.next_launch = Some(
+                        Instant::now() + Duration::from_millis(profile.restart_delay_ms.into()),
+                    );
+                }
+                Err(anyhow!(
+                    "Could not launch startup application '{}': {}",
+                    profile.id,
+                    message
+                ))
+            }
+        }
+    }
+
+    fn observe_exit(&mut self, id: &str, now: Instant) {
+        let exit = {
+            let Some(record) = self.records.get_mut(id) else {
+                return;
+            };
+            let Some(child) = record.child.as_mut() else {
+                return;
+            };
+            match child.try_wait() {
+                Ok(Some(status)) => Some(Ok(status)),
+                Ok(None) => None,
+                Err(error) => Some(Err(error)),
+            }
+        };
+        let Some(exit) = exit else {
+            return;
+        };
+        let Some(profile) = self.profiles.get(id).cloned() else {
+            return;
+        };
+        let record = self.records.get_mut(id).expect("record disappeared");
+        record.child = None;
+        match exit {
+            Ok(status) => {
+                record.last_exit_code = status.code();
+                record.last_error = None;
+                let restart = !record.suppress_restart
+                    && should_restart(&profile, Some(status), record.restart_count);
+                if restart {
+                    record.restart_count = record.restart_count.saturating_add(1);
+                    record.status = "restart pending".to_string();
+                    record.next_launch =
+                        Some(now + Duration::from_millis(profile.restart_delay_ms.into()));
+                } else {
+                    record.status = if status.success() {
+                        "exited".to_string()
+                    } else {
+                        "failed".to_string()
+                    };
+                    record.next_launch = None;
+                }
+            }
+            Err(error) => {
+                record.status = "failed".to_string();
+                record.last_error = Some(error.to_string());
+                record.next_launch = None;
+            }
+        }
+    }
+
+    fn stop_record(&mut self, id: &str, status: &str) -> Result<()> {
+        let record = self
+            .records
+            .entry(id.to_string())
+            .or_insert_with(ProcessRecord::disabled);
+        record.suppress_restart = true;
+        record.next_launch = None;
+        if let Some(mut child) = record.child.take() {
+            child
+                .kill()
+                .map_err(|error| anyhow!("Could not stop startup application '{id}': {error}"))?;
+            let _ = child.wait();
+        }
+        record.status = status.to_string();
+        Ok(())
+    }
+}
+
+fn normalize_id(id: &str) -> String {
+    id.trim().to_ascii_lowercase()
+}
+
+pub fn spawn_launch(launch: &LaunchProfile) -> Result<Child> {
+    let program = launch.program.trim();
+    if program.is_empty() {
+        return Err(anyhow!("Launch program cannot be empty"));
+    }
+    let mut command = Command::new(program);
+    command.args(&launch.args);
+    command.envs(&launch.environment);
+    if let Some(directory) = launch
+        .working_directory
+        .as_deref()
+        .map(str::trim)
+        .filter(|directory| !directory.is_empty())
+    {
+        command.current_dir(directory);
+    }
+    #[cfg(windows)]
+    if launch.create_no_window {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command.spawn().map_err(Into::into)
+}
+
+fn should_restart(
+    profile: &StartupProfile,
+    status: Option<ExitStatus>,
+    restart_count: u32,
+) -> bool {
+    let within_limit = profile
+        .max_restarts
+        .is_none_or(|limit| restart_count < limit);
+    within_limit
+        && match profile.restart {
+            StartupRestartPolicy::Never => false,
+            StartupRestartPolicy::Always => true,
+            StartupRestartPolicy::OnFailure => status.is_none_or(|status| !status.success()),
+        }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_ids_are_normalized_for_control() {
+        let mut manager = StartupProcessManager::new();
+        manager.configure(
+            &[StartupProfile {
+                id: "  Status-Bar ".to_string(),
+                enabled: false,
+                ..StartupProfile::default()
+            }],
+            false,
+        );
+        assert_eq!(manager.resolve_id("STATUS-BAR").unwrap(), "status-bar");
+        assert_eq!(manager.states()[0].status, "disabled");
+    }
+
+    #[test]
+    fn restart_limit_is_respected_before_spawning_again() {
+        let profile = StartupProfile {
+            restart: StartupRestartPolicy::Always,
+            max_restarts: Some(2),
+            ..StartupProfile::default()
+        };
+        assert!(should_restart(&profile, None, 0));
+        assert!(should_restart(&profile, None, 1));
+        assert!(!should_restart(&profile, None, 2));
+
+        let profile = StartupProfile {
+            restart: StartupRestartPolicy::OnFailure,
+            ..profile
+        };
+        assert!(should_restart(&profile, None, 0));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn structured_launch_reports_real_exit_state() {
+        let mut manager = StartupProcessManager::new();
+        manager.configure(
+            &[StartupProfile {
+                id: "exit-probe".to_string(),
+                name: "Exit probe".to_string(),
+                launch: LaunchProfile {
+                    program: "cmd.exe".to_string(),
+                    args: vec!["/C".to_string(), "exit".to_string(), "7".to_string()],
+                    create_no_window: true,
+                    ..LaunchProfile::default()
+                },
+                ..StartupProfile::default()
+            }],
+            false,
+        );
+        manager.tick();
+        assert!(manager.states()[0].pid.is_some());
+
+        for _ in 0..100 {
+            manager.tick();
+            if manager.states()[0].last_exit_code.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let state = &manager.states()[0];
+        assert_eq!(state.status, "failed");
+        assert_eq!(state.last_exit_code, Some(7));
+        assert!(state.pid.is_none());
+    }
+}

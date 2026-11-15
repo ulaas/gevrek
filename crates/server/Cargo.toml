@@ -1,0 +1,25 @@
+[package]
+name = "gevrek-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The gRPC server of gevrek: the IPC surface of the WM, independent of the windowing system."
+
+[dependencies]
+gevrek-protocol = { path = "../protocol" }
+gevrek-model = { path = "../model" }
+# Whether this is a first launch (it floats until the welcome is answered).
+gevrek-tutorial = { path = "../tutorial" }
+gevrek-engine = { path = "../engine" }
+gevrek-host = { path = "../host" }
+# Which commit the window manager was built from (`gevrek health`).
+gevrek-build = { path = "../build" }
+tonic = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+chrono = { workspace = true }

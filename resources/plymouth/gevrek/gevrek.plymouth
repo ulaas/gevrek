@@ -1,0 +1,66 @@
+# gevrek's boot splash: the mark on black, five bars under it with one
+# lit, and at the end everything goes into black, which is what gevrek's
+# login begins with. See resources/plymouth/README.md.
+[Plymouth Theme]
+Name=gevrek
+Description=The gevrek mark on black, from the boot loader to gevrek's login without a seam.
+ModuleName=two-step
+
+[two-step]
+Font=Sans 12
+TitleFont=Sans Light 30
+ImageDir=/usr/share/plymouth/themes/gevrek
+DialogHorizontalAlignment=.5
+DialogVerticalAlignment=.5
+TitleHorizontalAlignment=.5
+TitleVerticalAlignment=.25
+HorizontalAlignment=.5
+VerticalAlignment=.5
+Transition=none
+TransitionDuration=0.0
+# Black, as the firmware leaves the display and as the login begins.
+BackgroundStartColor=0x000000
+BackgroundEndColor=0x000000
+ProgressBarBackgroundColor=0x2E1A10
+ProgressBarForegroundColor=0xD9701F
+MessageBelowAnimation=true
+
+# Starting: when the login is ready the splash is told to end, and the
+# pictures named animation-* take the mark into black.
+[boot-up]
+UseEndAnimation=true
+
+# Stopping: nothing waits for an end.
+[shutdown]
+UseEndAnimation=false
+
+[reboot]
+UseEndAnimation=false
+
+[updates]
+SuppressMessages=true
+ProgressBarShowPercentComplete=true
+UseProgressBar=true
+Title=Installing Updates...
+SubTitle=Do not turn off your computer
+
+[system-upgrade]
+SuppressMessages=true
+ProgressBarShowPercentComplete=true
+UseProgressBar=true
+Title=Upgrading System...
+SubTitle=Do not turn off your computer
+
+[firmware-upgrade]
+SuppressMessages=true
+ProgressBarShowPercentComplete=true
+UseProgressBar=true
+Title=Upgrading Firmware...
+SubTitle=Do not turn off your computer
+
+[system-reset]
+SuppressMessages=true
+ProgressBarShowPercentComplete=true
+UseProgressBar=true
+Title=Resetting System...
+SubTitle=Do not turn off your computer

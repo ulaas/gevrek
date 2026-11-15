@@ -1,0 +1,29 @@
+#%PAM-1.0
+# A person logging in through gevrek's display manager: the password is
+# checked as every login's on this system is, and a session is opened.
+# (Fedora and Arch name the shared part system-auth; for Debian and
+# Ubuntu, which name it common-auth, common-account and common-session,
+# there is pam-gevrek-dm.debian, which scripts/install-dm.sh takes there.)
+#
+# The lines that begin with a dash are for a keyring or a wallet: where
+# its module is installed, the password typed at the login opens it, and
+# nothing asks for it again once the desktop is up. Where the module is
+# not there, the line is passed over without a word.
+auth       substack     system-auth
+-auth      optional     pam_gnome_keyring.so
+-auth      optional     pam_kwallet6.so
+-auth      optional     pam_kwallet5.so
+account    required     pam_nologin.so
+account    include      system-auth
+password   include      system-auth
+# (Under SELinux: the session is given its person's own label. Closed
+# first and opened after the login's own steps, as the system's other
+# logins have it; passed over where SELinux is not installed.)
+-session   required     pam_selinux.so close
+session    required     pam_loginuid.so
+-session   required     pam_selinux.so open
+session    optional     pam_keyinit.so force revoke
+session    include      system-auth
+-session   optional     pam_gnome_keyring.so auto_start
+-session   optional     pam_kwallet6.so auto_start
+-session   optional     pam_kwallet5.so auto_start

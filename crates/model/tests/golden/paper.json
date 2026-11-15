@@ -1,0 +1,3858 @@
+{
+  "version": "0.6.0",
+  "desktop": {
+    "schema_version": 24,
+    "focus": {
+      "history_size": 20,
+      "focus_follows_mouse": false,
+      "mouse_follows_focus": false,
+      "focus_delay_ms": 100,
+      "prevent_focus_steal": true,
+      "focus_steal_whitelist": [],
+      "focus_next_on_close": true
+    },
+    "apply_system_rules": true,
+    "watch_configuration": true,
+    "manage_existing_on_startup": true,
+    "restore_session_on_startup": false,
+    "appearance": {
+      "border_enabled": true,
+      "border_width": 1,
+      "border_offset": 0,
+      "border_style": "Rounded",
+      "active_border_color": [
+        120,
+        132,
+        150
+      ],
+      "inactive_border_color": [
+        200,
+        205,
+        214
+      ],
+      "active_border_alpha": 255,
+      "inactive_border_alpha": 255,
+      "window_opacity": 255,
+      "dim_inactive": false,
+      "inactive_window_opacity": 220,
+      "dim_fullscreen": false,
+      "stackbar": {
+        "enabled": true,
+        "height": 30,
+        "background_color": [
+          22,
+          22,
+          28
+        ],
+        "active_text_color": [
+          64,
+          224,
+          208
+        ],
+        "inactive_text_color": [
+          170,
+          172,
+          184
+        ]
+      },
+      "transparency_enabled": true,
+      "high_contrast": false,
+      "theme": {
+        "palette": null,
+        "accent": null
+      },
+      "invisible_borders": {
+        "enabled": false,
+        "size": 8
+      },
+      "effects": {
+        "corner_radius": 9,
+        "shadow": {
+          "enabled": true,
+          "radius": 36,
+          "offset_x": 0,
+          "offset_y": 12,
+          "color": [
+            40,
+            50,
+            70
+          ],
+          "opacity": 120,
+          "inactive_opacity": 60
+        },
+        "glow": {
+          "enabled": false,
+          "radius": 18,
+          "color": null,
+          "opacity": 170,
+          "inactive_opacity": 0
+        },
+        "gradient": {
+          "enabled": false,
+          "active_end": [
+            200,
+            80,
+            255
+          ],
+          "inactive_end": [
+            40,
+            45,
+            60
+          ],
+          "angle": 45.0,
+          "spin_seconds": 0.0
+        },
+        "tint": {
+          "enabled": false,
+          "color": [
+            12,
+            16,
+            32
+          ],
+          "inactive_opacity": 70,
+          "active_opacity": 0
+        }
+      },
+      "floating": {
+        "separate": true,
+        "border_enabled": true,
+        "border_width": 1,
+        "border_offset": 0,
+        "active_border_color": null,
+        "inactive_border_color": null,
+        "active_border_alpha": null,
+        "inactive_border_alpha": null,
+        "glow_radius": 12,
+        "glow_opacity": 114,
+        "glow_inactive_opacity": 0
+      }
+    },
+    "platform": {
+      "windows": {
+        "backdrop": "Auto",
+        "corners": "Round",
+        "shadow": "default",
+        "hide_taskbar": true,
+        "own_windows_key": true,
+        "drag_with_windows_key": true,
+        "cut_columns_at_displays": false
+      },
+      "wayland": {
+        "xwayland": true,
+        "cursor_theme": "",
+        "cursor_size": 0,
+        "output_scale": 1.0,
+        "output_scales": {},
+        "blur_behind_windows": true,
+        "share_card_buffers": false
+      }
+    },
+    "animations": {
+      "enabled": true,
+      "reduce_motion": false,
+      "fps": 60,
+      "layout": {
+        "enabled": true,
+        "duration_ms": 180,
+        "curve": "ease_out"
+      },
+      "workspace": {
+        "enabled": true,
+        "duration_ms": 180,
+        "curve": "ease_out"
+      },
+      "border": {
+        "enabled": true,
+        "duration_ms": 180,
+        "curve": "ease_out"
+      },
+      "window": {
+        "enabled": true,
+        "duration_ms": 180,
+        "curve": "ease_out"
+      },
+      "window_enter_style": "fade",
+      "window_exit_style": "fade",
+      "workspace_style": "slide",
+      "session": {
+        "enabled": true,
+        "duration_ms": 480,
+        "blur": true,
+        "vignette": true
+      }
+    },
+    "work_area_offset": {
+      "left": 0,
+      "top": 0,
+      "right": 0,
+      "bottom": 0
+    },
+    "monitors": [],
+    "workspaces": [
+      {
+        "enabled": true,
+        "name": "1",
+        "monitor": "Any",
+        "layout": "Columns",
+        "default": true,
+        "persistent": true,
+        "on_created_empty": null,
+        "gaps_in": 14,
+        "gaps_out": 22,
+        "work_area_offset": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
+        "master_ratio": 0.5,
+        "master_count": 1,
+        "master_position": "Left",
+        "new_window_placement": "StackEnd",
+        "window_container_behaviour": "column",
+        "dwindle_direction": "Alternate",
+        "dwindle_preserve_split": false,
+        "appearance_override": false,
+        "border_enabled": true,
+        "border_width": 4,
+        "border_offset": -1,
+        "border_style": "Rounded",
+        "active_border_color": [
+          0,
+          170,
+          255
+        ],
+        "inactive_border_color": [
+          70,
+          80,
+          95
+        ],
+        "active_border_alpha": 255,
+        "inactive_border_alpha": 180
+      },
+      {
+        "enabled": true,
+        "name": "2",
+        "monitor": "Any",
+        "layout": "Columns",
+        "default": false,
+        "persistent": true,
+        "on_created_empty": null,
+        "gaps_in": 14,
+        "gaps_out": 22,
+        "work_area_offset": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
+        "master_ratio": 0.5,
+        "master_count": 1,
+        "master_position": "Left",
+        "new_window_placement": "StackEnd",
+        "window_container_behaviour": "column",
+        "dwindle_direction": "Alternate",
+        "dwindle_preserve_split": false,
+        "appearance_override": false,
+        "border_enabled": true,
+        "border_width": 4,
+        "border_offset": -1,
+        "border_style": "Rounded",
+        "active_border_color": [
+          0,
+          170,
+          255
+        ],
+        "inactive_border_color": [
+          70,
+          80,
+          95
+        ],
+        "active_border_alpha": 255,
+        "inactive_border_alpha": 180
+      },
+      {
+        "enabled": true,
+        "name": "3",
+        "monitor": "Any",
+        "layout": "Columns",
+        "default": false,
+        "persistent": true,
+        "on_created_empty": null,
+        "gaps_in": 14,
+        "gaps_out": 22,
+        "work_area_offset": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
+        "master_ratio": 0.5,
+        "master_count": 1,
+        "master_position": "Left",
+        "new_window_placement": "StackEnd",
+        "window_container_behaviour": "column",
+        "dwindle_direction": "Alternate",
+        "dwindle_preserve_split": false,
+        "appearance_override": false,
+        "border_enabled": true,
+        "border_width": 4,
+        "border_offset": -1,
+        "border_style": "Rounded",
+        "active_border_color": [
+          0,
+          170,
+          255
+        ],
+        "inactive_border_color": [
+          70,
+          80,
+          95
+        ],
+        "active_border_alpha": 255,
+        "inactive_border_alpha": 180
+      },
+      {
+        "enabled": true,
+        "name": "4",
+        "monitor": "Any",
+        "layout": "Columns",
+        "default": false,
+        "persistent": true,
+        "on_created_empty": null,
+        "gaps_in": 14,
+        "gaps_out": 22,
+        "work_area_offset": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
+        "master_ratio": 0.5,
+        "master_count": 1,
+        "master_position": "Left",
+        "new_window_placement": "StackEnd",
+        "window_container_behaviour": "column",
+        "dwindle_direction": "Alternate",
+        "dwindle_preserve_split": false,
+        "appearance_override": false,
+        "border_enabled": true,
+        "border_width": 4,
+        "border_offset": -1,
+        "border_style": "Rounded",
+        "active_border_color": [
+          0,
+          170,
+          255
+        ],
+        "inactive_border_color": [
+          70,
+          80,
+          95
+        ],
+        "active_border_alpha": 255,
+        "inactive_border_alpha": 180
+      },
+      {
+        "enabled": true,
+        "name": "5",
+        "monitor": "Any",
+        "layout": "Columns",
+        "default": false,
+        "persistent": false,
+        "on_created_empty": null,
+        "gaps_in": 14,
+        "gaps_out": 22,
+        "work_area_offset": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
+        "master_ratio": 0.5,
+        "master_count": 1,
+        "master_position": "Left",
+        "new_window_placement": "StackEnd",
+        "window_container_behaviour": "column",
+        "dwindle_direction": "Alternate",
+        "dwindle_preserve_split": false,
+        "appearance_override": false,
+        "border_enabled": true,
+        "border_width": 4,
+        "border_offset": -1,
+        "border_style": "Rounded",
+        "active_border_color": [
+          0,
+          170,
+          255
+        ],
+        "inactive_border_color": [
+          70,
+          80,
+          95
+        ],
+        "active_border_alpha": 255,
+        "inactive_border_alpha": 180
+      },
+      {
+        "enabled": true,
+        "name": "6",
+        "monitor": "Any",
+        "layout": "Columns",
+        "default": false,
+        "persistent": false,
+        "on_created_empty": null,
+        "gaps_in": 14,
+        "gaps_out": 22,
+        "work_area_offset": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
+        "master_ratio": 0.5,
+        "master_count": 1,
+        "master_position": "Left",
+        "new_window_placement": "StackEnd",
+        "window_container_behaviour": "column",
+        "dwindle_direction": "Alternate",
+        "dwindle_preserve_split": false,
+        "appearance_override": false,
+        "border_enabled": true,
+        "border_width": 4,
+        "border_offset": -1,
+        "border_style": "Rounded",
+        "active_border_color": [
+          0,
+          170,
+          255
+        ],
+        "inactive_border_color": [
+          70,
+          80,
+          95
+        ],
+        "active_border_alpha": 255,
+        "inactive_border_alpha": 180
+      },
+      {
+        "enabled": true,
+        "name": "7",
+        "monitor": "Any",
+        "layout": "Columns",
+        "default": false,
+        "persistent": false,
+        "on_created_empty": null,
+        "gaps_in": 14,
+        "gaps_out": 22,
+        "work_area_offset": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
+        "master_ratio": 0.5,
+        "master_count": 1,
+        "master_position": "Left",
+        "new_window_placement": "StackEnd",
+        "window_container_behaviour": "column",
+        "dwindle_direction": "Alternate",
+        "dwindle_preserve_split": false,
+        "appearance_override": false,
+        "border_enabled": true,
+        "border_width": 4,
+        "border_offset": -1,
+        "border_style": "Rounded",
+        "active_border_color": [
+          0,
+          170,
+          255
+        ],
+        "inactive_border_color": [
+          70,
+          80,
+          95
+        ],
+        "active_border_alpha": 255,
+        "inactive_border_alpha": 180
+      },
+      {
+        "enabled": true,
+        "name": "8",
+        "monitor": "Any",
+        "layout": "Columns",
+        "default": false,
+        "persistent": false,
+        "on_created_empty": null,
+        "gaps_in": 14,
+        "gaps_out": 22,
+        "work_area_offset": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
+        "master_ratio": 0.5,
+        "master_count": 1,
+        "master_position": "Left",
+        "new_window_placement": "StackEnd",
+        "window_container_behaviour": "column",
+        "dwindle_direction": "Alternate",
+        "dwindle_preserve_split": false,
+        "appearance_override": false,
+        "border_enabled": true,
+        "border_width": 4,
+        "border_offset": -1,
+        "border_style": "Rounded",
+        "active_border_color": [
+          0,
+          170,
+          255
+        ],
+        "inactive_border_color": [
+          70,
+          80,
+          95
+        ],
+        "active_border_alpha": 255,
+        "inactive_border_alpha": 180
+      },
+      {
+        "enabled": true,
+        "name": "9",
+        "monitor": "Any",
+        "layout": "Columns",
+        "default": false,
+        "persistent": false,
+        "on_created_empty": null,
+        "gaps_in": 14,
+        "gaps_out": 22,
+        "work_area_offset": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
+        "master_ratio": 0.5,
+        "master_count": 1,
+        "master_position": "Left",
+        "new_window_placement": "StackEnd",
+        "window_container_behaviour": "column",
+        "dwindle_direction": "Alternate",
+        "dwindle_preserve_split": false,
+        "appearance_override": false,
+        "border_enabled": true,
+        "border_width": 4,
+        "border_offset": -1,
+        "border_style": "Rounded",
+        "active_border_color": [
+          0,
+          170,
+          255
+        ],
+        "inactive_border_color": [
+          70,
+          80,
+          95
+        ],
+        "active_border_alpha": 255,
+        "inactive_border_alpha": 180
+      }
+    ],
+    "zones": {
+      "behavior": {
+        "enabled": true,
+        "show_preview": true,
+        "highlight_zones": true,
+        "snap_threshold": 0.3,
+        "activation_modifier": "Shift",
+        "preview_opacity": 0.3,
+        "preview_color": [
+          0,
+          120,
+          215
+        ]
+      },
+      "default_layout": {
+        "id": "columns_2",
+        "name": "Two Columns",
+        "description": "Two equal-width columns",
+        "zones": [
+          {
+            "id": 0,
+            "name": "Left",
+            "x_percent": 0.0,
+            "y_percent": 0.0,
+            "width_percent": 0.5,
+            "height_percent": 1.0,
+            "gap": 8,
+            "priority": 0
+          },
+          {
+            "id": 1,
+            "name": "Right",
+            "x_percent": 0.5,
+            "y_percent": 0.0,
+            "width_percent": 0.5,
+            "height_percent": 1.0,
+            "gap": 8,
+            "priority": 0
+          }
+        ]
+      },
+      "monitor_layouts": []
+    },
+    "startup": [],
+    "scratchpads": [],
+    "bindings": [
+      {
+        "name": "Show shortcuts",
+        "enabled": true,
+        "key": "SLASH",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "show_shortcuts"
+        }
+      },
+      {
+        "name": "Show shortcuts",
+        "enabled": true,
+        "key": "F1",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "show_shortcuts"
+        }
+      },
+      {
+        "name": "Overview",
+        "enabled": true,
+        "key": "O",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "toggle_expose"
+        }
+      },
+      {
+        "name": "Overview of every workspace",
+        "enabled": true,
+        "key": "O",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "workspace_overview"
+        }
+      },
+      {
+        "name": "Close window",
+        "enabled": true,
+        "key": "Q",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "close_active"
+        }
+      },
+      {
+        "name": "Terminal",
+        "enabled": true,
+        "key": "T",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "exec",
+          "program": "@terminal",
+          "args": []
+        }
+      },
+      {
+        "name": "Launcher",
+        "enabled": true,
+        "key": "D",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "launcher"
+        }
+      },
+      {
+        "name": "Launcher",
+        "enabled": true,
+        "key": "SPACE",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "launcher"
+        }
+      },
+      {
+        "name": "Control centre",
+        "enabled": true,
+        "key": "S",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "control_center"
+        }
+      },
+      {
+        "name": "Notifications",
+        "enabled": true,
+        "key": "N",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "notification_center"
+        }
+      },
+      {
+        "name": "Window switcher",
+        "enabled": true,
+        "key": "Tab",
+        "ctrl": false,
+        "alt": true,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "window_switcher"
+        }
+      },
+      {
+        "name": "Lock the screen",
+        "enabled": true,
+        "key": "L",
+        "ctrl": false,
+        "alt": true,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "lock"
+        }
+      },
+      {
+        "name": "Displays off",
+        "enabled": true,
+        "key": "P",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "displays_off"
+        }
+      },
+      {
+        "name": "Show an empty workspace",
+        "enabled": true,
+        "key": "O",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "switch_workspace_selector",
+          "selector": {
+            "kind": "first_empty"
+          }
+        }
+      },
+      {
+        "name": "Quit the session",
+        "enabled": true,
+        "key": "E",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "quit"
+        }
+      },
+      {
+        "name": "Power menu",
+        "enabled": true,
+        "key": "X",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "power_menu"
+        }
+      },
+      {
+        "name": "The tutorial",
+        "enabled": true,
+        "key": "F2",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "tutorial"
+        }
+      },
+      {
+        "name": "Leave the tutorial",
+        "enabled": true,
+        "key": "F2",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "tutorial_leave"
+        }
+      },
+      {
+        "name": "Screenshot of a region",
+        "enabled": true,
+        "key": "PRINTSCREEN",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "screenshot_region"
+        }
+      },
+      {
+        "name": "Screenshot of the screen",
+        "enabled": true,
+        "key": "PRINTSCREEN",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "screenshot_screen"
+        }
+      },
+      {
+        "name": "Screenshot of the window",
+        "enabled": true,
+        "key": "PRINTSCREEN",
+        "ctrl": false,
+        "alt": true,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "screenshot_window"
+        }
+      },
+      {
+        "name": "Volume up",
+        "enabled": true,
+        "key": "VOLUME_UP",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "volume_up"
+        }
+      },
+      {
+        "name": "Volume down",
+        "enabled": true,
+        "key": "VOLUME_DOWN",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "volume_down"
+        }
+      },
+      {
+        "name": "Mute",
+        "enabled": true,
+        "key": "VOLUME_MUTE",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "volume_mute"
+        }
+      },
+      {
+        "name": "Mute the microphone",
+        "enabled": true,
+        "key": "MIC_MUTE",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "mic_mute"
+        }
+      },
+      {
+        "name": "Play / pause",
+        "enabled": true,
+        "key": "MEDIA_PLAY_PAUSE",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "media_play_pause"
+        }
+      },
+      {
+        "name": "Stop playing",
+        "enabled": true,
+        "key": "MEDIA_STOP",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "media_stop"
+        }
+      },
+      {
+        "name": "Previous track",
+        "enabled": true,
+        "key": "MEDIA_PREVIOUS",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "media_previous"
+        }
+      },
+      {
+        "name": "Next track",
+        "enabled": true,
+        "key": "MEDIA_NEXT",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "media_next"
+        }
+      },
+      {
+        "name": "Brightness up",
+        "enabled": true,
+        "key": "BRIGHTNESS_UP",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "brightness_up"
+        }
+      },
+      {
+        "name": "Brightness down",
+        "enabled": true,
+        "key": "BRIGHTNESS_DOWN",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "shell",
+          "action": "brightness_down"
+        }
+      },
+      {
+        "name": "Focus left",
+        "enabled": true,
+        "key": "LEFT",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "focus_direction",
+          "direction": "left"
+        }
+      },
+      {
+        "name": "Move window left",
+        "enabled": true,
+        "key": "LEFT",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "swap_direction",
+          "direction": "left"
+        }
+      },
+      {
+        "name": "Focus monitor left",
+        "enabled": true,
+        "key": "LEFT",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "focus_monitor",
+          "target": {
+            "kind": "previous"
+          }
+        }
+      },
+      {
+        "name": "Move window to monitor left",
+        "enabled": true,
+        "key": "LEFT",
+        "ctrl": true,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_window_to_monitor_and_follow",
+          "window": {
+            "kind": "active"
+          },
+          "target": {
+            "kind": "previous"
+          }
+        }
+      },
+      {
+        "name": "Focus left",
+        "enabled": true,
+        "key": "H",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "focus_direction",
+          "direction": "left"
+        }
+      },
+      {
+        "name": "Move window left",
+        "enabled": true,
+        "key": "H",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "swap_direction",
+          "direction": "left"
+        }
+      },
+      {
+        "name": "Focus monitor left",
+        "enabled": true,
+        "key": "H",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "focus_monitor",
+          "target": {
+            "kind": "previous"
+          }
+        }
+      },
+      {
+        "name": "Move window to monitor left",
+        "enabled": true,
+        "key": "H",
+        "ctrl": true,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_window_to_monitor_and_follow",
+          "window": {
+            "kind": "active"
+          },
+          "target": {
+            "kind": "previous"
+          }
+        }
+      },
+      {
+        "name": "Focus down",
+        "enabled": true,
+        "key": "DOWN",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "focus_direction",
+          "direction": "down"
+        }
+      },
+      {
+        "name": "Move window down",
+        "enabled": true,
+        "key": "DOWN",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "swap_direction",
+          "direction": "down"
+        }
+      },
+      {
+        "name": "Focus monitor down",
+        "enabled": true,
+        "key": "DOWN",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "focus_monitor",
+          "target": {
+            "kind": "next"
+          }
+        }
+      },
+      {
+        "name": "Move window to monitor down",
+        "enabled": true,
+        "key": "DOWN",
+        "ctrl": true,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_window_to_monitor_and_follow",
+          "window": {
+            "kind": "active"
+          },
+          "target": {
+            "kind": "next"
+          }
+        }
+      },
+      {
+        "name": "Focus down",
+        "enabled": true,
+        "key": "J",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "focus_direction",
+          "direction": "down"
+        }
+      },
+      {
+        "name": "Move window down",
+        "enabled": true,
+        "key": "J",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "swap_direction",
+          "direction": "down"
+        }
+      },
+      {
+        "name": "Focus monitor down",
+        "enabled": true,
+        "key": "J",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "focus_monitor",
+          "target": {
+            "kind": "next"
+          }
+        }
+      },
+      {
+        "name": "Move window to monitor down",
+        "enabled": true,
+        "key": "J",
+        "ctrl": true,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_window_to_monitor_and_follow",
+          "window": {
+            "kind": "active"
+          },
+          "target": {
+            "kind": "next"
+          }
+        }
+      },
+      {
+        "name": "Focus up",
+        "enabled": true,
+        "key": "UP",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "focus_direction",
+          "direction": "up"
+        }
+      },
+      {
+        "name": "Move window up",
+        "enabled": true,
+        "key": "UP",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "swap_direction",
+          "direction": "up"
+        }
+      },
+      {
+        "name": "Focus monitor up",
+        "enabled": true,
+        "key": "UP",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "focus_monitor",
+          "target": {
+            "kind": "previous"
+          }
+        }
+      },
+      {
+        "name": "Move window to monitor up",
+        "enabled": true,
+        "key": "UP",
+        "ctrl": true,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_window_to_monitor_and_follow",
+          "window": {
+            "kind": "active"
+          },
+          "target": {
+            "kind": "previous"
+          }
+        }
+      },
+      {
+        "name": "Focus up",
+        "enabled": true,
+        "key": "K",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "focus_direction",
+          "direction": "up"
+        }
+      },
+      {
+        "name": "Move window up",
+        "enabled": true,
+        "key": "K",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "swap_direction",
+          "direction": "up"
+        }
+      },
+      {
+        "name": "Focus monitor up",
+        "enabled": true,
+        "key": "K",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "focus_monitor",
+          "target": {
+            "kind": "previous"
+          }
+        }
+      },
+      {
+        "name": "Move window to monitor up",
+        "enabled": true,
+        "key": "K",
+        "ctrl": true,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_window_to_monitor_and_follow",
+          "window": {
+            "kind": "active"
+          },
+          "target": {
+            "kind": "previous"
+          }
+        }
+      },
+      {
+        "name": "Focus right",
+        "enabled": true,
+        "key": "RIGHT",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "focus_direction",
+          "direction": "right"
+        }
+      },
+      {
+        "name": "Move window right",
+        "enabled": true,
+        "key": "RIGHT",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "swap_direction",
+          "direction": "right"
+        }
+      },
+      {
+        "name": "Focus monitor right",
+        "enabled": true,
+        "key": "RIGHT",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "focus_monitor",
+          "target": {
+            "kind": "next"
+          }
+        }
+      },
+      {
+        "name": "Move window to monitor right",
+        "enabled": true,
+        "key": "RIGHT",
+        "ctrl": true,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_window_to_monitor_and_follow",
+          "window": {
+            "kind": "active"
+          },
+          "target": {
+            "kind": "next"
+          }
+        }
+      },
+      {
+        "name": "Focus right",
+        "enabled": true,
+        "key": "L",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "focus_direction",
+          "direction": "right"
+        }
+      },
+      {
+        "name": "Move window right",
+        "enabled": true,
+        "key": "L",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "swap_direction",
+          "direction": "right"
+        }
+      },
+      {
+        "name": "Focus monitor right",
+        "enabled": true,
+        "key": "L",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "focus_monitor",
+          "target": {
+            "kind": "next"
+          }
+        }
+      },
+      {
+        "name": "Move window to monitor right",
+        "enabled": true,
+        "key": "L",
+        "ctrl": true,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_window_to_monitor_and_follow",
+          "window": {
+            "kind": "active"
+          },
+          "target": {
+            "kind": "next"
+          }
+        }
+      },
+      {
+        "name": "Next workspace",
+        "enabled": true,
+        "key": "PAGEDOWN",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "switch_workspace_selector",
+          "selector": {
+            "kind": "next"
+          }
+        }
+      },
+      {
+        "name": "Move window to next workspace",
+        "enabled": true,
+        "key": "PAGEDOWN",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "next"
+          }
+        }
+      },
+      {
+        "name": "Next workspace",
+        "enabled": true,
+        "key": "U",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "switch_workspace_selector",
+          "selector": {
+            "kind": "next"
+          }
+        }
+      },
+      {
+        "name": "Move window to next workspace",
+        "enabled": true,
+        "key": "U",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "next"
+          }
+        }
+      },
+      {
+        "name": "Previous workspace",
+        "enabled": true,
+        "key": "PAGEUP",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "switch_workspace_selector",
+          "selector": {
+            "kind": "previous"
+          }
+        }
+      },
+      {
+        "name": "Move window to previous workspace",
+        "enabled": true,
+        "key": "PAGEUP",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "previous"
+          }
+        }
+      },
+      {
+        "name": "Previous workspace",
+        "enabled": true,
+        "key": "I",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "switch_workspace_selector",
+          "selector": {
+            "kind": "previous"
+          }
+        }
+      },
+      {
+        "name": "Move window to previous workspace",
+        "enabled": true,
+        "key": "I",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "previous"
+          }
+        }
+      },
+      {
+        "name": "Next workspace",
+        "enabled": true,
+        "key": "WHEEL_DOWN",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "mouse",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "switch_workspace_selector",
+          "selector": {
+            "kind": "next"
+          }
+        }
+      },
+      {
+        "name": "Move window to next workspace",
+        "enabled": true,
+        "key": "WHEEL_DOWN",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "mouse",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "next"
+          }
+        }
+      },
+      {
+        "name": "Previous workspace",
+        "enabled": true,
+        "key": "WHEEL_UP",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "mouse",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "switch_workspace_selector",
+          "selector": {
+            "kind": "previous"
+          }
+        }
+      },
+      {
+        "name": "Move window to previous workspace",
+        "enabled": true,
+        "key": "WHEEL_UP",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "mouse",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "previous"
+          }
+        }
+      },
+      {
+        "name": "Focus right",
+        "enabled": true,
+        "key": "WHEEL_DOWN",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "mouse",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "focus_direction",
+          "direction": "right"
+        }
+      },
+      {
+        "name": "Move window right",
+        "enabled": true,
+        "key": "WHEEL_DOWN",
+        "ctrl": true,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "mouse",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "swap_direction",
+          "direction": "right"
+        }
+      },
+      {
+        "name": "Focus left",
+        "enabled": true,
+        "key": "WHEEL_UP",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "mouse",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "focus_direction",
+          "direction": "left"
+        }
+      },
+      {
+        "name": "Move window left",
+        "enabled": true,
+        "key": "WHEEL_UP",
+        "ctrl": true,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "mouse",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "swap_direction",
+          "direction": "left"
+        }
+      },
+      {
+        "name": "Scroll the strip right",
+        "enabled": true,
+        "key": "WHEEL_DOWN",
+        "ctrl": false,
+        "alt": true,
+        "shift": false,
+        "super": true,
+        "device": "mouse",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "scroll_view",
+          "pixels": 240
+        }
+      },
+      {
+        "name": "Scroll the strip left",
+        "enabled": true,
+        "key": "WHEEL_UP",
+        "ctrl": false,
+        "alt": true,
+        "shift": false,
+        "super": true,
+        "device": "mouse",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "scroll_view",
+          "pixels": -240
+        }
+      },
+      {
+        "name": "Workspace 1",
+        "enabled": true,
+        "key": "1",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "switch_workspace_selector",
+          "selector": {
+            "kind": "name",
+            "value": "1"
+          }
+        }
+      },
+      {
+        "name": "Move window to workspace 1",
+        "enabled": true,
+        "key": "1",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "name",
+            "value": "1"
+          }
+        }
+      },
+      {
+        "name": "Workspace 2",
+        "enabled": true,
+        "key": "2",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "switch_workspace_selector",
+          "selector": {
+            "kind": "name",
+            "value": "2"
+          }
+        }
+      },
+      {
+        "name": "Move window to workspace 2",
+        "enabled": true,
+        "key": "2",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "name",
+            "value": "2"
+          }
+        }
+      },
+      {
+        "name": "Workspace 3",
+        "enabled": true,
+        "key": "3",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "switch_workspace_selector",
+          "selector": {
+            "kind": "name",
+            "value": "3"
+          }
+        }
+      },
+      {
+        "name": "Move window to workspace 3",
+        "enabled": true,
+        "key": "3",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "name",
+            "value": "3"
+          }
+        }
+      },
+      {
+        "name": "Workspace 4",
+        "enabled": true,
+        "key": "4",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "switch_workspace_selector",
+          "selector": {
+            "kind": "name",
+            "value": "4"
+          }
+        }
+      },
+      {
+        "name": "Move window to workspace 4",
+        "enabled": true,
+        "key": "4",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "name",
+            "value": "4"
+          }
+        }
+      },
+      {
+        "name": "Workspace 5",
+        "enabled": true,
+        "key": "5",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "switch_workspace_selector",
+          "selector": {
+            "kind": "name",
+            "value": "5"
+          }
+        }
+      },
+      {
+        "name": "Move window to workspace 5",
+        "enabled": true,
+        "key": "5",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "name",
+            "value": "5"
+          }
+        }
+      },
+      {
+        "name": "Workspace 6",
+        "enabled": true,
+        "key": "6",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "switch_workspace_selector",
+          "selector": {
+            "kind": "name",
+            "value": "6"
+          }
+        }
+      },
+      {
+        "name": "Move window to workspace 6",
+        "enabled": true,
+        "key": "6",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "name",
+            "value": "6"
+          }
+        }
+      },
+      {
+        "name": "Workspace 7",
+        "enabled": true,
+        "key": "7",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "switch_workspace_selector",
+          "selector": {
+            "kind": "name",
+            "value": "7"
+          }
+        }
+      },
+      {
+        "name": "Move window to workspace 7",
+        "enabled": true,
+        "key": "7",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "name",
+            "value": "7"
+          }
+        }
+      },
+      {
+        "name": "Workspace 8",
+        "enabled": true,
+        "key": "8",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "switch_workspace_selector",
+          "selector": {
+            "kind": "name",
+            "value": "8"
+          }
+        }
+      },
+      {
+        "name": "Move window to workspace 8",
+        "enabled": true,
+        "key": "8",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "name",
+            "value": "8"
+          }
+        }
+      },
+      {
+        "name": "Workspace 9",
+        "enabled": true,
+        "key": "9",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "switch_workspace_selector",
+          "selector": {
+            "kind": "name",
+            "value": "9"
+          }
+        }
+      },
+      {
+        "name": "Move window to workspace 9",
+        "enabled": true,
+        "key": "9",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "name",
+            "value": "9"
+          }
+        }
+      },
+      {
+        "name": "Join the window before as tabs",
+        "enabled": true,
+        "key": "LEFTBRACKET",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "merge_group_previous"
+        }
+      },
+      {
+        "name": "Join the window after as tabs",
+        "enabled": true,
+        "key": "RIGHTBRACKET",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "merge_group_next"
+        }
+      },
+      {
+        "name": "Join the window after as tabs",
+        "enabled": true,
+        "key": "COMMA",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "merge_group_next"
+        }
+      },
+      {
+        "name": "Leave the tabs",
+        "enabled": true,
+        "key": "PERIOD",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "ungroup_active"
+        }
+      },
+      {
+        "name": "Tabs on or off",
+        "enabled": true,
+        "key": "W",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "toggle_group"
+        }
+      },
+      {
+        "name": "Next tab",
+        "enabled": true,
+        "key": "TAB",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "cycle_group_next"
+        }
+      },
+      {
+        "name": "Previous tab",
+        "enabled": true,
+        "key": "TAB",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "cycle_group_previous"
+        }
+      },
+      {
+        "name": "One window fills the area",
+        "enabled": true,
+        "key": "F",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "toggle_monocle"
+        }
+      },
+      {
+        "name": "Fullscreen",
+        "enabled": true,
+        "key": "F",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "toggle_fullscreen"
+        }
+      },
+      {
+        "name": "Maximize",
+        "enabled": true,
+        "key": "M",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "toggle_maximized"
+        }
+      },
+      {
+        "name": "Centre window",
+        "enabled": true,
+        "key": "C",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "center_active"
+        }
+      },
+      {
+        "name": "Floating or tiled",
+        "enabled": true,
+        "key": "V",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "toggle_floating"
+        }
+      },
+      {
+        "name": "Floating windows out of the way, or back",
+        "enabled": true,
+        "key": "V",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "toggle_floating_aside"
+        }
+      },
+      {
+        "name": "Narrower",
+        "enabled": true,
+        "key": "MINUS",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "resize_axis",
+          "axis": "horizontal",
+          "sizing": "decrease"
+        }
+      },
+      {
+        "name": "Wider",
+        "enabled": true,
+        "key": "EQUALS",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "resize_axis",
+          "axis": "horizontal",
+          "sizing": "increase"
+        }
+      },
+      {
+        "name": "Lower",
+        "enabled": true,
+        "key": "MINUS",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "resize_axis",
+          "axis": "vertical",
+          "sizing": "decrease"
+        }
+      },
+      {
+        "name": "Taller",
+        "enabled": true,
+        "key": "EQUALS",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "resize_axis",
+          "axis": "vertical",
+          "sizing": "increase"
+        }
+      }
+    ],
+    "gestures": {
+      "enabled": true,
+      "idle_timeout_ms": 350,
+      "axis_lock_ratio": 1.25,
+      "scroll_fingers": 3,
+      "profiles": []
+    },
+    "window_rules": [],
+    "shell": {
+      "panel": {
+        "enabled": true,
+        "edge": "top",
+        "style": "bar",
+        "fit": "full",
+        "width": 0,
+        "align": "centre",
+        "floating": false,
+        "height": 38,
+        "margin": 10,
+        "corner_radius": 14,
+        "padding": 10,
+        "spacing": 8,
+        "opacity": 245,
+        "background": [
+          244,
+          245,
+          248
+        ],
+        "text": [
+          40,
+          46,
+          58
+        ],
+        "accent": [
+          58,
+          110,
+          220
+        ],
+        "left": [
+          "launcher",
+          "workspaces",
+          "layout",
+          "title"
+        ],
+        "centre": [],
+        "right": [
+          "tray",
+          "network",
+          "sound",
+          "battery",
+          "clock"
+        ],
+        "title_width": 260,
+        "task_width": 150,
+        "clock_format": "%a %d %b  %H:%M",
+        "older_tray_icons": true,
+        "displays": []
+      },
+      "notifications": {
+        "corner": "top_right",
+        "shown": 5,
+        "stay_seconds": 6,
+        "sound": false
+      },
+      "screenshots": {
+        "folder": "",
+        "clipboard": true,
+        "save": true,
+        "record_sound": false
+      },
+      "glass": {
+        "enabled": true,
+        "tint": 165
+      },
+      "osd": {
+        "volume": true
+      }
+    },
+    "input": {
+      "keyboard": {
+        "layouts": [],
+        "switch_with": "alt_shift",
+        "options": [],
+        "model": "",
+        "repeat_delay_ms": 400,
+        "repeat_rate": 30,
+        "numlock": false
+      },
+      "mouse": {
+        "speed": 0.0,
+        "accel_profile": "default",
+        "natural_scroll": false,
+        "left_handed": false
+      },
+      "touchpad": {
+        "tap": true,
+        "tap_drag": true,
+        "natural_scroll": true,
+        "disable_while_typing": true,
+        "speed": 0.0,
+        "accel_profile": "default",
+        "scroll_method": "default",
+        "left_handed": false,
+        "middle_emulation": false
+      }
+    },
+    "outputs": [],
+    "session": {
+      "environment": {},
+      "lock_after_minutes": 0,
+      "dim_before_lock_seconds": 10,
+      "lock_before_sleep": true,
+      "awake_while_fullscreen": true,
+      "lock_shows_wallpaper": true,
+      "displays_off_after_minutes": 0
+    },
+    "wallpaper": {
+      "image": "",
+      "fit": "fill",
+      "color": [
+        18,
+        18,
+        23
+      ],
+      "outputs": [],
+      "slideshow": {
+        "folder": "",
+        "every_minutes": 30,
+        "shuffle": false
+      }
+    },
+    "night_light": {
+      "enabled": false,
+      "temperature": 4000,
+      "from": "20:00",
+      "to": "07:00"
+    },
+    "layer_rules": []
+  },
+  "node_graph": {
+    "nodes": {
+      "0": {
+        "id": 0,
+        "node_type": "OnStartup",
+        "position": [
+          60.0,
+          60.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 0,
+            "name": "Event",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "1": {
+        "id": 1,
+        "node_type": {
+          "ApplySystemFilters": {
+            "enabled": true
+          }
+        },
+        "position": [
+          350.0,
+          60.0
+        ],
+        "inputs": [
+          {
+            "id": 1,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 2,
+            "name": "Then",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 3,
+            "name": "Count",
+            "pin_type": "Number"
+          }
+        ]
+      },
+      "2": {
+        "id": 2,
+        "node_type": "OnWindowCreated",
+        "position": [
+          640.0,
+          60.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 4,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 5,
+            "name": "Window",
+            "pin_type": "WindowHandle"
+          }
+        ]
+      },
+      "3": {
+        "id": 3,
+        "node_type": {
+          "SetWindowArrangement": {
+            "mode": "Auto"
+          }
+        },
+        "position": [
+          930.0,
+          60.0
+        ],
+        "inputs": [
+          {
+            "id": 6,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 7,
+            "name": "Window",
+            "pin_type": "WindowHandle"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 8,
+            "name": "Then",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 9,
+            "name": "Window",
+            "pin_type": "WindowHandle"
+          }
+        ]
+      },
+      "4": {
+        "id": 4,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "E",
+            "ctrl": true,
+            "alt": true,
+            "shift": false,
+            "super": false
+          }
+        },
+        "position": [
+          1220.0,
+          60.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 10,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 11,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 12,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 13,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 14,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 15,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "5": {
+        "id": 5,
+        "node_type": "ToggleExposeMode",
+        "position": [
+          1510.0,
+          60.0
+        ],
+        "inputs": [
+          {
+            "id": 16,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 17,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "6": {
+        "id": 6,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "J",
+            "ctrl": true,
+            "alt": true,
+            "shift": false,
+            "super": false
+          }
+        },
+        "position": [
+          60.0,
+          284.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 18,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 19,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 20,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 21,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 22,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 23,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "7": {
+        "id": 7,
+        "node_type": "FocusNextWindow",
+        "position": [
+          350.0,
+          284.0
+        ],
+        "inputs": [
+          {
+            "id": 24,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 25,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "8": {
+        "id": 8,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "K",
+            "ctrl": true,
+            "alt": true,
+            "shift": false,
+            "super": false
+          }
+        },
+        "position": [
+          640.0,
+          284.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 26,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 27,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 28,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 29,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 30,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 31,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "9": {
+        "id": 9,
+        "node_type": "FocusPreviousWindow",
+        "position": [
+          930.0,
+          284.0
+        ],
+        "inputs": [
+          {
+            "id": 32,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 33,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "10": {
+        "id": 10,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "J",
+            "ctrl": true,
+            "alt": false,
+            "shift": true,
+            "super": false
+          }
+        },
+        "position": [
+          1220.0,
+          284.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 34,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 35,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 36,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 37,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 38,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 39,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "11": {
+        "id": 11,
+        "node_type": "SwapWithNext",
+        "position": [
+          1510.0,
+          284.0
+        ],
+        "inputs": [
+          {
+            "id": 40,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 41,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "12": {
+        "id": 12,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "K",
+            "ctrl": true,
+            "alt": false,
+            "shift": true,
+            "super": false
+          }
+        },
+        "position": [
+          60.0,
+          508.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 42,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 43,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 44,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 45,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 46,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 47,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "13": {
+        "id": 13,
+        "node_type": "SwapWithPrevious",
+        "position": [
+          350.0,
+          508.0
+        ],
+        "inputs": [
+          {
+            "id": 48,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 49,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "14": {
+        "id": 14,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "L",
+            "ctrl": true,
+            "alt": true,
+            "shift": false,
+            "super": false
+          }
+        },
+        "position": [
+          640.0,
+          508.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 50,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 51,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 52,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 53,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 54,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 55,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "15": {
+        "id": 15,
+        "node_type": "NextWorkspace",
+        "position": [
+          930.0,
+          508.0
+        ],
+        "inputs": [
+          {
+            "id": 56,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 57,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "16": {
+        "id": 16,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "H",
+            "ctrl": true,
+            "alt": true,
+            "shift": false,
+            "super": false
+          }
+        },
+        "position": [
+          1220.0,
+          508.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 58,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 59,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 60,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 61,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 62,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 63,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "17": {
+        "id": 17,
+        "node_type": "PreviousWorkspace",
+        "position": [
+          1510.0,
+          508.0
+        ],
+        "inputs": [
+          {
+            "id": 64,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 65,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "18": {
+        "id": 18,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "F",
+            "ctrl": true,
+            "alt": true,
+            "shift": false,
+            "super": false
+          }
+        },
+        "position": [
+          60.0,
+          732.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 66,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 67,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 68,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 69,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 70,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 71,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "19": {
+        "id": 19,
+        "node_type": "ToggleFloating",
+        "position": [
+          350.0,
+          732.0
+        ],
+        "inputs": [
+          {
+            "id": 72,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 73,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "20": {
+        "id": 20,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "Space",
+            "ctrl": true,
+            "alt": true,
+            "shift": false,
+            "super": false
+          }
+        },
+        "position": [
+          640.0,
+          732.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 74,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 75,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 76,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 77,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 78,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 79,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "21": {
+        "id": 21,
+        "node_type": "CycleNextLayout",
+        "position": [
+          930.0,
+          732.0
+        ],
+        "inputs": [
+          {
+            "id": 80,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 81,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      },
+      "22": {
+        "id": 22,
+        "node_type": {
+          "OnKeyPress": {
+            "key": "Space",
+            "ctrl": true,
+            "alt": false,
+            "shift": true,
+            "super": false
+          }
+        },
+        "position": [
+          1220.0,
+          732.0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "id": 82,
+            "name": "Event",
+            "pin_type": "Execution"
+          },
+          {
+            "id": 83,
+            "name": "Key",
+            "pin_type": "String"
+          },
+          {
+            "id": 84,
+            "name": "Ctrl",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 85,
+            "name": "Alt",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 86,
+            "name": "Shift",
+            "pin_type": "Bool"
+          },
+          {
+            "id": 87,
+            "name": "Win",
+            "pin_type": "Bool"
+          }
+        ]
+      },
+      "23": {
+        "id": 23,
+        "node_type": "CyclePreviousLayout",
+        "position": [
+          1510.0,
+          732.0
+        ],
+        "inputs": [
+          {
+            "id": 88,
+            "name": "Trigger",
+            "pin_type": "Execution"
+          }
+        ],
+        "outputs": [
+          {
+            "id": 89,
+            "name": "Then",
+            "pin_type": "Execution"
+          }
+        ]
+      }
+    },
+    "connections": [
+      {
+        "from_node": 0,
+        "from_pin": 0,
+        "to_node": 1,
+        "to_pin": 1
+      },
+      {
+        "from_node": 2,
+        "from_pin": 4,
+        "to_node": 3,
+        "to_pin": 6
+      },
+      {
+        "from_node": 2,
+        "from_pin": 5,
+        "to_node": 3,
+        "to_pin": 7
+      },
+      {
+        "from_node": 4,
+        "from_pin": 10,
+        "to_node": 5,
+        "to_pin": 16
+      },
+      {
+        "from_node": 6,
+        "from_pin": 18,
+        "to_node": 7,
+        "to_pin": 24
+      },
+      {
+        "from_node": 8,
+        "from_pin": 26,
+        "to_node": 9,
+        "to_pin": 32
+      },
+      {
+        "from_node": 10,
+        "from_pin": 34,
+        "to_node": 11,
+        "to_pin": 40
+      },
+      {
+        "from_node": 12,
+        "from_pin": 42,
+        "to_node": 13,
+        "to_pin": 48
+      },
+      {
+        "from_node": 14,
+        "from_pin": 50,
+        "to_node": 15,
+        "to_pin": 56
+      },
+      {
+        "from_node": 16,
+        "from_pin": 58,
+        "to_node": 17,
+        "to_pin": 64
+      },
+      {
+        "from_node": 18,
+        "from_pin": 66,
+        "to_node": 19,
+        "to_pin": 72
+      },
+      {
+        "from_node": 20,
+        "from_pin": 74,
+        "to_node": 21,
+        "to_pin": 80
+      },
+      {
+        "from_node": 22,
+        "from_pin": 82,
+        "to_node": 23,
+        "to_pin": 88
+      }
+    ],
+    "next_node_id": 24,
+    "next_pin_id": 90
+  }
+}

@@ -1,0 +1,12 @@
+:root {
+  --gevrek-molasses: #21110A; /* ground, text on light */
+  --gevrek-crust: #D9701F;    /* the ring */
+  --gevrek-crust-deep: #C75F14; /* the ring on light grounds */
+  --gevrek-ember: #E58A3C;    /* accent on dark */
+  --gevrek-sesame: #F4E2BC;   /* focus, light ground, text on dark */
+  --gevrek-surface: #2E1A10;  /* raised tile on molasses */
+  --gevrek-muted: #C4A482;    /* secondary text on dark */
+  --gevrek-muted-on-light: #5E3D26;
+  --gevrek-font-display: "Outfit", system-ui, sans-serif;
+  --gevrek-font-mono: "JetBrains Mono", ui-monospace, monospace;
+}

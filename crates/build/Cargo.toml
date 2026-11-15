@@ -1,0 +1,8 @@
+[package]
+name = "gevrek-build"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Which commit a gevrek program was built from."
+build = "build.rs"
