@@ -749,6 +749,11 @@ impl Executor {
             }
             WorkspaceSelector::PreviousVisited => monitor_manager
                 .get_previous_workspace_index(monitor)
+                .filter(|index| {
+                    monitor_manager
+                        .get_workspaces(monitor)
+                        .is_some_and(|workspaces| *index < workspaces.len())
+                })
                 .ok_or_else(|| anyhow::anyhow!("No previously visited workspace is available"))?,
             WorkspaceSelector::FirstEmpty => {
                 if let Some(index) =
@@ -1125,8 +1130,31 @@ impl Executor {
         let monitor = self
             .active_monitor(window_manager, monitor_manager)
             .ok_or_else(|| anyhow::anyhow!("Could not determine the active monitor"))?;
-        let index =
-            self.resolve_existing_workspace_selector(monitor_manager, monitor, &selector)?;
+        // (A workspace named by its name is found on whichever display
+        // has it: a panel renames the workspace of its own display, which
+        // need not be the one with the keyboard.)
+        let (monitor, index) =
+            match self.resolve_existing_workspace_selector(monitor_manager, monitor, &selector) {
+                Ok(index) => (monitor, index),
+                Err(error) => {
+                    let WorkspaceSelector::Name(wanted) = &selector else {
+                        return Err(error);
+                    };
+                    monitor_manager
+                        .get_all_monitors()
+                        .iter()
+                        .find_map(|other| {
+                            let at = monitor_manager
+                                .get_workspaces(other.handle)?
+                                .iter()
+                                .position(|workspace| {
+                                    workspace.name.eq_ignore_ascii_case(wanted.trim())
+                                })?;
+                            Some((other.handle, at))
+                        })
+                        .ok_or(error)?
+                }
+            };
         let Some(workspaces::Renamed {
             workspace_id,
             old_name,
@@ -1139,6 +1167,34 @@ impl Executor {
             self.reevaluate_dynamic_rules(window_manager, monitor_manager, window)?;
         }
         self.emit_workspace_renamed(monitor, workspace_id, &old_name, name);
+        // A workspace that every display has by one name (it is written
+        // down once, for all of them) has the new name on every display:
+        // else the others would keep a workspace nothing is written of.
+        let others: Vec<(MonitorHandle, usize)> = monitor_manager
+            .get_all_monitors()
+            .iter()
+            .map(|other| other.handle)
+            .filter(|other| *other != monitor)
+            .filter_map(|other| {
+                let at = monitor_manager
+                    .get_workspaces(other)?
+                    .iter()
+                    .position(|workspace| workspace.name.eq_ignore_ascii_case(&old_name))?;
+                Some((other, at))
+            })
+            .collect();
+        for (other, at) in others {
+            match workspaces::rename_workspace(monitor_manager, other, at, name) {
+                Ok(Some(renamed)) => {
+                    for window in renamed.windows {
+                        self.reevaluate_dynamic_rules(window_manager, monitor_manager, window)?;
+                    }
+                    self.emit_workspace_renamed(other, renamed.workspace_id, &old_name, name);
+                }
+                Ok(None) => {}
+                Err(error) => log::debug!("Workspace '{old_name}' keeps its name on {other:?}: {error}"),
+            }
+        }
         log::info!(
             "Renamed workspace '{}' to '{}' using selector '{}'",
             old_name,

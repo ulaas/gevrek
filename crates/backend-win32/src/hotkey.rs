@@ -810,7 +810,16 @@ fn run_input_loop(
                 DispatchMessageW(&message);
             }
         }
-        std::thread::sleep(Duration::from_millis(4));
+        // Wait for a message, at most as long as the pass used to sleep.
+        // The hooks of this thread are called only while it waits for or
+        // takes messages: asleep, every key and every movement of the
+        // mouse, of every program, waited for it to wake.
+        unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::{
+                MsgWaitForMultipleObjectsEx, MWMO_INPUTAVAILABLE, QS_ALLINPUT,
+            };
+            MsgWaitForMultipleObjectsEx(None, 4, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        }
     }
 
     let _ = unsafe { UnhookWindowsHookEx(mouse_hook) };
@@ -947,7 +956,9 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
             }
             configured_consume || owned
         } else {
-            context.consumed_inputs.remove(&identity) || configured_consume
+            // (Only when its press was kept from the programs too: one
+            // that saw a key go down and never come up has it held for good.)
+            context.consumed_inputs.remove(&identity)
         };
         if consume && down {
             mask_modifier_release(&raw);
@@ -1089,7 +1100,9 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPA
             }
             configured_consume
         } else {
-            context.consumed_inputs.remove(&identity) || configured_consume
+            // (Only when its press was kept from the programs too: one
+            // that saw a key go down and never come up has it held for good.)
+            context.consumed_inputs.remove(&identity)
         };
         if consume && down {
             mask_modifier_release(&raw);

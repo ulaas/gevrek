@@ -261,6 +261,13 @@ impl WindowSurface {
                                 | WmWindowType::Utility
                                 | WmWindowType::Splash
                                 | WmWindowType::Toolbar
+                                // (No windows to tile either, where one
+                                // of them is not left to its program.)
+                                | WmWindowType::Menu
+                                | WmWindowType::DropdownMenu
+                                | WmWindowType::PopupMenu
+                                | WmWindowType::Tooltip
+                                | WmWindowType::Notification
                         )
                     )
                     || window

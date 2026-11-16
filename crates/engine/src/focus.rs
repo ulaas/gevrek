@@ -39,11 +39,18 @@ pub fn on_focused(
     id: WindowId,
     is_visible: impl Fn(WindowId) -> bool,
 ) -> FocusDecision {
-    let enforced = world
-        .windows
-        .ids_where(|state| state.stay_focused.enabled())
-        .into_iter()
-        .find(|candidate| *candidate != id && is_visible(*candidate));
+    // (A window that is itself to keep the keyboard keeps it: with two
+    // such windows on screen each would else take it from the other, on
+    // and on.)
+    let enforced = if world.windows.get(id).stay_focused.enabled() {
+        None
+    } else {
+        world
+            .windows
+            .ids_where(|state| state.stay_focused.enabled() && !state.minimized)
+            .into_iter()
+            .find(|candidate| *candidate != id && is_visible(*candidate))
+    };
     if let Some(target) = enforced {
         return FocusDecision::Enforce(target);
     }

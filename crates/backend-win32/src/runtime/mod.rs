@@ -11,6 +11,7 @@ use gevrek_engine::core;
 use gevrek_host::process_manager;
 #[cfg(test)]
 mod characterization_tests;
+mod held;
 mod reload;
 #[cfg(test)]
 mod test_support;
@@ -82,6 +83,8 @@ pub struct Runtime {
     /// When the last display notification arrived; the monitor model is
     /// reconciled once notifications have been quiet for a moment.
     display_change_pending: Option<std::time::Instant>,
+    /// Windows that opened while the mouse button was held (`held.rs`).
+    held_openings: held::Held,
     /// Publishes the running configuration to readers (the gRPC server).
     config_publisher: Option<config_store::ConfigPublisher>,
     /// `config` changed since the last publish.
@@ -206,6 +209,26 @@ impl InjectedFault {
 }
 
 /// Whether the key that activates zone snapping is held right now.
+/// Whether a window is where it is because the pointer carried it there:
+/// it has the keyboard and the pointer is on it. (Asked when the mouse
+/// button comes up, of a window that opened while it was down.)
+fn carried_by_hand(window: crate::dwm::WindowHandle) -> bool {
+    use windows::Win32::Foundation::{POINT, RECT};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetCursorPos, GetForegroundWindow, GetWindowRect,
+    };
+    let hwnd = window.to_hwnd();
+    let (mut pointer, mut place) = (POINT::default(), RECT::default());
+    // SAFETY: plain questions; a window that is gone has no place.
+    unsafe {
+        GetForegroundWindow() == hwnd
+            && GetCursorPos(&mut pointer).is_ok()
+            && GetWindowRect(hwnd, &mut place).is_ok()
+            && (place.left..place.right).contains(&pointer.x)
+            && (place.top..place.bottom).contains(&pointer.y)
+    }
+}
+
 fn zone_modifier_held(modifier: crate::dwm::ZoneModifier) -> bool {
     use crate::dwm::ZoneModifier;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -385,6 +408,7 @@ impl Runtime {
             published_monitors: Vec::new(),
             gesture_progress_updated: None,
             display_change_pending: None,
+            held_openings: held::Held::default(),
             config_publisher: None,
             config_dirty: false,
             notices: Vec::new(),
@@ -753,6 +777,16 @@ impl Runtime {
                 // Configuration changes are still applied and published.
                 self.apply_configuration_changes();
                 self.publish_config_if_changed();
+                // New display settings nobody kept in time go back, paused
+                // or not: a display that shows nothing cannot be answered.
+                if self
+                    .display_trial
+                    .as_ref()
+                    .is_some_and(|trial| std::time::Instant::now() >= trial.until)
+                {
+                    log::warn!("The new display settings were not kept: going back to the ones before");
+                    self.answer_display_trial(gevrek_model::command::TrialAnswer::Revert);
+                }
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 continue;
             }
@@ -880,6 +914,24 @@ impl Runtime {
             let before_poll = std::time::Instant::now();
             let mut events = self.window_monitor.poll_events();
             let poll_duration = before_poll.elapsed();
+            // A window that opens while the mouse button is held (a tab
+            // pulled out of a browser) is told of when the button is up
+            // (`held.rs`).
+            {
+                use gevrek_engine::contract::Desktop;
+                let button_down = self.window_manager.primary_button_down();
+                let outputs = &self.core.monitor_manager;
+                events = self.held_openings.pass(
+                    events,
+                    button_down,
+                    |window| outputs.find_window(window).is_none(),
+                    carried_by_hand,
+                );
+                if self.held_openings.any() {
+                    // (Nothing announces the button's release.)
+                    last_work = Some(std::time::Instant::now());
+                }
+            }
             // A window that opens is heard of as opened before it is heard
             // of as having the keyboard, whichever Windows told first: the
             // display with the keyboard is the one it was asked for on, and
@@ -1334,9 +1386,11 @@ impl Runtime {
                 if pruned > 0 {
                     log::debug!("Pruned {} dead window(s) from the registry", pruned);
                 }
-                self.core
-                    .executor
-                    .cleanup_stale_tracking(&self.window_manager);
+                self.core.executor.cleanup_stale_members(
+                    &self.window_manager,
+                    &mut self.core.monitor_manager,
+                    &mut self.core.zone_manager,
+                );
                 match self.window_manager.cleanup_stale_borders() {
                     Ok(count) if count > 0 => {
                         log::debug!("Cleaned up {} stale border overlay(s)", count)
@@ -1487,21 +1541,20 @@ impl Runtime {
             );
         }
         let restored_composition = self.window_manager.restore_all_window_alpha_styles();
+        // The title bars and their buttons gevrek took away are back.
+        self.window_manager.restore_all_window_frames();
         // Windows that were cut at a display's edge are whole again.
         self.window_manager.cut_at_displays(&[]);
         // The displays have their own colours again.
         self.night_light.restore();
         // And the desktop the wallpaper it had.
-        if self.wallpaper.has_given() {
-            if let Some(mut desktop) = crate::wallpaper::system::Desktop::open() {
-                self.wallpaper.give_back(&mut desktop);
-                // (A colour or a slideshow is held for a moment: the
-                // system may still finish a picture set shortly before.)
-                while self.wallpaper.holds() {
-                    std::thread::sleep(std::time::Duration::from_millis(250));
-                    self.wallpaper.hold(&mut desktop);
-                }
-            }
+        let mut wallpaper_desktop = if self.wallpaper.has_given() {
+            crate::wallpaper::system::Desktop::open()
+        } else {
+            None
+        };
+        if let Some(desktop) = wallpaper_desktop.as_mut() {
+            self.wallpaper.give_back(desktop);
         }
         // Windows moves the windows its own way again.
         self.window_manager.set_system_transitions_for_all(false);
@@ -1540,6 +1593,16 @@ impl Runtime {
         log::info!("Saving window manager state before exit...");
         if let Err(e) = self.save_state() {
             log::error!("Failed to save state on shutdown: {}", e);
+        }
+
+        // Last of all, since it takes seconds and whoever ends gevrek does
+        // not wait for long: a colour or a slideshow is held for a moment
+        // (the system may still finish a picture set shortly before).
+        if let Some(desktop) = wallpaper_desktop.as_mut() {
+            while self.wallpaper.holds() {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                self.wallpaper.hold(desktop);
+            }
         }
 
         log::info!("Runtime event loop exited gracefully");

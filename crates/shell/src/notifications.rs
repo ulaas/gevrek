@@ -285,8 +285,9 @@ impl Stack {
                 self.last_id
             }
         };
+        // (The summary carries no markup: only the body may.)
         let (summary, body) = if markup {
-            (plain(summary), plain(body))
+            (summary.to_string(), plain(body))
         } else {
             (summary.to_string(), body.to_string())
         };
@@ -465,15 +466,26 @@ impl Stack {
 /// and with the few named characters written out.
 pub fn plain(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
-    let mut in_tag = false;
-    for letter in text.chars() {
-        match letter {
-            '<' => in_tag = true,
-            '>' if in_tag => in_tag = false,
-            other if !in_tag => out.push(other),
-            _ => {}
+    let mut rest = text;
+    while let Some(at) = rest.find('<') {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + 1..];
+        // A tag begins with a letter (or a stroke, where it ends one) and
+        // has its end: a "<" that is only a sign ("less than 5 % free")
+        // stays, with all that follows it.
+        let begins = after
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic() || first == '/');
+        match after.find('>').filter(|_| begins) {
+            Some(end) => rest = &after[end + 1..],
+            None => {
+                out.push('<');
+                rest = after;
+            }
         }
     }
+    out.push_str(rest);
     out.replace("&lt;", "<")
         .replace("&gt;", ">")
         .replace("&quot;", "\"")

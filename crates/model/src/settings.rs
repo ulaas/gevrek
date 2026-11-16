@@ -470,6 +470,11 @@ pub struct PanelProfile {
     /// every button is that wide, or narrower when there are many (0:
     /// each as wide as its words).
     pub task_width: u32,
+    /// Whether the taskbar has the windows of every workspace of its
+    /// display, or only those of the workspace that is shown. (The
+    /// taskbar has a button of its own that says which, and changes it.)
+    #[serde(default)]
+    pub tasks_of_all_workspaces: bool,
     /// The clock, in `strftime` form.
     pub clock_format: String,
     /// Show the icons of older programs in the tray too: those that
@@ -556,6 +561,7 @@ impl Default for PanelProfile {
             ],
             title_width: 260,
             task_width: 150,
+            tasks_of_all_workspaces: false,
             clock_format: "%a %d %b  %H:%M".to_string(),
             older_tray_icons: true,
             displays: Vec::new(),
@@ -645,6 +651,37 @@ impl PanelProfile {
 }
 
 impl DesktopConfig {
+    /// Give the workspace `old` the name `new`, in everything that is
+    /// written down of it: its own entry, and the keys and gestures that
+    /// name it (they go on meaning the same workspace). Nothing happens
+    /// when no workspace is written down by the old name, when the new
+    /// one is empty, or when another workspace already has it. Returns
+    /// whether anything changed.
+    pub fn rename_workspace(&mut self, old: &str, new: &str) -> bool {
+        let (old, new) = (old.trim(), new.trim());
+        if new.is_empty() || old == new {
+            return false;
+        }
+        let is = |name: &str, wanted: &str| name.trim().eq_ignore_ascii_case(wanted);
+        let taken = !old.eq_ignore_ascii_case(new)
+            && self.workspaces.iter().any(|profile| is(&profile.name, new));
+        if taken || !self.workspaces.iter().any(|profile| is(&profile.name, old)) {
+            return false;
+        }
+        for profile in &mut self.workspaces {
+            if is(&profile.name, old) {
+                profile.name = new.to_string();
+            }
+        }
+        for binding in &mut self.bindings {
+            binding.command.follow_workspace_rename(old, new);
+        }
+        for gesture in &mut self.gestures.profiles {
+            gesture.command.follow_workspace_rename(old, new);
+        }
+        true
+    }
+
     pub fn validate(&self) -> Vec<ConfigIssue> {
         let mut issues = Vec::new();
         for (path, message) in self
@@ -4024,3 +4061,35 @@ mod tests {
 }
 
 crate::tolerant_enum!(RuleEffect);
+
+#[cfg(test)]
+mod workspace_rename_tests {
+    use crate::command::{DispatchCommand, WorkspaceSelector};
+
+    #[test]
+    fn a_renamed_workspace_keeps_its_entry_and_its_keys() {
+        let mut desktop = crate::examples::starting_configuration().desktop;
+        let shows = |desktop: &super::DesktopConfig, wanted: &str| {
+            desktop.bindings.iter().any(|binding| {
+                matches!(&binding.command, DispatchCommand::SwitchWorkspaceSelector {
+                    selector: WorkspaceSelector::Name(name),
+                } if name == wanted)
+            })
+        };
+        assert!(shows(&desktop, "1"), "the starting keys show workspace 1 by its name");
+
+        assert!(desktop.rename_workspace("1", " web "));
+        assert!(desktop.workspaces.iter().any(|profile| profile.name == "web"));
+        assert!(!desktop.workspaces.iter().any(|profile| profile.name == "1"));
+        // The key that showed it shows it still.
+        assert!(shows(&desktop, "web") && !shows(&desktop, "1"));
+        assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
+
+        // No workspace by that name, a name that is taken, no name at all.
+        assert!(!desktop.rename_workspace("1", "mail"));
+        assert!(!desktop.rename_workspace("web", "2"));
+        assert!(!desktop.rename_workspace("web", "  "));
+        // Only its letters' case is another: still the same workspace.
+        assert!(desktop.rename_workspace("web", "Web"));
+    }
+}

@@ -242,7 +242,12 @@ impl Control {
 
     /// Whether a surface is open now.
     pub fn is_open(&self, id: SurfaceId) -> bool {
-        self.known.contains(&id) && !self.close.contains(&id)
+        // (Also one asked for earlier in this pass, which is made when
+        // the pass is over: asked for a second time it would be made
+        // twice, and the first never closed.)
+        let asked_for = self.open.iter().any(|(asked, ..)| *asked == id)
+            || self.popups.iter().any(|(asked, ..)| *asked == id);
+        (self.known.contains(&id) || asked_for) && !self.close.contains(&id)
     }
 
     /// End the shell: every surface is closed and `run` returns.

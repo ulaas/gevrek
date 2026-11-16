@@ -256,6 +256,13 @@ struct State {
     /// The running configuration (the tutorial shows the keys it has),
     /// and the desktop as the window manager last said it stands.
     config: Option<Box<gevrek_model::Config>>,
+    /// The revision of that configuration: a change the shell makes to it
+    /// (a workspace's name, whose windows the taskbar has) is based on it.
+    revision: u64,
+    /// The box that asks for a workspace's new name, while it is open:
+    /// the name the workspace has, what is typed, and what is wrong with
+    /// that.
+    rename: Option<(SurfaceId, String, String, String)>,
     facts: gevrek_tutorial::Facts,
     /// The wireless side and bluetooth, as they were last read for the
     /// control centre; the network that is being joined; and whether
@@ -376,6 +383,8 @@ pub fn run() -> anyhow::Result<()> {
         night_light: false,
         tutorial: None,
         config: None,
+        revision: 0,
+        rename: None,
         facts: gevrek_tutorial::Facts::default(),
         wifi: None,
         wifi_joining: None,
@@ -931,6 +940,97 @@ fn carry_out(choice: Choice) -> Result<(), String> {
 
 /// Open the power menu, or close it when it is open. It has the keyboard
 /// while it is open; a click elsewhere puts it away.
+/// Ask for a workspace's new name, in a small box on the display of the
+/// panel whose tab was pressed. Enter gives the workspace the name: the
+/// window manager is told (the workspace has it at once, on every display
+/// that has a workspace by the old name), and the configuration is
+/// written with it (the workspace's own entry, and the keys that name
+/// it), so that it has the name when gevrek is started again.
+fn ask_workspace_name(
+    state: &Rc<RefCell<State>>,
+    control: &mut Control,
+    display: &str,
+    old: &str,
+    others: Vec<String>,
+) {
+    if let Some((id, ..)) = state.borrow_mut().rename.take() {
+        if control.is_open(id) {
+            control.close(id);
+        }
+    }
+    let place = Place {
+        name: surface_name("gevrek-rename"),
+        edge: Edge::Centre,
+        level: Level::Overlay,
+        width: panel::RENAME_SIZE.0,
+        height: panel::RENAME_SIZE.1,
+        reserve: false,
+        keyboard: Keyboard::Exclusive,
+        margin: 0,
+        output: Some(display.to_string()),
+    };
+    let shared = Rc::clone(state);
+    let mut fonts = false;
+    let mut had_keyboard = false;
+    let id = control.open(place, move |ui, _| {
+        let context = ui.ctx().clone();
+        let mut state = shared.borrow_mut();
+        let state = &mut *state;
+        let palette = themed(state, ui, &mut fonts);
+        let Some((_, old, mut name, mut problem)) = state.rename.clone() else {
+            return Flow::Close;
+        };
+        let mut close =
+            context.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        let before = name.clone();
+        match panel::rename_box(ui, &palette, &old, &mut name, &problem) {
+            Some(true) => {
+                let new = name.trim().to_string();
+                if others.iter().any(|other| other.eq_ignore_ascii_case(&new)) {
+                    problem = format!("Another workspace is called \u{201c}{new}\u{201d} already.");
+                } else {
+                    if !new.eq_ignore_ascii_case(&old) || new != old {
+                        state
+                            .link
+                            .send(Request::Dispatch(panel::rename_workspace(&old, &new)));
+                        if let Some(mut changed) = state.config.clone() {
+                            if changed.desktop.rename_workspace(&old, &new) {
+                                state.link.send(Request::Apply {
+                                    config: changed,
+                                    base_revision: state.revision,
+                                    client_id: "gevrek-shell".to_string(),
+                                });
+                            } else {
+                                log::info!(
+                                    "workspace {old:?} is renamed to {new:?} for now: the configuration has no workspace by that name to keep the new one"
+                                );
+                            }
+                        }
+                        state.link.send(Request::StateAfter(Duration::from_millis(120)));
+                    }
+                    close = true;
+                }
+            }
+            Some(false) => close = true,
+            None => {
+                if name != before {
+                    problem.clear();
+                }
+            }
+        }
+        if close || lost_keyboard(&context, &mut had_keyboard) {
+            state.rename = None;
+            return Flow::Close;
+        }
+        if let Some(rename) = state.rename.as_mut() {
+            rename.2 = name;
+            rename.3 = problem;
+        }
+        Flow::Continue
+    });
+    state.borrow_mut().rename = Some((id, old.to_string(), old.to_string(), String::new()));
+}
+
 fn toggle_power(state: &Rc<RefCell<State>>, control: &mut Control) {
     if let Some((id, ..)) = state.borrow_mut().power.take() {
         if control.is_open(id) {
@@ -2207,10 +2307,11 @@ fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
                     shell_action(state, action, &fields, control);
                 }
             }
-            Event::Configuration(config, _) => {
+            Event::Configuration(config, revision) => {
                 let (red, green, blue) = config.desktop.appearance.active_border_color;
                 {
                     let mut state = state.borrow_mut();
+                    state.revision = revision;
                     state.accent = egui::Color32::from_rgb(red, green, blue);
                     state.asked_look = (
                         config.desktop.animations.reduce_motion,
@@ -2572,6 +2673,35 @@ fn draw_panel(
         .map(|(id, which, _)| (*id, *which));
     let notices = Rc::clone(&state.notices);
     drop(state);
+    // The taskbar's own button: whose windows it has. Kept in the
+    // configuration, so it is the same after gevrek is started again.
+    if let Some(all) = asked.all_tasks {
+        let mut state = shared.borrow_mut();
+        let state = &mut *state;
+        if let Some(bar) = state.bar.as_mut() {
+            // (At once here; the configuration that comes back says the same.)
+            bar.tasks_of_all_workspaces = all;
+        }
+        if let Some(mut changed) = state.config.clone() {
+            changed.desktop.shell.panel.tasks_of_all_workspaces = all;
+            state.link.send(Request::Apply {
+                config: changed,
+                base_revision: state.revision,
+                client_id: "gevrek-shell".to_string(),
+            });
+        }
+        redraw_panels(state, control);
+    }
+    // The other button on a workspace's tab: its new name is asked for.
+    if let Some(tab) = asked.rename.and_then(|index| view.tabs.get(index)) {
+        let others: Vec<String> = view
+            .tabs
+            .iter()
+            .filter(|other| other.name != tab.name)
+            .map(|other| other.name.clone())
+            .collect();
+        ask_workspace_name(shared, control, display, &tab.name, others);
+    }
     if asked.sound.is_some() || asked.show.is_some() {
         log::debug!(
             "the panel of {display} is asked: sound {:?}, workspace {:?} (the pointer over the sound: {})",

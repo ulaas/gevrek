@@ -5,7 +5,7 @@ use super::*;
 
 impl Executor {
     pub(super) fn set_window_floating(
-        &self,
+        &mut self,
         window_manager: &mut dyn Desktop,
         monitor_manager: &mut MonitorManager,
         handle: WindowHandle,
@@ -47,6 +47,9 @@ impl Executor {
             }
             self.apply_workspace_layout_and_position(workspace, work_area, window_manager)?;
         }
+        // (The pass that follows shows the tab that takes the place of a
+        // window that left its group.)
+        self.mark_layout_dirty(monitor);
         Ok(())
     }
 
@@ -632,7 +635,14 @@ impl Executor {
             None,
             RuleResolutionScope::Static,
         );
-        let floating = resolution.floating == Some(true);
+        // A rule of the person's own is the last word; where none speaks
+        // of floating, the desktop says what the window is (a dialog, a
+        // window of one size) and what the rules gevrek comes with say.
+        // The same answer the graph's "Auto" arrangement goes by, so a
+        // window floats or not whichever of the two takes it.
+        let floating = resolution
+            .floating
+            .unwrap_or_else(|| queries(window_manager).floats_by_rules(window));
         let where_it_is =
             monitor_of(window_manager, monitor_manager, window).map(|monitor| monitor.handle);
         let with_keyboard =

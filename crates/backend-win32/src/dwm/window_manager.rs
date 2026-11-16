@@ -472,8 +472,15 @@ pub struct WindowManager {
     /// when it was first asked (asking is a message to the program, so
     /// it is asked once): `None`, it named none or did not answer.
     smallest_window_sizes: RefCell<HashMap<WindowHandle, Option<(i32, i32)>>>,
+    /// The boxes (to minimise, to maximise) gevrek took from a window's
+    /// title bar, by window: exactly those are given back.
+    caption_buttons_removed: RefCell<HashMap<WindowHandle, i32>>,
     /// The windows of a workspace that is giving way to another.
     going_out: GoingOut,
+    /// What was hidden along with the window it belongs to (the dialogs a
+    /// window has open, when the window is put away with its workspace):
+    /// shown again when that window is.
+    hidden_with_owner: RefCell<HashMap<WindowHandle, Vec<WindowHandle>>>,
     /// The windows that are cut at their display's edge (a column of the
     /// scrolling layout that reaches past it), each with the window's
     /// place and the display it was last cut for.
@@ -673,7 +680,9 @@ impl WindowManager {
             initial_window_metadata: HashMap::new(),
             preferred_window_sizes: HashMap::new(),
             smallest_window_sizes: RefCell::new(HashMap::new()),
+            caption_buttons_removed: RefCell::new(HashMap::new()),
             going_out: GoingOut::default(),
+            hidden_with_owner: RefCell::new(HashMap::new()),
             cut: RefCell::new(HashMap::new()),
             plain_frame: RefCell::new(HashSet::new()),
             border_windows: HashMap::new(),
@@ -706,7 +715,9 @@ impl WindowManager {
             initial_window_metadata: HashMap::new(),
             preferred_window_sizes: HashMap::new(),
             smallest_window_sizes: RefCell::new(HashMap::new()),
+            caption_buttons_removed: RefCell::new(HashMap::new()),
             going_out: GoingOut::default(),
+            hidden_with_owner: RefCell::new(HashMap::new()),
             cut: RefCell::new(HashMap::new()),
             plain_frame: RefCell::new(HashSet::new()),
             border_hwnd_set: HashSet::new(),
@@ -1086,16 +1097,21 @@ impl WindowManager {
             return true;
         }
 
-        // Nor is what only passes by: a notification a program draws
-        // itself, a display of the volume (`window_kind.rs`).
-        if crate::window_kind::of_window(handle.0) == crate::window_kind::Kind::Passing {
+        // (The window as Windows has it: gevrek's own number for a window
+        // is another once a handle's value has been given out again.)
+        let native = handle.to_hwnd().0 as isize;
+
+        // Nor is what only passes by (a notification a program draws
+        // itself, a display of the volume), nor what belongs to another
+        // window (a dialog, a menu): `window_kind.rs`.
+        if !crate::window_kind::of_window(native).is_managed() {
             return true;
         }
 
         // Nor is one of a program with an administrator's rights, where
         // gevrek has none: Windows lets it be neither moved nor resized,
         // and a tile kept for it would stay empty (`elevated.rs`).
-        if crate::elevated::window_is_beyond_reach(handle.0) {
+        if crate::elevated::window_is_beyond_reach(native) {
             return true;
         }
 
@@ -1166,17 +1182,28 @@ impl WindowManager {
         }
     }
 
-    /// Check both declarative and legacy float rules for a live window.
+    /// Whether a window floats: as a rule of the person's says; where none
+    /// speaks of it, as the window itself is made (a dialog, a window of
+    /// one size, one kept above the others: `window_kind::floats`); and
+    /// else as the rules gevrek comes with say.
     pub fn should_float_window(&self, handle: WindowHandle) -> bool {
-        let Some(rule_engine) = &self.rule_engine else {
-            return false;
-        };
-        let Ok(engine) = rule_engine.lock() else {
-            return false;
-        };
-        self.rule_window_info(handle)
-            .map(|window| engine.should_float(&window))
-            .unwrap_or(false)
+        let facts = self.rule_window_info(handle);
+        let engine = self
+            .rule_engine
+            .as_ref()
+            .and_then(|rule_engine| rule_engine.lock().ok());
+        if let (Some(engine), Some(facts)) = (engine.as_ref(), facts.as_ref()) {
+            if let Some(floating) = engine.resolve_static(facts).floating {
+                return floating;
+            }
+        }
+        if crate::window_kind::window_floats(handle.to_hwnd().0 as isize) {
+            return true;
+        }
+        match (engine, facts) {
+            (Some(engine), Some(facts)) => engine.should_float(&facts),
+            _ => false,
+        }
     }
 
     /// The window's identity, resolved once per window. The cached entry is
@@ -1556,6 +1583,8 @@ impl WindowManager {
     /// Remove a window from tracking (without closing it)
     pub fn untrack_window(&mut self, handle: WindowHandle) {
         let _ = self.restore_native_window_alpha(handle);
+        self.caption_buttons_removed.borrow_mut().remove(&handle);
+        self.show_owned_windows(handle);
         self.windows.remove(&handle);
         self.preferred_window_sizes.remove(&handle);
         self.smallest_window_sizes.borrow_mut().remove(&handle);
@@ -1872,6 +1901,7 @@ impl WindowManager {
                     }
                 }
                 super::hidden_journal::record_hidden(handle, false);
+                self.hide_owned_windows(handle);
 
                 // Also hide border to prevent ghost windows
                 self.hide_border(handle)?;
@@ -1916,7 +1946,58 @@ impl WindowManager {
                 log::debug!("Showed window: {:?}", handle);
             }
         }
+        // (After the window itself: what belongs to it lies above it.)
+        self.show_owned_windows(handle);
         Ok(())
+    }
+
+    /// Hide what belongs to a window that gevrek hides: the dialogs it has
+    /// open, a palette of it. Windows keeps such a window above its owner
+    /// and minimises it with it, and leaves it on the screen when the
+    /// owner is hidden: a "Save as" would stay behind on a workspace its
+    /// program is not on. They are no windows of gevrek's (`window_kind`),
+    /// so they are remembered here, by the window they went with.
+    fn hide_owned_windows(&self, owner: WindowHandle) {
+        let owned = owned_windows_on_screen(owner.to_hwnd());
+        if owned.is_empty() {
+            return;
+        }
+        let mut hidden = self.hidden_with_owner.borrow_mut();
+        let list = hidden.entry(owner).or_default();
+        for hwnd in owned {
+            let handle = WindowHandle::from_hwnd(hwnd);
+            // SAFETY: posted to the window's own thread; a window that is
+            // gone meanwhile takes no harm.
+            unsafe {
+                let _ = ShowWindowAsync(hwnd, SW_HIDE);
+            }
+            // (In the journal as every window gevrek hides: a gevrek that
+            // ends, in whatever way, shows it again.)
+            super::hidden_journal::record_hidden(handle, false);
+            if !list.contains(&handle) {
+                list.push(handle);
+            }
+        }
+        log::debug!("Hid {} window(s) that belong to {:?}", list.len(), owner);
+    }
+
+    /// Show again what was hidden with a window (`hide_owned_windows`).
+    /// Also when that window is gone: Windows ends a window's dialogs with
+    /// it, and one that is still there is a window of its own again.
+    fn show_owned_windows(&self, owner: WindowHandle) {
+        let Some(owned) = self.hidden_with_owner.borrow_mut().remove(&owner) else {
+            return;
+        };
+        for handle in owned {
+            super::hidden_journal::record_shown(handle);
+            let hwnd = handle.to_hwnd();
+            // SAFETY: plain calls; a window that closed meanwhile is skipped.
+            unsafe {
+                if IsWindow(hwnd).as_bool() {
+                    let _ = ShowWindowAsync(hwnd, SW_SHOWNA);
+                }
+            }
+        }
     }
 
     /// Restore a minimized window to its normal state
@@ -1966,9 +2047,21 @@ impl WindowManager {
             // Remove minimize and maximize box styles
             const WS_MINIMIZEBOX: i32 = 0x00020000;
             const WS_MAXIMIZEBOX: i32 = 0x00010000;
+            const WS_THICKFRAME: i32 = 0x00040000;
+            // (Not from a window without a frame to resize it by: what
+            // kind of window it is is read from these very boxes there
+            // (`window_kind`), and it would be another kind without them.)
+            if style & WS_THICKFRAME == 0 {
+                return Ok(());
+            }
             let new_style = style & !(WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
 
             if new_style != style {
+                *self
+                    .caption_buttons_removed
+                    .borrow_mut()
+                    .entry(handle)
+                    .or_insert(0) |= style & (WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
                 SetWindowLongW(hwnd, GWL_STYLE, new_style);
                 // Force window to redraw its non-client area (title bar)
                 SetWindowPos(
@@ -2001,10 +2094,12 @@ impl WindowManager {
             // Get current window style
             let style = GetWindowLongW(hwnd, GWL_STYLE);
 
-            // Add minimize and maximize box styles back
-            const WS_MINIMIZEBOX: i32 = 0x00020000;
-            const WS_MAXIMIZEBOX: i32 = 0x00010000;
-            let new_style = style | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+            // The boxes gevrek took away, and no other: a window that
+            // never had a box to maximise it by does not get one.
+            let Some(removed) = self.caption_buttons_removed.borrow_mut().remove(&handle) else {
+                return Ok(());
+            };
+            let new_style = style | removed;
 
             if new_style != style {
                 SetWindowLongW(hwnd, GWL_STYLE, new_style);
@@ -2122,6 +2217,22 @@ impl WindowManager {
     ///
     /// This is part of graceful shutdown so applications return to their native
     /// DirectComposition path even if the WM exits during a fade.
+    /// Give every window back what gevrek took from its frame: the boxes
+    /// of its title bar, and the title bar itself. (When gevrek ends:
+    /// they would else stay away until the window's program is started
+    /// again.)
+    pub fn restore_all_window_frames(&mut self) {
+        let without_buttons: Vec<WindowHandle> =
+            self.caption_buttons_removed.borrow().keys().copied().collect();
+        for handle in without_buttons {
+            let _ = self.restore_min_max_buttons(handle);
+        }
+        let without_title: Vec<WindowHandle> = self.title_bar_hidden.keys().copied().collect();
+        for handle in without_title {
+            let _ = self.set_title_bar_visible(handle, true);
+        }
+    }
+
     pub fn restore_all_window_alpha_styles(&mut self) -> usize {
         let handles = self
             .gevrek_layered_windows
@@ -2325,6 +2436,12 @@ impl WindowManager {
         unsafe {
             let hwnd = handle.to_hwnd();
             if IsWindow(hwnd).as_bool() {
+                // A window that waits for a dialog of its own to be answered
+                // takes no input (Windows has it disabled): the keyboard
+                // goes to the dialog, as it does when the window's button
+                // in the taskbar is pressed. Given to the window itself, it
+                // would be with a window that hears nothing.
+                let hwnd = window_to_activate(hwnd);
                 // First bring to front, then give it focus
                 SetWindowPos(
                     hwnd,
@@ -2439,8 +2556,10 @@ impl WindowManager {
             }
             if cloak {
                 super::hidden_journal::record_hidden(handle, result.is_ok());
+                self.hide_owned_windows(handle);
             } else {
                 super::hidden_journal::record_shown(handle);
+                self.show_owned_windows(handle);
             }
 
             // Also handle border visibility
@@ -3475,7 +3594,9 @@ impl WindowManager {
         } = *look;
         // What goes with a window (a dialog) has no border: the border is
         // for a program's own window (`window_kind.rs`).
-        if crate::window_kind::of_window(handle.0) != crate::window_kind::Kind::Ordinary {
+        if crate::window_kind::of_window(handle.to_hwnd().0 as isize)
+            != crate::window_kind::Kind::Ordinary
+        {
             return Ok(());
         }
         // CRITICAL: Never create borders for our own border windows!
@@ -3691,7 +3812,9 @@ impl WindowManager {
         } = *look;
         // What goes with a window (a dialog) has no border: the border is
         // for a program's own window (`window_kind.rs`).
-        if crate::window_kind::of_window(handle.0) != crate::window_kind::Kind::Ordinary {
+        if crate::window_kind::of_window(handle.to_hwnd().0 as isize)
+            != crate::window_kind::Kind::Ordinary
+        {
             return Ok(());
         }
         // CRITICAL: Never create borders for our own border windows!
@@ -5358,6 +5481,79 @@ fn show_window_nonblocking(hwnd: HWND, command: SHOW_WINDOW_CMD) {
 
 struct EnumContext<'a> {
     windows: &'a mut HashMap<WindowHandle, WindowInfo>,
+}
+
+/// The window that takes the keyboard when `hwnd` is to have it: `hwnd`
+/// itself, or, where it is disabled because a dialog of its own waits for
+/// an answer, that dialog.
+fn window_to_activate(hwnd: HWND) -> HWND {
+    use windows::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled;
+    // SAFETY: plain questions about windows that may be gone meanwhile.
+    unsafe {
+        if IsWindowEnabled(hwnd).as_bool() {
+            return hwnd;
+        }
+        let popup = GetLastActivePopup(hwnd);
+        if popup.is_invalid() || popup == hwnd || !IsWindow(popup).as_bool() {
+            return hwnd;
+        }
+        popup
+    }
+}
+
+/// How far up from a window its owners are followed (a dialog's own
+/// dialog's dialog): enough for any program, and an end to a ring of
+/// owners should Windows ever hand one out.
+const OWNER_DEPTH: usize = 8;
+
+/// The top-level windows on the screen that belong to `owner`, directly or
+/// through one another, lowest first. None of gevrek's own.
+fn owned_windows_on_screen(owner: HWND) -> Vec<HWND> {
+    struct Search {
+        owner: HWND,
+        found: Vec<HWND>,
+    }
+    unsafe extern "system" fn each(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let search = &mut *(lparam.0 as *mut Search);
+        // (Most windows belong to none: one question and on to the next.)
+        let Some(mut above) = GetWindow(hwnd, GW_OWNER)
+            .ok()
+            .filter(|above| !above.is_invalid())
+        else {
+            return true.into();
+        };
+        if hwnd == search.owner || !IsWindowVisible(hwnd).as_bool() {
+            return true.into();
+        }
+        for _ in 0..OWNER_DEPTH {
+            if above == search.owner {
+                if !read_window_class(hwnd).starts_with("Gevrek_") {
+                    search.found.push(hwnd);
+                }
+                break;
+            }
+            match GetWindow(above, GW_OWNER) {
+                Ok(next) if !next.is_invalid() => above = next,
+                _ => break,
+            }
+        }
+        true.into()
+    }
+    let mut search = Search {
+        owner,
+        found: Vec::new(),
+    };
+    // SAFETY: the callback runs before the call returns and gets a pointer
+    // to `search`, which outlives it.
+    unsafe {
+        if !IsWindow(owner).as_bool() {
+            return Vec::new();
+        }
+        let _ = EnumWindows(Some(each), LPARAM(&mut search as *mut Search as isize));
+    }
+    // (EnumWindows goes from the top down.)
+    search.found.reverse();
+    search.found
 }
 
 /// Whether the panel of this instance's shell (`gevrek-shell`) is on the

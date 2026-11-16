@@ -238,6 +238,11 @@ pub struct Studio {
     /// was made from.
     base: Option<(u64, Value)>,
     graph: crate::graph::GraphPage,
+    /// The file that was to be opened is there and could not be read (it
+    /// does not parse, or is not valid): what is shown is gevrek's
+    /// defaults, and saving them over the file would lose it. While this
+    /// is set nothing is saved.
+    file_problem: Option<String>,
 }
 
 /// Where the schema describes a command.
@@ -246,6 +251,7 @@ const COMMAND: &str = "/desktop/bindings/0/command";
 impl Studio {
     pub fn new(context: &egui::Context, options: Options) -> Self {
         let wake = context.clone();
+        let mut file_problem = None;
         let (link, file, address, document) = match options.source {
             Source::WindowManager(address) => (
                 Link::start(address.clone(), move || wake.request_repaint()),
@@ -259,6 +265,11 @@ impl Studio {
                         "{}: {error}; starting from gevrek's defaults",
                         path.display()
                     );
+                    // (A file that is not there yet is made by the first
+                    // save; one that is there is not written over.)
+                    if path.exists() {
+                        file_problem = Some(format!("{}: {error}", path.display()));
+                    }
                     Config::default()
                 });
                 (
@@ -271,6 +282,7 @@ impl Studio {
         };
         let generation = document.generation();
         Self {
+            file_problem,
             link,
             file,
             address,
@@ -604,13 +616,20 @@ impl Studio {
 
     fn can_apply(&self) -> bool {
         let conflict = self.session.as_ref().is_some_and(Session::has_conflict);
-        self.document.config().is_some() && !self.applying && !conflict && self.dirty()
+        self.document.config().is_some()
+            && !self.applying
+            && !conflict
+            && self.dirty()
+            && self.file_problem.is_none()
     }
 
     fn apply(&mut self) {
         let Some(config) = self.document.config().cloned() else {
             return;
         };
+        if self.file_problem.is_some() {
+            return;
+        }
         if let Some(path) = self.file.clone() {
             match config.save(&path) {
                 Ok(()) => {
@@ -1090,6 +1109,13 @@ impl Studio {
     }
 
     fn banners(&mut self, ui: &mut Ui, palette: &Palette) {
+        if let Some(problem) = &self.file_problem {
+            banner(ui, palette.error, icons::WARNING, |ui| {
+                ui.label(format!(
+                    "The file could not be read, and what is shown here is gevrek's defaults. Nothing is saved, so that the file is not written over. Put the file right and open it again. ({problem})"
+                ));
+            });
+        }
         if let Some(until) = self.trial {
             let left = until.saturating_duration_since(Instant::now());
             if left.is_zero() {

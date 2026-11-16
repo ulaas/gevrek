@@ -871,6 +871,17 @@ impl Outputs {
         let Some(workspace) = workspaces.remove_at(index) else {
             return false;
         };
+        // The workspace that was visited before: none if it was this one,
+        // one place earlier if it came after it.
+        match self.previous_workspace.get(&monitor).copied() {
+            Some(previous) if previous == index => {
+                self.previous_workspace.remove(&monitor);
+            }
+            Some(previous) if previous > index => {
+                self.previous_workspace.insert(monitor, previous - 1);
+            }
+            _ => {}
+        }
         log::info!(
             "Removed inactive empty workspace '{}' from monitor {:?}",
             workspace.name,

@@ -177,6 +177,39 @@ impl Outputs {
         let reserved = self.reserved_areas.remove(&handle);
         let previous_workspace = self.previous_workspace.remove(&handle);
 
+        // Where the windows go: the workspace the primary display shows.
+        // A display that takes the only one's place has none yet (it is
+        // given its workspaces after this): it gets the ring of the one
+        // that went, windows and all, instead of the windows being taken
+        // out of their workspaces and put nowhere.
+        let host_ready = self.primary_monitor.is_some_and(|primary| {
+            self.workspaces
+                .get(&primary)
+                .is_some_and(|workspaces| workspaces.focused().is_some())
+        });
+        if !host_ready {
+            if let Some(primary) = self.primary_monitor.filter(|primary| *primary != handle) {
+                if self
+                    .workspaces
+                    .get(&primary)
+                    .is_none_or(|workspaces| workspaces.is_empty())
+                    && !ring.is_empty()
+                {
+                    log::info!(
+                        "Monitor {key} detached with no other workspace to take its windows: its workspaces go to the primary monitor"
+                    );
+                    self.workspaces.insert(primary, ring);
+                    if let Some(reserved) = reserved {
+                        self.reserved_areas.entry(primary).or_insert(reserved);
+                    }
+                    if let Some(previous) = previous_workspace {
+                        self.previous_workspace.insert(primary, previous);
+                    }
+                    return;
+                }
+            }
+        }
+
         let mut evacuated = Vec::new();
         for (workspace_index, workspace) in ring.iter_mut().enumerate() {
             for window in workspace.all_windows() {

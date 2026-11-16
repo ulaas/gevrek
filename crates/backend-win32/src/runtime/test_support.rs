@@ -59,14 +59,17 @@ impl TestWindow {
     pub(crate) fn create() -> Self {
         shares_the_journal();
         use windows::Win32::UI::WindowsAndMessaging::{
-            CreateWindowExW, WINDOW_EX_STYLE, WINDOW_STYLE,
+            CreateWindowExW, WINDOW_EX_STYLE, WS_OVERLAPPEDWINDOW,
         };
         let hwnd = unsafe {
             CreateWindowExW(
                 WINDOW_EX_STYLE::default(),
                 windows::core::w!("STATIC"),
                 windows::core::w!("gevrek reload test"),
-                WINDOW_STYLE::default(),
+                // A program's own window, as Windows makes one: with a
+                // title bar alone it would be a dialog, which floats
+                // (`window_kind`).
+                WS_OVERLAPPEDWINDOW,
                 0,
                 0,
                 10,
@@ -144,6 +147,7 @@ pub(crate) fn test_runtime(config: Config) -> ManuallyDrop<Runtime> {
         published_monitors: Vec::new(),
         gesture_progress_updated: None,
         display_change_pending: None,
+        held_openings: Default::default(),
         config_publisher: None,
         config_dirty: false,
         notices: Vec::new(),

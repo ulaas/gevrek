@@ -47,10 +47,22 @@ impl SessionLockHandler for State {
         gevrek_host::lock::set(true);
         self.lock_surfaces.clear();
         // Nothing of the session has the keyboard or the pointer any more.
-        if let Some(keyboard) = self.seat.get_keyboard() {
-            keyboard.set_focus(self, None, smithay::utils::SERIAL_COUNTER.next_serial());
+        // A menu that is open, or an X11 program that holds the keyboard,
+        // has them by a grab, and a grab keeps what is typed from going
+        // anywhere else: with one alive the password typed at the lock
+        // screen would go to that program. So the grabs end first.
+        let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+        if let Some(mut grab) = self.popup_grab.take() {
+            grab.ungrab(smithay::desktop::PopupUngrabStrategy::All);
         }
-        self.popup_grab = None;
+        self.x11_key_grab = None;
+        if let Some(pointer) = self.seat.get_pointer() {
+            pointer.unset_grab(self, serial, 0);
+        }
+        if let Some(keyboard) = self.seat.get_keyboard() {
+            keyboard.unset_grab(self);
+            keyboard.set_focus(self, None, serial);
+        }
         self.drag = None;
         self.desktop.needs_redraw = true;
         // From the next frame on only lock surfaces are drawn.

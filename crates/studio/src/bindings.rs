@@ -300,7 +300,11 @@ impl BindingsPage {
             return wish;
         };
         let place = format!("{LIST}/{index}");
-        let binding = bindings[index].clone();
+        // (A binding made in this very pass is in the document and not in
+        // the list this pass drew from: it is shown from the next one on.)
+        let Some(binding) = bindings.get(index).cloned() else {
+            return wish;
+        };
         let mut remove = false;
         let mut copy = false;
         widgets::card(ui, binding["name"].as_str().unwrap_or("Binding"), |ui| {

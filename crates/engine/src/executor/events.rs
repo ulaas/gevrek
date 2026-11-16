@@ -18,7 +18,11 @@ impl Executor {
         // TILING WM: Prevent maximize for tiled windows
         // Check if window became maximized and revert it immediately
         if queries(window_manager).is_maximized(handle) {
-            let is_floating = monitor_manager.is_window_floating(handle);
+            // (Only a window that has a tile: one in no workspace at all,
+            // a scratchpad or one gevrek leaves alone, is as free to be
+            // maximised as a floating one.)
+            let is_floating = monitor_manager.is_window_floating(handle)
+                || monitor_manager.find_window(handle).is_none();
             if !is_floating {
                 log::info!("🗖 Tiled window maximize detected - unmaximizing immediately");
                 effect(
@@ -130,6 +134,35 @@ impl Executor {
     /// on hidden workspaces, hidden group tabs, and hidden scratchpads are
     /// alive and must keep their tracking state.
     pub fn cleanup_stale_tracking(&mut self, window_manager: &dyn Desktop) {
+        self.cleanup_stale_tracking_in(window_manager);
+    }
+
+    /// As `cleanup_stale_tracking`, and a window that is gone also leaves
+    /// its workspace (its end was never told: without this its tile stays
+    /// empty until the configuration is next read), which is laid out
+    /// again.
+    pub fn cleanup_stale_members(
+        &mut self,
+        window_manager: &dyn Desktop,
+        monitor_manager: &mut MonitorManager,
+        zone_manager: &mut ZoneManager,
+    ) {
+        let gone: Vec<WindowHandle> = crate::reload::managed_windows(monitor_manager)
+            .into_iter()
+            .filter(|window| !queries(window_manager).exists(*window))
+            .collect();
+        for window in gone {
+            if let Some((output, _)) = monitor_manager.find_and_remove_window(window) {
+                log::info!("{window:?} is gone without its end being told: it leaves its workspace");
+                self.mark_layout_dirty(output);
+            }
+            zone_manager.remove_window(window);
+            self.rule_metadata.forget(window);
+        }
+        self.cleanup_stale_tracking_in(window_manager);
+    }
+
+    fn cleanup_stale_tracking_in(&mut self, window_manager: &dyn Desktop) {
         // Liveness of every tracked window, not only adopted ones: a dead
         // handle's state must not carry over to a new window that reuses it.
         let stale_known: Vec<WindowHandle> = self
@@ -527,6 +560,15 @@ impl Executor {
         focus_manager: &mut FocusManager,
         handle: WindowHandle,
     ) -> Result<()> {
+        // A window that is gone by the time its opening is told (it was
+        // shown for a moment, or the telling was held back) is no window
+        // to take: every question about it would be answered with nothing,
+        // and nothing reads as a window like any other.
+        if !queries(window_manager).exists(handle) {
+            log::debug!("{handle:?} is gone before it was told of as opened");
+            return Ok(());
+        }
+
         // CRITICAL: Skip events for windows that should be ignored (like Gevrek's own windows)
         if queries(window_manager).ignored_by_rules(handle) {
             log::debug!("Skipping OnWindowCreated event for excluded window");
@@ -565,8 +607,13 @@ impl Executor {
         self.apply_initial_window_rules(window_manager, monitor_manager, handle)?;
         self.arm_initial_focus_suppression(window_manager, monitor_manager, focus_manager, handle)?;
         self.adopt_pending_scratchpad(window_manager, monitor_manager, handle)?;
-        if !self.scratchpads.is_scratchpad_window(handle) {
-            self.adopt_new_window(window_manager, monitor_manager, handle)?;
+        if !self.scratchpads.is_scratchpad_window(handle)
+            && self.adopt_new_window(window_manager, monitor_manager, handle)?
+        {
+            // The rules were applied above, before the window was in a
+            // workspace: what they say of a workspace (move it to
+            // another) had nothing to act on then. Now it has.
+            self.apply_initial_window_rules(window_manager, monitor_manager, handle)?;
         }
         // Started by `flush_pending_layouts`, once the window is tiled.
         self.pending_window_enters.push(handle);
@@ -674,14 +721,12 @@ impl Executor {
                 "✅ Window {:?} removed from workspace, reapplying layout",
                 handle
             );
-            let Some(work_area) =
-                monitor_manager.get_adjusted_work_area(monitor_handle, window_manager)
-            else {
-                return Ok(());
-            };
+            let work_area = monitor_manager.get_adjusted_work_area(monitor_handle, window_manager);
             // The flush only lays out the focused workspace, so a
-            // hidden one is laid out here.
-            if let Removal::Hidden { workspace, .. } = removal {
+            // hidden one is laid out here. (An output without a work area,
+            // one that has just gone, is laid out by nobody; the graph is
+            // told of the window's end all the same.)
+            if let (Removal::Hidden { workspace, .. }, Some(work_area)) = (removal, work_area) {
                 if let Some(workspace) = monitor_manager
                     .get_workspaces_mut(monitor_handle)
                     .and_then(|workspaces| workspaces.get_mut(workspace))
@@ -1180,6 +1225,13 @@ impl Executor {
         handle: WindowHandle,
     ) -> Result<()> {
         log::info!("🎯 DRAG ENDED - User released window");
+
+        // In the overview the windows lie where the overview put them:
+        // a drag there ends without the workspace being laid out as tiles.
+        if self.is_in_expose(monitor_manager, handle) {
+            self.window_state.get_mut(handle).drag = None;
+            return Ok(());
+        }
 
         if let Some(drag_state) = self.window_state.get_mut(handle).drag.take() {
             // EARLY EXIT: Floating and unmanaged windows just stay where the user dropped them.

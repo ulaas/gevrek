@@ -26,6 +26,18 @@ pub enum WorkspaceSelector {
 }
 
 impl WorkspaceSelector {
+    /// A workspace has another name: a selector that named it by the old
+    /// one names it by the new. Returns whether it did.
+    pub fn follow_rename(&mut self, old: &str, new: &str) -> bool {
+        match self {
+            Self::Name(name) if name.trim().eq_ignore_ascii_case(old.trim()) => {
+                *name = new.trim().to_string();
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub fn expression(&self) -> String {
         match self {
             Self::Index(index) => index.to_string(),
@@ -35,6 +47,27 @@ impl WorkspaceSelector {
             Self::PreviousVisited => "back".to_string(),
             Self::FirstEmpty => "empty".to_string(),
             Self::Relative(offset) => format!("{offset:+}"),
+        }
+    }
+}
+
+impl DispatchCommand {
+    /// A workspace has another name: the command goes on meaning the same
+    /// workspace (a key that showed workspace `1` shows it under its new
+    /// name). Returns whether the command named it.
+    pub fn follow_workspace_rename(&mut self, old: &str, new: &str) -> bool {
+        match self {
+            Self::SwitchWorkspaceSelector { selector }
+            | Self::MoveToWorkspaceSelector { selector }
+            | Self::MoveToWorkspaceAndFollow { selector }
+            | Self::RenameWorkspace { selector, .. }
+            | Self::ToggleWorkspaceTiling { selector }
+            | Self::ToggleWorkspaceWindowContainerBehaviour { selector }
+            | Self::ToggleWorkspaceFloatOverride { selector } => selector.follow_rename(old, new),
+            Self::MoveWindowToWorkspace { workspace, .. }
+            | Self::MoveWindowToWorkspaceAndFollow { workspace, .. }
+            | Self::FocusMonitorWorkspace { workspace, .. } => workspace.follow_rename(old, new),
+            _ => false,
         }
     }
 }

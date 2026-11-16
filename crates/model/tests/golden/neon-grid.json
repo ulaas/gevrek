@@ -2875,6 +2875,7 @@
         ],
         "title_width": 260,
         "task_width": 150,
+        "tasks_of_all_workspaces": false,
         "clock_format": "%a %d %b  %H:%M",
         "older_tray_icons": true,
         "displays": []

@@ -81,6 +81,8 @@ impl Executor {
                         "Skipping pending layout flush for monitor {:?} (expose active)",
                         monitor_handle
                     );
+                    // (Still to be done: laid out when the overview is left.)
+                    self.pending_layout_monitors.insert(monitor_handle);
                     continue;
                 }
                 // Show before layout: a removal (close, minimize, app hide)
@@ -600,6 +602,29 @@ impl Executor {
     ) -> Result<()> {
         log::info!("🔄 Re-tiling window on monitor {:?}", monitor_handle);
 
+        // A window that already has its tile on this output's workspace
+        // on screen (it was dragged and let go where it was, or resized)
+        // stays in it: taken out and put back, it left its group of tabs,
+        // the next tab stayed hidden, and the workspace forgot the shares
+        // its windows had been given. The workspace is laid out as it is.
+        let stays = monitor_manager
+            .get_focused_workspace(monitor_handle)
+            .is_some_and(|workspace| workspace.find_container(handle).is_some());
+        if stays {
+            if let Some(work_area) =
+                monitor_manager.get_adjusted_work_area(monitor_handle, window_manager)
+            {
+                if let Some(workspace) = monitor_manager.get_focused_workspace_mut(monitor_handle) {
+                    self.suppressed_windows.insert(handle);
+                    let laid_out =
+                        self.apply_workspace_layout_and_position(workspace, work_area, window_manager);
+                    self.suppressed_windows.remove(&handle);
+                    return laid_out;
+                }
+            }
+            return Ok(());
+        }
+
         // Add to suppression list to prevent event loops
         self.suppressed_windows.insert(handle);
 
@@ -632,6 +657,9 @@ impl Executor {
             // CRITICAL: Only retile if we removed a TILED window
             // Floating windows don't affect tiling layout
             if !was_floating {
+                // (Also shown again: the tab that takes the place of the
+                // window that left its group.)
+                self.mark_layout_dirty(old_monitor);
                 // Retile the old workspace to fill the gap
                 let old_work_area = if let Some(area) =
                     monitor_manager.get_adjusted_work_area(old_monitor, window_manager)

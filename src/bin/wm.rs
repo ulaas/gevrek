@@ -83,6 +83,26 @@ mod windows_main {
         let (manual_command_sender, manual_command_receiver) = std::sync::mpsc::channel();
         let stop_flag = Arc::new(Mutex::new(false));
         gevrek_win32::runtime::process_guard::install(Arc::clone(&stop_flag));
+        // Another gevrek-wm of this instance that is running has its
+        // windows hidden on purpose: this one must not show them (the
+        // journal is the same file) before it finds out, further down,
+        // that the place is taken.
+        if let gevrek_protocol::Endpoint::Local(instance) =
+            gevrek_protocol::Endpoint::parse(&args.address)
+        {
+            let pipe = gevrek_protocol::endpoint::pipe_name(&instance);
+            // (Busy counts as there: 231 is ERROR_PIPE_BUSY.)
+            let answered = match tokio::net::windows::named_pipe::ClientOptions::new().open(&pipe)
+            {
+                Ok(_) => true,
+                Err(error) => error.raw_os_error() == Some(231),
+            };
+            if answered {
+                anyhow::bail!(
+                    "another gevrek already answers on {pipe}; stop it first (`gevrek stop`)"
+                );
+            }
+        }
         // Unhide anything a crashed or killed previous instance left hidden,
         // before the runtime enumerates windows so they get adopted again.
         if let Some(journal_path) = gevrek_win32::dwm::hidden_journal::default_path() {

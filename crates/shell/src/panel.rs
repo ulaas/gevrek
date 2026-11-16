@@ -44,6 +44,8 @@ pub struct Task {
     pub icon: String,
     /// It is the one its workspace gives the keyboard to.
     pub focused: bool,
+    /// Its workspace is the one the display shows.
+    pub shown: bool,
 }
 
 /// What a window's picture is looked for by. The picture its program
@@ -198,6 +200,9 @@ pub struct View {
     /// The windows of the shown workspace, in the order the state has
     /// them (the taskbar's buttons).
     pub tasks: Vec<Task>,
+    /// The windows of every workspace of the display, workspace by
+    /// workspace (the taskbar's buttons where it is set to show all).
+    pub all_tasks: Vec<Task>,
 }
 
 /// Something the window manager has to tell its user.
@@ -272,6 +277,84 @@ pub fn switch_keyboard_layout(next: bool) -> String {
         .to_string()
 }
 
+/// The windows of one workspace of the state, as the taskbar's buttons.
+fn tasks_of(workspace: &Value, shown: bool) -> Vec<Task> {
+    workspace["detailed_windows"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|window| !window["is_border_window"].as_bool().unwrap_or(false))
+        .filter_map(|window| {
+            let said = |key: &str| window[key].as_str().unwrap_or_default();
+            Some(Task {
+                id: window["window_id"].as_u64()?,
+                title: window["title"].as_str().unwrap_or_default().to_string(),
+                class: window["class"].as_str().unwrap_or_default().to_string(),
+                icon: task_icon(said("icon"), said("app_id"), said("class"), said("exe")),
+                focused: window["is_focused"].as_bool().unwrap_or(false),
+                shown,
+            })
+        })
+        .collect()
+}
+
+/// The command that gives a workspace another name. By the name it has:
+/// a workspace that every display has is renamed on all of them.
+pub fn rename_workspace(old: &str, new: &str) -> String {
+    use gevrek_model::command::{DispatchCommand, WorkspaceSelector};
+    serde_json::to_string(&DispatchCommand::RenameWorkspace {
+        selector: WorkspaceSelector::Name(old.to_string()),
+        name: new.trim().to_string(),
+    })
+    .unwrap_or_default()
+}
+
+/// How large the box is that asks for a workspace's new name.
+pub const RENAME_SIZE: (u32, u32) = (340, 132);
+
+/// The box that asks for a workspace's new name. `Some(true)`: Enter was
+/// pressed on a name; `Some(false)`: it is to be put away.
+pub fn rename_box(
+    ui: &mut egui::Ui,
+    palette: &theme::Palette,
+    old: &str,
+    name: &mut String,
+    problem: &str,
+) -> Option<bool> {
+    let mut answer = None;
+    egui::Frame::new()
+        .fill(palette.surface)
+        .corner_radius(12)
+        .inner_margin(16)
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(format!("Rename workspace \u{201c}{old}\u{201d}"))
+                    .size(14.0)
+                    .color(palette.text),
+            );
+            ui.add_space(8.0);
+            let field = ui.add(
+                egui::TextEdit::singleline(name)
+                    .desired_width(f32::INFINITY)
+                    .hint_text("Its new name"),
+            );
+            if !field.has_focus() && !field.lost_focus() {
+                field.request_focus();
+            }
+            if field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                answer = Some(!name.trim().is_empty());
+            }
+            ui.add_space(6.0);
+            let words = if problem.is_empty() {
+                "Enter keeps it, Escape leaves it as it is."
+            } else {
+                problem
+            };
+            ui.label(egui::RichText::new(words).size(12.0).color(palette.muted));
+        });
+    answer
+}
+
 /// What the panel of this display of the state shows.
 pub fn view_of(monitor: &Value) -> View {
     let shown_id = &monitor["workspace"]["id"];
@@ -292,6 +375,7 @@ pub fn view_of(monitor: &Value) -> View {
             shown,
             windows: listed.max(counted),
         });
+        found.all_tasks.extend(tasks_of(workspace, shown));
         if shown {
             found.layout = workspace["layout_type"].as_str().unwrap_or("").to_string();
             found.floating = workspace["tiling_enabled"].as_bool() == Some(false);
@@ -303,22 +387,7 @@ pub fn view_of(monitor: &Value) -> View {
                     .and_then(|window| window["title"].as_str())
                     .map(str::to_string)
             };
-            found.tasks = workspace["detailed_windows"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|window| !window["is_border_window"].as_bool().unwrap_or(false))
-                .filter_map(|window| {
-                    let said = |key: &str| window[key].as_str().unwrap_or_default();
-                    Some(Task {
-                        id: window["window_id"].as_u64()?,
-                        title: window["title"].as_str().unwrap_or_default().to_string(),
-                        class: window["class"].as_str().unwrap_or_default().to_string(),
-                        icon: task_icon(said("icon"), said("app_id"), said("class"), said("exe")),
-                        focused: window["is_focused"].as_bool().unwrap_or(false),
-                    })
-                })
-                .collect();
+            found.tasks = tasks_of(workspace, true);
             found.title = focused_of(&workspace["detailed_windows"])
                 .or_else(|| focused_of(&workspace["windows"]))
                 .unwrap_or_default();
@@ -1037,6 +1106,12 @@ pub struct Asked {
     pub show: Option<usize>,
     /// Go to this window (a button of the taskbar).
     pub go: Option<u64>,
+    /// Give this workspace (its place among the tabs) another name: the
+    /// other button was pressed on its tab.
+    pub rename: Option<usize>,
+    /// The taskbar's own button was pressed: show the windows of every
+    /// workspace (true), or of the shown one only.
+    pub all_tasks: Option<bool>,
     /// The layout was pressed: open, or put away, the menu of layouts
     /// next to this rectangle.
     pub layout_menu: Option<egui::Rect>,
@@ -1960,8 +2035,23 @@ fn draw_module(
                     .fill(fill)
                     .corner_radius(10)
                     .min_size(egui::vec2(30.0, tall));
-                if ui.add(button).clicked() && !tab.shown {
+                // (The box that asks for a new name is there on Windows
+                // only so far.)
+                let renames = cfg!(target_os = "windows");
+                let response = ui.add(button);
+                let response = if renames {
+                    response.hint(format!(
+                        "Workspace {}. The other button renames it.",
+                        tab.name
+                    ))
+                } else {
+                    response
+                };
+                if response.clicked() && !tab.shown {
                     asked.show = Some(index);
+                }
+                if renames && response.secondary_clicked() {
+                    asked.rename = Some(index);
                 }
             }
         }
@@ -2246,20 +2336,46 @@ fn draw_module(
             }
         }
         PanelModule::Taskbar => {
+            // Whose windows it has: every workspace's, or the shown
+            // one's. Its own small button says which, and changes it.
+            let all = bar.tasks_of_all_workspaces;
+            let tasks = if all { &view.all_tasks } else { &view.tasks };
+            let sign = if all { icons::STACK } else { icons::SQUARE };
+            let scope = egui::Button::new(
+                egui::RichText::new(sign)
+                    .size(14.0)
+                    .color(if all { accent } else { text.gamma_multiply(0.6) }),
+            )
+            .fill(egui::Color32::TRANSPARENT)
+            .corner_radius(8)
+            .min_size(egui::vec2(22.0, tall));
+            if ui
+                .add(scope)
+                .hint(if all {
+                    "The windows of every workspace. A press shows this workspace's only."
+                } else {
+                    "The windows of this workspace. A press shows every workspace's."
+                })
+                .clicked()
+            {
+                asked.all_tasks = Some(!all);
+            }
             // As wide as the setting says, or narrower when the buttons
             // of all the windows would not fit beside each other.
-            let task_wide = if bar.task_width == 0 || view.tasks.is_empty() {
+            let task_wide = if bar.task_width == 0 || tasks.is_empty() {
                 0.0
             } else {
-                let count = view.tasks.len() as f32;
+                let count = tasks.len() as f32;
                 let room =
                     (ui.available_width() - ui.spacing().item_spacing.x * (count - 1.0)) / count;
                 (bar.task_width as f32).min(room.max(36.0))
             };
-            for task in &view.tasks {
+            for task in tasks {
                 // The one with the keyboard stands out, as the shown
                 // workspace does among the tabs, more quietly.
-                let has_keys = task.focused && view.focused;
+                let has_keys = task.focused && task.shown && view.focused;
+                // (One on a workspace that is not shown reads fainter.)
+                let text = if task.shown { text } else { text.gamma_multiply(0.6) };
                 let (fill, ink) = if has_keys {
                     (accent.gamma_multiply(0.28), text)
                 } else {
@@ -2555,6 +2671,7 @@ mod tests {
             class: String::new(),
             icon: String::new(),
             focused: false,
+            shown: true,
         };
         let label = task_label(&long);
         // (Cut at 24 letters; a space the cut ends on is left out.)

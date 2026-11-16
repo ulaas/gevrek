@@ -724,6 +724,9 @@ impl Config {
     /// `crate::migrate`). Every place that takes a configuration from a
     /// file or from another program goes through here.
     pub fn from_json(text: &str) -> serde_json::Result<Self> {
+        // (A mark of the byte order at the start, as some editors on
+        // Windows put before UTF-8, is no part of the text.)
+        let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         let mut value: serde_json::Value = serde_json::from_str(text)?;
         crate::migrate::migrate(&mut value);
         serde_json::from_value(value)

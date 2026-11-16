@@ -2053,6 +2053,12 @@ impl XdgShellHandler for State {
         let Some(seat) = Seat::<Self>::from_resource(&seat) else {
             return;
         };
+        // While the session is locked no program takes the keyboard by
+        // a menu of its own: what is typed then is a password.
+        if self.locked {
+            surface.send_popup_done();
+            return;
+        }
         let popup = PopupKind::Xdg(surface);
         let Ok(root) = find_popup_root_surface(&popup) else {
             return;

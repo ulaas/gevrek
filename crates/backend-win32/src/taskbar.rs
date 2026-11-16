@@ -20,7 +20,7 @@
 
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetWindowRect, IsWindowVisible, ShowWindow, SW_HIDE,
+    EnumWindows, GetClassNameW, GetWindowRect, IsWindowVisible, ShowWindowAsync, SW_HIDE,
     SW_SHOWNOACTIVATE,
 };
 
@@ -113,7 +113,9 @@ fn note() -> std::path::PathBuf {
 fn show(window: isize, shown: bool) {
     // SAFETY: a window that is gone is no window; nothing happens.
     unsafe {
-        let _ = ShowWindow(
+        // (Posted: the taskbar is another program's window, and a
+        // program that hangs is not waited for.)
+        let _ = ShowWindowAsync(
             HWND(window as *mut _),
             if shown { SW_SHOWNOACTIVATE } else { SW_HIDE },
         );

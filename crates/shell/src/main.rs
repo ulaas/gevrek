@@ -1374,6 +1374,19 @@ mod linux {
                     .to_string(),
             ));
         }
+        // The taskbar's own button: whose windows it has. Kept in the
+        // configuration, so it is the same after gevrek is started again.
+        if let Some(all) = asked.all_tasks {
+            if let Some((config, revision)) = state.running.clone() {
+                let mut changed = config;
+                changed.desktop.shell.panel.tasks_of_all_workspaces = all;
+                state.link.send(Request::Apply {
+                    config: Box::new(changed),
+                    base_revision: revision,
+                    client_id: "gevrek-shell".to_string(),
+                });
+            }
+        }
         // By the display and the workspace's place on it, not by its
         // name: two displays may each have a workspace of one name, and a
         // name would be looked for on the display with the keyboard first.
