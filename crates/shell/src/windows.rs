@@ -855,7 +855,6 @@ fn toggle_centre(state: &Rc<RefCell<State>>, control: &mut Control) {
     };
     let shared = Rc::clone(state);
     let mut fonts = false;
-    let mut had_keyboard = false;
     let mut said = String::new();
     let draw = move |ui: &mut egui::Ui, control: &mut Control| {
         let context = ui.ctx().clone();
@@ -901,9 +900,10 @@ fn toggle_centre(state: &Rc<RefCell<State>>, control: &mut Control) {
             }
         }
         // (A press on a window or the desktop puts it away, whether or
-        // not it ever had the keyboard.)
+        // not it ever had the keyboard. Losing the keyboard does not, as
+        // with the control centre: `toggle_control` says why.)
         let elsewhere = state.centre.is_some_and(|own| control.pressed_outside(own));
-        if escape || asked.close || elsewhere || lost_keyboard(&context, &mut had_keyboard) {
+        if escape || asked.close || elsewhere {
             state.centre = None;
             return Flow::Close;
         }
@@ -1459,7 +1459,18 @@ fn shell_action(
 /// Open the control centre, or close it when it is open: the sound and
 /// where it plays, the brightness, do not disturb, the night light, the
 /// keys for what plays, the lock and the power menu. It has the keyboard
-/// while it is open (Escape puts it away, and so does a press elsewhere).
+/// once something in it is pressed (Escape puts it away then); a press
+/// elsewhere puts it away at any time.
+///
+/// Losing the keyboard does not put it away, unlike the surfaces that are
+/// there for the keyboard. It stands beside the windows and can be given
+/// the keyboard without being pressed: when the window in front steps
+/// aside, even for a moment, Windows activates the next window that may
+/// be activated, and that is this one, the topmost. A window that then
+/// takes the keyboard back (a TeamViewer session in front, 2026-11-15)
+/// closed it within half a second, with nothing pressed. A press elsewhere
+/// is heard by itself (`Control::pressed_outside`). The notification
+/// centre is the same.
 ///
 /// What Linux has there and Windows not: what is playing by its name (the
 /// keys for it are there), the power profiles, bluetooth, and a recording
@@ -1490,7 +1501,6 @@ fn toggle_control(state: &Rc<RefCell<State>>, control: &mut Control) {
     };
     let shared = Rc::clone(state);
     let mut fonts = false;
-    let mut had_keyboard = false;
     let mut read_at = Instant::now();
     let id = control.open(place, move |ui, control| {
         let context = ui.ctx().clone();
@@ -1538,12 +1548,13 @@ fn toggle_control(state: &Rc<RefCell<State>>, control: &mut Control) {
             let mut asked =
                 crate::control::draw(ui, &palette, &facts, held, &crate::frost::Look::plain());
             // (A press on a window or the desktop puts it away, whether
-            // or not it ever had the keyboard.)
+            // or not it ever had the keyboard. Losing the keyboard does
+            // not: see above.)
             let elsewhere = state
                 .control_centre
                 .as_ref()
                 .is_some_and(|(own, ..)| control.pressed_outside(*own));
-            if escape || elsewhere || lost_keyboard(&context, &mut had_keyboard) {
+            if escape || elsewhere {
                 asked.push(crate::control::Ask::Close);
             }
             asked
