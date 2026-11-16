@@ -1230,7 +1230,9 @@ impl Runtime {
                 );
                 if let crate::dwm::WindowEvent::Created(handle) = event {
                     self.apply_appearance_to_window(handle);
-                    if self.transitions_off {
+                    // (Of gevrek's own windows only: a menu keeps the way
+                    // its program lets it appear.)
+                    if self.transitions_off && !self.window_manager.should_ignore_window(handle) {
                         self.window_manager.set_system_transitions(handle, true);
                     }
                 }

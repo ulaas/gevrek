@@ -52,6 +52,15 @@ impl WmCore {
         if desktop.is_decoration(id) {
             return;
         }
+        // Only a window that is gevrek's has gevrek's look. This is asked
+        // for every window that appears, and every menu, tooltip and
+        // flyout is one: given round corners, a menu (whose window is
+        // larger than what is seen of it, for its shadow) had the frame
+        // Windows draws around a rounded window, a thin line well outside
+        // the menu itself; and a backdrop, and gevrek's opacity.
+        if desktop.ignored_by_rules(id) {
+            return;
+        }
         try_effect(
             desktop,
             "backdrop",
@@ -128,7 +137,9 @@ impl WmCore {
             .windows()
             .iter()
             .map(|window| window.handle)
-            .filter(|handle| !desktop.is_decoration(*handle))
+            // (Gevrek's own windows only: one that a rule says to leave
+            // alone is not made fainter for not having the keyboard.)
+            .filter(|handle| !desktop.is_decoration(*handle) && !desktop.ignored_by_rules(*handle))
             .collect();
 
         for handle in handles {
