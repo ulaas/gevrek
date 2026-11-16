@@ -95,7 +95,7 @@ jobs:
       - name: Libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libwayland-dev libxkbcommon-dev libegl1-mesa-dev libgles2-mesa-dev libudev-dev libinput-dev libgbm-dev libseat-dev libdrm-dev libpam0g-dev libpipewire-0.3-dev clang dpkg-dev
+          sudo apt-get install -y pkg-config libwayland-dev libxkbcommon-dev libegl1-mesa-dev libgles2-mesa-dev libudev-dev libinput-dev libgbm-dev libseat-dev libdrm-dev libpam0g-dev libpipewire-0.3-dev libpixman-1-dev clang dpkg-dev
 
       - name: Build and pack
         run: cargo xtask dist tar deb
@@ -130,7 +130,7 @@ jobs:
     steps:
       - name: Tools and libraries
         run: |
-          dnf install -y git curl tar gzip gcc gcc-c++ make pkgconf-pkg-config wayland-devel libxkbcommon-devel mesa-libEGL-devel libglvnd-devel systemd-devel libinput-devel mesa-libgbm-devel libseat-devel libdrm-devel pam-devel pipewire-devel clang rpm-build systemd-rpm-macros
+          dnf install -y git curl tar gzip gcc gcc-c++ make pkgconf-pkg-config wayland-devel libxkbcommon-devel mesa-libEGL-devel libglvnd-devel systemd-devel libinput-devel mesa-libgbm-devel libseat-devel libdrm-devel pam-devel pipewire-devel pixman-devel clang rpm-build systemd-rpm-macros
       - uses: actions/checkout@v4
         with:
           persist-credentials: false

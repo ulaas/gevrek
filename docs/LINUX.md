@@ -15,11 +15,11 @@ done in that virtual machine, written for a real one.
 # Fedora:
 sudo dnf install gcc pkgconf-pkg-config wayland-devel libxkbcommon-devel mesa-libEGL-devel \
     libglvnd-devel systemd-devel libinput-devel mesa-libgbm-devel libseat-devel libdrm-devel \
-    pam-devel pipewire-devel clang
+    pam-devel pipewire-devel pixman-devel clang
 # Ubuntu:
 sudo apt-get install -y build-essential pkg-config libwayland-dev libxkbcommon-dev \
     libegl1-mesa-dev libgles2-mesa-dev libudev-dev libinput-dev libgbm-dev libseat-dev libdrm-dev libpam0g-dev \
-    libpipewire-0.3-dev clang
+    libpipewire-0.3-dev libpixman-1-dev clang
 git clone https://github.com/ulaas/gevrek.git && cd gevrek
 cargo build --release -p gevrek-smithay -p gevrek-studio --bins
 cargo build --release --bin gevrek          # the command-line client
