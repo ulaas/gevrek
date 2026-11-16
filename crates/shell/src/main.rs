@@ -433,6 +433,10 @@ mod linux {
         /// The power menu: its surface, the choice that waits for its
         /// second press, and what went wrong with the last one.
         power: Option<(SurfaceId, Option<crate::power::Choice>, String)>,
+        /// The box that asks for a workspace's new name while it is
+        /// open: its surface, the workspace's name, what is typed, and
+        /// what is wrong with it.
+        rename: Option<(SurfaceId, String, String, String)>,
         /// What the on-screen display shows, and until when.
         osd: Option<(SurfaceId, Osd, Instant)>,
         notes: Stack,
@@ -548,6 +552,7 @@ mod linux {
             night_light: false,
             region: None,
             power: None,
+            rename: None,
             osd: None,
             notes: Stack::default(),
             notes_surface: None,
@@ -1394,6 +1399,19 @@ mod linux {
             .show
             .filter(|index| *index < view.tabs.len())
             .map(|index| crate::panel::show_workspace_at(output, view.focused, index));
+        // A right-click on a workspace's tab: its new name is asked for.
+        let rename = asked
+            .rename
+            .and_then(|index| view.tabs.get(index))
+            .map(|tab| {
+                let others: Vec<String> = view
+                    .tabs
+                    .iter()
+                    .filter(|other| other.name != tab.name)
+                    .map(|other| other.name.clone())
+                    .collect();
+                (tab.name.clone(), others)
+            });
         let wanted = asked
             .layout_menu
             .map(|anchor| (Menu::Layouts, anchor))
@@ -1430,6 +1448,9 @@ mod linux {
         }
         if end_sharing {
             end_sharing_all(shared);
+        }
+        if let Some((old, others)) = rename {
+            ask_workspace_name(shared, control, output, &old, others);
         }
         match pressed {
             Some(PanelModule::Launcher) => toggle_launcher(shared, control),
@@ -3928,6 +3949,116 @@ mod linux {
             Flow::Continue
         });
         state.borrow_mut().power = Some((id, None, String::new()));
+    }
+
+    /// Ask for a workspace's new name, in a small box on the display of
+    /// the panel whose tab was pressed. Enter gives the workspace of that
+    /// display the name, and leaves the workspaces of the old name on the
+    /// other displays as they are: it is written into the configuration as
+    /// an entry of this display's own (`DesktopConfig::rename_workspace_on`),
+    /// which the window manager takes in at once and has again when it is
+    /// started anew.
+    fn ask_workspace_name(
+        state: &Rc<RefCell<State>>,
+        control: &mut Control,
+        display: &str,
+        old: &str,
+        others: Vec<String>,
+    ) {
+        if let Some((id, ..)) = state.borrow_mut().rename.take() {
+            control.close(id);
+        }
+        let place = Place {
+            name: "gevrek-rename".to_string(),
+            edge: Edge::Centre,
+            level: Level::Overlay,
+            width: crate::panel::RENAME_SIZE.0,
+            height: crate::panel::RENAME_SIZE.1,
+            reserve: false,
+            keyboard: Keyboard::Exclusive,
+            margin: 0,
+            output: Some(display.to_string()),
+        };
+        let display = display.to_string();
+        let shared = Rc::clone(state);
+        let mut fonts = false;
+        let id = control.open(place, move |ui, _| {
+            let context = ui.ctx().clone();
+            let mut state = shared.borrow_mut();
+            if !fonts {
+                theme::install_fonts(&context, state.settings.system_font);
+                fonts = true;
+            }
+            let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
+            theme::apply(&context, &palette, &state.settings);
+            let Some((_, old, mut name, mut problem)) = state.rename.clone() else {
+                return Flow::Close;
+            };
+            let mut close = context
+                .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+            let before = name.clone();
+            match crate::panel::rename_box(ui, &palette, &old, &mut name, &problem) {
+                Some(true) => {
+                    let new = name.trim().to_string();
+                    if others.iter().any(|other| other.eq_ignore_ascii_case(&new)) {
+                        problem =
+                            format!("Another workspace is called \u{201c}{new}\u{201d} already.");
+                    } else {
+                        if new != old {
+                            // Written into the configuration, for this
+                            // display alone: the window manager gives the
+                            // workspace its name as it takes the
+                            // configuration in, and has it again when it
+                            // is started anew.
+                            let written = state.running.clone().and_then(|(mut changed, revision)| {
+                                changed
+                                    .desktop
+                                    .rename_workspace_on(&display, &old, &new)
+                                    .then_some((changed, revision))
+                            });
+                            match written {
+                                Some((changed, revision)) => state.link.send(Request::Apply {
+                                    config: Box::new(changed),
+                                    base_revision: revision,
+                                    client_id: "gevrek-shell".to_string(),
+                                }),
+                                // A workspace the configuration does not
+                                // have (made by hand, or by the graph):
+                                // renamed for as long as it is there.
+                                None => {
+                                    log::info!(
+                                        "workspace {old:?} is renamed to {new:?} for now: the configuration has no workspace by that name to keep the new one"
+                                    );
+                                    state.link.send(Request::Dispatch(
+                                        crate::panel::rename_workspace(&old, &new),
+                                    ));
+                                }
+                            }
+                            state
+                                .link
+                                .send(Request::StateAfter(std::time::Duration::from_millis(120)));
+                        }
+                        close = true;
+                    }
+                }
+                Some(false) => close = true,
+                None => {
+                    if name != before {
+                        problem.clear();
+                    }
+                }
+            }
+            if close {
+                state.rename = None;
+                return Flow::Close;
+            }
+            if let Some(rename) = state.rename.as_mut() {
+                rename.2 = name;
+                rename.3 = problem;
+            }
+            Flow::Continue
+        });
+        state.borrow_mut().rename = Some((id, old.to_string(), old.to_string(), String::new()));
     }
 
     /// How long the on-screen display stays after the last key.

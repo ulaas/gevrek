@@ -2036,19 +2036,13 @@ fn draw_module(
                     .fill(fill)
                     .corner_radius(10)
                     .min_size(egui::vec2(30.0, tall));
-                // (The box that asks for a new name is there on Windows
-                // only so far.)
-                let renames = cfg!(target_os = "windows");
-                let response = ui.add(button);
-                let response = if renames {
-                    response.hint(format!("Workspace {}. Right-click to rename.", tab.name))
-                } else {
-                    response
-                };
+                let response = ui
+                    .add(button)
+                    .hint(format!("Workspace {}. Right-click to rename.", tab.name));
                 if response.clicked() && !tab.shown {
                     asked.show = Some(index);
                 }
-                if renames && response.secondary_clicked() {
+                if response.secondary_clicked() {
                     asked.rename = Some(index);
                 }
             }
