@@ -21,7 +21,7 @@ pub struct HotkeyEvent {
 }
 
 /// Registration consumed by the unified low-level keyboard/mouse input engine.
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Hotkey {
     pub key: String,
     pub ctrl: bool,
@@ -49,8 +49,10 @@ impl Hotkey {
         }
     }
 
+    /// (By the key's one name: a binding written `RETURN` is the key the
+    /// keyboard tells of as `ENTER`. Written so, it never fired.)
     pub fn normalized_key(&self) -> String {
-        self.key.trim().to_ascii_uppercase()
+        gevrek_model::keys::canonical_key_name(&self.key)
     }
 
     pub fn matches(&self, raw: &RawInputEvent) -> bool {
@@ -63,7 +65,7 @@ impl Hotkey {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RawInputEvent {
     pub key: String,
     pub ctrl: bool,

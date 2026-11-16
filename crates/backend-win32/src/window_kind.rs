@@ -28,8 +28,15 @@
 //! - **What passes by** (`Kind::Passing`): a window that stays above all
 //!   others and has neither a title bar nor a frame to resize it by (a
 //!   notification a program draws itself, a volume or brightness display,
-//!   a tooltip-like popup), and a window inside another (a control). No
-//!   window to gevrek at all.
+//!   a tooltip-like popup), a window that cannot be given the keyboard or
+//!   that is kept out of the taskbar (a menu, a flyout, a tooltip, a
+//!   palette), one of the classes menus and their like are made of, and a
+//!   window inside another (a control). No window to gevrek at all.
+//!
+//! None of this waits for a rule, and none of it asks the window's
+//! program anything: a menu is no window to gevrek also where the rules
+//! gevrek comes with are switched off, and also in the moment its program
+//! is too busy opening it to answer.
 
 /// What a window is to gevrek.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,8 +59,37 @@ const WS_CHILD: u32 = 0x4000_0000;
 const WS_CAPTION: u32 = 0x00C0_0000;
 const WS_THICKFRAME: u32 = 0x0004_0000;
 const WS_MINIMIZEBOX: u32 = 0x0002_0000;
+const WS_MAXIMIZEBOX: u32 = 0x0001_0000;
+const WS_SYSMENU: u32 = 0x0008_0000;
 const WS_EX_TOPMOST: u32 = 0x0000_0008;
 const WS_EX_APPWINDOW: u32 = 0x0004_0000;
+const WS_EX_TOOLWINDOW: u32 = 0x0000_0080;
+const WS_EX_NOACTIVATE: u32 = 0x0800_0000;
+
+/// Whether a class is one that menus, flyouts, tooltips and the shadows
+/// under them are made of, by the toolkits that make them. (Most of them
+/// say so by their styles as well; a few do not, or not at every moment.)
+fn is_a_popups_class(class: &str) -> bool {
+    const WHOLE: [&str; 9] = [
+        // Windows' own menus, tooltips, the list of a combo box, shadows.
+        "#32768",
+        "tooltips_class32",
+        "ComboLBox",
+        "SysShadow",
+        "DropDown",
+        // XAML (Windows' own programs, Windows Terminal): a menu or a
+        // flyout that reaches beyond its window.
+        "Xaml_WindowedPopupClass",
+        "Microsoft.UI.Content.PopupWindowSiteBridge",
+        // Firefox' menus and their shadow.
+        "MozillaDropShadowWindowClass",
+        "MozillaHiddenWindowClass",
+    ];
+    WHOLE.contains(&class)
+        // Qt (`Qt5QWindowPopupDropShadowSaveBits`, `Qt6…ToolTip…`).
+        || (class.starts_with("Qt")
+            && (class.contains("QWindowPopup") || class.contains("QWindowToolTip")))
+}
 
 /// The class of the dialogs Windows makes itself.
 const DIALOG_CLASS: &str = "#32770";
@@ -79,6 +115,15 @@ impl Facts<'_> {
         self.style & WS_CAPTION == WS_CAPTION
     }
 
+    /// Nothing of a window's own about it: no title bar, no box to
+    /// minimise or maximise it by, no menu of the system's. Every
+    /// program's own window has one of them at least, also one that draws
+    /// all of itself (it keeps them so that Windows treats it as a
+    /// window); a menu, a flyout or a list that drops down has none.
+    fn bare(&self) -> bool {
+        !self.titled() && self.style & (WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU) == 0
+    }
+
     fn topmost(&self) -> bool {
         self.extended & WS_EX_TOPMOST != 0
     }
@@ -93,13 +138,29 @@ impl Facts<'_> {
 
 /// The kind of a window.
 pub fn kind(facts: &Facts) -> Kind {
-    if facts.style & WS_CHILD != 0 {
+    if facts.style & WS_CHILD != 0 || is_a_popups_class(facts.class) {
+        return Kind::Passing;
+    }
+    // A window that cannot be given the keyboard is no window to work in;
+    // one that is kept out of the taskbar and has not asked to be in it
+    // is a part of another (a palette, a menu, a flyout).
+    if facts.extended & WS_EX_NOACTIVATE != 0
+        || (facts.extended & WS_EX_TOOLWINDOW != 0 && facts.extended & WS_EX_APPWINDOW == 0)
+    {
         return Kind::Passing;
     }
     if facts.belongs_to_another() {
         return Kind::Owned;
     }
     if facts.topmost() && !facts.resizable() && !facts.titled() {
+        return Kind::Passing;
+    }
+    // A bare window with a frame to resize it by: nobody resizes it; the
+    // frame is there for the shadow and the round corners Windows gives a
+    // window that has one. That is how a browser makes its menus (the
+    // menu of a folder of bookmarks, the menu of a page): read as "can
+    // be resized", such a menu was a program's own window, with a border.
+    if facts.bare() && facts.resizable() {
         return Kind::Passing;
     }
     if facts.class == DIALOG_CLASS
@@ -171,11 +232,24 @@ fn read(window: isize) -> Read {
     unsafe {
         let mut name = [0u16; 64];
         let length = GetClassNameW(hwnd, &mut name).max(0) as usize;
+        let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+        // A window with neither a title bar nor a frame that belongs to
+        // another is that other's (a menu, a list that drops down), also
+        // where the other is a window nobody sees: such a window is made
+        // for one that is shown inside another program's window.
+        let bare = style & WS_CAPTION != WS_CAPTION && style & WS_THICKFRAME == 0;
+        let owned = owner_on_screen(window).is_some()
+            || (bare
+                && windows::Win32::UI::WindowsAndMessaging::GetWindow(
+                    hwnd,
+                    windows::Win32::UI::WindowsAndMessaging::GW_OWNER,
+                )
+                .is_ok_and(|owner| !owner.is_invalid()));
         Read {
-            style: GetWindowLongW(hwnd, GWL_STYLE) as u32,
+            style,
             extended: GetWindowLongW(hwnd, GWL_EXSTYLE) as u32,
             class: String::from_utf16_lossy(&name[..length.min(name.len())]),
-            owned: owner_on_screen(window).is_some(),
+            owned,
         }
     }
 }
@@ -293,6 +367,51 @@ mod tests {
         assert_eq!(kind_of(WS_CHILD, 0, "Button", false), Kind::Passing);
         assert_eq!(kind_of(WS_CHILD | WS_CAPTION | WS_THICKFRAME, 0, "MDIChild", true), Kind::Passing);
         assert!(!Kind::Passing.is_managed());
+        // The menu of a tab of Windows Terminal, as it is on the screen
+        // (read off a running one): by its class, and by its styles alone.
+        assert_eq!(
+            kind_of(0x8400_0000, 0x0820_0000, "Xaml_WindowedPopupClass", false),
+            Kind::Passing
+        );
+        assert_eq!(kind_of(0x8400_0000, 0x0820_0000, "SomeToolkitsMenu", false), Kind::Passing);
+        // Windows' own menu, a tooltip, a Qt popup: by their classes,
+        // whatever their styles say.
+        assert_eq!(kind_of(OVERLAPPED, 0, "#32768", false), Kind::Passing);
+        assert_eq!(kind_of(OVERLAPPED, 0, "tooltips_class32", false), Kind::Passing);
+        assert_eq!(
+            kind_of(OVERLAPPED, 0, "Qt5151QWindowPopupSaveBits", false),
+            Kind::Passing
+        );
+        // A palette kept out of the taskbar; one that asks to be in it is
+        // a window of its own.
+        assert_eq!(kind_of(OVERLAPPED, WS_EX_TOOLWINDOW, "Palette", false), Kind::Passing);
+        assert_eq!(
+            kind_of(OVERLAPPED, WS_EX_TOOLWINDOW | WS_EX_APPWINDOW, "Palette", false),
+            Kind::Ordinary
+        );
+        // A browser's menu (of a folder of bookmarks): nothing but a
+        // frame, which it has for its shadow. Not owned, not kept above
+        // the others, with no style that says it is a menu.
+        assert_eq!(
+            kind_of(WS_POPUP | WS_THICKFRAME, 0, "Chrome_WidgetWin_1", false),
+            Kind::Passing
+        );
+        assert_eq!(
+            kind_of(WS_POPUP | WS_THICKFRAME, WS_EX_TOPMOST, "Chrome_WidgetWin_2", false),
+            Kind::Passing
+        );
+        // The browser's own window, as it is on the screen while it is
+        // tiled (read off a running one; gevrek has taken its two boxes),
+        // and one of a program made with the same toolkit that draws its
+        // own title bar: windows of their own.
+        assert_eq!(kind_of(0x16CC_0000, 0x0020_0100, "Chrome_WidgetWin_1", false), Kind::Ordinary);
+        assert_eq!(kind_of(0x14C7_0000, 0x0020_0100, "Chrome_WidgetWin_1", false), Kind::Ordinary);
+        assert_eq!(
+            kind_of(WS_POPUP | WS_THICKFRAME | WS_SYSMENU, 0, "Qt5QWindowIcon", false),
+            Kind::Ordinary
+        );
+        // A Qt program's own window is not a popup for being Qt's.
+        assert_eq!(kind_of(OVERLAPPED, 0, "Qt5151QWindowIcon", false), Kind::Ordinary);
     }
 
     #[test]

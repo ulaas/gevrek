@@ -55,6 +55,39 @@ impl TryOut {
     }
 }
 
+/// What sends the configuration from before a trial, should this program
+/// fall over while the trial runs.
+static REVERT: std::sync::Mutex<Option<Box<dyn Fn() + Send>>> = std::sync::Mutex::new(None);
+
+/// A trial runs: should the program panic, `revert` is called (it sends
+/// the configuration from before on the line's own thread, which lives a
+/// moment longer than the window).
+pub fn revert_on_panic(revert: impl Fn() + Send + 'static) {
+    static HOOKED: std::sync::Once = std::sync::Once::new();
+    HOOKED.call_once(|| {
+        let before = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |panic| {
+            let revert = REVERT.lock().ok().and_then(|mut held| held.take());
+            if let Some(revert) = revert {
+                revert();
+                // (Time for the line to carry it.)
+                std::thread::sleep(std::time::Duration::from_millis(1500));
+            }
+            before(panic);
+        }));
+    });
+    if let Ok(mut held) = REVERT.lock() {
+        *held = Some(Box::new(revert));
+    }
+}
+
+/// The trial is over: nothing is sent should the program fall over.
+pub fn forget_revert() {
+    if let Ok(mut held) = REVERT.lock() {
+        *held = None;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -7,6 +7,7 @@ mod aura;
 pub mod hidden_journal;
 pub mod hwnd_map;
 pub mod monitor;
+pub mod reach;
 use gevrek_engine::overlay_data;
 pub(crate) mod window_manager;
 mod window_monitor;

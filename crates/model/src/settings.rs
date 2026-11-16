@@ -11,6 +11,49 @@ use std::collections::{BTreeMap, HashSet};
 
 pub const DESKTOP_CONFIG_SCHEMA_VERSION: u32 = 24;
 
+/// What is wrong with the pattern in a command's window selector, where
+/// it has one that cannot be read (`re:` and what follows is a regular
+/// expression). A selector read from words on a command line is checked
+/// as it is read; one out of a file was not checked at all.
+fn selector_pattern_problem(command: &DispatchCommand) -> Option<String> {
+    let written = serde_json::to_value(command).ok()?;
+    let mut problem = None;
+    // (Only what selects a window: a program's arguments and a
+    // workspace's name may begin with any letters.)
+    fn within_selector(value: &serde_json::Value, problem: &mut Option<String>) {
+        match value {
+            serde_json::Value::String(text) => {
+                if let Some(pattern) = text.strip_prefix("re:") {
+                    if let Err(error) = regex::Regex::new(pattern) {
+                        *problem = Some(format!(
+                            "The pattern '{pattern}' is no regular expression: {error}"
+                        ));
+                    }
+                }
+            }
+            serde_json::Value::Array(items) => {
+                items.iter().for_each(|item| within_selector(item, problem))
+            }
+            serde_json::Value::Object(fields) => fields
+                .values()
+                .for_each(|field| within_selector(field, problem)),
+            _ => {}
+        }
+    }
+    if let serde_json::Value::Object(fields) = &written {
+        for (key, field) in fields {
+            // (A workspace is selected by `selector` too, by its name,
+            // which is no pattern.)
+            if matches!(key.as_str(), "selector" | "window")
+                && field["kind"].as_str() != Some("name")
+            {
+                within_selector(field, &mut problem);
+            }
+        }
+    }
+    problem
+}
+
 fn window_selector_is_empty(selector: &WindowSelector) -> bool {
     match selector {
         WindowSelector::Active | WindowSelector::Floating | WindowSelector::Tiled => false,
@@ -651,6 +694,69 @@ impl PanelProfile {
 }
 
 impl DesktopConfig {
+    /// Give the workspace `old` of one display the name `new`, and leave
+    /// the workspaces of that name on the other displays as they are.
+    ///
+    /// A workspace that is written down for this display alone is simply
+    /// renamed. One that is written down for several displays keeps its
+    /// entry, and this display gets an entry of its own, a copy with the
+    /// new name that takes the other's place here (`also_called`). The
+    /// keys that name the workspace are not changed: on this display they
+    /// mean the renamed one, on the others the one that kept its name.
+    ///
+    /// `display` is the display as the window manager names it. Returns
+    /// whether anything changed (nothing does where no workspace is
+    /// written down by the old name, the new name is empty, or another
+    /// workspace has it already).
+    pub fn rename_workspace_on(&mut self, display: &str, old: &str, new: &str) -> bool {
+        let (old, new) = (old.trim(), new.trim());
+        if new.is_empty() || old == new || display.trim().is_empty() {
+            return false;
+        }
+        let is = |name: &str, wanted: &str| name.trim().eq_ignore_ascii_case(wanted);
+        let taken = !old.eq_ignore_ascii_case(new)
+            && self.workspaces.iter().any(|profile| is(&profile.name, new));
+        if taken {
+            return false;
+        }
+        let own = |profile: &WorkspaceProfile| {
+            matches!(&profile.monitor, MonitorSelector::Name(name) if is(name, display))
+        };
+        // The entry this display has for it: its own, or the one it
+        // shares with the others.
+        let Some(at) = self
+            .workspaces
+            .iter()
+            .position(|profile| is(&profile.name, old) && own(profile))
+            .or_else(|| self.workspaces.iter().position(|profile| is(&profile.name, old)))
+        else {
+            return false;
+        };
+        if own(&self.workspaces[at]) {
+            let takes_anothers_place = !self.workspaces[at].also_called.is_empty();
+            self.workspaces[at].name = new.to_string();
+            // (One that was only ever this display's is named by its own
+            // name in the keys: they follow it.)
+            if !takes_anothers_place {
+                for binding in &mut self.bindings {
+                    binding.command.follow_workspace_rename(old, new);
+                }
+                for gesture in &mut self.gestures.profiles {
+                    gesture.command.follow_workspace_rename(old, new);
+                }
+            }
+            return true;
+        }
+        let mut own_entry = self.workspaces[at].clone();
+        own_entry.name = new.to_string();
+        own_entry.monitor = MonitorSelector::Name(display.trim().to_string());
+        own_entry.also_called = vec![old.to_string()];
+        // (Right after the one whose place it takes: the workspaces of a
+        // display are made in the order they are written in.)
+        self.workspaces.insert(at + 1, own_entry);
+        true
+    }
+
     /// Give the workspace `old` the name `new`, in everything that is
     /// written down of it: its own entry, and the keys and gestures that
     /// name it (they go on meaning the same workspace). Nothing happens
@@ -719,6 +825,46 @@ impl DesktopConfig {
             issues.push(ConfigIssue::error(
                 "desktop.appearance.border_style",
                 unsupported_border_style_message(&self.appearance.border_style),
+            ));
+        }
+        // How far a shadow and a glow reach, and how far a shadow lies
+        // from its window: what a display can show.
+        let effects = &self.appearance.effects;
+        if effects.shadow.radius > 200 {
+            issues.push(ConfigIssue::error(
+                "desktop.appearance.effects.shadow.radius",
+                "A shadow's radius must be at most 200 pixels",
+            ));
+        }
+        for (name, offset) in [
+            ("offset_x", effects.shadow.offset_x),
+            ("offset_y", effects.shadow.offset_y),
+        ] {
+            if !(-200..=200).contains(&offset) {
+                issues.push(ConfigIssue::error(
+                    format!("desktop.appearance.effects.shadow.{name}"),
+                    "A shadow's offset must be between -200 and 200 pixels",
+                ));
+            }
+        }
+        if effects.glow.radius > 200 {
+            issues.push(ConfigIssue::error(
+                "desktop.appearance.effects.glow.radius",
+                "A glow's radius must be at most 200 pixels",
+            ));
+        }
+        let floating = &self.appearance.floating;
+        if floating.separate && floating.border_enabled && !(1..=32).contains(&floating.border_width)
+        {
+            issues.push(ConfigIssue::error(
+                "desktop.appearance.floating.border_width",
+                "Border width must be between 1 and 32 pixels",
+            ));
+        }
+        if !(0..=5000).contains(&self.animations.session.duration_ms) {
+            issues.push(ConfigIssue::error(
+                "desktop.animations.session.duration_ms",
+                "The change between lock screen and desktop takes at most 5000 milliseconds",
             ));
         }
         if self.appearance.window_opacity < 20 {
@@ -878,6 +1024,22 @@ impl DesktopConfig {
                     format!("Duplicate workspace name '{}'", workspace.name),
                 ));
             }
+            // Room between and around the windows: nothing less than
+            // none, and nothing that leaves the windows no room at all.
+            for (name, gap) in [("gaps_in", workspace.gaps_in), ("gaps_out", workspace.gaps_out)] {
+                if !(0..=500).contains(&gap) {
+                    issues.push(ConfigIssue::error(
+                        format!("{path}.{name}"),
+                        "A gap must be between 0 and 500 pixels",
+                    ));
+                }
+            }
+            if workspace.appearance_override && !(1..=32).contains(&workspace.border_width) {
+                issues.push(ConfigIssue::error(
+                    format!("{path}.border_width"),
+                    "Border width must be between 1 and 32 pixels",
+                ));
+            }
             if !(0.1..=0.9).contains(&workspace.master_ratio) {
                 issues.push(ConfigIssue::error(
                     format!("{path}.master_ratio"),
@@ -974,6 +1136,16 @@ impl DesktopConfig {
                 ));
             }
             if !scratchpad.enabled {
+                // (Its pattern is checked all the same: it can be read
+                // once the scratchpad is switched on.)
+                if matches!(scratchpad.match_strategy, MatchStrategy::Regex)
+                    && regex::Regex::new(&scratchpad.pattern).is_err()
+                {
+                    issues.push(ConfigIssue::error(
+                        format!("{path}.pattern"),
+                        "Scratchpad pattern is an invalid regular expression",
+                    ));
+                }
                 continue;
             }
             enabled_scratchpad_ids.insert(id);
@@ -1191,6 +1363,9 @@ impl DesktopConfig {
                     "Tag, named-rule, and scratchpad binding arguments cannot be empty",
                 ));
             }
+            if let Some(problem) = selector_pattern_problem(&binding.command) {
+                issues.push(ConfigIssue::error(format!("{path}.command.selector"), problem));
+            }
             if let DispatchCommand::SetBindingSubmap { name } = &binding.command {
                 let target = name.trim().to_ascii_lowercase();
                 if !target.is_empty() && !binding_submaps.contains(&target) {
@@ -1369,11 +1544,62 @@ impl DesktopConfig {
                 } => window_selector_is_empty(selector),
                 _ => false,
             };
+            let empty_argument = empty_argument
+                || matches!(&gesture.command, DispatchCommand::Exec { program, .. } if program.trim().is_empty());
             if empty_argument {
                 issues.push(ConfigIssue::error(
                     format!("{path}.command"),
                     "Gesture action arguments cannot be empty",
                 ));
+            }
+            // What the command names is there: as for a key's command.
+            match &gesture.command {
+                DispatchCommand::SetBindingSubmap { name } => {
+                    let target = name.trim().to_ascii_lowercase();
+                    if !target.is_empty() && !binding_submaps.contains(&target) {
+                        issues.push(ConfigIssue::error(
+                            format!("{path}.command.name"),
+                            format!("No binding submap named '{}' exists", name.trim()),
+                        ));
+                    }
+                }
+                DispatchCommand::ToggleScratchpad { id } => {
+                    let id = id.trim().to_ascii_lowercase();
+                    if !id.is_empty() && !scratchpad_ids.contains(&id) {
+                        issues.push(ConfigIssue::error(
+                            format!("{path}.command.id"),
+                            format!("No scratchpad profile named '{id}' exists"),
+                        ));
+                    } else if !id.is_empty() && !enabled_scratchpad_ids.contains(&id) {
+                        issues.push(ConfigIssue::error(
+                            format!("{path}.command.id"),
+                            format!("Scratchpad profile '{id}' is disabled"),
+                        ));
+                    }
+                }
+                DispatchCommand::LaunchStartup { id }
+                | DispatchCommand::StopStartup { id }
+                | DispatchCommand::RestartStartup { id } => {
+                    let id = id.trim().to_ascii_lowercase();
+                    if !id.is_empty() && !startup_ids.contains(&id) {
+                        issues.push(ConfigIssue::error(
+                            format!("{path}.command.id"),
+                            format!("No startup application named '{id}' exists"),
+                        ));
+                    } else if matches!(&gesture.command, DispatchCommand::LaunchStartup { .. })
+                        && !id.is_empty()
+                        && !enabled_startup_ids.contains(&id)
+                    {
+                        issues.push(ConfigIssue::error(
+                            format!("{path}.command.id"),
+                            format!("Startup application '{id}' is disabled"),
+                        ));
+                    }
+                }
+                _ => {}
+            }
+            if let Some(problem) = selector_pattern_problem(&gesture.command) {
+                issues.push(ConfigIssue::error(format!("{path}.command.selector"), problem));
             }
         }
 
@@ -1392,6 +1618,22 @@ impl DesktopConfig {
                 ));
             }
             if !rule.enabled {
+                // (Its patterns are checked all the same: a rule can be
+                // switched on while gevrek runs, by a key or a command,
+                // and nothing reads the file again then.)
+                for (predicate_index, predicate) in rule.predicates.iter().enumerate() {
+                    if matches!(predicate.strategy, MatchStrategy::Regex)
+                        && regex::RegexBuilder::new(&predicate.value)
+                            .case_insensitive(!predicate.case_sensitive)
+                            .build()
+                            .is_err()
+                    {
+                        issues.push(ConfigIssue::error(
+                            format!("{path}.predicates[{predicate_index}].value"),
+                            "Predicate contains an invalid regular expression",
+                        ));
+                    }
+                }
                 continue;
             }
             if rule.predicates.is_empty() {
@@ -1433,6 +1675,12 @@ impl DesktopConfig {
                     issues.push(ConfigIssue::error(
                         format!("{path}.effects[{effect_index}]"),
                         "Tag effects require a non-empty tag",
+                    ));
+                }
+                if matches!(effect, RuleEffect::Opacity(opacity) if *opacity < 20) {
+                    issues.push(ConfigIssue::error(
+                        format!("{path}.effects[{effect_index}]"),
+                        "A rule's opacity must be at least 20, as every window's (a window nobody sees cannot be found again)",
                     ));
                 }
                 if matches!(
@@ -1492,10 +1740,10 @@ impl DesktopConfig {
                     "Zone geometry must be positive and remain inside normalized monitor bounds",
                 ));
             }
-            if zone.gap < 0 {
+            if !(0..=500).contains(&zone.gap) {
                 issues.push(ConfigIssue::error(
                     format!("{zone_path}.gap"),
-                    "Zone gap cannot be negative",
+                    "Zone gap must be between 0 and 500 pixels",
                 ));
             }
         }
@@ -1632,12 +1880,15 @@ impl WindowEffectsProfile {
     pub fn margin(&self) -> i32 {
         let mut margin = 0;
         if self.shadow.enabled {
-            let reach = self.shadow.radius as i32
-                + self.shadow.offset_x.abs().max(self.shadow.offset_y.abs());
+            // (Numbers out of a file, of any size: none of this overflows.)
+            let far = |value: i32| value.checked_abs().unwrap_or(i32::MAX);
+            let reach = i32::try_from(self.shadow.radius)
+                .unwrap_or(i32::MAX)
+                .saturating_add(far(self.shadow.offset_x).max(far(self.shadow.offset_y)));
             margin = margin.max(reach);
         }
         if self.glow.enabled {
-            margin = margin.max(self.glow.radius as i32);
+            margin = margin.max(i32::try_from(self.glow.radius).unwrap_or(i32::MAX));
         }
         margin.clamp(0, 160)
     }
@@ -1849,7 +2100,7 @@ impl FloatingAppearance {
     /// (never none at all), and two thirds of the glow, in reach and in
     /// strength. The colours are the tiled windows'.
     pub fn softer_than(border_width: i32, border_offset: i32, glow: &GlowEffect) -> Self {
-        let two_thirds = |value: u32| (value * 2).div_ceil(3);
+        let two_thirds = |value: u32| value.saturating_mul(2).div_ceil(3);
         Self {
             extra: Default::default(),
             separate: true,
@@ -2592,6 +2843,15 @@ impl Default for ScratchpadProfile {
 pub struct WorkspaceProfile {
     pub enabled: bool,
     pub name: String,
+    /// Names it also answers to, on its display. A workspace that every
+    /// display has (`monitor: any`) can have another name on one display:
+    /// that display then has an entry of its own, which names here the
+    /// workspace whose place it takes. The entry for every display makes
+    /// no workspace there, and what names the workspace by the name the
+    /// others have (a key that shows workspace `1`) means this one on
+    /// this display.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub also_called: Vec<String>,
     /// The display it is on. `Any`: every display has a workspace of its
     /// own by this name (the keys that show it show the one of the display
     /// in use).
@@ -2635,6 +2895,7 @@ impl Default for WorkspaceProfile {
     fn default() -> Self {
         Self {
             extra: Default::default(),
+            also_called: Vec::new(),
             enabled: true,
             name: "Workspace".to_string(),
             // Every display has the workspace, each its own: a display
@@ -2698,8 +2959,10 @@ pub struct BindingProfile {
 }
 
 impl BindingProfile {
+    /// (By the key's one name: `RETURN` and `ENTER` are one key, and two
+    /// bindings on it are two bindings on one key.)
     pub fn normalized_key(&self) -> String {
-        self.key.trim().to_ascii_uppercase()
+        crate::keys::canonical_key_name(&self.key)
     }
 
     pub fn normalized_submap(&self) -> String {
@@ -4091,5 +4354,127 @@ mod workspace_rename_tests {
         assert!(!desktop.rename_workspace("web", "  "));
         // Only its letters' case is another: still the same workspace.
         assert!(desktop.rename_workspace("web", "Web"));
+    }
+}
+
+#[cfg(test)]
+mod odd_value_tests {
+    use super::*;
+
+    fn problems(desktop: &DesktopConfig) -> Vec<String> {
+        desktop.validate().into_iter().map(|issue| issue.path).collect()
+    }
+
+    #[test]
+    fn a_key_by_its_other_name_is_the_same_key() {
+        let mut desktop = crate::examples::starting_configuration().desktop;
+        assert!(problems(&desktop).is_empty(), "{:?}", desktop.validate());
+        let mut first = BindingProfile {
+            name: "one".to_string(),
+            key: "ENTER".to_string(),
+            win: true,
+            ctrl: true,
+            alt: true,
+            ..BindingProfile::default()
+        };
+        first.enabled = true;
+        let second = BindingProfile {
+            name: "two".to_string(),
+            key: "return".to_string(),
+            ..first.clone()
+        };
+        assert_eq!(first.chord_key(), second.chord_key());
+        desktop.bindings.push(first);
+        desktop.bindings.push(second);
+        assert!(!problems(&desktop).is_empty(), "two bindings on one key are told of");
+        assert_eq!(crate::keys::canonical_key_name(" esc "), "ESCAPE");
+        assert_eq!(crate::keys::canonical_key_name("oem_minus"), "MINUS");
+        assert_eq!(crate::keys::canonical_key_name("X1"), "X1");
+    }
+
+    #[test]
+    fn values_no_desktop_can_have_are_told_of() {
+        let good = crate::examples::starting_configuration().desktop;
+        let told = |change: &dyn Fn(&mut DesktopConfig), place: &str| {
+            let mut desktop = good.clone();
+            change(&mut desktop);
+            assert!(
+                problems(&desktop).iter().any(|path| path.contains(place)),
+                "{place}: {:?}",
+                problems(&desktop)
+            );
+        };
+        told(&|desktop| desktop.workspaces[0].gaps_in = -4, "gaps_in");
+        told(&|desktop| desktop.workspaces[0].gaps_out = 100_000, "gaps_out");
+        told(&|desktop| desktop.appearance.effects.shadow.radius = u32::MAX, "shadow.radius");
+        told(&|desktop| desktop.appearance.effects.shadow.offset_x = i32::MIN, "shadow.offset_x");
+        told(&|desktop| desktop.appearance.effects.glow.radius = 5000, "glow.radius");
+        told(&|desktop| desktop.animations.session.duration_ms = 600_000, "session.duration_ms");
+        // (And none of them overflows where it is used.)
+        let mut desktop = good.clone();
+        desktop.appearance.effects.shadow.enabled = true;
+        desktop.appearance.effects.shadow.radius = u32::MAX;
+        desktop.appearance.effects.shadow.offset_x = i32::MIN;
+        assert_eq!(desktop.appearance.effects.margin(), 160);
+    }
+
+    #[test]
+    fn a_pattern_that_cannot_be_read_is_told_of_wherever_it_is_written() {
+        let command: DispatchCommand = serde_json::from_value(serde_json::json!({
+            "command": "focus_window",
+            "selector": {"kind": "title", "value": "re:(unclosed"}
+        }))
+        .expect("a command");
+        assert!(selector_pattern_problem(&command).is_some());
+        let command: DispatchCommand = serde_json::from_value(serde_json::json!({
+            "command": "focus_window",
+            "selector": {"kind": "title", "value": "re:^Mail"}
+        }))
+        .expect("a command");
+        assert!(selector_pattern_problem(&command).is_none());
+    }
+}
+
+#[cfg(test)]
+mod workspace_per_display_tests {
+    use super::*;
+    use crate::command::{DispatchCommand, WorkspaceSelector};
+
+    #[test]
+    fn a_workspace_renamed_on_one_display_keeps_its_name_on_the_others() {
+        let mut desktop = crate::examples::starting_configuration().desktop;
+        let before = desktop.workspaces.len();
+        let bindings = serde_json::to_value(&desktop.bindings).unwrap();
+        assert!(desktop.rename_workspace_on("DP-1", "1", "web"));
+        // The entry for every display is as it was; this display has one
+        // of its own, right after it, that takes its place.
+        assert_eq!(desktop.workspaces.len(), before + 1);
+        let shared = desktop.workspaces.iter().position(|p| p.name == "1").unwrap();
+        let own = &desktop.workspaces[shared + 1];
+        assert_eq!(own.name, "web");
+        assert_eq!(own.monitor, MonitorSelector::Name("DP-1".to_string()));
+        assert_eq!(own.also_called, vec!["1".to_string()]);
+        assert_eq!(desktop.workspaces[shared].monitor, MonitorSelector::Any);
+        // The keys are as they were: the one for workspace 1 means the
+        // renamed one on this display, by the name it also answers to.
+        assert_eq!(serde_json::to_value(&desktop.bindings).unwrap(), bindings);
+        assert!(desktop.bindings.iter().any(|binding| matches!(
+            &binding.command,
+            DispatchCommand::SwitchWorkspaceSelector { selector: WorkspaceSelector::Name(name) } if name == "1"
+        )));
+        assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
+
+        // Renamed again there: the same entry, still in the other's place.
+        assert!(desktop.rename_workspace_on("DP-1", "web", "mail"));
+        assert_eq!(desktop.workspaces.len(), before + 1);
+        assert_eq!(desktop.workspaces[shared + 1].name, "mail");
+        assert_eq!(desktop.workspaces[shared + 1].also_called, vec!["1".to_string()]);
+        // Another display renames its own.
+        assert!(desktop.rename_workspace_on("DP-2", "1", "chat"));
+        assert_eq!(desktop.workspaces.len(), before + 2);
+        // A name that is taken, and one nobody has.
+        assert!(!desktop.rename_workspace_on("DP-2", "2", "mail"));
+        assert!(!desktop.rename_workspace_on("DP-2", "nothing", "x"));
+        assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
     }
 }

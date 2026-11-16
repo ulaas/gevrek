@@ -13,3 +13,7 @@ log = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
+
+# The job that ends the programs gevrek started when gevrek ends.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }

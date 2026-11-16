@@ -152,9 +152,33 @@ pub fn keep(reader: &Reader, home: &Path, greeter_home: &Path, owner: (u32, u32)
         let file = folder.join(name);
         // (Written beside and moved over: the greeter never reads half a file.)
         let beside = folder.join(format!(".{name}.new"));
-        if std::fs::write(&beside, bytes).is_ok() {
-            let _ = std::os::unix::fs::chown(&beside, Some(owner.0), Some(owner.1));
+        // The folder is the greeter's account's, and this runs as root:
+        // a link put where the file is written would have root write
+        // through it, and hand what it points at to the greeter. So what
+        // lies there is taken away (the link, not what it points at), the
+        // file is made anew and only if nothing is there, and it is the
+        // file that was made that changes hands, not whatever has its
+        // name by then.
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let _ = std::fs::remove_file(&beside);
+        let made = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .mode(0o644)
+            .open(&beside);
+        let Ok(mut made) = made else {
+            return;
+        };
+        if made.write_all(bytes).is_ok()
+            && std::os::unix::fs::fchown(&made, Some(owner.0), Some(owner.1)).is_ok()
+        {
+            drop(made);
             let _ = std::fs::rename(&beside, &file);
+        } else {
+            drop(made);
+            let _ = std::fs::remove_file(&beside);
         }
     };
     let keyboard: String = taken
@@ -175,7 +199,8 @@ pub fn keep(reader: &Reader, home: &Path, greeter_home: &Path, owner: (u32, u32)
     if let Some((ending, bytes)) = picture {
         put(&format!("wallpaper.{ending}"), &bytes);
     }
-    let _ = std::os::unix::fs::chown(&folder, Some(owner.0), Some(owner.1));
+    // (The folder itself, not what a link in its place points at.)
+    let _ = std::os::unix::fs::lchown(&folder, Some(owner.0), Some(owner.1));
 }
 
 /// What was kept, as the environment of the greeter: the keyboard (in

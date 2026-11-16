@@ -83,6 +83,20 @@ impl WindowMonitor {
                     WINEVENT_OUTOFCONTEXT,
                 );
 
+                // Hook 4: the desktop itself is another (Windows' own
+                // question for an administrator's rights, the lock, and
+                // back): what was held when it went is not known when it
+                // comes back.
+                let _hook_desktop = SetWinEventHook(
+                    EVENT_SYSTEM_DESKTOPSWITCH,
+                    EVENT_SYSTEM_DESKTOPSWITCH,
+                    None,
+                    Some(win_event_proc),
+                    0,
+                    0,
+                    WINEVENT_OUTOFCONTEXT,
+                );
+
                 if hook_system.is_invalid() || hook_object.is_invalid() {
                     log::error!("Failed to set Windows event hooks");
                     return;
@@ -382,6 +396,12 @@ unsafe extern "system" fn win_event_proc(
     _id_event_thread: u32,
     _dwms_event_time: u32,
 ) {
+    // (Told of no window: before any is asked for.)
+    if event == EVENT_SYSTEM_DESKTOPSWITCH {
+        log::debug!("the desktop is another: what is held is forgotten");
+        crate::hotkey::forget_what_is_held();
+        return;
+    }
     if hwnd.is_invalid() {
         return;
     }
@@ -447,6 +467,14 @@ unsafe extern "system" fn win_event_proc(
             // (Alt-Tab, clicks, programmatic SetForegroundWindow). Without it the
             // focus model only saw the rare OBJID_WINDOW focus events.
             EVENT_SYSTEM_FOREGROUND | EVENT_OBJECT_FOCUS => {
+                // A menu or a flyout tells of the focus inside it, and is
+                // a window that cannot have the keyboard: the window that
+                // has it is the one it had (whose border would else go
+                // dim for as long as its own menu is open).
+                const WS_EX_NOACTIVATE: i32 = 0x0800_0000;
+                if GetWindowLongW(root_window(hwnd), GWL_EXSTYLE) & WS_EX_NOACTIVATE != 0 {
+                    return;
+                }
                 let root = WindowHandle::from_hwnd(root_window(hwnd));
                 LAST_FOCUSED.with(|last| {
                     let mut value = last.get();

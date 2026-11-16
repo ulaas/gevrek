@@ -67,6 +67,18 @@ pub fn key_name_to_vk(key: &str) -> Option<u16> {
     }
 }
 
+/// The one name of a key, whichever of its names was written: `RETURN`
+/// is `ENTER`, `ESC` is `ESCAPE`, `OEM_MINUS` is `MINUS`. Two bindings on
+/// one key are then known to be on one key, and a binding written with a
+/// key's other name is the key the keyboard tells of (which it tells of
+/// by this name). A name that is no key's is given back in capitals.
+pub fn canonical_key_name(key: &str) -> String {
+    let written = key.trim().to_ascii_uppercase();
+    key_name_to_vk(&written)
+        .and_then(vk_to_key_name)
+        .unwrap_or(written)
+}
+
 pub fn vk_to_key_name(vk: u16) -> Option<String> {
     if (0x30..=0x39).contains(&vk) || (0x41..=0x5A).contains(&vk) {
         return char::from_u32(vk as u32).map(|value| value.to_string());

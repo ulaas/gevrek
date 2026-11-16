@@ -169,6 +169,28 @@ impl Executor {
         Ok(())
     }
 
+    /// Hide again every window gevrek has as hidden: something else
+    /// showed them (a session that was about to end, and did not).
+    pub fn hide_hidden_windows_again(&mut self, window_manager: &mut dyn Desktop) -> usize {
+        let hidden = self.window_state.ids_where(|state| state.hidden_by_wm);
+        let mut count = 0;
+        for handle in hidden {
+            if queries(window_manager).exists(handle)
+                && effect(
+                    window_manager,
+                    Effect::SetVisible {
+                        id: handle,
+                        visible: false,
+                    },
+                )
+                .is_ok()
+            {
+                count += 1;
+            }
+        }
+        count
+    }
+
     /// Restore every window Gevrek hid (workspace switching, group tabs,
     /// scratchpads). Used both by the shutdown path and by the
     /// `RestoreWindows` dispatch. Returns the
@@ -721,15 +743,21 @@ impl Executor {
                             workspaces
                                 .elements()
                                 .iter()
-                                .position(|workspace| workspace.name.eq_ignore_ascii_case(name))
+                                .position(|workspace| workspace.is_called(name))
                         })
                 {
                     index
                 } else {
+                    // (On a display where the workspace of this name has
+                    // an entry of its own under another name, that one
+                    // is made.)
+                    let name = self
+                        .name_on_output(monitor_manager, monitor, name)
+                        .unwrap_or_else(|| name.clone());
                     self.create_workspace_for_selector(
                         monitor_manager,
                         monitor,
-                        name.clone(),
+                        name,
                         crate::layouts::LayoutType::BSP,
                         run_created_empty,
                     )?
@@ -963,7 +991,7 @@ impl Executor {
                             workspaces
                                 .elements()
                                 .iter()
-                                .any(|workspace| workspace.name.eq_ignore_ascii_case(name))
+                                .any(|workspace| workspace.is_called(name))
                         })
                 };
                 // A workspace of the configuration that this monitor is to
@@ -1054,7 +1082,14 @@ impl Executor {
             let workspace = monitor_manager
                 .get_focused_workspace_mut(monitor)
                 .ok_or_else(|| anyhow::anyhow!("The selected workspace disappeared"))?;
-            self.apply_workspace_layout_and_position(workspace, work_area, window_manager)?;
+            // (The workspace before is hidden by now: whatever goes wrong
+            // from here on, the new one is shown, or the display would be
+            // left with neither.)
+            if let Err(error) =
+                self.apply_workspace_layout_and_position(workspace, work_area, window_manager)
+            {
+                log::warn!("The workspace was not laid out before it was shown: {error:#}");
+            }
             let mut transition_rects = Vec::new();
             for window in workspace.floating_windows.iter().copied() {
                 if let Ok(rect) = queries(window_manager)
@@ -1077,11 +1112,13 @@ impl Executor {
             _ if target < current => -1,
             _ => 1,
         };
-        let _ = window_manager.begin_workspace_transition(
+        if let Err(error) = window_manager.begin_workspace_transition(
             &transition_rects,
             direction * work_area.width,
             0,
-        )?;
+        ) {
+            log::warn!("The workspace comes without its transition: {error:#}");
+        }
         let mut changes = Changes::default();
         let reveal = workspaces::reveal(
             &mut World {
@@ -1167,34 +1204,7 @@ impl Executor {
             self.reevaluate_dynamic_rules(window_manager, monitor_manager, window)?;
         }
         self.emit_workspace_renamed(monitor, workspace_id, &old_name, name);
-        // A workspace that every display has by one name (it is written
-        // down once, for all of them) has the new name on every display:
-        // else the others would keep a workspace nothing is written of.
-        let others: Vec<(MonitorHandle, usize)> = monitor_manager
-            .get_all_monitors()
-            .iter()
-            .map(|other| other.handle)
-            .filter(|other| *other != monitor)
-            .filter_map(|other| {
-                let at = monitor_manager
-                    .get_workspaces(other)?
-                    .iter()
-                    .position(|workspace| workspace.name.eq_ignore_ascii_case(&old_name))?;
-                Some((other, at))
-            })
-            .collect();
-        for (other, at) in others {
-            match workspaces::rename_workspace(monitor_manager, other, at, name) {
-                Ok(Some(renamed)) => {
-                    for window in renamed.windows {
-                        self.reevaluate_dynamic_rules(window_manager, monitor_manager, window)?;
-                    }
-                    self.emit_workspace_renamed(other, renamed.workspace_id, &old_name, name);
-                }
-                Ok(None) => {}
-                Err(error) => log::debug!("Workspace '{old_name}' keeps its name on {other:?}: {error}"),
-            }
-        }
+        // (The workspaces of that name on the other displays keep theirs.)
         log::info!(
             "Renamed workspace '{}' to '{}' using selector '{}'",
             old_name,
@@ -1202,6 +1212,30 @@ impl Executor {
             selector.expression()
         );
         Ok(())
+    }
+
+    /// The name the workspace meant by `name` has on an output, where the
+    /// configuration gives that output an entry of its own for it under
+    /// another name (`WorkspaceProfile::also_called`).
+    fn name_on_output(
+        &self,
+        monitor_manager: &MonitorManager,
+        monitor: MonitorHandle,
+        name: &str,
+    ) -> Option<String> {
+        let monitors = monitor_manager.get_all_monitors_ordered();
+        self.workspace_profiles
+            .values()
+            .find(|profile| {
+                profile.enabled
+                    && profile
+                        .also_called
+                        .iter()
+                        .any(|other| other.trim().eq_ignore_ascii_case(name.trim()))
+                    && crate::config_apply::monitor_selector_targets(&profile.monitor, &monitors)
+                        .contains(&monitor)
+            })
+            .map(|profile| profile.name.clone())
     }
 
     pub fn prune_non_persistent_workspace(

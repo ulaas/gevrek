@@ -807,6 +807,17 @@ impl Background {
         if app_id.is_empty() || app_id.contains('/') || app_id.starts_with('.') {
             return false;
         }
+        // (Nor one with a line's end in it, or a word of its command with
+        // one: an entry is read line by line, and what stood after the
+        // break would be a line of its own, a second `Exec=` among them.)
+        if app_id.chars().any(char::is_control)
+            || commandline
+                .iter()
+                .any(|word| word.chars().any(char::is_control))
+        {
+            log::warn!("no autostart entry for {app_id:?}: its name or its command has a control character");
+            return false;
+        }
         let Some(folder) = autostart_folder() else {
             return false;
         };

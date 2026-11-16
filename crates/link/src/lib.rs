@@ -334,20 +334,46 @@ async fn connect(endpoint: &str) -> Result<(WMClient, Peer), String> {
 }
 
 async fn fetch(client: &mut WMClient, tell: &Teller) {
-    let document = tokio::time::timeout(CALL, client.get_configuration()).await;
-    match document {
-        Ok(Ok(document)) => match serde_json::from_str::<Config>(&document.json) {
-            Ok(mut config) => {
-                // Reading does not build the graph's lookup tables.
-                config.node_graph.rebuild_connection_indices();
-                tell.tell(Event::Configuration(Box::new(config), document.revision));
-            }
-            Err(error) => log::warn!("the window manager's configuration is not read: {error}"),
-        },
-        Ok(Err(error)) => log::warn!("the configuration could not be fetched: {error}"),
-        Err(_) => log::warn!("the configuration could not be fetched: no answer"),
+    // (Asked for again where no answer came: a window manager that has
+    // just started may be busy for a moment.)
+    let mut why = String::new();
+    for attempt in 0..3 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(700)).await;
+        }
+        let document = tokio::time::timeout(CALL, client.get_configuration()).await;
+        match document {
+            Ok(Ok(document)) => match serde_json::from_str::<Config>(&document.json) {
+                Ok(mut config) => {
+                    // Reading does not build the graph's lookup tables.
+                    config.node_graph.rebuild_connection_indices();
+                    tell.tell(Event::Configuration(Box::new(config), document.revision));
+                    return;
+                }
+                // (Asking again would read the same: a window manager of
+                // another version, whose configuration this one cannot read.)
+                Err(error) => {
+                    why = format!("the window manager's configuration is not read: {error}");
+                    break;
+                }
+            },
+            Ok(Err(error)) => why = format!("the configuration could not be fetched: {error}"),
+            Err(_) => why = "the configuration could not be fetched: no answer".to_string(),
+        }
     }
+    log::warn!("{why}");
+    // Told, so that whoever shows the configuration can say that what it
+    // shows is not the window manager's.
+    tell.tell(Event::Log {
+        level: Level::Error,
+        message: format!("{FETCH_FAILED}{why}"),
+        timestamp_ms: 0,
+    });
 }
+
+/// How the message begins that tells of a configuration that could not be
+/// fetched (an [`Event::Log`] of the level `Error`).
+pub const FETCH_FAILED: &str = "configuration not fetched: ";
 
 async fn serve(client: &mut WMClient, request: Request, tell: &Teller) {
     match request {

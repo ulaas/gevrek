@@ -106,7 +106,7 @@ pub fn arrange(profiles: &[OutputProfile], outputs: &[(String, i32, i32)]) -> Ve
     let mut next_x = outputs
         .iter()
         .zip(&placed)
-        .filter_map(|((_, width, _), place)| place.map(|(x, _)| x + width))
+        .filter_map(|((_, width, _), place)| place.map(|(x, _)| x.saturating_add(*width)))
         .max()
         .unwrap_or(0);
     placed
@@ -115,7 +115,7 @@ pub fn arrange(profiles: &[OutputProfile], outputs: &[(String, i32, i32)]) -> Ve
         .map(|(place, (_, width, _))| {
             place.unwrap_or_else(|| {
                 let at = (next_x, 0);
-                next_x += width;
+                next_x = next_x.saturating_add(*width);
                 at
             })
         })

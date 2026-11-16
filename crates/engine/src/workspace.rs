@@ -117,6 +117,9 @@ impl ExposeState {
 pub struct Workspace {
     /// Name of this workspace
     pub name: String,
+    /// Names it also answers to (`WorkspaceProfile::also_called`): the
+    /// name the workspace in its place has on the other displays.
+    pub also_called: Vec<String>,
 
     /// Containers for tiled windows
     pub containers: Ring<Container>,
@@ -334,9 +337,21 @@ pub struct BorderLook {
 }
 
 impl Workspace {
+    /// Whether the workspace is the one meant by a name: its own, or one
+    /// it also answers to.
+    pub fn is_called(&self, name: &str) -> bool {
+        let name = name.trim();
+        self.name.eq_ignore_ascii_case(name)
+            || self
+                .also_called
+                .iter()
+                .any(|other| other.trim().eq_ignore_ascii_case(name))
+    }
+
     pub fn new(id: usize, name: String) -> Self {
         Self {
             name,
+            also_called: Vec::new(),
             containers: Ring::new(),
             floating_windows: Ring::new(),
             layout: LayoutType::BSP,

@@ -85,6 +85,10 @@ pub struct Runtime {
     display_change_pending: Option<std::time::Instant>,
     /// Windows that opened while the mouse button was held (`held.rs`).
     held_openings: held::Held,
+    /// Whether the helper for elevated windows answered when last asked,
+    /// and whether its task was already run for want of one.
+    elevated_helper: bool,
+    elevated_helper_asked: bool,
     /// Publishes the running configuration to readers (the gRPC server).
     config_publisher: Option<config_store::ConfigPublisher>,
     /// `config` changed since the last publish.
@@ -409,6 +413,8 @@ impl Runtime {
             gesture_progress_updated: None,
             display_change_pending: None,
             held_openings: held::Held::default(),
+            elevated_helper: false,
+            elevated_helper_asked: false,
             config_publisher: None,
             config_dirty: false,
             notices: Vec::new(),
@@ -675,6 +681,15 @@ impl Runtime {
             let _loop_start = std::time::Instant::now();
             // `health` reports a loop that stopped passing here.
             process_guard::beat();
+            if process_guard::session_end_called_off() {
+                let hidden = self
+                    .core
+                    .executor
+                    .hide_hidden_windows_again(&mut self.window_manager);
+                log::info!(
+                    "The session's end was called off: {hidden} window(s) of workspaces that are not shown are hidden again"
+                );
+            }
             if let Some(fault) = injected_fault.take_if(|fault| fault.due()) {
                 fault.happen();
             }
@@ -866,6 +881,10 @@ impl Runtime {
                 // (Windows shows it again now and then).
                 // (Only while gevrek's own panel is there to take its
                 // place: without one a desktop would be left with neither.)
+                // (And the helper for the windows of programs that run
+                // as an administrator: found when it comes, missed when
+                // it goes.)
+                self.follow_elevated_helper();
                 // (And the Windows key, as the configuration has it now.)
                 crate::windows_key::configure(
                     self.config.desktop.platform.windows.own_windows_key,
@@ -1350,6 +1369,8 @@ impl Runtime {
             if let Err(e) = self.window_manager.tick_runtime_animations() {
                 log::error!("Error advancing runtime animations: {}", e);
             }
+            // (What this pass hid and showed is in the journal's file.)
+            crate::dwm::hidden_journal::flush();
             // (After the windows were put where they are for this pass.)
             self.cut_columns();
             self.startup_process_manager.tick();
@@ -1541,6 +1562,8 @@ impl Runtime {
             );
         }
         let restored_composition = self.window_manager.restore_all_window_alpha_styles();
+        // (The helper for elevated windows is let go once nothing more is
+        // asked of it: at the very end of this.)
         // The title bars and their buttons gevrek took away are back.
         self.window_manager.restore_all_window_frames();
         // Windows that were cut at a display's edge are whole again.
@@ -1605,8 +1628,64 @@ impl Runtime {
             }
         }
 
+        crate::dwm::hidden_journal::flush();
+        // The helper for elevated windows ends with its window manager.
+        crate::elevated_helper::client::disconnect();
+
         log::info!("Runtime event loop exited gracefully");
         Ok(())
+    }
+
+    /// Have the helper for elevated windows where the configuration asks
+    /// for it and one is there, and none where it does not. When it
+    /// comes, the windows that were left alone for want of it are taken;
+    /// when it goes, they are let go again.
+    fn follow_elevated_helper(&mut self) {
+        use crate::elevated_helper::{client, pipe_name};
+        // Whether an elevated program's window is told by its border.
+        if self
+            .window_manager
+            .set_mark_elevated(self.config.desktop.platform.windows.mark_elevated_windows)
+        {
+            for monitor in self.core.monitor_manager.get_all_monitors() {
+                self.core.executor.mark_layout_dirty(monitor.handle);
+            }
+        }
+        let wanted = self.config.desktop.platform.windows.manage_elevated_windows
+            && !crate::elevated::own_elevated();
+        let had = self.elevated_helper;
+        let pipe = pipe_name(&gevrek_model::paths::instance());
+        let has = if wanted {
+            // (The first time none answers, the task that starts one
+            // without a question is run, where it was registered.)
+            if !client::connect(&pipe) && !std::mem::replace(&mut self.elevated_helper_asked, true)
+            {
+                crate::elevated::run_helper_task(&gevrek_model::paths::instance());
+            }
+            client::connected()
+        } else {
+            if client::connected() {
+                client::disconnect();
+            }
+            false
+        };
+        if has == had {
+            return;
+        }
+        self.elevated_helper = has;
+        if has {
+            log::info!("Windows of programs that run as an administrator are managed (the helper answers)");
+            if let Err(error) = self.window_manager.refresh_window_list() {
+                log::debug!("the windows were not listed anew: {error}");
+            }
+            if let Err(error) = self.adopt_existing_windows() {
+                log::warn!("the elevated windows that are open were not taken: {error}");
+            }
+        } else {
+            log::info!("Windows of programs that run as an administrator are left alone again (no helper answers)");
+            self.core
+                .release_newly_ignored_windows(&mut self.window_manager);
+        }
     }
 
     fn build_rule_engine(config: &DesktopConfig) -> RuleEngine {

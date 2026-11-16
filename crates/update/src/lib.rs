@@ -44,6 +44,10 @@ pub const WINDOWS_PROGRAMS: &[&str] = &[
     "gevrek-studio.exe",
     "gevrek-shell.exe",
 ];
+/// Programs a package has since a later version than the first: put in
+/// place where the package has them, and not asked for of an install
+/// (one made before they were is still one to update).
+const LATER_PROGRAMS: &[&str] = &["gevrek-elevated.exe"];
 /// What else of the package is put beside the programs when it is there.
 const BESIDE: &[&str] = &["uninstall.ps1", "README.txt", "LICENSE"];
 /// Seconds between two checks that nobody asked for.
@@ -364,6 +368,10 @@ pub fn stage(source: &Source, release: &Release, folder: &Path) -> Result<PathBu
     let work = folder.join("download");
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work)?;
+    // Whether what was staged before is gone already: until then a
+    // failure (no network, a file that is not the release's) leaves it as
+    // it was, ready to be put in place.
+    let mut replaced = false;
     let result = (|| {
         let sums_file = work.join(SUMS);
         download(source, &sums.url, &sums_file, MAX_TEXT, 60)?;
@@ -378,6 +386,7 @@ pub fn stage(source: &Source, release: &Release, folder: &Path) -> Result<PathBu
                 package.name
             );
         }
+        replaced = true;
         unstage(folder);
         let staged = staged_folder(folder);
         std::fs::create_dir_all(&staged)?;
@@ -402,7 +411,7 @@ pub fn stage(source: &Source, release: &Release, folder: &Path) -> Result<PathBu
         Ok(programs)
     })();
     let _ = std::fs::remove_dir_all(&work);
-    if result.is_err() {
+    if result.is_err() && replaced {
         unstage(folder);
     }
     result
@@ -434,10 +443,35 @@ pub fn apply(package: &Path, install: &Path) -> Result<()> {
     }
     let previous = install.join("previous");
     std::fs::create_dir_all(&previous)?;
+    // The programs to put in place: all of the first kind, and of the
+    // later ones those the package has.
+    let programs: Vec<&str> = WINDOWS_PROGRAMS
+        .iter()
+        .copied()
+        .chain(
+            LATER_PROGRAMS
+                .iter()
+                .copied()
+                .filter(|program| package.join(program).is_file()),
+        )
+        .collect();
+    // Each is written beside its place first, whole, under another name.
+    // Putting it in place is then two renames, done in a moment: a
+    // machine that loses its power meanwhile is not left with a program
+    // moved away and its new file half written.
+    let beside = |program: &str| install.join(format!("{program}.new"));
+    for program in &programs {
+        if let Err(error) = std::fs::copy(package.join(program), beside(program)) {
+            for written in &programs {
+                let _ = std::fs::remove_file(beside(written));
+            }
+            return Err(error).with_context(|| format!("write {}", beside(program).display()));
+        }
+    }
     let mut moved: Vec<&str> = Vec::new();
     let mut placed: Vec<&str> = Vec::new();
     let result = (|| -> Result<()> {
-        for program in WINDOWS_PROGRAMS {
+        for program in programs.iter().copied() {
             let to = install.join(program);
             if to.exists() {
                 let aside = previous.join(program);
@@ -451,14 +485,15 @@ pub fn apply(package: &Path, install: &Path) -> Result<()> {
                     .with_context(|| format!("move {} aside", to.display()))?;
                 moved.push(program);
             }
-            std::fs::copy(package.join(program), &to)
-                .with_context(|| format!("write {}", to.display()))?;
+            std::fs::rename(beside(program), &to)
+                .with_context(|| format!("put {} in place", to.display()))?;
             placed.push(program);
         }
         Ok(())
     })();
     if let Err(error) = result {
-        for program in WINDOWS_PROGRAMS {
+        for program in programs.iter() {
+            let _ = std::fs::remove_file(beside(program));
             let to = install.join(program);
             if moved.contains(program) {
                 let _ = std::fs::remove_file(&to);

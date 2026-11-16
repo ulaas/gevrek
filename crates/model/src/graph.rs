@@ -76,7 +76,9 @@ pub struct NodeGraph {
     #[schemars(with = "HashMap<String, Node>")]
     pub nodes: HashMap<NodeId, Node>,
     pub connections: Vec<Connection>,
+    #[serde(default)]
     next_node_id: NodeId,
+    #[serde(default)]
     next_pin_id: PinId,
     /// O(1) lookup set for checking if a connection exists
     /// Key format: (from_node, from_pin, to_node, to_pin)
@@ -144,6 +146,22 @@ impl NodeGraph {
 
     /// Rebuild connection indices after deserialization or bulk operations
     pub fn rebuild_connection_indices(&mut self) {
+        // What a file says of the numbers is not taken on trust: a node
+        // is known by the number it is filed under, and the next number
+        // to give out lies above every one in use. (A file put together
+        // by hand, with the counter left at nought, had its first node
+        // written over by the next one added.)
+        let mut highest_pin = 0;
+        for (key, node) in &mut self.nodes {
+            node.id = *key;
+            for pin in node.inputs.iter().chain(node.outputs.iter()) {
+                highest_pin = highest_pin.max(pin.id + 1);
+            }
+        }
+        if let Some(highest) = self.nodes.keys().max() {
+            self.next_node_id = self.next_node_id.max(highest + 1);
+        }
+        self.next_pin_id = self.next_pin_id.max(highest_pin);
         self.connection_set.clear();
         self.input_connection_set.clear();
         for conn in &self.connections {

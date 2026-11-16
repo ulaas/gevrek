@@ -30,6 +30,11 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 /// the call is honoured.
 unsafe fn take_foreground(hwnd: HWND) {
     use windows::Win32::UI::Input::KeyboardAndMouse::{SendInput, INPUT, INPUT_MOUSE};
+    // (A window of a program that runs as an administrator is given the
+    // keyboard by the helper that runs so too.)
+    if super::reach::foreground_by_helper(hwnd) {
+        return;
+    }
     if SetForegroundWindow(hwnd).as_bool() && GetForegroundWindow() == hwnd {
         return;
     }
@@ -195,10 +200,29 @@ pub fn workspace_ways(
         Some((x, y)) => (-x, -y),
         None => (-asked.0, -asked.1),
     };
-    let go = (opposite != (0, 0))
-        .then(|| slide_clear_of_displays(displays, outgoing, opposite))
-        .flatten()
-        .filter(|way| *way == opposite);
+    // The opposite way, or, where a display lies that way, up or down
+    // (as the new one may come from below or above for the same reason).
+    // Never the way the new one comes from: the two would cross. Before,
+    // an old workspace whose way out was taken by a display was hidden at
+    // once: beside another display, a change one way moved and a change
+    // the other way did not, and a change to a workspace with no window
+    // on it showed nothing at all.
+    let height = outgoing.first().map_or(0, |rect| {
+        let middle = (rect.0 + rect.2 / 2, rect.1 + rect.3 / 2);
+        displays
+            .iter()
+            .find(|display| {
+                middle.0 >= display.0
+                    && middle.0 < display.0 + display.2
+                    && middle.1 >= display.1
+                    && middle.1 < display.1 + display.3
+            })
+            .map_or(rect.3, |display| display.3)
+    });
+    let go = [opposite, (0, height), (0, -height)]
+        .into_iter()
+        .filter(|way| *way != (0, 0) && *way != (-opposite.0, -opposite.1))
+        .find(|way| slide_clear_of_displays(displays, outgoing, *way) == Some(*way));
     WorkspaceWays {
         come,
         go,
@@ -475,6 +499,9 @@ pub struct WindowManager {
     /// The boxes (to minimise, to maximise) gevrek took from a window's
     /// title bar, by window: exactly those are given back.
     caption_buttons_removed: RefCell<HashMap<WindowHandle, i32>>,
+    /// Whether the windows of programs that run as an administrator have
+    /// a border of their own colours (`marks`).
+    mark_elevated: bool,
     /// The windows of a workspace that is giving way to another.
     going_out: GoingOut,
     /// What was hidden along with the window it belongs to (the dialogs a
@@ -532,6 +559,17 @@ pub struct WindowManager {
     /// a "save changes?" prompt) gets its appearance back.
     close_checks: HashMap<WindowHandle, (Instant, ExitRestore)>,
 }
+
+/// The border of a window of a program that runs as an administrator:
+/// crimson, and a lighter red while it has the keyboard.
+const ELEVATED: (u8, u8, u8) = (220, 20, 60);
+const ELEVATED_FOCUSED: (u8, u8, u8) = (255, 99, 112);
+/// No glow at all (around such a window).
+const NO_GLOW: gevrek_engine::contract::GlowStrength = gevrek_engine::contract::GlowStrength {
+    radius: 0,
+    opacity: 0,
+    inactive_opacity: 0,
+};
 
 /// What never changes for the lifetime of a window.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -681,6 +719,7 @@ impl WindowManager {
             preferred_window_sizes: HashMap::new(),
             smallest_window_sizes: RefCell::new(HashMap::new()),
             caption_buttons_removed: RefCell::new(HashMap::new()),
+            mark_elevated: true,
             going_out: GoingOut::default(),
             hidden_with_owner: RefCell::new(HashMap::new()),
             cut: RefCell::new(HashMap::new()),
@@ -716,6 +755,7 @@ impl WindowManager {
             preferred_window_sizes: HashMap::new(),
             smallest_window_sizes: RefCell::new(HashMap::new()),
             caption_buttons_removed: RefCell::new(HashMap::new()),
+            mark_elevated: true,
             going_out: GoingOut::default(),
             hidden_with_owner: RefCell::new(HashMap::new()),
             cut: RefCell::new(HashMap::new()),
@@ -946,6 +986,11 @@ impl WindowManager {
             .collect();
         for handle in &dead {
             self.forget_window(*handle);
+            // (Its end was never told: the next window with this handle's
+            // value is another window, as after an end that was.)
+            if super::hwnd_map::id_for(super::hwnd_map::hwnd_of(handle.0)) == handle.0 {
+                super::hwnd_map::retire(super::hwnd_map::hwnd_of(handle.0));
+            }
         }
         self.identities
             .borrow_mut()
@@ -1111,7 +1156,11 @@ impl WindowManager {
         // Nor is one of a program with an administrator's rights, where
         // gevrek has none: Windows lets it be neither moved nor resized,
         // and a tile kept for it would stay empty (`elevated.rs`).
-        if crate::elevated::window_is_beyond_reach(native) {
+        // (With the helper that runs so too it is a window as any other:
+        // `elevated_helper`.)
+        if crate::elevated::window_is_beyond_reach(native)
+            && !crate::elevated_helper::client::connected()
+        {
             return true;
         }
 
@@ -1119,9 +1168,11 @@ impl WindowManager {
         if let Some(rule_engine_arc) = &self.rule_engine {
             if let Ok(engine) = rule_engine_arc.lock() {
                 // Build WindowInfo for rule checking
-                if let Some(rule_window_info) = self.rule_window_info(handle) {
-                    return engine.should_ignore(&rule_window_info);
-                }
+                // (A window that is gone meanwhile is nobody's to manage.)
+                return match self.rule_window_info(handle) {
+                    Some(rule_window_info) => engine.should_ignore(&rule_window_info),
+                    None => true,
+                };
             }
         }
 
@@ -1431,7 +1482,7 @@ impl WindowManager {
                 let height = rect.bottom - rect.top;
 
                 // Use ASYNCWINDOWPOS and NOACTIVATE to prevent visible shuffling
-                if let Err(e) = SetWindowPos(
+                if let Err(e) = super::reach::set_window_pos(
                     hwnd,
                     None,
                     x,
@@ -1462,7 +1513,7 @@ impl WindowManager {
                 }
 
                 // Use ASYNCWINDOWPOS and NOACTIVATE to prevent visible shuffling
-                if let Err(e) = SetWindowPos(
+                if let Err(e) = super::reach::set_window_pos(
                     hwnd,
                     None,
                     rect.left,
@@ -1557,7 +1608,7 @@ impl WindowManager {
 
                 // Use NOACTIVATE to prevent visible shuffling
                 // Removed SWP_ASYNCWINDOWPOS to ensure synchronous positioning
-                if let Err(e) = SetWindowPos(
+                if let Err(e) = super::reach::set_window_pos(
                     hwnd,
                     None,
                     adjusted_x,
@@ -1642,7 +1693,7 @@ impl WindowManager {
         unsafe {
             let hwnd = handle.to_hwnd();
             if IsWindow(hwnd).as_bool() {
-                PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0))?;
+                super::reach::post_close(hwnd)?;
                 self.windows.remove(&handle);
                 self.preferred_window_sizes.remove(&handle);
                 self.smallest_window_sizes.borrow_mut().remove(&handle);
@@ -1680,7 +1731,7 @@ impl WindowManager {
             };
             // SAFETY: a value of the kind the attribute takes, and its size.
             unsafe {
-                let _ = DwmSetWindowAttribute(
+                let _ = super::reach::dwm_set_window_attribute(
                     hwnd,
                     DWMWA_NCRENDERING_POLICY,
                     &policy as *const _ as *const core::ffi::c_void,
@@ -1817,7 +1868,7 @@ impl WindowManager {
                 return;
             }
             if hide {
-                let _ = ShowWindowAsync(hwnd, SW_HIDE);
+                super::reach::show_window_async(hwnd, SW_HIDE);
             }
             if let Some((home, alpha, _)) = left {
                 self.animation_scheduler.cancel_window(handle);
@@ -1827,7 +1878,7 @@ impl WindowManager {
                     // what is seen of it is: the window itself is larger
                     // by its frame that is not seen.)
                     let (left, top, right, bottom) = self.get_window_frame_offsets(hwnd);
-                    let _ = SetWindowPos(
+                    let _ = super::reach::set_window_pos(
                         hwnd,
                         None,
                         home.x - left,
@@ -1897,7 +1948,7 @@ impl WindowManager {
                         // Async: a busy app must not stall a workspace
                         // switch. Posted show/hide requests are applied in
                         // order.
-                        let _ = ShowWindowAsync(hwnd, SW_HIDE);
+                        super::reach::show_window_async(hwnd, SW_HIDE);
                     }
                 }
                 super::hidden_journal::record_hidden(handle, false);
@@ -1928,7 +1979,7 @@ impl WindowManager {
             if IsWindow(hwnd).as_bool() {
                 if journaled.is_some_and(|entry| entry.cloaked) {
                     let uncloak: i32 = 0;
-                    let _ = DwmSetWindowAttribute(
+                    let _ = super::reach::dwm_set_window_attribute(
                         hwnd,
                         DWMWINDOWATTRIBUTE(13), // DWMWA_CLOAK
                         &uncloak as *const _ as *const _,
@@ -1937,7 +1988,7 @@ impl WindowManager {
                 }
                 // SW_SHOWNA shows the window in its current state;
                 // SW_SHOWNOACTIVATE would restore a maximized window.
-                let _ = ShowWindowAsync(hwnd, SW_SHOWNA);
+                super::reach::show_window_async(hwnd, SW_SHOWNA);
 
                 // Also show border if it exists
                 self.show_border(handle)?;
@@ -1966,11 +2017,9 @@ impl WindowManager {
         let list = hidden.entry(owner).or_default();
         for hwnd in owned {
             let handle = WindowHandle::from_hwnd(hwnd);
-            // SAFETY: posted to the window's own thread; a window that is
-            // gone meanwhile takes no harm.
-            unsafe {
-                let _ = ShowWindowAsync(hwnd, SW_HIDE);
-            }
+            // (Posted to the window's own thread; a window that is gone
+            // meanwhile takes no harm.)
+            super::reach::show_window_async(hwnd, SW_HIDE);
             // (In the journal as every window gevrek hides: a gevrek that
             // ends, in whatever way, shows it again.)
             super::hidden_journal::record_hidden(handle, false);
@@ -1994,7 +2043,7 @@ impl WindowManager {
             // SAFETY: plain calls; a window that closed meanwhile is skipped.
             unsafe {
                 if IsWindow(hwnd).as_bool() {
-                    let _ = ShowWindowAsync(hwnd, SW_SHOWNA);
+                    super::reach::show_window_async(hwnd, SW_SHOWNA);
                 }
             }
         }
@@ -2048,10 +2097,13 @@ impl WindowManager {
             const WS_MINIMIZEBOX: i32 = 0x00020000;
             const WS_MAXIMIZEBOX: i32 = 0x00010000;
             const WS_THICKFRAME: i32 = 0x00040000;
-            // (Not from a window without a frame to resize it by: what
-            // kind of window it is is read from these very boxes there
-            // (`window_kind`), and it would be another kind without them.)
-            if style & WS_THICKFRAME == 0 {
+            // (Not from a window without a frame to resize it by, nor
+            // from one without a title bar: what kind of window it is is
+            // read from these very boxes there (`window_kind`), and it
+            // would be another kind without them. A window without a
+            // title bar shows no boxes to take away in any case.)
+            const WS_CAPTION: i32 = 0x00C0_0000;
+            if style & WS_THICKFRAME == 0 || style & WS_CAPTION != WS_CAPTION {
                 return Ok(());
             }
             let new_style = style & !(WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
@@ -2062,9 +2114,9 @@ impl WindowManager {
                     .borrow_mut()
                     .entry(handle)
                     .or_insert(0) |= style & (WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
-                SetWindowLongW(hwnd, GWL_STYLE, new_style);
+                super::reach::set_window_long(hwnd, GWL_STYLE, new_style);
                 // Force window to redraw its non-client area (title bar)
-                SetWindowPos(
+                super::reach::set_window_pos(
                     hwnd,
                     None,
                     0,
@@ -2102,9 +2154,9 @@ impl WindowManager {
             let new_style = style | removed;
 
             if new_style != style {
-                SetWindowLongW(hwnd, GWL_STYLE, new_style);
+                super::reach::set_window_long(hwnd, GWL_STYLE, new_style);
                 // Force window to redraw its non-client area (title bar)
-                SetWindowPos(
+                super::reach::set_window_pos(
                     hwnd,
                     None,
                     0,
@@ -2182,7 +2234,7 @@ impl WindowManager {
 
         unsafe {
             use windows::Win32::UI::WindowsAndMessaging::{
-                GetWindowLongW, SetWindowLongW, SetWindowPos, GWL_EXSTYLE, SWP_FRAMECHANGED,
+                GetWindowLongW, GWL_EXSTYLE, SWP_FRAMECHANGED,
                 SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_LAYERED,
             };
 
@@ -2190,8 +2242,8 @@ impl WindowManager {
             if IsWindow(hwnd).as_bool() {
                 let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
                 if (ex_style & WS_EX_LAYERED.0 as i32) != 0 {
-                    SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style & !(WS_EX_LAYERED.0 as i32));
-                    SetWindowPos(
+                    super::reach::set_window_long(hwnd, GWL_EXSTYLE, ex_style & !(WS_EX_LAYERED.0 as i32));
+                    super::reach::set_window_pos(
                         hwnd,
                         None,
                         0,
@@ -2275,7 +2327,7 @@ impl WindowManager {
 
         unsafe {
             use windows::Win32::UI::WindowsAndMessaging::{
-                GetWindowLongW, SetLayeredWindowAttributes, SetWindowLongW, GWL_EXSTYLE, LWA_ALPHA,
+                GetWindowLongW, GWL_EXSTYLE,
                 WS_EX_LAYERED,
             };
 
@@ -2301,16 +2353,11 @@ impl WindowManager {
                 }
 
                 if (ex_style & WS_EX_LAYERED.0 as i32) == 0 {
-                    SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED.0 as i32);
+                    super::reach::set_window_long(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED.0 as i32);
                     self.gevrek_layered_windows.insert(handle);
                 }
 
-                if let Err(error) = SetLayeredWindowAttributes(
-                    hwnd,
-                    windows::Win32::Foundation::COLORREF(0),
-                    alpha,
-                    LWA_ALPHA,
-                ) {
+                if let Err(error) = super::reach::set_layered_alpha(hwnd, alpha) {
                     let _ = self.restore_native_window_alpha(handle);
                     return Err(error.into());
                 }
@@ -2348,7 +2395,7 @@ impl WindowManager {
                 ShadowPolicy::Disabled => 1,
                 ShadowPolicy::Enabled => 2,
             };
-            let applied = DwmSetWindowAttribute(
+            let applied = super::reach::dwm_set_window_attribute(
                 hwnd,
                 DWMWINDOWATTRIBUTE(2),
                 &value as *const _ as *const _,
@@ -2397,9 +2444,9 @@ impl WindowManager {
             let Some(lowest) = lowest else {
                 return Ok(());
             };
-            SetWindowPos(
+            super::reach::set_window_pos(
                 hwnd,
-                lowest,
+                Some(lowest),
                 0,
                 0,
                 0,
@@ -2417,9 +2464,9 @@ impl WindowManager {
             let hwnd = handle.to_hwnd();
             if IsWindow(hwnd).as_bool() {
                 // Use HWND_TOP to bring window to top of Z-order
-                SetWindowPos(
+                super::reach::set_window_pos(
                     hwnd,
-                    HWND_TOP,
+                    Some(HWND_TOP),
                     0,
                     0,
                     0,
@@ -2443,9 +2490,9 @@ impl WindowManager {
                 // would be with a window that hears nothing.
                 let hwnd = window_to_activate(hwnd);
                 // First bring to front, then give it focus
-                SetWindowPos(
+                super::reach::set_window_pos(
                     hwnd,
-                    HWND_TOP,
+                    Some(HWND_TOP),
                     0,
                     0,
                     0,
@@ -2481,9 +2528,9 @@ impl WindowManager {
             let hwnd = handle.to_hwnd();
             if IsWindow(hwnd).as_bool() {
                 // Use HWND_BOTTOM to send window to bottom of Z-order
-                SetWindowPos(
+                super::reach::set_window_pos(
                     hwnd,
-                    HWND_BOTTOM,
+                    Some(HWND_BOTTOM),
                     0,
                     0,
                     0,
@@ -2506,9 +2553,9 @@ impl WindowManager {
                 } else {
                     HWND_NOTOPMOST
                 };
-                SetWindowPos(
+                super::reach::set_window_pos(
                     hwnd,
-                    z_order,
+                    Some(z_order),
                     0,
                     0,
                     0,
@@ -2537,7 +2584,7 @@ impl WindowManager {
 
             // DWMWA_CLOAK = 13
             let cloak_value: i32 = if cloak { 1 } else { 0 };
-            let result = DwmSetWindowAttribute(
+            let result = super::reach::dwm_set_window_attribute(
                 hwnd,
                 DWMWINDOWATTRIBUTE(13), // DWMWA_CLOAK
                 &cloak_value as *const _ as *const _,
@@ -2549,9 +2596,9 @@ impl WindowManager {
             } else {
                 // Fallback to ShowWindow if cloaking not supported
                 if cloak {
-                    let _ = ShowWindowAsync(hwnd, SW_HIDE);
+                    super::reach::show_window_async(hwnd, SW_HIDE);
                 } else {
-                    let _ = ShowWindowAsync(hwnd, SW_SHOWNA);
+                    super::reach::show_window_async(hwnd, SW_SHOWNA);
                 }
             }
             if cloak {
@@ -2605,7 +2652,7 @@ impl WindowManager {
                 RuleColor::Rgb { r, g, b } => (b as u32) << 16 | (g as u32) << 8 | (r as u32),
             };
 
-            let _ = DwmSetWindowAttribute(
+            let _ = super::reach::dwm_set_window_attribute(
                 hwnd,
                 DWMWINDOWATTRIBUTE(34), // DWMWA_BORDER_COLOR
                 &color_value as *const _ as *const _,
@@ -2655,7 +2702,7 @@ impl WindowManager {
                 RuleColor::Rgb { r, g, b } => (b as u32) << 16 | (g as u32) << 8 | (r as u32),
             };
 
-            let _ = DwmSetWindowAttribute(
+            let _ = super::reach::dwm_set_window_attribute(
                 hwnd,
                 DWMWINDOWATTRIBUTE(35), // DWMWA_CAPTION_COLOR
                 &color_value as *const _ as *const _,
@@ -2696,7 +2743,7 @@ impl WindowManager {
 
             // DWMWA_SYSTEMBACKDROP_TYPE = 38
             let backdrop_value: i32 = backdrop_type as i32;
-            let result = DwmSetWindowAttribute(
+            let result = super::reach::dwm_set_window_attribute(
                 hwnd,
                 DWMWINDOWATTRIBUTE(38), // DWMWA_SYSTEMBACKDROP_TYPE
                 &backdrop_value as *const _ as *const _,
@@ -2742,7 +2789,7 @@ impl WindowManager {
 
             // DWMWA_WINDOW_CORNER_PREFERENCE = 33
             let corner_value: i32 = corner as i32;
-            let _ = DwmSetWindowAttribute(
+            let _ = super::reach::dwm_set_window_attribute(
                 hwnd,
                 DWMWINDOWATTRIBUTE(33), // DWMWA_WINDOW_CORNER_PREFERENCE
                 &corner_value as *const _ as *const _,
@@ -2851,10 +2898,8 @@ impl WindowManager {
                 .collect();
         let hide_at_once = |manager: &mut Self, windows: &[(WindowHandle, crate::dwm::container::Rect)]| {
             for (handle, _) in windows {
-                // SAFETY: a plain call on a window that may be gone.
-                unsafe {
-                    let _ = ShowWindowAsync(handle.to_hwnd(), SW_HIDE);
-                }
+                // (A plain call on a window that may be gone.)
+                super::reach::show_window_async(handle.to_hwnd(), SW_HIDE);
                 manager.going_out.leaving.remove(handle);
             }
         };
@@ -3234,15 +3279,16 @@ impl WindowManager {
         // EndDeferWindowPos waits for every window in the batch; one hung app
         // would freeze the whole layout. Hung windows get a posted, async
         // move instead and land in place once they recover.
-        let (hung, targets): (Vec<_>, Vec<_>) =
-            targets.into_iter().partition(|target| is_hung(target.1));
+        let (hung, targets): (Vec<_>, Vec<_>) = targets
+            .into_iter()
+            .partition(|target| is_hung(target.1) || super::reach::by_helper(target.1));
         for (handle, hwnd, x, y, width, height) in &hung {
             log::debug!(
                 "Window {} is not responding; positioning it asynchronously",
                 handle.0
             );
             let _ = unsafe {
-                SetWindowPos(
+                super::reach::set_window_pos(
                     *hwnd,
                     None,
                     *x,
@@ -3272,7 +3318,7 @@ impl WindowManager {
             }
             // Async, so one hung window cannot block the rest of the layout.
             match unsafe {
-                SetWindowPos(
+                super::reach::set_window_pos(
                     *hwnd,
                     None,
                     *x,
@@ -3441,7 +3487,7 @@ impl WindowManager {
             if seen == wanted || room.width <= 0 || room.height <= 0 {
                 return false;
             }
-            SetWindowPos(
+            super::reach::set_window_pos(
                 hwnd,
                 None,
                 wanted.0 - left,
@@ -3480,11 +3526,43 @@ impl WindowManager {
     /// bring every bordered window in line with them.
     /// A glow of its own reach and strength around one window (a floating
     /// one's), or the configuration's again; what is drawn follows at once.
+    /// Whether the windows of programs that run as an administrator are
+    /// told from the others by their border
+    /// (`desktop.platform.windows.mark_elevated_windows`). Returns whether
+    /// it is another than before (the borders are then to be made anew).
+    pub fn set_mark_elevated(&mut self, mark: bool) -> bool {
+        if std::mem::replace(&mut self.mark_elevated, mark) == mark {
+            return false;
+        }
+        if !mark {
+            // (Their glow is the configuration's again.)
+            let mut auras = self.auras.borrow_mut();
+            for target in self.border_windows.keys() {
+                if crate::elevated::window_is_elevated(target.to_hwnd().0 as isize) {
+                    auras.set_glow(target.to_hwnd(), None);
+                }
+            }
+        }
+        true
+    }
+
+    /// Whether a window's border is the one of an elevated program's
+    /// window: crimson, a lighter red while it has the keyboard, no glow.
+    fn marks(&self, handle: WindowHandle) -> bool {
+        self.mark_elevated && crate::elevated::window_is_elevated(handle.to_hwnd().0 as isize)
+    }
+
     pub fn set_window_glow(
         &mut self,
         handle: WindowHandle,
         glow: Option<gevrek_engine::contract::GlowStrength>,
     ) {
+        // (An elevated program's window has none, whatever is asked.)
+        let glow = if self.marks(handle) {
+            Some(NO_GLOW)
+        } else {
+            glow
+        };
         if !self.auras.borrow_mut().set_glow(handle.to_hwnd(), glow) {
             return;
         }
@@ -3592,6 +3670,16 @@ impl WindowManager {
             inactive_alpha,
             ..
         } = *look;
+        // A window of a program that runs as an administrator has a
+        // border of its own colours, and no glow (`marks`).
+        let (active_color, inactive_color, active_alpha, inactive_alpha) = if self.marks(handle) {
+            self.auras
+                .borrow_mut()
+                .set_glow(handle.to_hwnd(), Some(NO_GLOW));
+            (ELEVATED_FOCUSED, ELEVATED, 255, 255)
+        } else {
+            (active_color, inactive_color, active_alpha, inactive_alpha)
+        };
         // What goes with a window (a dialog) has no border: the border is
         // for a program's own window (`window_kind.rs`).
         if crate::window_kind::of_window(handle.to_hwnd().0 as isize)
@@ -3810,6 +3898,16 @@ impl WindowManager {
             inactive_alpha,
             ..
         } = *look;
+        // A window of a program that runs as an administrator has a
+        // border of its own colours, and no glow (`marks`).
+        let (active_color, inactive_color, active_alpha, inactive_alpha) = if self.marks(handle) {
+            self.auras
+                .borrow_mut()
+                .set_glow(handle.to_hwnd(), Some(NO_GLOW));
+            (ELEVATED_FOCUSED, ELEVATED, 255, 255)
+        } else {
+            (active_color, inactive_color, active_alpha, inactive_alpha)
+        };
         // What goes with a window (a dialog) has no border: the border is
         // for a program's own window (`window_kind.rs`).
         if crate::window_kind::of_window(handle.to_hwnd().0 as isize)
@@ -4576,7 +4674,7 @@ impl WindowManager {
         let value: i32 = i32::from(off);
         // SAFETY: a plain attribute of a window; one that is gone has none.
         unsafe {
-            let _ = DwmSetWindowAttribute(
+            let _ = super::reach::dwm_set_window_attribute(
                 handle.to_hwnd(),
                 windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE(3),
                 (&value as *const i32).cast(),
@@ -4620,9 +4718,9 @@ impl WindowManager {
             }
 
             if let Some(restore) = self.fullscreen_windows.remove(&handle) {
-                SetWindowLongW(hwnd, GWL_STYLE, restore.style);
-                SetWindowLongW(hwnd, GWL_EXSTYLE, restore.ex_style);
-                SetWindowPos(
+                super::reach::set_window_long(hwnd, GWL_STYLE, restore.style);
+                super::reach::set_window_long(hwnd, GWL_EXSTYLE, restore.ex_style);
+                super::reach::set_window_pos(
                     hwnd,
                     None,
                     restore.rect.left,
@@ -4672,11 +4770,11 @@ impl WindowManager {
                     | WS_THICKFRAME.0 as i32
                     | WS_MINIMIZEBOX.0 as i32
                     | WS_MAXIMIZEBOX.0 as i32);
-            SetWindowLongW(hwnd, GWL_STYLE, borderless);
+            super::reach::set_window_long(hwnd, GWL_STYLE, borderless);
             let bounds = monitor_info.rcMonitor;
-            SetWindowPos(
+            super::reach::set_window_pos(
                 hwnd,
-                HWND_TOP,
+                Some(HWND_TOP),
                 bounds.left,
                 bounds.top,
                 bounds.right - bounds.left,
@@ -4708,16 +4806,16 @@ impl WindowManager {
                 let Some(style) = self.title_bar_hidden.remove(&handle) else {
                     return Ok(());
                 };
-                SetWindowLongW(hwnd, GWL_STYLE, style);
+                super::reach::set_window_long(hwnd, GWL_STYLE, style);
             } else {
                 if self.title_bar_hidden.contains_key(&handle) {
                     return Ok(());
                 }
                 let style = GetWindowLongW(hwnd, GWL_STYLE);
                 self.title_bar_hidden.insert(handle, style);
-                SetWindowLongW(hwnd, GWL_STYLE, style & !(WS_CAPTION.0 as i32));
+                super::reach::set_window_long(hwnd, GWL_STYLE, style & !(WS_CAPTION.0 as i32));
             }
-            SetWindowPos(
+            super::reach::set_window_pos(
                 hwnd,
                 None,
                 0,
@@ -4748,7 +4846,13 @@ impl WindowManager {
             .filter_map(|(target, border_info)| unsafe {
                 let target_valid = IsWindow(target.to_hwnd()).as_bool();
                 let border_valid = IsWindow(border_info.border_hwnd.to_hwnd()).as_bool();
-                (!target_valid || !border_valid).then_some(*target)
+                // (And a border around what is no program's own window:
+                // one that became a menu's or a palette's after it was
+                // given its border, or was given one before it was known
+                // for what it is.)
+                let bordered = crate::window_kind::of_window(target.to_hwnd().0 as isize)
+                    == crate::window_kind::Kind::Ordinary;
+                (!target_valid || !border_valid || !bordered).then_some(*target)
             })
             .collect::<Vec<_>>();
 
@@ -5277,7 +5381,7 @@ impl WindowManager {
             // COLORREF format: 0x00BBGGRR
             let color: u32 = (b as u32) << 16 | (g as u32) << 8 | (r as u32);
 
-            let result = DwmSetWindowAttribute(
+            let result = super::reach::dwm_set_window_attribute(
                 hwnd,
                 DWMWINDOWATTRIBUTE(34), // DWMWA_BORDER_COLOR
                 &color as *const _ as *const _,
@@ -5311,7 +5415,7 @@ impl WindowManager {
             // DWMWA_COLOR_DEFAULT = 0xFFFFFFFF
             let color: u32 = 0xFFFFFFFF;
 
-            let result = DwmSetWindowAttribute(
+            let result = super::reach::dwm_set_window_attribute(
                 hwnd,
                 DWMWINDOWATTRIBUTE(34), // DWMWA_BORDER_COLOR
                 &color as *const _ as *const _,
@@ -5333,7 +5437,7 @@ impl WindowManager {
             // DWMWA_COLOR_NONE = 0xFFFFFFFE
             let color: u32 = 0xFFFFFFFE;
 
-            let result = DwmSetWindowAttribute(
+            let result = super::reach::dwm_set_window_attribute(
                 hwnd,
                 DWMWINDOWATTRIBUTE(34), // DWMWA_BORDER_COLOR
                 &color as *const _ as *const _,
@@ -5363,7 +5467,7 @@ impl WindowManager {
             }
 
             let corner_value = corner as i32;
-            let _ = DwmSetWindowAttribute(
+            let _ = super::reach::dwm_set_window_attribute(
                 hwnd,
                 DWMWINDOWATTRIBUTE(33), // DWMWA_WINDOW_CORNER_PREFERENCE
                 &corner_value as *const _ as *const _,
@@ -5414,6 +5518,12 @@ fn is_hung(hwnd: HWND) -> bool {
         if IsHungAppWindow(hwnd).as_bool() {
             return true;
         }
+    }
+    // A window of a program with more rights takes no message from this
+    // one, the one asked here among them: it would always read as hung.
+    // What Windows itself says of it (above) is all there is to know.
+    if crate::elevated::window_is_beyond_reach(hwnd.0 as isize) {
+        return false;
     }
     let key = hwnd.0 as isize;
     let now = Instant::now();
@@ -5470,12 +5580,10 @@ fn nonblocking_swp(hwnd: HWND, flags: SET_WINDOW_POS_FLAGS) -> SET_WINDOW_POS_FL
 /// responsive windows: a posted restore/maximize would be processed after the
 /// layout's (sent) positioning and undo it.
 fn show_window_nonblocking(hwnd: HWND, command: SHOW_WINDOW_CMD) {
-    unsafe {
-        if is_hung(hwnd) {
-            let _ = ShowWindowAsync(hwnd, command);
-        } else {
-            let _ = ShowWindow(hwnd, command);
-        }
+    if is_hung(hwnd) {
+        super::reach::show_window_async(hwnd, command);
+    } else {
+        super::reach::show_window(hwnd, command);
     }
 }
 
@@ -5658,12 +5766,18 @@ fn process_image_path(pid: u32) -> String {
 
 impl WindowManager {
     /// Rule-matching facts for a window: cached identity plus cheap live
-    /// state. Returns `None` for a hung window, like the old 100 ms probe
-    /// message did, but without blocking the WM loop to find out.
+    /// state. `None` only for a window that is gone.
+    ///
+    /// None of it is asked of the window's program (Windows keeps all of
+    /// it itself), so it is read of a window whose program does not
+    /// answer at the moment too. It used not to be: such a window had no
+    /// facts, no rule spoke of it, and it was taken for a program's own
+    /// window. A program is busy for a moment just when it opens a menu:
+    /// the menu was then given a tile's place and a border.
     pub fn rule_window_info(&self, handle: WindowHandle) -> Option<RuleWindowInfo> {
         let hwnd = handle.to_hwnd();
-        if is_hung(hwnd) {
-            log::debug!("Skipping unresponsive window {:?}", hwnd);
+        // SAFETY: a plain question.
+        if !unsafe { IsWindow(hwnd) }.as_bool() {
             return None;
         }
         let identity = self.window_identity(handle);
@@ -6299,24 +6413,42 @@ mod stackbar_geometry_tests {
         );
         // A display to the right: the new one cannot come from there, so
         // it comes from the left; the old one would cross the other
-        // display on its way out, and is hidden at once.
+        // display on its way out to the right, and goes out downwards.
+        // (It was hidden at once before: beside another display the old
+        // workspace never moved, and a change to a workspace with no
+        // window on it showed nothing at all.)
         let two = [(0, 0, 1920, 1080), (1920, 0, 1920, 1080)];
         assert_eq!(
             workspace_ways(Style::Slide, &two, &incoming, &outgoing, (1920, 0)),
             WorkspaceWays {
                 come: Some((-1920, 0)),
-                go: None,
+                go: Some((0, 1080)),
                 fade: false
             }
         );
-        // Asked the other way, both ways are clear.
+        // Asked the other way: the same, for the same reason.
         assert_eq!(
             workspace_ways(Style::Slide, &two, &incoming, &outgoing, (-1920, 0)),
             WorkspaceWays {
                 come: Some((-1920, 0)),
-                go: None,
+                go: Some((0, 1080)),
                 fade: false
             }
+        );
+        // To a workspace without windows, beside another display: the old
+        // one still goes (out the way that is clear, or else downwards).
+        assert!(workspace_ways(Style::Slide, &two, &[], &outgoing, (1920, 0)).go.is_some());
+        assert!(workspace_ways(Style::Slide, &two, &[], &outgoing, (-1920, 0)).go.is_some());
+        // A display on every side but above: upwards.
+        let around = [
+            (0, 0, 1920, 1080),
+            (1920, 0, 1920, 1080),
+            (-1920, 0, 1920, 1080),
+            (0, 1080, 1920, 1080),
+        ];
+        assert_eq!(
+            workspace_ways(Style::Slide, &around, &[], &outgoing, (1920, 0)).go,
+            Some((0, -1080))
         );
         // To a workspace without windows: nothing comes, the old one goes.
         assert_eq!(

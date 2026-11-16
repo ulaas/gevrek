@@ -72,19 +72,22 @@ fn compare(before: &Value, after: &Value, pointer: String, found: &mut Vec<Chang
                 }
             }
         }
-        (Value::Array(old), Value::Array(new)) => {
-            for index in 0..old.len().max(new.len()) {
-                let place = format!("{pointer}/{index}");
-                match (old.get(index), new.get(index)) {
-                    (Some(one), Some(other)) => compare(one, other, place, found),
-                    (one, other) => found.push(Change {
-                        pointer: place,
-                        before: one.cloned(),
-                        after: other.cloned(),
-                    }),
-                }
+        // A list with as many items as before is compared item by item.
+        (Value::Array(old), Value::Array(new)) if old.len() == new.len() => {
+            for (index, (one, other)) in old.iter().zip(new).enumerate() {
+                compare(one, other, format!("{pointer}/{index}"), found);
             }
         }
+        // One that is longer or shorter is one change, of the whole list:
+        // which item came or went cannot be told by its place (take the
+        // first of three away, and by their places the first two "changed"
+        // and the third "went"; taking that one back put a copy of the
+        // third at the end). The list is taken back as a whole.
+        (Value::Array(_), Value::Array(_)) => found.push(Change {
+            pointer,
+            before: Some(before.clone()),
+            after: Some(after.clone()),
+        }),
         _ => found.push(Change {
             pointer,
             before: Some(before.clone()),
@@ -340,7 +343,8 @@ fn restore(document: &mut Document, change: &Change, base: &Value) {
             let Some((parent, key)) = change.pointer.rsplit_once('/') else {
                 return;
             };
-            let key = key.to_string();
+            // (As the key is, not as it is written in a place: `~1` is `/`.)
+            let key = key.replace("~1", "/").replace("~0", "~");
             document.edit(parent, |holder| match holder {
                 Value::Array(items) => {
                     if let Ok(index) = key.parse::<usize>() {
@@ -398,14 +402,15 @@ mod tests {
             places,
             [
                 "/desktop/shell/panel/height",
-                "/desktop/outputs/1",
+                // (A list that is longer or shorter: one change, the list's.)
+                "/desktop/outputs",
                 "/desktop/old",
                 "/desktop/new"
             ]
         );
         assert_eq!(found[0].before, Some(json!(36)));
         assert_eq!(found[0].after, Some(json!(44)));
-        assert_eq!(found[1].before, None);
+        assert_eq!(found[1].before, Some(json!([{"name": "DP-1"}])));
         assert_eq!(found[2].after, None);
         assert!(changes(&after, &after).is_empty());
     }
@@ -457,7 +462,7 @@ mod tests {
         restore(&mut document, &height, &base);
         let added = found
             .iter()
-            .find(|change| change.pointer == "/desktop/outputs/0")
+            .find(|change| change.pointer == "/desktop/outputs")
             .expect("output")
             .clone();
         restore(&mut document, &added, &base);
@@ -465,6 +470,29 @@ mod tests {
         assert_eq!(left.len(), 1);
         assert_eq!(left[0].pointer, "/desktop/shell/panel/margin");
         assert!(document.config().is_some());
+    }
+
+    #[test]
+    fn an_item_taken_out_of_a_list_comes_back_at_its_place() {
+        let base_config = Config::default();
+        let mut document = Document::new(&base_config);
+        document.set(
+            "/desktop/outputs",
+            json!([{"name": "A"}, {"name": "B"}, {"name": "C"}]),
+        );
+        let base = document.value().clone();
+        // The first of the three is taken away.
+        document.edit("/desktop/outputs", |outputs| {
+            if let Value::Array(outputs) = outputs {
+                outputs.remove(0);
+            }
+        });
+        let found = changes(&base, document.value());
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].pointer, "/desktop/outputs");
+        restore(&mut document, &found[0], &base);
+        // As it was: not B, C and a second C.
+        assert_eq!(document.value(), &base);
     }
 
     #[test]

@@ -645,8 +645,15 @@ impl Executor {
         monitor_manager: &mut MonitorManager,
     ) -> Result<()> {
         let handles = self.window_state.ids_where(|state| state.known);
+        // One window whose rules cannot be carried out (the workspace a
+        // rule had moved it from is no longer there) does not keep the
+        // rules of all the others, or a whole reload, from being applied.
         for handle in handles {
-            self.reevaluate_dynamic_rules(window_manager, monitor_manager, handle)?;
+            if let Err(error) =
+                self.reevaluate_dynamic_rules(window_manager, monitor_manager, handle)
+            {
+                log::warn!("The rules of {handle:?} were not applied again: {error:#}");
+            }
         }
         Ok(())
     }

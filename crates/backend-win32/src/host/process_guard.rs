@@ -40,6 +40,16 @@ pub fn shutdown_complete() {
 
 pub use gevrek_host::heartbeat::{beat, time_since_last_beat};
 
+/// The session was about to end, the hidden windows were shown for it
+/// (so their programs could ask to save), and the end was called off.
+static SESSION_END_CALLED_OFF: AtomicBool = AtomicBool::new(false);
+
+/// Whether a session's end was called off since this was last asked: the
+/// windows that were shown for it are to be hidden again.
+pub fn session_end_called_off() -> bool {
+    SESSION_END_CALLED_OFF.swap(false, Ordering::AcqRel)
+}
+
 fn request_stop() {
     if let Some(flag) = STOP_FLAG.get() {
         *flag.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
@@ -117,6 +127,19 @@ unsafe extern "system" fn session_window_proc(
             if wparam.0 != 0 {
                 restore_now("Session ended");
                 request_stop();
+                // Windows ends the process when this returns: the clean
+                // shutdown (the saved windows, the programs gevrek
+                // started, the taskbar) gets the time it gets when a
+                // console closes.
+                let deadline = Instant::now() + SHUTDOWN_GRACE;
+                while !SHUTDOWN_COMPLETE.load(Ordering::Acquire) && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            } else {
+                // The end was called off (a program had unsaved work):
+                // gevrek goes on, and its workspaces are as they were.
+                SESSION_END_CALLED_OFF.store(true, Ordering::Release);
+                gevrek_host::wake::now();
             }
             LRESULT(0)
         }

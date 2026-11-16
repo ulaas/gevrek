@@ -31,6 +31,9 @@ fn programs() -> Vec<&'static str> {
         vec![
             "gevrek",
             "gevrek-wm",
+            // The helper for the windows of programs that run as an
+            // administrator.
+            "gevrek-elevated",
             "gevrek-studio",
             "gevrek-shell",
         ]

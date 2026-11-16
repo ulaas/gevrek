@@ -66,11 +66,13 @@ impl Zone {
         let height = (work_area.height as f32 * self.height_percent) as i32;
 
         // Apply gap
+        // (A gap of any size out of a file: none of this overflows.)
+        let both = self.gap.saturating_mul(2);
         Rect::new(
-            x + self.gap,
-            y + self.gap,
-            (width - self.gap * 2).max(100),
-            (height - self.gap * 2).max(100),
+            x.saturating_add(self.gap),
+            y.saturating_add(self.gap),
+            width.saturating_sub(both).max(100),
+            height.saturating_sub(both).max(100),
         )
     }
 

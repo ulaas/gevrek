@@ -938,14 +938,12 @@ fn carry_out(choice: Choice) -> Result<(), String> {
     ask_system(choice.end(), choice.words())
 }
 
-/// Open the power menu, or close it when it is open. It has the keyboard
-/// while it is open; a click elsewhere puts it away.
 /// Ask for a workspace's new name, in a small box on the display of the
-/// panel whose tab was pressed. Enter gives the workspace the name: the
-/// window manager is told (the workspace has it at once, on every display
-/// that has a workspace by the old name), and the configuration is
-/// written with it (the workspace's own entry, and the keys that name
-/// it), so that it has the name when gevrek is started again.
+/// panel whose tab was pressed. Enter gives the workspace of that display
+/// the name, and leaves the workspaces of the old name on the other
+/// displays as they are: it is written into the configuration as an entry
+/// of this display's own (`DesktopConfig::rename_workspace_on`), which the
+/// window manager takes in at once and has again when it is started anew.
 fn ask_workspace_name(
     state: &Rc<RefCell<State>>,
     control: &mut Control,
@@ -967,8 +965,15 @@ fn ask_workspace_name(
         reserve: false,
         keyboard: Keyboard::Exclusive,
         margin: 0,
-        output: Some(display.to_string()),
+        // (The display the pointer is on, which is the one of the panel
+        // whose tab was pressed. Not by `display`: that is the window
+        // manager's name for it, and a surface is put on a display by
+        // Windows' name; asked for by the other, no box was made at all.)
+        output: None,
     };
+    // (The display whose workspace is renamed, as the window manager
+    // names it: the workspaces of that name on the others keep theirs.)
+    let display = display.to_string();
     let shared = Rc::clone(state);
     let mut fonts = false;
     let mut had_keyboard = false;
@@ -990,20 +995,32 @@ fn ask_workspace_name(
                     problem = format!("Another workspace is called \u{201c}{new}\u{201d} already.");
                 } else {
                     if !new.eq_ignore_ascii_case(&old) || new != old {
-                        state
-                            .link
-                            .send(Request::Dispatch(panel::rename_workspace(&old, &new)));
-                        if let Some(mut changed) = state.config.clone() {
-                            if changed.desktop.rename_workspace(&old, &new) {
-                                state.link.send(Request::Apply {
-                                    config: changed,
-                                    base_revision: state.revision,
-                                    client_id: "gevrek-shell".to_string(),
-                                });
-                            } else {
+                        // Written into the configuration, for this
+                        // display alone: the window manager gives the
+                        // workspace its name as it takes the configuration
+                        // in, and has it again when it is started anew.
+                        let written = state.config.clone().and_then(|mut changed| {
+                            changed
+                                .desktop
+                                .rename_workspace_on(&display, &old, &new)
+                                .then_some(changed)
+                        });
+                        match written {
+                            Some(changed) => state.link.send(Request::Apply {
+                                config: changed,
+                                base_revision: state.revision,
+                                client_id: "gevrek-shell".to_string(),
+                            }),
+                            // A workspace the configuration does not have
+                            // (made by hand, or by the graph): renamed for
+                            // as long as it is there.
+                            None => {
                                 log::info!(
                                     "workspace {old:?} is renamed to {new:?} for now: the configuration has no workspace by that name to keep the new one"
                                 );
+                                state
+                                    .link
+                                    .send(Request::Dispatch(panel::rename_workspace(&old, &new)));
                             }
                         }
                         state.link.send(Request::StateAfter(Duration::from_millis(120)));
@@ -1031,6 +1048,8 @@ fn ask_workspace_name(
     state.borrow_mut().rename = Some((id, old.to_string(), old.to_string(), String::new()));
 }
 
+/// Open the power menu, or close it when it is open. It has the keyboard
+/// while it is open; a click elsewhere puts it away.
 fn toggle_power(state: &Rc<RefCell<State>>, control: &mut Control) {
     if let Some((id, ..)) = state.borrow_mut().power.take() {
         if control.is_open(id) {
@@ -2146,10 +2165,13 @@ fn toggle_launcher(state: &Rc<RefCell<State>>, control: &mut Control) {
     let mut pictures: HashMap<String, egui::TextureHandle> = HashMap::new();
     let mut had_keyboard = false;
     let mut said = String::new();
-    let id = control.open(place, move |ui, _| {
+    let id = control.open(place, move |ui, control| {
         let context = ui.ctx().clone();
-        let mut state = shared.borrow_mut();
-        let state = &mut *state;
+        let mut held = shared.borrow_mut();
+        let state = &mut *held;
+        // What could not be done, where something could not: said as a
+        // notification once the launcher is put away.
+        let mut problem: Option<String> = None;
         if !fonts {
             theme::install_fonts(&context, state.settings.system_font);
             fonts = true;
@@ -2161,7 +2183,7 @@ fn toggle_launcher(state: &Rc<RefCell<State>>, control: &mut Control) {
         };
         let icons = &mut state.icons;
         let hint = format!(
-            "{}  An application · > a command",
+            "{}  An application · > a command · Ctrl+Enter: as administrator",
             theme::icons::MAGNIFYING_GLASS
         );
         let asked = launcher::draw(ui, &palette, launcher, &hint, &mut |context, entry| {
@@ -2212,7 +2234,25 @@ fn toggle_launcher(state: &Rc<RefCell<State>>, control: &mut Control) {
         let mut close = asked.close || (had_keyboard && !has_keyboard);
         if let Some(entry) = asked.run {
             let app = entry.app.as_deref().and_then(|id| launcher.app(id));
+            let elevated = asked.elevated;
             match (&entry.copy, app) {
+                // With an administrator's rights: Windows asks first.
+                (None, Some(app)) if elevated => {
+                    match gevrek_system::apps::start_elevated(app) {
+                        Ok(_) => log::info!("started {} as administrator", app.name),
+                        // (1223: the person said no to Windows' question.)
+                        Err(error) if error.raw_os_error() == Some(1223) => {
+                            log::info!("{} was not started: the question was answered with no", app.name)
+                        }
+                        Err(error) => {
+                            log::warn!("{} could not be started as administrator: {error}", app.name);
+                            problem = Some(format!(
+                                "{} could not be started as administrator. An application from the Store cannot be.",
+                                app.name
+                            ));
+                        }
+                    }
+                }
                 // A text that was copied before: on the clipboard again.
                 (Some(text), _) => {
                     if let Some(clipboard) = &state.clipboard {
@@ -2236,6 +2276,10 @@ fn toggle_launcher(state: &Rc<RefCell<State>>, control: &mut Control) {
         }
         if close {
             state.launcher = None;
+            drop(held);
+            if let Some(problem) = problem {
+                tell(&shared, "Not started", &problem, -1, control);
+            }
             return Flow::Close;
         }
         Flow::Continue
@@ -2692,7 +2736,7 @@ fn draw_panel(
         }
         redraw_panels(state, control);
     }
-    // The other button on a workspace's tab: its new name is asked for.
+    // A right-click on a workspace's tab: its new name is asked for.
     if let Some(tab) = asked.rename.and_then(|index| view.tabs.get(index)) {
         let others: Vec<String> = view
             .tabs

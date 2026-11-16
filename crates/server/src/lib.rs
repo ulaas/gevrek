@@ -2583,6 +2583,7 @@ pub async fn serve_on(
     wm_server: WMServer,
     stop_flag: Arc<Mutex<bool>>,
 ) -> Result<()> {
+    let (told, mut asked) = tokio::sync::watch::channel(false);
     let stopped = async move {
         loop {
             if *stop_flag
@@ -2593,7 +2594,22 @@ pub async fn serve_on(
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
+        let _ = told.send(true);
     };
+    // Asked to stop, the server lets every call end that is under way,
+    // and a client that listens to what happens (the shell, the settings
+    // program) never ends its call: the server waited for it for good,
+    // the program stayed with its endpoint taken, and whoever had asked
+    // it to stop ended it by force. So it waits a moment, and no longer.
+    let waited_enough = async move {
+        while !*asked.borrow() {
+            if asked.changed().await.is_err() {
+                std::future::pending::<()>().await;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    };
+    tokio::pin!(waited_enough);
     let router = Server::builder().add_service(WindowManagerServer::new(wm_server));
     match endpoint {
         gevrek_protocol::Endpoint::Local(instance) => {
@@ -2602,7 +2618,13 @@ pub async fn serve_on(
                 "Listening on {}",
                 gevrek_protocol::Endpoint::Local(instance.clone()).describe()
             );
-            let served = router.serve_with_incoming_shutdown(incoming, stopped).await;
+            let served = tokio::select! {
+                served = router.serve_with_incoming_shutdown(incoming, stopped) => served,
+                () = &mut waited_enough => {
+                    log::info!("Stopping though a client still listens");
+                    Ok(())
+                }
+            };
             gevrek_protocol::endpoint::release_local(&instance);
             served?;
         }
@@ -2615,7 +2637,12 @@ pub async fn serve_on(
             log::warn!(
                 "Listening on TCP {addr}: every local program of every user can control this window manager there"
             );
-            router.serve_with_shutdown(addr, stopped).await?;
+            tokio::select! {
+                served = router.serve_with_shutdown(addr, stopped) => served?,
+                () = &mut waited_enough => {
+                    log::info!("Stopping though a client still listens");
+                }
+            }
         }
     }
     Ok(())

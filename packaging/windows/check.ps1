@@ -13,7 +13,7 @@ $root = Join-Path ([IO.Path]::GetTempPath()) ("gevrek-install-check-" + [Guid]::
 $prefix = Join-Path $root 'programs'
 $menu = Join-Path $root 'menu'
 $registry = 'HKCU:\Software\gevrek-install-check'
-$programs = @('gevrek.exe', 'gevrek-wm.exe', 'gevrek-studio.exe', 'gevrek-shell.exe')
+$programs = @('gevrek.exe', 'gevrek-wm.exe', 'gevrek-elevated.exe', 'gevrek-studio.exe', 'gevrek-shell.exe')
 $failed = 0
 function Said([string]$what, [bool]$holds) {
     if ($holds) { Write-Host "ok    $what" } else { Write-Host "FAIL  $what"; $script:failed++ }

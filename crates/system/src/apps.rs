@@ -536,6 +536,14 @@ pub fn start(app: &App) -> std::io::Result<Option<u32>> {
     crate::start_menu::start(app)
 }
 
+/// Start an application with an administrator's rights (Windows asks the
+/// person first). An error where it cannot be started so (a packaged
+/// application), and where the person said no.
+#[cfg(windows)]
+pub fn start_elevated(app: &App) -> std::io::Result<Option<u32>> {
+    crate::start_menu::start_as(app, true)
+}
+
 /// How well an application answers what was typed; higher is better,
 /// `None` is not at all. The name counts most: its start, the start of
 /// one of its words, a part of it, its letters in order; then what kind

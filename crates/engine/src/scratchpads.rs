@@ -79,7 +79,12 @@ pub struct Scratchpads {
     windows: HashMap<String, (WindowId, bool)>,
     /// Scratchpads waiting for the window of the program they launched.
     pending: HashSet<String>,
+    /// Since when each of them waits.
+    pending_since: std::collections::HashMap<String, std::time::Instant>,
 }
+
+/// How long a scratchpad waits for the window of the program it started.
+const LAUNCH_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 
 impl Scratchpads {
     pub fn new() -> Self {
@@ -257,6 +262,8 @@ impl Scratchpads {
     /// The scratchpad launched its program and waits for the window.
     pub fn mark_pending(&mut self, id: &str) {
         self.pending.insert(normalize_id(id));
+        self.pending_since
+            .insert(normalize_id(id), std::time::Instant::now());
     }
 
     /// The enabled scratchpads waiting for a window, with their profiles
@@ -292,7 +299,19 @@ impl Scratchpads {
             return Err(ScratchpadError::Disabled(profile.id));
         }
         if self.pending.contains(&normalized) {
-            return Ok(Toggle::Waiting);
+            // A program that was started and showed no window that is the
+            // scratchpad's (it ended, it handed over to one that ran
+            // already, its window was named later) is not waited for
+            // without end: after a while the scratchpad is asked for anew.
+            let waited_long = self
+                .pending_since
+                .get(&normalized)
+                .is_none_or(|since| since.elapsed() >= LAUNCH_WAIT);
+            if !waited_long {
+                return Ok(Toggle::Waiting);
+            }
+            self.pending.remove(&normalized);
+            self.pending_since.remove(&normalized);
         }
         if let Some((window, visible)) = self.windows.get(&normalized).copied() {
             if !exists(window) {

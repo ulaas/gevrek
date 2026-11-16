@@ -148,6 +148,8 @@ pub(crate) fn test_runtime(config: Config) -> ManuallyDrop<Runtime> {
         gesture_progress_updated: None,
         display_change_pending: None,
         held_openings: Default::default(),
+        elevated_helper: false,
+        elevated_helper_asked: false,
         config_publisher: None,
         config_dirty: false,
         notices: Vec::new(),

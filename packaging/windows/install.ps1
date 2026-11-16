@@ -34,7 +34,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$programs = @('gevrek.exe', 'gevrek-wm.exe', 'gevrek-studio.exe', 'gevrek-shell.exe')
+$programs = @('gevrek.exe', 'gevrek-wm.exe', 'gevrek-elevated.exe', 'gevrek-studio.exe', 'gevrek-shell.exe')
 # Programs an older build had and this one has not.
 $retired = @('gevrek-editor.exe')
 

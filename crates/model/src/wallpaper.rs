@@ -123,7 +123,13 @@ impl Slideshow {
 
 /// A path of the configuration: `~/` at its start is the home directory.
 fn home_path(text: &str) -> std::path::PathBuf {
-    match text.strip_prefix("~/") {
+    // (`~` alone, and `~\` as it is written on Windows, too.)
+    let rest = if text == "~" {
+        Some("")
+    } else {
+        text.strip_prefix("~/").or_else(|| text.strip_prefix("~\\"))
+    };
+    match rest {
         Some(rest) => {
             dirs::home_dir().map_or_else(|| std::path::PathBuf::from(text), |home| home.join(rest))
         }

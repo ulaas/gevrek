@@ -593,6 +593,18 @@ mod linux {
                     edit = edit.text_color(egui::Color32::TRANSPARENT);
                 }
                 let output = edit.show(ui);
+                if password {
+                    // What was typed into a password's field is not kept
+                    // to be taken back: the toolkit remembers a field's
+                    // earlier text for "undo", and the greeter lives on
+                    // after a person has logged in and out again. Whoever
+                    // came next could bring that person's password back
+                    // into the field with one chord, and press Enter.
+                    if let Some(mut kept) = egui::TextEdit::load_state(ui.ctx(), id) {
+                        kept.clear_undoer();
+                        egui::TextEdit::store_state(ui.ctx(), id, kept);
+                    }
+                }
                 let dots = password.then(|| text.chars().count());
                 if let Some(letters) = dots {
                     glow_dots(ui, &output, letters, accent);

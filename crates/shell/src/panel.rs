@@ -298,8 +298,9 @@ fn tasks_of(workspace: &Value, shown: bool) -> Vec<Task> {
         .collect()
 }
 
-/// The command that gives a workspace another name. By the name it has:
-/// a workspace that every display has is renamed on all of them.
+/// The command that gives a workspace another name for as long as it is
+/// there (one the configuration does not have: one that it has is renamed
+/// in the configuration, `DesktopConfig::rename_workspace_on`).
 pub fn rename_workspace(old: &str, new: &str) -> String {
     use gevrek_model::command::{DispatchCommand, WorkspaceSelector};
     serde_json::to_string(&DispatchCommand::RenameWorkspace {
@@ -1106,8 +1107,8 @@ pub struct Asked {
     pub show: Option<usize>,
     /// Go to this window (a button of the taskbar).
     pub go: Option<u64>,
-    /// Give this workspace (its place among the tabs) another name: the
-    /// other button was pressed on its tab.
+    /// Give this workspace (its place among the tabs) another name: its
+    /// tab was right-clicked.
     pub rename: Option<usize>,
     /// The taskbar's own button was pressed: show the windows of every
     /// workspace (true), or of the shown one only.
@@ -2040,10 +2041,7 @@ fn draw_module(
                 let renames = cfg!(target_os = "windows");
                 let response = ui.add(button);
                 let response = if renames {
-                    response.hint(format!(
-                        "Workspace {}. The other button renames it.",
-                        tab.name
-                    ))
+                    response.hint(format!("Workspace {}. Right-click to rename.", tab.name))
                 } else {
                     response
                 };
@@ -2215,9 +2213,9 @@ fn draw_module(
                 };
                 let label = egui::RichText::new(said).size(13.0).color(colour);
                 let hint = if muted {
-                    "Sound: muted. A press lets it be heard; the wheel makes it louder and quieter; the other button chooses the device."
+                    "Sound: muted. A press lets it be heard; the wheel makes it louder and quieter; right-click chooses the device."
                 } else {
-                    "Sound. A press mutes it; the wheel makes it louder and quieter; the other button chooses the device."
+                    "Sound. A press mutes it; the wheel makes it louder and quieter; right-click chooses the device."
                 };
                 let button = match sound_sign(percent, muted) {
                     Some(sign) => signed(

@@ -119,6 +119,12 @@ impl Config {
                 win,
             } = &node.node_type
             {
+                if !key.trim().is_empty() && crate::keys::key_name_to_vk(key).is_none() {
+                    issues.push(ConfigIssue::error(
+                        format!("node_graph.nodes[{node_id}]"),
+                        format!("'{}' is no key the keyboard has", key.trim()),
+                    ));
+                }
                 let chord = crate::settings::BindingProfile {
                     key: key.clone(),
                     ctrl: *ctrl,

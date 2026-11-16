@@ -112,8 +112,12 @@ fn greeter_command() -> String {
 /// What a person's session runs: the session installed for them, else
 /// the system's.
 fn session_command() -> String {
+    // Handed to the person's own shell, which need not be one that
+    // reads `if ...; then`: fish and csh do not, and such a person's
+    // session ended as it began. Every shell can start `/bin/sh` with
+    // one word in single quotes, and that one reads the rest.
     format!(
-        "if [ -x \"$HOME/.local/bin/gevrek-session\" ]; then exec \"$HOME/.local/bin/gevrek-session\"; else exec {}; fi",
+        "exec /bin/sh -c 'if [ -x \"$HOME/.local/bin/gevrek-session\" ]; then exec \"$HOME/.local/bin/gevrek-session\"; else exec \"{}\"; fi'",
         beside("gevrek-session").display()
     )
 }

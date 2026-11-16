@@ -1979,6 +1979,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "windows 0.58.0",
 ]
 
 [[package]]
@@ -2045,6 +2046,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "tower 0.4.13",
+ "windows 0.58.0",
 ]
 
 [[package]]

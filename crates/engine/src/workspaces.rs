@@ -144,7 +144,7 @@ pub fn resolve_existing_workspace(
         }),
         WorkspaceSelector::Name(name) => workspaces
             .iter()
-            .position(|workspace| workspace.name.eq_ignore_ascii_case(name.trim()))
+            .position(|workspace| workspace.is_called(name))
             .ok_or_else(|| WorkspaceError::NoWorkspaceNamed(name.trim().to_string())),
         WorkspaceSelector::Next => Ok((current + 1) % len),
         WorkspaceSelector::Previous => Ok((current + len - 1) % len),

@@ -184,16 +184,12 @@ pub fn release_local(instance: &str) {
 
 #[cfg(windows)]
 pub fn bind_local(instance: &str) -> std::io::Result<LocalIncoming> {
-    use tokio::net::windows::named_pipe::ServerOptions;
     let name = pipe_name(instance);
     // The first instance: fails when another process owns the name. The
     // default access list of a pipe lets only its creator, administrators
     // and the system write to it; remote clients are refused.
-    let mut server = ServerOptions::new()
-        .first_pipe_instance(true)
-        .reject_remote_clients(true)
-        .create(&name)
-        .map_err(|error| {
+    let rights = pipe_rights();
+    let mut server = make_pipe(&name, true, rights).map_err(|error| {
             std::io::Error::new(
                 error.kind(),
                 format!("another gevrek already answers on {name} ({error})"),
@@ -210,10 +206,7 @@ pub fn bind_local(instance: &str) -> std::io::Result<LocalIncoming> {
             }
             // The next instance exists before this one is handed over, so
             // a client never finds the name gone.
-            let next = match ServerOptions::new()
-                .reject_remote_clients(true)
-                .create(&name)
-            {
+            let next = match make_pipe(&name, false, rights) {
                 Ok(next) => next,
                 Err(error) => {
                     let _ = sender.send(Err(error)).await;
@@ -227,6 +220,98 @@ pub fn bind_local(instance: &str) -> std::io::Result<LocalIncoming> {
         }
     });
     Ok(tokio_stream::wrappers::ReceiverStream::new(receiver))
+}
+
+/// Who may open the pipe, as Windows keeps it: the person the window
+/// manager runs for, and the system; nobody else. (Left to the default,
+/// it depended on how the window manager was started: one that runs as
+/// an administrator had a pipe its own clients, which do not, could not
+/// write to.) The label says that a program without an administrator's
+/// rights may write to it, which is what the pipe is for. Made once and
+/// kept for as long as the program lives; 0 where it could not be made
+/// (the default then).
+#[cfg(windows)]
+fn pipe_rights() -> usize {
+    use windows::core::{HSTRING, PWSTR};
+    use windows::Win32::Foundation::{CloseHandle, LocalFree, HANDLE, HLOCAL};
+    use windows::Win32::Security::Authorization::{
+        ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+        SDDL_REVISION_1,
+    };
+    use windows::Win32::Security::{
+        GetTokenInformation, TokenUser, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_QUERY,
+        TOKEN_USER,
+    };
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    static RIGHTS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *RIGHTS.get_or_init(|| {
+        let made = (|| -> windows::core::Result<usize> {
+            // SAFETY: the token is closed below; the buffer is as large
+            // as Windows says the answer is; the text Windows makes is
+            // freed once copied; the descriptor and its frame are kept
+            // for good (they are used for every pipe that is made).
+            unsafe {
+                let mut token = HANDLE::default();
+                OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token)?;
+                let mut needed = 0u32;
+                let _ = GetTokenInformation(token, TokenUser, None, 0, &mut needed);
+                let mut buffer = vec![0u8; needed as usize];
+                let asked = GetTokenInformation(
+                    token,
+                    TokenUser,
+                    Some(buffer.as_mut_ptr().cast()),
+                    needed,
+                    &mut needed,
+                );
+                let _ = CloseHandle(token);
+                asked?;
+                let user = &*(buffer.as_ptr() as *const TOKEN_USER);
+                let mut text = PWSTR::null();
+                ConvertSidToStringSidW(user.User.Sid, &mut text)?;
+                let person = text.to_string().unwrap_or_default();
+                let _ = LocalFree(HLOCAL(text.0.cast()));
+                let words = HSTRING::from(format!(
+                    "D:P(A;;GA;;;SY)(A;;GA;;;{person})S:(ML;;NW;;;ME)"
+                ));
+                let mut descriptor = PSECURITY_DESCRIPTOR::default();
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    &words,
+                    SDDL_REVISION_1,
+                    &mut descriptor,
+                    None,
+                )?;
+                let frame = Box::leak(Box::new(SECURITY_ATTRIBUTES {
+                    nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+                    lpSecurityDescriptor: descriptor.0,
+                    bInheritHandle: false.into(),
+                }));
+                Ok(frame as *mut SECURITY_ATTRIBUTES as usize)
+            }
+        })();
+        made.unwrap_or_else(|error| {
+            log::warn!("The pipe has Windows' usual rights: its own could not be made ({error})");
+            0
+        })
+    })
+}
+
+/// Make one instance of the pipe, with its rights (`pipe_rights`).
+#[cfg(windows)]
+fn make_pipe(
+    name: &str,
+    first: bool,
+    rights: usize,
+) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
+    use tokio::net::windows::named_pipe::ServerOptions;
+    let mut options = ServerOptions::new();
+    options
+        .first_pipe_instance(first)
+        .reject_remote_clients(true);
+    if rights == 0 {
+        return options.create(name);
+    }
+    // SAFETY: `rights` is the address of a frame that is never freed.
+    unsafe { options.create_with_security_attributes_raw(name, rights as *mut std::ffi::c_void) }
 }
 
 /// One client on the named pipe.

@@ -579,6 +579,18 @@ fn facts_of(window: HWND) -> Facts {
     })
 }
 
+/// The message Windows' own shell sends every top-level window when it
+/// has started (again): it has then forgotten every application bar.
+fn shell_started() -> u32 {
+    static MESSAGE: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    // SAFETY: a constant name; the number is the same for every caller.
+    *MESSAGE.get_or_init(|| unsafe {
+        windows::Win32::UI::WindowsAndMessaging::RegisterWindowMessageW(windows::core::w!(
+            "TaskbarCreated"
+        ))
+    })
+}
+
 fn change_facts(window: HWND, change: impl FnOnce(&mut Facts)) {
     FACTS.with(|facts| {
         if let Ok(mut facts) = facts.try_borrow_mut() {
@@ -636,6 +648,10 @@ unsafe extern "system" fn procedure(
         WM_MOUSELEAVE | WM_MOUSEWHEEL | WM_MOUSEHWHEEL | WM_KEYDOWN | WM_KEYUP | WM_CHAR
         | WM_SETFOCUS | WM_KILLFOCUS | WM_DISPLAYCHANGE | WM_DPICHANGED | WM_SETTINGCHANGE
         | BAR_NEWS => {
+            keep();
+            LRESULT(0)
+        }
+        told if told != 0 && told == shell_started() => {
             keep();
             LRESULT(0)
         }
@@ -1729,6 +1745,22 @@ impl Host {
 
     /// Something a window was told becomes something egui is told.
     fn take_in(&mut self, news: News) {
+        // Windows' shell started again (it was ended, or fell over): it
+        // knows of no application bar any more. Every surface that was
+        // one is one again when it is next given its place: else a panel
+        // would no longer hear of windows that cover the display, and a
+        // strip kept clear for one would be given away.
+        if news.message != 0 && news.message == shell_started() {
+            for surface in &mut self.surfaces {
+                if surface.window.reserved {
+                    surface.window.reserved = false;
+                    surface.kept = None;
+                    change_facts(surface.window.handle, |facts| facts.reserved = false);
+                }
+            }
+            self.displays_changed = true;
+            return;
+        }
         match news.message {
             WM_DISPLAYCHANGE | WM_DPICHANGED => {
                 self.displays_changed = true;

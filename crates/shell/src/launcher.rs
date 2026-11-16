@@ -514,6 +514,10 @@ pub struct Asked {
     /// It was chosen with Shift+Enter: to be started inside gamescope
     /// (a game in a compositor of its own, with its own resolution).
     pub in_gamescope: bool,
+    /// It was chosen with Ctrl+Enter, or with the other mouse button: to
+    /// be started with an administrator's rights (Windows asks first).
+    /// Only where that can be done: on Windows, for an application.
+    pub elevated: bool,
 }
 
 /// The command that starts the same program inside gamescope, filling
@@ -620,6 +624,13 @@ pub fn draw(
     if context.input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::Enter)) {
         asked.run = entries.get(launcher.chosen).cloned();
         asked.in_gamescope = true;
+    }
+    // (And Ctrl+Enter: with an administrator's rights.)
+    if cfg!(target_os = "windows")
+        && context.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Enter))
+    {
+        asked.run = entries.get(launcher.chosen).cloned();
+        asked.elevated = asked.run.is_some();
     }
     if pressed(egui::Key::Enter) {
         asked.run = entries.get(launcher.chosen).cloned();
@@ -729,8 +740,14 @@ pub fn draw(
                     let picture = (!entry.icon.is_empty())
                         .then(|| icon(&context, entry))
                         .flatten();
-                    if button(ui, index, entry, None, picture).clicked() {
+                    let pressed = button(ui, index, entry, None, picture);
+                    if pressed.clicked() {
                         over = Some(entry.clone());
+                    }
+                    // (The other button: with an administrator's rights.)
+                    if cfg!(target_os = "windows") && pressed.secondary_clicked() {
+                        over = Some(entry.clone());
+                        asked.elevated = true;
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -837,6 +854,10 @@ pub fn draw(
                 }
                 if response.clicked() {
                     asked.run = Some(entry.clone());
+                }
+                if cfg!(target_os = "windows") && response.secondary_clicked() {
+                    asked.run = Some(entry.clone());
+                    asked.elevated = true;
                 }
             }
             if entries.is_empty() {

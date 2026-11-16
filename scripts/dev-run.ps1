@@ -29,7 +29,7 @@ $prefix = Join-Path $env:USERPROFILE '.local'
 $bin = Join-Path $prefix 'bin'
 $previous = Join-Path $prefix 'lib\gevrek\previous'
 $gevrek = Join-Path $bin 'gevrek.exe'
-$programs = @('gevrek.exe', 'gevrek-wm.exe', 'gevrek-studio.exe', 'gevrek-shell.exe')
+$programs = @('gevrek.exe', 'gevrek-wm.exe', 'gevrek-elevated.exe', 'gevrek-studio.exe', 'gevrek-shell.exe')
 
 function Stop-Gevrek {
     if (Test-Path $gevrek) {

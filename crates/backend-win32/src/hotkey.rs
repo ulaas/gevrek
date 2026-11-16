@@ -81,6 +81,7 @@ impl HotkeyManager {
     /// resume.
     pub fn set_input_suspended(&self, suspended: bool) {
         INPUT_SUSPENDED.store(suspended, std::sync::atomic::Ordering::Release);
+        crate::elevated_helper::client::set_suspended(suspended);
         if suspended {
             let _ = self.poll_events();
             let _ = self.poll_gesture_events();
@@ -187,10 +188,43 @@ impl Drop for HotkeyManager {
     }
 }
 
+/// How long a key of the keyboard that is held is not heard of again
+/// before it counts as let go. A held key is told again and again (it
+/// repeats, a few times a second at the slowest); one that is silent for
+/// this long was let go where no hook heard of it.
+const HELD_KEY_SILENCE: Duration = Duration::from_secs(2);
+
+/// How often the hooks are put in anew. Windows takes a hook away, and
+/// says nothing, when its answer once took too long (the machine stood
+/// still for a moment): all of gevrek's keys were then dead until it was
+/// started again.
+const HOOKS_RENEWED_EVERY: Duration = Duration::from_secs(30);
+
+/// Something happened after which what is held is not known any more
+/// (the desktop went away for Windows' own question or the lock, and
+/// came back): the input thread forgets what it holds and renews its
+/// hooks.
+static FORGET_HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The keys and buttons that are held are not known any more.
+pub fn forget_what_is_held() {
+    FORGET_HELD.store(true, std::sync::atomic::Ordering::Release);
+    crate::windows_key::cancel_drag();
+}
+
+/// Whether a press that is told while its key or button already counts
+/// as held is a new press: its release was not heard. A button of the
+/// mouse never repeats; a key that repeats is not silent for long.
+fn is_a_new_press(device: BindingDevice, since_last_heard: Duration) -> bool {
+    device != BindingDevice::Keyboard || since_last_heard >= HELD_KEY_SILENCE
+}
+
 #[derive(Debug)]
 struct PressedInput {
     raw: RawInputEvent,
     started: Instant,
+    /// When it was last told of as down.
+    last_heard: Instant,
     registrations: HashMap<i32, Hotkey>,
     long_press_emitted: HashSet<i32>,
 }
@@ -207,6 +241,234 @@ static HOOK_CONTEXT: OnceLock<Mutex<Option<HookContext>>> = OnceLock::new();
 /// While set (the WM is paused), the input hooks pass everything through:
 /// no binding consumes keys or buttons and no input events are produced.
 static INPUT_SUSPENDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whose the input is that the hooks of this program answer.
+///
+/// A window manager that does not run as an administrator has a helper
+/// that does (`elevated_helper`), and Windows keeps the keys and presses
+/// that go to an elevated program's window from the hooks of one that is
+/// not. So there are two pairs of hooks, with one rule between them: what
+/// goes to a window of an elevated program is the helper's to answer,
+/// everything else the window manager's. Each of the two leaves the
+/// other's alone, whether Windows would have shown it to it or not.
+static ROLE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(ROLE_ALONE);
+/// No helper: all of it.
+const ROLE_ALONE: u8 = 0;
+/// The window manager, with a helper: all but what goes to elevated windows.
+const ROLE_WITH_HELPER: u8 = 1;
+/// The helper: only what goes to elevated windows.
+const ROLE_HELPER: u8 = 2;
+
+/// Whether the input that goes to this window (a handle's value; 0: to
+/// none) is another's to answer, for a role.
+fn others_to_answer(role: u8, goes_to_elevated: bool) -> bool {
+    match role {
+        ROLE_WITH_HELPER => goes_to_elevated,
+        ROLE_HELPER => !goes_to_elevated,
+        _ => false,
+    }
+}
+
+/// Whether a key is another's to answer: by the window with the keyboard.
+fn key_is_anothers() -> bool {
+    let role = ROLE.load(std::sync::atomic::Ordering::Relaxed);
+    if role == ROLE_ALONE {
+        return false;
+    }
+    // SAFETY: a plain question.
+    let window = unsafe { GetForegroundWindow() };
+    others_to_answer(role, crate::elevated::window_is_elevated(window.0 as isize))
+}
+
+/// Whether a press of the mouse is another's to answer: by the window
+/// under the pointer.
+fn press_is_anothers(at: (i32, i32)) -> bool {
+    let role = ROLE.load(std::sync::atomic::Ordering::Relaxed);
+    if role == ROLE_ALONE {
+        return false;
+    }
+    // SAFETY: plain questions about the window at a point.
+    let window = unsafe {
+        let under = WindowFromPoint(POINT { x: at.0, y: at.1 });
+        let root = GetAncestor(under, GA_ROOT);
+        if root.is_invalid() {
+            under
+        } else {
+            root
+        }
+    };
+    others_to_answer(role, crate::elevated::window_is_elevated(window.0 as isize))
+}
+
+/// The window manager has a helper whose hooks answer for elevated
+/// windows (or has none any more).
+pub fn set_helper_answers(answers: bool) {
+    ROLE.store(
+        if answers { ROLE_WITH_HELPER } else { ROLE_ALONE },
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// A key or a press the helper heard, as if this program's own hooks had:
+/// the window manager's input thread makes of it what it makes of its own
+/// (a press, a repeat, a release, a long press of a binding).
+pub fn heard_by_helper(raw: RawInputEvent) {
+    let context = hook_context()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(context) = context.as_ref() {
+        let _ = context.raw_sender.send(raw);
+    }
+}
+
+/// What the helper's hooks go by: the bindings, and whether they rest.
+/// (The helper's own side of `sync_hook_registrations`.)
+pub fn set_helper_table(registrations: HashMap<i32, Hotkey>, suspended: bool) {
+    INPUT_SUSPENDED.store(suspended, std::sync::atomic::Ordering::Release);
+    sync_hook_registrations(&registrations);
+}
+
+/// Whether the helper may hear a binding's key. A program with an
+/// administrator's rights is kept apart from the others so that they do
+/// not read what is typed into it; the helper passes on only what a
+/// binding names, and a binding that names a plain letter would pass on
+/// the letters. So a key of the keyboard must be held with the Windows
+/// key, with Ctrl or with Alt (not with Ctrl and Alt alone, which is how
+/// many layouts type their third signs), or be a key that types nothing
+/// (F1 to F24, the keys for sound and players). A button of the mouse
+/// says nothing of what is typed.
+pub fn may_be_heard_by_helper(hotkey: &Hotkey) -> bool {
+    if hotkey.device != BindingDevice::Keyboard {
+        return true;
+    }
+    let third_signs = hotkey.ctrl && hotkey.alt && !hotkey.win;
+    if (hotkey.win || hotkey.ctrl || hotkey.alt) && !third_signs {
+        return true;
+    }
+    let key = hotkey.key.to_ascii_uppercase();
+    let function = key
+        .strip_prefix('F')
+        .is_some_and(|number| !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()));
+    function
+        || ["MEDIA_", "VOLUME_", "BROWSER_", "LAUNCH_"]
+            .iter()
+            .any(|kind| key.starts_with(kind))
+}
+
+/// Run the helper's hooks on a thread of their own: the same two hooks as
+/// the window manager's, answering only what goes to elevated windows.
+/// `heard` is called (on another thread) with each key and press that a
+/// binding names, and with the release of each that was told of.
+pub fn run_helper_hooks(heard: impl Fn(RawInputEvent) + Send + 'static) -> Result<(), String> {
+    let (raw_sender, raw_receiver) = channel::<RawInputEvent>();
+    {
+        let mut context = hook_context()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *context = Some(HookContext {
+            raw_sender,
+            registrations: HashMap::new(),
+            consumed_inputs: HashSet::new(),
+        });
+    }
+    ROLE.store(ROLE_HELPER, std::sync::atomic::Ordering::Relaxed);
+    let (started_sender, started) = channel::<Result<(), String>>();
+    std::thread::spawn(move || {
+        // SAFETY: the hooks are this thread's, which runs the loop of
+        // messages they are called from until the process ends.
+        unsafe {
+            let keyboard = SetWindowsHookExW(
+                WH_KEYBOARD_LL,
+                Some(keyboard_hook_proc),
+                HINSTANCE::default(),
+                0,
+            );
+            let mouse =
+                SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), HINSTANCE::default(), 0);
+            match (&keyboard, &mouse) {
+                (Ok(_), Ok(_)) => {
+                    let _ = started_sender.send(Ok(()));
+                }
+                (keyboard, mouse) => {
+                    let _ = started_sender.send(Err(format!(
+                        "the helper's hooks were not installed: {:?} {:?}",
+                        keyboard.as_ref().err(),
+                        mouse.as_ref().err()
+                    )));
+                    return;
+                }
+            }
+            // (Renewed now and then, as the window manager's own are:
+            // a timer of this thread wakes its loop for it.)
+            let (mut keyboard, mut mouse) = match (keyboard, mouse) {
+                (Ok(keyboard), Ok(mouse)) => (keyboard, mouse),
+                _ => return,
+            };
+            let timer = SetTimer(None, 0, HOOKS_RENEWED_EVERY.as_millis() as u32, None);
+            let mut message = MSG::default();
+            while GetMessageW(&mut message, HWND::default(), 0, 0).as_bool() {
+                if message.message == WM_TIMER && message.wParam.0 == timer {
+                    let _ = UnhookWindowsHookEx(keyboard);
+                    let _ = UnhookWindowsHookEx(mouse);
+                    if let Ok(renewed) = SetWindowsHookExW(
+                        WH_KEYBOARD_LL,
+                        Some(keyboard_hook_proc),
+                        HINSTANCE::default(),
+                        0,
+                    ) {
+                        keyboard = renewed;
+                    }
+                    if let Ok(renewed) = SetWindowsHookExW(
+                        WH_MOUSE_LL,
+                        Some(mouse_hook_proc),
+                        HINSTANCE::default(),
+                        0,
+                    ) {
+                        mouse = renewed;
+                    }
+                    continue;
+                }
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+    });
+    started
+        .recv_timeout(Duration::from_secs(2))
+        .map_err(|error| format!("the helper's hooks did not start: {error}"))??;
+    std::thread::spawn(move || {
+        // The keys and buttons whose press was told of: their release is.
+        let mut told: HashSet<(BindingDevice, String)> = HashSet::new();
+        while let Ok(raw) = raw_receiver.recv() {
+            let identity = (raw.device, raw.key.clone());
+            let named = {
+                let context = hook_context()
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                context.as_ref().is_some_and(|context| {
+                    context
+                        .registrations
+                        .values()
+                        .any(|hotkey| hotkey.matches(&raw))
+                })
+            };
+            let tell = if raw.momentary {
+                named
+            } else if raw.down {
+                if named {
+                    told.insert(identity);
+                }
+                named
+            } else {
+                told.remove(&identity)
+            };
+            if tell {
+                heard(raw);
+            }
+        }
+    });
+    Ok(())
+}
 
 fn input_suspended() -> bool {
     INPUT_SUSPENDED.load(std::sync::atomic::Ordering::Acquire)
@@ -615,7 +877,7 @@ fn run_input_loop(
         });
     }
 
-    let keyboard_hook = match unsafe {
+    let mut keyboard_hook = match unsafe {
         SetWindowsHookExW(
             WH_KEYBOARD_LL,
             Some(keyboard_hook_proc),
@@ -631,7 +893,7 @@ fn run_input_loop(
             return Err(error);
         }
     };
-    let mouse_hook = match unsafe {
+    let mut mouse_hook = match unsafe {
         SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), HINSTANCE::default(), 0)
     } {
         Ok(hook) => hook,
@@ -673,7 +935,59 @@ fn run_input_loop(
     let _ = startup_sender.send(Ok(()));
     log::info!("Unified keyboard and mouse input engine started");
     let mut running = true;
+    let mut hooks_renewed = Instant::now();
     while running {
+        // What is held is not known any more: forgotten, here and in the
+        // hooks, and the hooks are put in anew.
+        let forget = FORGET_HELD.swap(false, std::sync::atomic::Ordering::AcqRel);
+        if forget {
+            pressed.clear();
+            if let Some(context) = hook_context()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .as_mut()
+            {
+                context.consumed_inputs.clear();
+            }
+        }
+        if forget || hooks_renewed.elapsed() >= HOOKS_RENEWED_EVERY {
+            hooks_renewed = Instant::now();
+            // (Taken out and put in on the thread they are called on,
+            // between two of its looks at its messages: no key is told
+            // to neither, and none to both.)
+            // SAFETY: the hooks are this thread's own.
+            unsafe {
+                let _ = UnhookWindowsHookEx(keyboard_hook);
+                let _ = UnhookWindowsHookEx(mouse_hook);
+                match (
+                    SetWindowsHookExW(
+                        WH_KEYBOARD_LL,
+                        Some(keyboard_hook_proc),
+                        HINSTANCE::default(),
+                        0,
+                    ),
+                    SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), HINSTANCE::default(), 0),
+                ) {
+                    (Ok(keyboard), Ok(mouse)) => {
+                        keyboard_hook = keyboard;
+                        mouse_hook = mouse;
+                    }
+                    (keyboard, mouse) => {
+                        log::error!(
+                            "The input hooks could not be renewed (keyboard: {:?}, mouse: {:?}); gevrek's keys may not answer",
+                            keyboard.as_ref().err(),
+                            mouse.as_ref().err()
+                        );
+                        if let Ok(keyboard) = keyboard {
+                            keyboard_hook = keyboard;
+                        }
+                        if let Ok(mouse) = mouse {
+                            mouse_hook = mouse;
+                        }
+                    }
+                }
+            }
+        }
         while let Ok(message) = control_receiver.try_recv() {
             match message {
                 ControlMessage::Register(hotkey, id) => {
@@ -715,8 +1029,19 @@ fn run_input_loop(
                 continue;
             }
 
+            // Held already, and told as pressed: a repeat, unless its
+            // release was not heard (`is_a_new_press`), then it is let go
+            // first and pressed anew.
+            if raw.down
+                && pressed.get(&identity).is_some_and(|state| {
+                    is_a_new_press(raw.device, state.last_heard.elapsed())
+                })
+            {
+                pressed.remove(&identity);
+            }
             if raw.down {
-                if let Some(state) = pressed.get(&identity) {
+                if let Some(state) = pressed.get_mut(&identity) {
+                    state.last_heard = Instant::now();
                     emit_matching(
                         &event_sender,
                         &state.registrations,
@@ -741,6 +1066,7 @@ fn run_input_loop(
                         PressedInput {
                             raw,
                             started: Instant::now(),
+                            last_heard: Instant::now(),
                             registrations: registration_snapshot,
                             long_press_emitted: HashSet::new(),
                         },
@@ -758,6 +1084,11 @@ fn run_input_loop(
             }
         }
 
+        // A key that has been silent for long is not held any more: no
+        // long press comes of it.
+        pressed.retain(|(device, _), state| {
+            *device != BindingDevice::Keyboard || state.last_heard.elapsed() < HELD_KEY_SILENCE
+        });
         for state in pressed.values_mut() {
             let held_ms = elapsed_ms(state.started);
             let due_ids = state
@@ -840,6 +1171,11 @@ fn sync_hook_registrations(registrations: &HashMap<i32, Hotkey>) {
     if let Some(context) = context.as_mut() {
         context.registrations = registrations.clone();
     }
+    drop(context);
+    // (The helper's hooks go by the same bindings: `elevated_helper`.)
+    if ROLE.load(std::sync::atomic::Ordering::Relaxed) != ROLE_HELPER {
+        crate::elevated_helper::client::set_bindings(registrations);
+    }
 }
 
 fn emit_matching(
@@ -897,6 +1233,11 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
     }
 
     let data = *(lparam.0 as *const KBDLLHOOKSTRUCT);
+    // What goes to a window of an elevated program is the helper's to
+    // answer, and all else the window manager's (`ROLE`).
+    if key_is_anothers() {
+        return CallNextHookEx(HHOOK::default(), code, wparam, lparam);
+    }
     // A key gevrek pressed itself for the system and its programs (the
     // shell's key for "play", asked for by a key that is bound to the
     // shell; `gevrek_system::every_key::OWN_MARK`) is not answered again.
@@ -953,6 +1294,11 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
         let consume = if down {
             if configured_consume || owned {
                 context.consumed_inputs.insert(identity);
+            } else {
+                // (Its last release was never seen, behind a locked
+                // screen or a program with more rights: this press goes to
+                // the programs, and so will its release.)
+                context.consumed_inputs.remove(&identity);
             }
             configured_consume || owned
         } else {
@@ -1022,6 +1368,13 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPA
     match message {
         WM_MOUSEMOVE => {
             crate::windows_key::pointer_moved(at);
+            return CallNextHookEx(HHOOK::default(), code, wparam, lparam);
+        }
+        // What goes to a window of an elevated program is the helper's to
+        // answer, and all else the window manager's (`ROLE`). A drag that
+        // this program began is its own to its end, wherever the pointer
+        // is by then.
+        _ if !crate::windows_key::is_dragging() && press_is_anothers(at) => {
             return CallNextHookEx(HHOOK::default(), code, wparam, lparam);
         }
         WM_LBUTTONDOWN | WM_RBUTTONDOWN => {
@@ -1097,6 +1450,8 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPA
         } else if down {
             if configured_consume {
                 context.consumed_inputs.insert(identity);
+            } else {
+                context.consumed_inputs.remove(&identity);
             }
             configured_consume
         } else {
@@ -1293,5 +1648,65 @@ mod tests {
         assert!(snapshot.contains_key(&10));
         assert!(!snapshot.contains_key(&20));
         assert!(live_registrations.contains_key(&20));
+    }
+}
+
+#[cfg(test)]
+mod helper_tests {
+    use super::*;
+
+    #[test]
+    fn a_press_whose_release_was_not_heard_is_a_press_again() {
+        // A held key repeats: told again soon, it is a repeat.
+        assert!(!is_a_new_press(BindingDevice::Keyboard, Duration::from_millis(40)));
+        assert!(!is_a_new_press(BindingDevice::Keyboard, Duration::from_millis(600)));
+        // Silent for long and then down again: it had been let go.
+        assert!(is_a_new_press(BindingDevice::Keyboard, HELD_KEY_SILENCE));
+        // A button of the mouse does not repeat at all.
+        assert!(is_a_new_press(BindingDevice::Mouse, Duration::from_millis(1)));
+    }
+
+    fn key(name: &str, ctrl: bool, alt: bool, win: bool) -> Hotkey {
+        Hotkey::new(name.to_string(), ctrl, alt, false, win)
+    }
+
+    #[test]
+    fn each_of_the_two_answers_its_own_input_and_leaves_the_others() {
+        // No helper: the window manager answers all of it.
+        assert!(!others_to_answer(ROLE_ALONE, true));
+        assert!(!others_to_answer(ROLE_ALONE, false));
+        // With one: what goes to an elevated window is the helper's.
+        assert!(others_to_answer(ROLE_WITH_HELPER, true));
+        assert!(!others_to_answer(ROLE_WITH_HELPER, false));
+        assert!(!others_to_answer(ROLE_HELPER, true));
+        assert!(others_to_answer(ROLE_HELPER, false));
+    }
+
+    #[test]
+    fn the_helper_hears_no_binding_that_would_pass_on_what_is_typed() {
+        // A key held with the Windows key, with Ctrl or with Alt.
+        assert!(may_be_heard_by_helper(&key("J", false, false, true)));
+        assert!(may_be_heard_by_helper(&key("C", true, false, false)));
+        assert!(may_be_heard_by_helper(&key("TAB", false, true, false)));
+        assert!(may_be_heard_by_helper(&key("Q", true, true, true)));
+        // A plain letter, with Shift or without, and the third signs of
+        // a layout (Ctrl and Alt alone): those are what is typed.
+        assert!(!may_be_heard_by_helper(&key("A", false, false, false)));
+        assert!(!may_be_heard_by_helper(&Hotkey::new(
+            "A".to_string(),
+            false,
+            false,
+            true,
+            false
+        )));
+        assert!(!may_be_heard_by_helper(&key("Q", true, true, false)));
+        // Keys that type nothing.
+        assert!(may_be_heard_by_helper(&key("F12", false, false, false)));
+        assert!(may_be_heard_by_helper(&key("VOLUME_UP", false, false, false)));
+        assert!(!may_be_heard_by_helper(&key("F", false, false, false)));
+        // A button of the mouse says nothing of what is typed.
+        let mut button = key("MIDDLE", false, false, false);
+        button.device = BindingDevice::Mouse;
+        assert!(may_be_heard_by_helper(&button));
     }
 }

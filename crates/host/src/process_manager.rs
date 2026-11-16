@@ -240,6 +240,9 @@ impl StartupProcessManager {
         match spawn_launch(&profile.launch) {
             Ok(child) => {
                 let pid = child.id();
+                if profile.terminate_on_exit {
+                    end_with_this_program(&child);
+                }
                 let record = self
                     .records
                     .entry(id.to_string())
@@ -350,6 +353,58 @@ impl StartupProcessManager {
         Ok(())
     }
 }
+
+/// Have a started program end when this one does, however this one ends
+/// (stopped, ended by force, fallen over), and what it started with it.
+/// Without this a program that was to end with gevrek outlived a gevrek
+/// that fell over, and the next gevrek started a second one beside it.
+#[cfg(windows)]
+fn end_with_this_program(child: &Child) {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    // One job for all of them, held for as long as this program lives:
+    // Windows closes it when the program is gone, and ends what is in it.
+    static JOB: std::sync::OnceLock<Option<isize>> = std::sync::OnceLock::new();
+    let job = *JOB.get_or_init(|| {
+        // SAFETY: a job of this program's own, never closed by it; the
+        // limits are a plain structure that lives until the call returns.
+        unsafe {
+            let job = CreateJobObjectW(None, None).ok()?;
+            let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+            .ok()?;
+            Some(job.0 as isize)
+        }
+    });
+    let Some(job) = job else {
+        log::debug!("no job for the started programs: they are ended one by one");
+        return;
+    };
+    // SAFETY: both handles are valid for the length of the call.
+    let joined = unsafe {
+        AssignProcessToJobObject(
+            HANDLE(job as *mut _),
+            HANDLE(child.as_raw_handle() as *mut _),
+        )
+    };
+    if let Err(error) = joined {
+        log::debug!("process {} does not end with gevrek by itself: {error}", child.id());
+    }
+}
+
+#[cfg(not(windows))]
+fn end_with_this_program(_child: &Child) {}
 
 fn normalize_id(id: &str) -> String {
     id.trim().to_ascii_lowercase()

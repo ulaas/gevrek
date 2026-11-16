@@ -316,6 +316,20 @@ impl Stack {
             None if self.quiet && urgency != Urgency::Critical => {}
             None => self.items.push(notification),
         }
+        // A program that sends without end does not fill the memory:
+        // of those that wait their turn, the oldest that can wait no
+        // longer goes (it is still in the list of what was told).
+        const WAITING_MOST: usize = 100;
+        while self.items.len() > self.at_once + WAITING_MOST {
+            let oldest = self
+                .items
+                .iter()
+                .enumerate()
+                .skip(self.at_once)
+                .find(|(_, item)| item.urgency != Urgency::Critical)
+                .map_or(self.at_once, |(at, _)| at);
+            self.items.remove(oldest);
+        }
         id
     }
 

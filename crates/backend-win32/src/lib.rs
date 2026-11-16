@@ -17,6 +17,7 @@ pub mod conflicts;
 pub mod display_settings;
 pub mod dwm;
 pub mod elevated;
+pub mod elevated_helper;
 pub mod hotkey;
 pub mod idle;
 pub mod night_light;

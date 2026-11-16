@@ -851,25 +851,13 @@ impl RuleEngine {
                 MatchStrategy::Contains,
                 "Splash screens",
             ),
-            // System tools (often unmanageable/protected)
-            (
-                "Taskmgr.exe",
-                MatchKind::Exe,
-                MatchStrategy::Equals,
-                "Task Manager",
-            ),
-            (
-                "msedge.exe",
-                MatchKind::Exe,
-                MatchStrategy::Contains,
-                "Edge browser",
-            ), // Edge has special window styles
-            (
-                "SystemSettings.exe",
-                MatchKind::Exe,
-                MatchStrategy::Equals,
-                "Windows Settings",
-            ),
+            // What Windows itself puts on the screen that is no program's
+            // window. (No program floats because of what program it is:
+            // Notepad, Paint, the calculator, the browser, the settings
+            // and the task manager are tiled as any other. A window that
+            // cannot take a tile's size floats by how it is made, whoever
+            // made it (the backend says: a dialog, a window of one size),
+            // and a rule of the person's floats whatever they like.)
             (
                 "ShellExperienceHost.exe",
                 MatchKind::Exe,
@@ -893,31 +881,6 @@ impl RuleEngine {
                 MatchKind::Exe,
                 MatchStrategy::Equals,
                 "Touch Keyboard",
-            ),
-            // Common applications that should float
-            (
-                "Notepad.exe",
-                MatchKind::Exe,
-                MatchStrategy::Equals,
-                "Notepad",
-            ),
-            (
-                "calc.exe",
-                MatchKind::Exe,
-                MatchStrategy::Equals,
-                "Calculator",
-            ),
-            (
-                "mspaint.exe",
-                MatchKind::Exe,
-                MatchStrategy::Equals,
-                "Paint",
-            ),
-            (
-                "SnippingTool.exe",
-                MatchKind::Exe,
-                MatchStrategy::Equals,
-                "Snipping Tool",
             ),
         ];
 

@@ -243,6 +243,10 @@ pub struct Studio {
     /// defaults, and saving them over the file would lose it. While this
     /// is set nothing is saved.
     file_problem: Option<String>,
+    /// The window manager answers, and its configuration could not be
+    /// fetched: what is shown is gevrek's defaults, and nothing can be
+    /// applied.
+    fetch_problem: Option<String>,
 }
 
 /// Where the schema describes a command.
@@ -283,6 +287,7 @@ impl Studio {
         let generation = document.generation();
         Self {
             file_problem,
+            fetch_problem: None,
             link,
             file,
             address,
@@ -457,6 +462,7 @@ impl Studio {
                     self.line_down = reason;
                 }
                 Event::Configuration(config, revision) => {
+                    self.fetch_problem = None;
                     self.remote_configuration(*config, revision)
                 }
                 Event::Applied(revision) => {
@@ -476,9 +482,17 @@ impl Studio {
                     self.toast(Tone::Warn, message);
                     self.link.send(Request::Fetch);
                 }
+                // The configuration could not be fetched: what the window
+                // shows is not what the window manager runs.
+                Event::Log { level: gevrek_link::Level::Error, ref message, .. }
+                    if message.starts_with(gevrek_link::FETCH_FAILED) && self.session.is_none() =>
+                {
+                    self.fetch_problem = Some(message.clone());
+                }
                 Event::ApplyFailed(message) => {
                     self.applying = false;
                     self.try_out = None;
+                    crate::tryout::forget_revert();
                     self.live = false;
                     self.toast(Tone::Bad, format!("Not applied: {message}"));
                 }
@@ -513,7 +527,9 @@ impl Studio {
                             Some("started") => {
                                 let seconds = field("seconds")
                                     .and_then(|text| text.parse::<f64>().ok())
-                                    .unwrap_or(15.0);
+                                    .filter(|seconds| seconds.is_finite())
+                                    .unwrap_or(15.0)
+                                    .clamp(0.0, 600.0);
                                 Some(Instant::now() + Duration::from_secs_f64(seconds))
                             }
                             _ => None,
@@ -665,6 +681,18 @@ impl Studio {
         self.live = false;
         self.apply();
         if self.applying {
+            // (Should this program fall over while the trial runs, the
+            // configuration from before is sent all the same.)
+            let tell = self.link.teller();
+            let client_id = self.client_id.clone();
+            let back = before.clone();
+            crate::tryout::revert_on_panic(move || {
+                tell(Request::Apply {
+                    config: Box::new(back.clone()),
+                    base_revision: 0,
+                    client_id: client_id.clone(),
+                });
+            });
             self.try_out = Some(TryOut::begin(before, Instant::now()));
         }
     }
@@ -676,6 +704,7 @@ impl Studio {
         let Some(trial) = self.try_out.take() else {
             return;
         };
+        crate::tryout::forget_revert();
         if keep {
             // A configuration that changes the displays is on trial at
             // the window manager too, with a time of its own: kept here,
@@ -1109,6 +1138,19 @@ impl Studio {
     }
 
     fn banners(&mut self, ui: &mut Ui, palette: &Palette) {
+        if let Some(problem) = self.fetch_problem.clone() {
+            let mut again = false;
+            banner(ui, palette.error, icons::WARNING, |ui| {
+                ui.label(format!(
+                    "The window manager answers, and its configuration could not be read. What is shown here is gevrek's defaults, not what runs, and nothing can be applied. ({problem})"
+                ));
+                again = widgets::secondary_button(ui, "Ask again").clicked();
+            });
+            if again {
+                self.fetch_problem = None;
+                self.link.send(Request::Fetch);
+            }
+        }
         if let Some(problem) = &self.file_problem {
             banner(ui, palette.error, icons::WARNING, |ui| {
                 ui.label(format!(
@@ -2480,7 +2522,34 @@ impl eframe::App for Studio {
         // A trial nobody kept does not outlive the window that would have
         // ended it.
         self.applying = false;
+        let on_trial = self.try_out.is_some();
         self.end_trial(false);
+        if on_trial {
+            // The configuration from before is on its way to the window
+            // manager, on the line's own thread: the window does not
+            // close (and the program end, the line with it) before it is
+            // answered, or a few seconds have passed.
+            let until = Instant::now() + Duration::from_secs(4);
+            let mut answered = false;
+            while !answered && Instant::now() < until {
+                answered = self.link.poll().iter().any(|event| {
+                    matches!(
+                        event,
+                        Event::Applied(_)
+                            | Event::ApplyFailed(_)
+                            | Event::Conflict(_)
+                            | Event::Disconnected(_)
+                    )
+                });
+                if !answered {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
+            if !answered {
+                log::warn!("the configuration from before the trial was sent, and not answered in time");
+            }
+        }
+        crate::tryout::forget_revert();
         // The sandbox is this window's; it ends with it.
         if let Some(sandbox) = self.sandbox.take() {
             sandbox.stop();

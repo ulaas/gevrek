@@ -1053,3 +1053,74 @@ fn a_rule_on_the_application_id_matches_on_any_backend() {
     other.app_id = "something-else".to_string();
     assert!(!engine.should_ignore(&other));
 }
+
+/// A workspace that every display has is given another name on one of
+/// them (as the panel does: an entry of that display's own, in the
+/// configuration, that takes the other's place there).
+#[test]
+fn a_workspace_renamed_on_one_display_keeps_its_name_and_its_windows_elsewhere() {
+    use gevrek_model::settings::{AppearanceProfile, MonitorSelector, WorkspaceProfile};
+    const SIDE: MonitorHandle = MonitorHandle(2);
+    let (mut core, mut desktop) = setup(&[]);
+    core.monitor_manager.add_test_monitor(SIDE, "Side");
+    let profile = |name: &str| WorkspaceProfile {
+        name: name.to_string(),
+        monitor: MonitorSelector::Any,
+        persistent: true,
+        ..WorkspaceProfile::default()
+    };
+    let mut profiles = vec![profile("1"), profile("2")];
+    let appearance = AppearanceProfile::default();
+    core.apply_workspace_profile_set(&profiles, &appearance, |_| true, true);
+    let names = |core: &WmCore, output: MonitorHandle| -> Vec<String> {
+        core.monitor_manager
+            .get_workspaces(output)
+            .map(|workspaces| workspaces.iter().map(|w| w.name.clone()).collect())
+            .unwrap_or_default()
+    };
+    assert_eq!(names(&core, OUTPUT), ["1", "2"]);
+    assert_eq!(names(&core, SIDE), ["1", "2"]);
+    let window = open(&mut core, &mut desktop, "a window");
+
+    // The first display's workspace 1 is "web" from now on.
+    profiles.insert(
+        1,
+        WorkspaceProfile {
+            name: "web".to_string(),
+            monitor: MonitorSelector::Name("Primary".to_string()),
+            also_called: vec!["1".to_string()],
+            ..profile("1")
+        },
+    );
+    core.executor
+        .set_workspace_profiles(profiles.clone(), appearance.clone());
+    core.apply_workspace_profile_set(&profiles, &appearance, |_| true, false);
+    // Renamed where it was, with its window; no second workspace "1"
+    // made beside it; the other display's as before.
+    assert_eq!(names(&core, OUTPUT), ["web", "2"]);
+    assert_eq!(names(&core, SIDE), ["1", "2"]);
+    assert_eq!(core.monitor_manager.find_window(window), Some((OUTPUT, 0)));
+
+    // The key for workspace 1, pressed on the first display, shows "web".
+    core.dispatch(
+        &mut desktop,
+        DispatchCommand::SwitchWorkspaceSelector {
+            selector: WorkspaceSelector::Name("2".to_string()),
+        },
+    )
+    .expect("to 2");
+    core.dispatch(
+        &mut desktop,
+        DispatchCommand::SwitchWorkspaceSelector {
+            selector: WorkspaceSelector::Name("1".to_string()),
+        },
+    )
+    .expect("to 1");
+    assert_eq!(
+        core.monitor_manager
+            .get_focused_workspace(OUTPUT)
+            .map(|workspace| workspace.name.clone()),
+        Some("web".to_string())
+    );
+    assert_eq!(names(&core, OUTPUT), ["web", "2"]);
+}

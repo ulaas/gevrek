@@ -69,6 +69,43 @@ impl Journal {
     }
 }
 
+/// What is in memory is not yet in the file.
+static UNWRITTEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// When the file was last written.
+static WRITTEN_AT: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// Within this long of the last writing, a change waits for the end of
+/// the window manager's pass (`flush`). A workspace that is shown hides
+/// and shows many windows at once; each used to write the whole file, a
+/// dozen writings for one key, each looked at by whatever watches files
+/// on the machine. The first of a run is written at once as before (a
+/// single window hidden is in the file when it is hidden); the rest of
+/// the run is written together, a moment later.
+const WRITTEN_TOGETHER_WITHIN: Duration = Duration::from_millis(100);
+
+/// The file is to say what is in memory: now, or with the changes that
+/// follow at once.
+fn written(journal: &Journal) {
+    let mut at = WRITTEN_AT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if at.is_none_or(|at| at.elapsed() >= WRITTEN_TOGETHER_WITHIN) {
+        *at = Some(Instant::now());
+        UNWRITTEN.store(false, std::sync::atomic::Ordering::Release);
+        journal.persist();
+    } else {
+        UNWRITTEN.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
+/// Write what waited to be written (`written`). Called at the end of
+/// each pass of the window manager, and before it ends.
+pub fn flush() {
+    if UNWRITTEN.swap(false, std::sync::atomic::Ordering::AcqRel) {
+        *WRITTEN_AT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Instant::now());
+        lock().persist();
+    }
+}
+
 static JOURNAL: Mutex<Journal> = Mutex::new(Journal {
     entries: BTreeMap::new(),
     path: None,
@@ -201,7 +238,7 @@ pub fn record_hidden(handle: WindowHandle, cloaked: bool) {
             cloaked,
         },
     ) {
-        journal.persist();
+        written(&journal);
     }
 }
 
@@ -212,7 +249,7 @@ pub fn record_shown(handle: WindowHandle) -> Option<JournalEntry> {
     let mut journal = lock();
     let removed = journal.remove(handle.0);
     if removed.is_some() {
-        journal.persist();
+        written(&journal);
     }
     removed
 }

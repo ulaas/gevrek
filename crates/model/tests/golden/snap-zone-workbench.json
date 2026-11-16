@@ -135,7 +135,9 @@
         "hide_taskbar": true,
         "own_windows_key": true,
         "drag_with_windows_key": true,
-        "cut_columns_at_displays": false
+        "cut_columns_at_displays": false,
+        "manage_elevated_windows": true,
+        "mark_elevated_windows": true
       },
       "wayland": {
         "xwayland": true,

@@ -296,6 +296,16 @@ enum Commands {
     /// Print the configuration file gevrek uses when none is named
     ConfigPath,
 
+    /// The helper for the windows of programs that run as an
+    /// administrator (Windows): `start` it for now (Windows asks first),
+    /// `install` the task that starts it without a question from then on
+    /// (asked once), `remove` that task, or show its `status`
+    Elevated {
+        /// start, install, remove or status
+        #[arg(default_value = "status")]
+        action: String,
+    },
+
     /// Print the JSON Schema of a configuration file (for an editor to
     /// complete and check `config.json` with), or with `--settings` the
     /// list of settings with their place and description
@@ -1396,7 +1406,10 @@ fn discover_component_pids(component: &Component) -> Vec<u32> {
                     .file_stem()
                     .and_then(|name| name.to_str())
                     .is_some_and(|name| name.eq_ignore_ascii_case(component.binary_name()));
-                if matches {
+                // (Only of this session: another person signed in on the
+                // same machine has a gevrek of their own, which is neither
+                // "already running" for this one nor this one's to stop.)
+                if matches && in_this_session(entry.th32ProcessID) {
                     pids.push(entry.th32ProcessID);
                 }
                 if Process32NextW(snapshot, &mut entry).is_err() {
@@ -1409,6 +1422,23 @@ fn discover_component_pids(component: &Component) -> Vec<u32> {
     pids.sort_unstable();
     pids.dedup();
     pids
+}
+
+/// Whether a process runs in the session this one runs in. A process
+/// Windows does not tell the session of counts as one of it, as before.
+#[cfg(windows)]
+fn in_this_session(pid: u32) -> bool {
+    use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
+    let (mut own, mut other) = (0u32, 0u32);
+    // SAFETY: plain questions with valid places for the answers.
+    unsafe {
+        if ProcessIdToSessionId(std::process::id(), &mut own).is_err()
+            || ProcessIdToSessionId(pid, &mut other).is_err()
+        {
+            return true;
+        }
+    }
+    own == other
 }
 
 #[cfg(not(windows))]
@@ -2340,6 +2370,126 @@ async fn show_state(address: &str) -> Result<()> {
 }
 
 /// Show health status
+/// `gevrek elevated ...`: the helper for elevated windows.
+#[cfg(not(windows))]
+fn elevated_helper(_address: &str, _action: &str) -> Result<()> {
+    println!("Only Windows keeps a program from moving the windows of one with more rights: there is no helper to run here.");
+    Ok(())
+}
+
+/// `gevrek elevated ...`: the helper for elevated windows.
+#[cfg(windows)]
+fn elevated_helper(address: &str, action: &str) -> Result<()> {
+    use gevrek_win32::elevated::helper_task_name;
+    let instance = match gevrek_protocol::Endpoint::parse(address) {
+        gevrek_protocol::Endpoint::Local(instance) => instance,
+        gevrek_protocol::Endpoint::Tcp(_) => gevrek_model::paths::instance(),
+    };
+    let helper = std::env::current_exe()?.with_file_name("gevrek-elevated.exe");
+    let task = helper_task_name(&instance);
+    let pipe = gevrek_win32::elevated_helper::pipe_name(&instance);
+    // Start a program with an administrator's rights: Windows asks first.
+    let as_administrator = |program: &std::ffi::OsStr, arguments: &str| -> Result<()> {
+        use windows::core::{HSTRING, PCWSTR};
+        use windows::Win32::UI::Shell::ShellExecuteW;
+        use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
+        let (program, arguments) = (HSTRING::from(program), HSTRING::from(arguments));
+        // SAFETY: the texts live until the call returns.
+        let answer = unsafe {
+            ShellExecuteW(
+                None,
+                windows::core::w!("runas"),
+                PCWSTR(program.as_ptr()),
+                PCWSTR(arguments.as_ptr()),
+                None,
+                SW_HIDE,
+            )
+        };
+        // (Above 32: started. 5 and 1223 are a "no" to Windows' question.)
+        if answer.0 as isize > 32 {
+            Ok(())
+        } else {
+            anyhow::bail!(
+                "it was not started with an administrator's rights (Windows' question was answered with no, or: {})",
+                std::io::Error::last_os_error()
+            )
+        }
+    };
+    match action {
+        "start" => {
+            anyhow::ensure!(helper.is_file(), "{} is not there", helper.display());
+            // (Who it is for: the helper may run as another person, where
+            // an administrator's name is given to Windows' question.)
+            let person = gevrek_win32::elevated_helper::server::own_user()?;
+            as_administrator(
+                helper.as_os_str(),
+                &format!("--instance \"{instance}\" --for {person}"),
+            )?;
+            println!("The helper is started. A window manager that runs finds it within a few seconds; it ends when the window manager does.");
+        }
+        "install" => {
+            anyhow::ensure!(helper.is_file(), "{} is not there", helper.display());
+            // Done by the helper itself, with an administrator's rights
+            // (Windows asks, this once): it puts a copy of itself where
+            // only an administrator can write, and registers the task
+            // that starts that copy for this person and this window
+            // manager. (A task that started the file that lies here, in a
+            // folder this person's programs can write to, would let any
+            // of them run as an administrator.)
+            let person = match (std::env::var("USERDOMAIN"), std::env::var("USERNAME")) {
+                (Ok(domain), Ok(name)) => format!("{domain}\\{name}"),
+                (_, Ok(name)) => name,
+                _ => anyhow::bail!("Windows does not say who is signed in"),
+            };
+            let window_manager = helper.with_file_name("gevrek-wm.exe");
+            as_administrator(
+                helper.as_os_str(),
+                &format!(
+                    "--instance \"{instance}\" --wm \"{}\" --install \"{person}\"",
+                    window_manager.display()
+                ),
+            )?;
+            let registered = (0..40).any(|_| {
+                std::thread::sleep(Duration::from_millis(250));
+                gevrek_win32::elevated::helper_task_is_registered(&instance)
+            });
+            anyhow::ensure!(
+                registered,
+                "the task \"{task}\" is not there after ten seconds: it was not registered"
+            );
+            println!(
+                "The task \"{task}\" is registered, and the helper kept at {}. From the next start of the window manager on the helper is started by it, without a question. After gevrek is updated, do this again: the helper that is kept is the one of this version.",
+                gevrek_win32::elevated::kept_helper().display()
+            );
+        }
+        "remove" => {
+            as_administrator(
+                helper.as_os_str(),
+                &format!("--instance \"{instance}\" --remove"),
+            )?;
+            println!("The task \"{task}\" is asked to be removed.");
+        }
+        "status" => {
+            let registered = gevrek_win32::elevated::helper_task_is_registered(&instance);
+            // (A pipe that is there is in the list of pipes; opening it
+            // would take the window manager's place at it.)
+            let runs = std::fs::read_dir(r"\\.\pipe\")
+                .map(|pipes| {
+                    pipes.flatten().any(|entry| {
+                        pipe.ends_with(&*entry.file_name().to_string_lossy())
+                    })
+                })
+                .unwrap_or(false);
+            println!("helper program: {}{}", helper.display(), if helper.is_file() { "" } else { " (not there)" });
+            println!("task \"{task}\": {}", if registered { "registered" } else { "not registered (`gevrek elevated install`)" });
+            println!("helper: {}", if runs { "runs" } else { "does not run" });
+            println!("windows of programs that run as an administrator are managed while the helper runs and `desktop.platform.windows.manage_elevated_windows` is on.");
+        }
+        other => anyhow::bail!("`{other}` is none of start, install, remove, status"),
+    }
+    Ok(())
+}
+
 async fn show_health(address: &str) -> Result<()> {
     let mut client = WMClient::connect(address.to_string()).await?;
     let health = client.health_check().await?;
@@ -3162,6 +3312,10 @@ async fn run() -> Result<()> {
 
         Commands::Health => {
             show_health(&cli.address).await?;
+        }
+
+        Commands::Elevated { action } => {
+            elevated_helper(&cli.address, &action)?;
         }
 
         Commands::Capabilities => {

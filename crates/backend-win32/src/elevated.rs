@@ -24,29 +24,206 @@ fn beyond_reach(own_elevated: bool, other_elevated: Option<bool>) -> bool {
 /// What was found out about processes, by their numbers (a process keeps
 /// its rights for as long as it lives; the list is emptied when it grows,
 /// since a number is given out again after a process ends).
-static KNOWN: Mutex<Option<HashMap<u32, bool>>> = Mutex::new(None);
+static KNOWN: Mutex<Option<HashMap<u32, (bool, std::time::Instant)>>> = Mutex::new(None);
+
+/// How long what was found out of a process is believed: its number is
+/// given to another program once it has ended, which may have other
+/// rights.
+const BELIEVED_FOR: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Whether a window belongs to a program this one cannot manage.
 pub fn window_is_beyond_reach(window: isize) -> bool {
+    !system::own_elevated() && window_is_elevated(window)
+}
+
+/// Whether a window belongs to a program that runs as an administrator
+/// (or to one Windows does not say it of, which is one with more rights
+/// than whoever asks). The same answer to the window manager and to its
+/// helper: the two go by it to tell whose a key or a press is
+/// (`hotkey.rs`).
+pub fn window_is_elevated(window: isize) -> bool {
     let Some(process) = system::process_of(window) else {
         return false;
     };
     let mut known = KNOWN.lock().unwrap_or_else(|error| error.into_inner());
     let known = known.get_or_insert_with(HashMap::new);
-    if let Some(answer) = known.get(&process) {
-        return *answer;
+    if let Some((answer, when)) = known.get(&process) {
+        if when.elapsed() < BELIEVED_FOR {
+            return *answer;
+        }
     }
     if known.len() > 512 {
         known.clear();
     }
-    let answer = beyond_reach(system::own_elevated(), system::elevated(process));
+    let answer = beyond_reach(false, system::elevated(process));
     if answer {
-        log::info!(
-            "A window of process {process} is left alone: the program runs as an administrator and gevrek does not"
-        );
+        log::debug!("process {process} runs as an administrator");
     }
-    known.insert(process, answer);
+    known.insert(process, (answer, std::time::Instant::now()));
     answer
+}
+
+/// Whether this program runs as an administrator itself.
+pub fn own_elevated() -> bool {
+    system::own_elevated()
+}
+
+/// The name of the task that starts the helper for elevated windows
+/// without Windows' question (`gevrek elevated install` registers it).
+pub fn helper_task_name(instance: &str) -> String {
+    let plain: String = instance
+        .chars()
+        .map(|letter| if letter.is_ascii_alphanumeric() { letter } else { '-' })
+        .collect();
+    format!("gevrek elevated helper ({plain})")
+}
+
+/// Where the helper lies that the task starts: a folder only an
+/// administrator can write to. (gevrek itself is installed for one person,
+/// in a folder that person's programs can write to: a task that started a
+/// file from there as an administrator, without asking, would let any of
+/// those programs put another file in its place and run as one.)
+pub fn kept_helper() -> std::path::PathBuf {
+    let programs = std::env::var_os("ProgramW6432")
+        .or_else(|| std::env::var_os("ProgramFiles"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Program Files"));
+    programs.join("gevrek").join("gevrek-elevated.exe")
+}
+
+/// The task as Windows' own tool reads it: run by hand only, for one
+/// person, with the most rights that person has, and no end to its time.
+fn helper_task_xml(person: &str, command: &std::path::Path, arguments: &str) -> String {
+    let plain = |text: &str| {
+        text.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+    };
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Starts gevrek's helper for the windows of programs that run as an administrator. Run by gevrek's window manager when it starts.</Description>
+  </RegistrationInfo>
+  <Principals>
+    <Principal id="Author">
+      <UserId>{person}</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Enabled>true</Enabled>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>{command}</Command>
+      <Arguments>{arguments}</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"#,
+        person = plain(person),
+        command = plain(&command.to_string_lossy()),
+        arguments = plain(arguments),
+    )
+}
+
+/// Windows' tool for tasks, without a window of its own.
+fn task_tool(arguments: &[&str]) -> anyhow::Result<()> {
+    use std::os::windows::process::CommandExt;
+    let output = std::process::Command::new("schtasks.exe")
+        .args(arguments)
+        .stdin(std::process::Stdio::null())
+        .creation_flags(0x0800_0000)
+        .output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "schtasks {}: {}",
+        arguments.first().copied().unwrap_or_default(),
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(())
+}
+
+/// Register the task that starts the helper without a question, for an
+/// instance of gevrek, the window manager it serves and the person it is
+/// for. Done by the helper itself, started once with an administrator's
+/// rights (`gevrek elevated install`): it puts a copy of itself where
+/// only an administrator can write, and the task starts that copy.
+pub fn install_helper_task(
+    instance: &str,
+    window_manager: &std::path::Path,
+    person: &str,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(own_elevated(), "only an administrator can register the task");
+    let kept = kept_helper();
+    let own = std::env::current_exe()?;
+    if own != kept {
+        if let Some(folder) = kept.parent() {
+            std::fs::create_dir_all(folder)?;
+        }
+        std::fs::copy(&own, &kept)?;
+    }
+    let arguments = format!(
+        "--instance \"{instance}\" --wm \"{}\"",
+        window_manager.display()
+    );
+    let written = helper_task_xml(person, &kept, &arguments);
+    // (As Windows' own tools write it: two bytes a letter, marked.)
+    let mut bytes = vec![0xFF, 0xFE];
+    bytes.extend(written.encode_utf16().flat_map(u16::to_le_bytes));
+    let file = std::env::temp_dir().join(format!("gevrek-elevated-task-{}.xml", std::process::id()));
+    std::fs::write(&file, bytes)?;
+    let made = task_tool(&[
+        "/create",
+        "/f",
+        "/tn",
+        &helper_task_name(instance),
+        "/xml",
+        &file.to_string_lossy(),
+    ]);
+    let _ = std::fs::remove_file(&file);
+    made
+}
+
+/// Remove the task, and the helper's copy where no other task is left to
+/// start it (the copy of a helper that runs stays: Windows holds its file).
+pub fn remove_helper_task(instance: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(own_elevated(), "only an administrator can remove the task");
+    let removed = task_tool(&["/delete", "/f", "/tn", &helper_task_name(instance)]);
+    let _ = std::fs::remove_file(kept_helper());
+    removed
+}
+
+/// Whether the task is registered.
+pub fn helper_task_is_registered(instance: &str) -> bool {
+    task_tool(&["/query", "/tn", &helper_task_name(instance)]).is_ok()
+}
+
+/// Run the task that starts the helper, where it is registered. Nothing
+/// happens where it is not: no helper, and the windows of elevated
+/// programs are left alone as before.
+pub fn run_helper_task(instance: &str) {
+    use std::os::windows::process::CommandExt;
+    // (No window for the tool: 0x08000000 is CREATE_NO_WINDOW.)
+    let started = std::process::Command::new("schtasks.exe")
+        .args(["/run", "/tn", &helper_task_name(instance)])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(0x0800_0000)
+        .spawn();
+    match started {
+        Ok(_) => log::debug!("asked for the helper for elevated windows by its task"),
+        Err(error) => log::debug!("the helper's task could not be asked for: {error}"),
+    }
 }
 
 mod system {

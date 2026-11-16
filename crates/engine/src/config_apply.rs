@@ -181,15 +181,53 @@ impl WmCore {
                 );
             }
             for monitor in targets {
-                let existing_index =
+                // A display that has an entry of its own in this one's
+                // place (`also_called`) gets that one, and not this.
+                let taken_over = profiles.iter().any(|other| {
+                    other.enabled
+                        && !std::ptr::eq(other, profile)
+                        && other
+                            .also_called
+                            .iter()
+                            .any(|name| name.trim().eq_ignore_ascii_case(profile.name.trim()))
+                        && monitor_selector_targets(&other.monitor, &monitors).contains(&monitor)
+                });
+                if taken_over {
+                    continue;
+                }
+                let mut existing_index =
                     self.monitor_manager
                         .get_workspaces(monitor)
                         .and_then(|workspaces| {
                             workspaces
                                 .elements()
                                 .iter()
-                                .position(|workspace| workspace.name == profile.name)
+                                .position(|workspace| {
+                                    workspace.name.eq_ignore_ascii_case(&profile.name)
+                                })
                         });
+                // The workspace whose place it takes is there already
+                // (it was just given its own name on this display): that
+                // one is it, windows and all, under its new name.
+                if existing_index.is_none() && !profile.also_called.is_empty() {
+                    if let Some(workspaces) = self.monitor_manager.get_workspaces_mut(monitor) {
+                        let found = workspaces.elements().iter().position(|workspace| {
+                            profile
+                                .also_called
+                                .iter()
+                                .any(|name| workspace.name.eq_ignore_ascii_case(name.trim()))
+                        });
+                        if let Some(workspace) = found.and_then(|at| workspaces.get_mut(at)) {
+                            log::info!(
+                                "Workspace '{}' is '{}' on this display from now on",
+                                workspace.name,
+                                profile.name
+                            );
+                            workspace.name = profile.name.clone();
+                            existing_index = found;
+                        }
+                    }
+                }
                 // Persistent/default profiles are eagerly materialized.
                 // Other profiles remain declarative until a named selector
                 // visits them.

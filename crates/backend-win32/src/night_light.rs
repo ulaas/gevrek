@@ -64,6 +64,30 @@ fn warmed(own: &Ramp, (red, green, blue): (f32, f32, f32)) -> Ramp {
     ramp
 }
 
+/// The ramp of a display that nothing has changed: every colour from
+/// none to all of it, in even steps.
+fn plain_ramp() -> Ramp {
+    let mut ramp = [0u16; 768];
+    for (at, step) in ramp.iter_mut().enumerate() {
+        *step = ((at % 256) * 257) as u16;
+    }
+    ramp
+}
+
+/// Whether a ramp found on a display reads as one a night light left
+/// there: its green or its blue ends well below its red. A gevrek that is
+/// ended at once (not stopped) cannot give the displays their own ramps
+/// back; the next one would take the warm ramp for the display's own,
+/// warm it again, and give the warm one "back" at its end.
+fn left_warm(ramp: &Ramp) -> bool {
+    let (red, green, blue) = (
+        u32::from(ramp[255]),
+        u32::from(ramp[511]),
+        u32::from(ramp[767]),
+    );
+    red > 0 && (green * 100 < red * 93 || blue * 100 < red * 93)
+}
+
 /// The factors as near to what is asked as Windows takes.
 fn within_what_windows_takes((red, green, blue): (f32, f32, f32)) -> (f32, f32, f32) {
     (red.max(LEAST), green.max(LEAST), blue.max(LEAST))
@@ -218,6 +242,12 @@ impl NightLight {
                         // What it has is ours (another temperature now), or
                         // Windows gave it its usual one back.
                         Some(at) => self.warm[at].own,
+                        None if left_warm(&now_has) => {
+                            log::info!(
+                                "Night light: the display {device} still has a warm ramp from a gevrek that was ended; its own is taken to be the plain one"
+                            );
+                            plain_ramp()
+                        }
                         None => now_has,
                     };
                     let given = warmed(&own, taken);
@@ -365,6 +395,17 @@ mod system {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_ramp_left_warm_is_not_taken_for_a_displays_own() {
+        let plain = super::plain_ramp();
+        assert_eq!((plain[0], plain[255], plain[256], plain[767]), (0, 65535, 0, 65535));
+        assert!(!super::left_warm(&plain));
+        // As the night light leaves it: less green, much less blue.
+        assert!(super::left_warm(&super::warmed(&plain, (1.0, 0.8, 0.6))));
+        // A display's own correction of a few percent is its own.
+        assert!(!super::left_warm(&super::warmed(&plain, (1.0, 0.97, 0.95))));
+    }
+
     use super::*;
 
     fn straight() -> Ramp {

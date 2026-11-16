@@ -456,7 +456,7 @@ pub fn opened_by(app: &App) -> String {
 }
 
 #[cfg(windows)]
-pub use shell::{installed, programs_folders, read_packaged, read_shortcuts, start};
+pub use shell::{installed, programs_folders, read_packaged, read_shortcuts, start, start_as};
 
 #[cfg(windows)]
 mod shell {
@@ -713,6 +713,15 @@ mod shell {
     /// asked may be a surface above every window, where a dialog of the
     /// shell would lie hidden.
     pub fn start(app: &App) -> std::io::Result<Option<u32>> {
+        start_as(app, false)
+    }
+
+    /// As `start`, with an administrator's rights where `elevated`:
+    /// Windows asks the person first (its own question, on its own
+    /// screen), and the program starts when they agree. A packaged
+    /// application cannot be started so, and one whose question was
+    /// answered with no is not started: both are an error to who asked.
+    pub fn start_as(app: &App, elevated: bool) -> std::io::Result<Option<u32>> {
         let _com = Com::new();
         let file = HSTRING::from(opened_by(app));
         let mut info = SHELLEXECUTEINFOW {
@@ -720,6 +729,11 @@ mod shell {
             // Done when the call returns: the thread that asks may have
             // no loop of messages to finish it in.
             fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC,
+            lpVerb: if elevated {
+                windows::core::w!("runas")
+            } else {
+                PCWSTR::null()
+            },
             lpFile: PCWSTR(file.as_ptr()),
             nShow: SW_SHOWNORMAL.0,
             ..Default::default()

@@ -56,6 +56,7 @@ Name: "autostart"; Description: "Start gevrek when I sign in"; Flags: unchecked
 [Files]
 Source: "{#Source}\gevrek.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Source}\gevrek-wm.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#Source}\gevrek-elevated.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Source}\gevrek-studio.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Source}\gevrek-shell.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Source}\README.txt"; DestDir: "{app}"; Flags: ignoreversion

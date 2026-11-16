@@ -62,6 +62,9 @@ pub struct Session {
     remote: Option<(Config, u64)>,
     /// The revision of this editor's own last apply.
     own_revision: Option<u64>,
+    /// The configuration that was sent with the apply that is on its way:
+    /// what runs once it is answered. (The draft may be another by then.)
+    sent: std::cell::RefCell<Option<Config>>,
 }
 
 impl Session {
@@ -73,6 +76,7 @@ impl Session {
             base_revision: revision,
             draft: None,
             remote: None,
+            sent: std::cell::RefCell::new(None),
             own_revision: None,
         }
     }
@@ -135,8 +139,10 @@ impl Session {
         if self.has_conflict() {
             return None;
         }
+        let config = self.draft.clone()?;
+        *self.sent.borrow_mut() = Some(config.clone());
         Some(ApplyRequest {
-            config: self.draft.clone()?,
+            config,
             base_revision: self.base_revision,
             client_id: self.client_id.clone(),
         })
@@ -144,8 +150,26 @@ impl Session {
 
     /// The WM applied the draft sent with `begin_apply` as `revision`.
     pub fn applied(&mut self, revision: u64) {
-        if let Some(draft) = self.draft.take() {
-            self.base = draft;
+        match self.sent.borrow_mut().take() {
+            // What runs is what was sent. Edits made while it was on its
+            // way are still a draft: taken for applied, they were shown
+            // as running and never sent.
+            Some(sent) => {
+                let as_json = |config: &Config| serde_json::to_value(config).ok();
+                if self
+                    .draft
+                    .as_ref()
+                    .is_none_or(|draft| as_json(draft) == as_json(&sent))
+                {
+                    self.draft = None;
+                }
+                self.base = sent;
+            }
+            None => {
+                if let Some(draft) = self.draft.take() {
+                    self.base = draft;
+                }
+            }
         }
         self.base_revision = revision;
         self.own_revision = Some(revision);

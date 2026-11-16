@@ -39,6 +39,10 @@ static DRAGGING: AtomicBool = AtomicBool::new(false);
 pub fn configure(own_key: bool, drag: bool) {
     OWN_KEY.store(own_key, Ordering::Relaxed);
     DRAG_WITH_KEY.store(drag, Ordering::Relaxed);
+    // (The helper for elevated windows goes by the same two, where the
+    // window manager has one: `elevated_helper`. In the helper itself
+    // nobody is told.)
+    crate::elevated_helper::client::set_windows_key(own_key, drag);
 }
 
 /// Whether every key pressed with the Windows key is gevrek's.
@@ -94,6 +98,22 @@ pub fn pressed_just_now() -> Option<(i32, i32)> {
 }
 
 /// The drags that began or ended since this was last asked.
+/// Whether a window is being dragged with the Windows key by this
+/// program's own hooks.
+pub fn is_dragging() -> bool {
+    DRAGGING.load(Ordering::Relaxed)
+}
+
+/// A drag that was made elsewhere (by the helper for elevated windows) is
+/// told of as one made here.
+pub fn push_event(event: DragEvent) {
+    EVENTS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .push(event);
+    gevrek_host::wake::now();
+}
+
 pub fn take_events() -> Vec<DragEvent> {
     std::mem::take(&mut *EVENTS.lock().unwrap_or_else(|error| error.into_inner()))
 }
@@ -158,7 +178,7 @@ fn may_be_dragged(class: &str) -> bool {
         ))
 }
 
-pub use system::{key_pressed, key_released, pointer_moved, pressed, released};
+pub use system::{cancel_drag, key_pressed, key_released, pointer_moved, pressed, released};
 
 mod system {
     use super::*;
@@ -238,8 +258,15 @@ mod system {
     /// and nothing else was held. `true`: a drag began, and the press is
     /// gevrek's (it goes no further).
     pub fn pressed(left_button: bool, at: (i32, i32)) -> bool {
-        if !DRAG_WITH_KEY.load(Ordering::Relaxed) || DRAGGING.load(Ordering::Relaxed) {
+        if !DRAG_WITH_KEY.load(Ordering::Relaxed) {
             return false;
+        }
+        // A button goes down while a drag is still held: the button that
+        // held it was let go where no hook heard of it (behind Windows'
+        // question for an administrator's rights, behind the lock, over
+        // a window of a program with more rights). That drag is over.
+        if DRAGGING.load(Ordering::Relaxed) {
+            cancel_drag();
         }
         // SAFETY: plain questions about the window under the pointer.
         unsafe {
@@ -317,6 +344,27 @@ mod system {
                 bottom - top,
                 flags,
             );
+        }
+    }
+
+    /// End a drag whose button was let go unheard (see `pressed`), or
+    /// whose desktop went away under it. The window stays where it is,
+    /// and the drag is told of as ended.
+    pub fn cancel_drag() {
+        if !DRAGGING.swap(false, Ordering::Relaxed) {
+            return;
+        }
+        let held = DRAG
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
+        if let Some(held) = held {
+            log::debug!("a drag with the Windows key ends without its button's release");
+            EVENTS
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .push(DragEvent::Ended(held.window));
+            gevrek_host::wake::now();
         }
     }
 

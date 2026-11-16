@@ -23,7 +23,15 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "file".to_string());
-    let temporary = folder.join(format!(".{name}.gevrek-{}", std::process::id()));
+    // (A name of its own for each writing: two of one program at the
+    // same moment, on two of its threads, would else write into one file
+    // and rename each other's half.)
+    static WRITINGS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let writing = WRITINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let temporary = folder.join(format!(
+        ".{name}.gevrek-{}-{writing}",
+        std::process::id()
+    ));
     let written = (|| {
         let mut file = std::fs::File::create(&temporary)?;
         file.write_all(bytes)?;
