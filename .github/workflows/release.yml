@@ -1,0 +1,199 @@
+# Builds gevrek for Windows and Linux when a version tag is pushed, and
+# publishes what was built as a GitHub release, with SHA-256 checksums:
+#
+#   gevrek-windows-x64-setup.exe   the setup program (Inno Setup)
+#   gevrek-windows-x64.zip         the programs with install.ps1; an installed
+#                                  gevrek updates itself from this one
+#   gevrek-linux-x64.deb           Debian and Ubuntu (built on Ubuntu 24.04)
+#   gevrek-linux-x64.rpm           Fedora (built on the Fedora named below)
+#   gevrek-linux-x64.tar.gz        the files as a package places them
+#   SHA256SUMS.txt
+#
+# The names carry no version: `cargo xtask dist` makes them, and an installed
+# gevrek finds its update by them (crates/update).
+#
+# To release:
+#   1. Set `version` under [workspace.package] in Cargo.toml, commit, push.
+#   2. git tag -a v<version> -m "gevrek <version>" && git push origin v<version>
+name: Release
+
+# Run by hand (Actions > Release > Run workflow) it builds and packs
+# everything and keeps the files as workflow artifacts, without publishing.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # What the programs say they were built from (crates/build), also where
+  # git cannot be asked.
+  GEVREK_COMMIT: ${{ github.sha }}
+
+jobs:
+  windows:
+    name: Windows (zip and setup program)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+
+      # The tag is the version people see; the build must agree with it.
+      - name: The tag is the version in Cargo.toml
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version $version in Cargo.toml"
+            exit 1
+          fi
+
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+
+      - name: Build and pack
+        run: cargo xtask dist zip setup
+
+      # install.ps1 and uninstall.ps1 of the package, tried without touching
+      # the machine's own PATH, Start menu or list of apps.
+      - name: The package installs, updates and is removed
+        shell: pwsh
+        run: packaging\windows\check.ps1 target\dist\gevrek-windows-x64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gevrek-windows-x64
+          path: |
+            target/dist/gevrek-windows-x64.zip
+            target/dist/gevrek-windows-x64-setup.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  deb:
+    name: Linux (.deb and tarball)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libwayland-dev libxkbcommon-dev libegl1-mesa-dev libgles2-mesa-dev libudev-dev libinput-dev libgbm-dev libseat-dev libdrm-dev libpam0g-dev libpipewire-0.3-dev clang dpkg-dev
+
+      - name: Build and pack
+        run: cargo xtask dist tar deb
+
+      - name: What the package holds
+        run: |
+          dpkg-deb --info target/dist/gevrek-linux-x64.deb
+          dpkg-deb --contents target/dist/gevrek-linux-x64.deb
+
+      # What it depends on is there to be had, and the installed program runs.
+      - name: The package installs
+        run: |
+          sudo apt-get install -y --no-install-recommends ./target/dist/gevrek-linux-x64.deb
+          gevrek --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gevrek-linux-x64-deb
+          path: |
+            target/dist/gevrek-linux-x64.deb
+            target/dist/gevrek-linux-x64.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  rpm:
+    name: Linux (.rpm)
+    runs-on: ubuntu-latest
+    # The oldest Fedora that is still supported: the package then installs
+    # on the newer ones too. To be moved on when that one ends.
+    container: fedora:44
+    timeout-minutes: 90
+    steps:
+      - name: Tools and libraries
+        run: |
+          dnf install -y git curl tar gzip gcc gcc-c++ make pkgconf-pkg-config wayland-devel libxkbcommon-devel mesa-libEGL-devel libglvnd-devel systemd-devel libinput-devel mesa-libgbm-devel libseat-devel libdrm-devel pam-devel pipewire-devel clang rpm-build systemd-rpm-macros
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build and pack
+        run: cargo xtask dist rpm
+
+      - name: What the package holds and needs
+        run: |
+          rpm -qip target/dist/gevrek-linux-x64.rpm
+          rpm -qlp target/dist/gevrek-linux-x64.rpm
+          rpm -qRp target/dist/gevrek-linux-x64.rpm
+
+      - name: The package installs
+        run: |
+          dnf install -y --setopt=install_weak_deps=False ./target/dist/gevrek-linux-x64.rpm
+          gevrek --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gevrek-linux-x64-rpm
+          path: target/dist/gevrek-linux-x64.rpm
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish the release
+    needs: [windows, deb, rpm]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum gevrek-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create the release
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
+          | | |
+          |---|---|
+          | Windows 10 and 11 | `gevrek-windows-x64-setup.exe`, or `gevrek-windows-x64.zip` with its `install.ps1`. An installed gevrek updates itself: `gevrek update`. |
+          | Debian and Ubuntu (24.04 and later) | `sudo apt install ./gevrek-linux-x64.deb` |
+          | Fedora (44 and later) | `sudo dnf install ./gevrek-linux-x64.rpm` |
+          | Other Linux | `gevrek-linux-x64.tar.gz`: the same files, with a README |
+
+          The programs are not signed: Windows may ask before it runs the setup program. `SHA256SUMS.txt` has the checksum of every file.
+
+          NOTES
+          flags=(--verify-tag --generate-notes --notes-file "$RUNNER_TEMP/notes.md" --title "gevrek ${GITHUB_REF_NAME#v}")
+          case "$GITHUB_REF_NAME" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" "${flags[@]}" gevrek-* SHA256SUMS.txt

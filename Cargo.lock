@@ -1923,6 +1923,7 @@ dependencies = [
  "gevrek-server",
  "gevrek-studio",
  "gevrek-system",
+ "gevrek-update",
  "gevrek-win32",
  "libc",
  "log",
@@ -2240,6 +2241,16 @@ dependencies = [
  "image",
  "pollster",
  "resvg",
+]
+
+[[package]]
+name = "gevrek-update"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

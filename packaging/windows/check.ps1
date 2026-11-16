@@ -29,7 +29,7 @@ try {
     $common = @{ Prefix = $prefix; StartMenu = $menu; RegistryRoot = $registry; NoStop = $true }
     $first = & (Join-Path $Package 'install.ps1') @common 6>&1 | Out-String
     Said 'a first install says so' ($first -match 'Installed: gevrek')
-    Said 'the five programs are there' (@($programs | Where-Object { Test-Path (Join-Path $prefix $_) }).Count -eq 5)
+    Said 'the programs are there' (@($programs | Where-Object { Test-Path (Join-Path $prefix $_) }).Count -eq $programs.Count)
     Said 'the way out is beside them' ((Test-Path (Join-Path $prefix 'uninstall.ps1')) -and (Test-Path (Join-Path $prefix 'README.txt')))
     $parts = Path-Parts
     Said 'the folder is on the PATH, after what was there, which is as it was' (($parts -join ';') -eq "C:\one;%USERPROFILE%\two;$prefix")
@@ -46,7 +46,7 @@ try {
     # The same package again: an update.
     $second = & (Join-Path $Package 'install.ps1') @common 6>&1 | Out-String
     Said 'a second install is an update' ($second -match 'Updated: gevrek')
-    Said 'the build before is kept' (@($programs | Where-Object { Test-Path (Join-Path $prefix "previous\$_") }).Count -eq 5)
+    Said 'the build before is kept' (@($programs | Where-Object { Test-Path (Join-Path $prefix "previous\$_") }).Count -eq $programs.Count)
     Said 'the folder is on the PATH once' (@(Path-Parts | Where-Object { $_ -eq $prefix }).Count -eq 1)
 
     # Removed by the copy that was installed.

@@ -1,0 +1,16 @@
+Package: gevrek
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: Aydemir Şahin <ulaas@users.noreply.github.com>
+Installed-Size: @SIZE@
+Depends: @LIBRARIES@, polkitd | policykit-1, libgl1-mesa-dri
+Recommends: xdg-desktop-portal, xdg-desktop-portal-gtk, xwayland, pipewire-bin, foot
+Section: x11
+Priority: optional
+Homepage: https://ulaas.github.io/gevrek/
+Description: A tiling window manager and desktop for Wayland
+ gevrek is a tiling Wayland compositor with its own desktop around it: a
+ panel, a launcher, notifications, a lock screen, and a settings program
+ (gevrek-studio) in which every setting has a form.
+ .
+ After installing, gevrek is in the login manager's list of sessions.

@@ -105,6 +105,7 @@ gevrek-schema = { path = "crates/schema" }
 gevrek-engine = { path = "crates/engine" }
 gevrek-host = { path = "crates/host" }
 gevrek-server = { path = "crates/server" }
+gevrek-update = { path = "crates/update" }
 
 # Workspace dependencies
 tonic = { workspace = true }

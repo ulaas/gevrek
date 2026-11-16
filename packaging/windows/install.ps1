@@ -12,7 +12,8 @@
 # A gevrek that is running is stopped first and started again afterwards.
 # The configuration (%APPDATA%\gevrek) is not touched.
 #
-# Updating: unpack the newer package and run its install.ps1.
+# Updating: `gevrek update`, which gets the newer package and puts its
+# programs in place; or unpack the newer package and run its install.ps1.
 #
 # Nothing here needs the network.
 [CmdletBinding()]
@@ -82,8 +83,13 @@ foreach ($program in $retired) {
     $old = Join-Path $Prefix $program
     if (Test-Path $old) { Remove-Item -Force $old; Write-Host "Removed $program (no longer part of gevrek)." }
 }
+# An install the setup program made keeps its own way out: its uninstaller,
+# and Windows' note of it.
+$setupEntry = Join-Path $RegistryRoot 'Software\Microsoft\Windows\CurrentVersion\Uninstall\gevrek_is1'
+$bySetup = Test-Path $setupEntry
 # The way out, beside the programs.
 foreach ($file in @('uninstall.ps1', 'README.txt')) {
+    if ($bySetup -and ($file -eq 'uninstall.ps1')) { continue }
     if (Test-Path (Join-Path $here $file)) { Copy-Item -Force (Join-Path $here $file) (Join-Path $Prefix $file) }
 }
 Write-Host "The programs are in $Prefix (the build before in $previous)."
@@ -127,7 +133,9 @@ if (-not $NoShortcuts) {
     Write-Host 'The Start menu has gevrek settings, gevrek (start) and gevrek (stop).'
 }
 
-if (-not $NoUninstallEntry) {
+if ($bySetup) {
+    Set-ItemProperty -Path $setupEntry -Name 'DisplayVersion' -Value ("$new" -replace '^gevrek\s*', '' -replace '\s.*$', '')
+} elseif (-not $NoUninstallEntry) {
     $key = Join-Path $RegistryRoot 'Software\Microsoft\Windows\CurrentVersion\Uninstall\gevrek'
     New-Item -Path $key -Force | Out-Null
     $remove = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $Prefix 'uninstall.ps1') + '"'

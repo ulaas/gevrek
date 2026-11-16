@@ -12,6 +12,7 @@
 
 <p align="center">
   <a href="https://ulaas.github.io/gevrek/">Website</a> ·
+  <a href="#install">Install</a> ·
   <a href="#build">Build</a> ·
   <a href="docs/GUIDE.md">Guide</a> ·
   <a href="docs/LINUX.md">Linux</a> ·
@@ -94,6 +95,33 @@ offers what.
 
 gevrek is at version 0.6 and young: expect rough edges, and keep the way
 out in mind (`gevrek stop all` puts every window back).
+
+## Install
+
+Each [release](https://github.com/ulaas/gevrek/releases) has:
+
+| System | File | |
+|---|---|---|
+| Windows 10 and 11 | `gevrek-windows-x64-setup.exe` | Installs for you alone, with no administrator. Or `gevrek-windows-x64.zip` and the `install.ps1` in it |
+| Debian and Ubuntu (24.04 and later) | `gevrek-linux-x64.deb` | `sudo apt install ./gevrek-linux-x64.deb` |
+| Fedora (44 and later) | `gevrek-linux-x64.rpm` | `sudo dnf install ./gevrek-linux-x64.rpm` |
+| Other Linux | `gevrek-linux-x64.tar.gz` | The same files as a package places them, with a README |
+
+On Linux gevrek is then in the login manager's list of sessions. On Windows,
+`gevrek start all` starts it (see [First steps](#first-steps)).
+
+**Updates.** On Windows an installed gevrek updates itself. Once a day, when
+it starts, it asks GitHub for the newest release (nothing is sent but its
+own version), gets a newer one ready, and installs it the next time it
+starts, so a desktop in use is not interrupted. `gevrek update` installs it
+at once, `gevrek update --check` only looks, and `gevrek update --automatic
+off` turns the daily look off. The download is checked against the
+release's SHA-256 list, and the build before is kept in the folder
+`previous` beside the programs. On Linux the package manager updates: install
+the newer package.
+
+The programs are not signed, so Windows may ask before it runs the setup
+program.
 
 ## Build
 

@@ -15,6 +15,11 @@
 //! - `package [--debug]` (Windows): the programs with the scripts that
 //!   install, update and remove them for one person, in one zip
 //!   (`target/package`): what is given to a machine without the sources.
+//! - `rpm [--debug]` (Linux): the programs as an RPM, for the machine they
+//!   were built on.
+//! - `dist [kinds] [--debug]`: what a release offers, under `target/dist`:
+//!   the zip and the setup program on Windows; the tarball, the .deb and
+//!   the .rpm on Linux. The release workflow runs it.
 
 use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
@@ -62,6 +67,15 @@ fn root() -> PathBuf {
         .parent()
         .expect("xtask is in the repository")
         .to_path_buf()
+}
+
+/// Where cargo builds: `target` in the repository, unless `CARGO_TARGET_DIR`
+/// names another folder (a build inside WSL keeps it on the Linux side).
+fn target_dir() -> PathBuf {
+    std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .filter(|folder| folder.is_absolute())
+        .unwrap_or_else(|| root().join("target"))
 }
 
 fn run(step: &str, command: &mut Command) -> Result<()> {
@@ -128,7 +142,7 @@ fn check() -> Result<()> {
                         "xtask",
                         "--all-targets",
                     ])
-                    .env("CARGO_TARGET_DIR", root().join("target").join("win")),
+                    .env("CARGO_TARGET_DIR", target_dir().join("win")),
             )?;
         } else {
             println!("== type-check of the Windows side: skipped (rustup target add x86_64-pc-windows-msvc)");
@@ -215,9 +229,7 @@ fn install(arguments: &[String]) -> Result<()> {
     }
     run("build", &mut build)?;
 
-    let built = root()
-        .join("target")
-        .join(if debug { "debug" } else { "release" });
+    let built = target_dir().join(if debug { "debug" } else { "release" });
     let bin = prefix.join("bin");
     let previous = prefix.join("lib").join("gevrek").join("previous");
     std::fs::create_dir_all(&bin)?;
@@ -606,6 +618,28 @@ fn rpm(arguments: &[String]) -> Result<()> {
         bail!("an RPM is made on Linux");
     }
     let debug = arguments.iter().any(|argument| argument == "--debug");
+    let programs = build_linux_programs(debug)?;
+    // The commits since the start count the releases of one version.
+    let release = Command::new("git")
+        .args(["rev-list", "--count", "HEAD"])
+        .current_dir(root())
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty() && text.chars().all(|letter| letter.is_ascii_digit()))
+        .unwrap_or_else(|| "1".to_string());
+    let top = rpm_build(&programs, &release)?;
+    println!();
+    println!("The package is under {}", top.join("RPMS").display());
+    println!(
+        "  sudo dnf install <the file>     then gevrek is in the login manager's list of sessions"
+    );
+    Ok(())
+}
+
+/// Build the programs of a Linux package; returns the folder they are in.
+fn build_linux_programs(debug: bool) -> Result<PathBuf> {
     let mut build = cargo();
     build.arg("build").arg("--bins");
     if !debug {
@@ -624,22 +658,26 @@ fn rpm(arguments: &[String]) -> Result<()> {
         "gevrek-lock",
     ]);
     run("build", &mut build)?;
-    let programs = root()
-        .join("target")
-        .join(if debug { "debug" } else { "release" });
-    let top = root().join("target").join("rpm");
+    Ok(target_dir().join(if debug { "debug" } else { "release" }))
+}
+
+/// The version as a package manager sorts it: a pre-release (`0.7.0-rc.1`)
+/// before its release, which `~` says to dpkg and to rpm.
+fn package_version() -> String {
+    env!("CARGO_PKG_VERSION").replacen('-', "~", 1)
+}
+
+/// Make the RPM of programs that are built (`packaging/rpm/gevrek.spec`);
+/// returns rpmbuild's folder (`target/rpm`), with the package under `RPMS`.
+fn rpm_build(programs: &Path, release: &str) -> Result<PathBuf> {
+    let top = target_dir().join("rpm");
+    // Only the package of this build is there afterwards.
+    if top.join("RPMS").exists() {
+        std::fs::remove_dir_all(top.join("RPMS"))?;
+    }
     std::fs::create_dir_all(&top)?;
-    let version = env!("CARGO_PKG_VERSION");
-    // The commits since the start count the releases of one version.
-    let release = Command::new("git")
-        .args(["rev-list", "--count", "HEAD"])
-        .current_dir(root())
-        .output()
-        .ok()
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|text| text.trim().to_string())
-        .filter(|text| !text.is_empty() && text.chars().all(|letter| letter.is_ascii_digit()))
-        .unwrap_or_else(|| "1".to_string());
+    let version = package_version();
+    let version = version.as_str();
     let define = |name: &str, value: &str| format!("{name} {value}");
     run(
         "rpmbuild",
@@ -650,7 +688,7 @@ fn rpm(arguments: &[String]) -> Result<()> {
             .arg("--define")
             .arg(define("gevrek_version", version))
             .arg("--define")
-            .arg(define("gevrek_release", &release))
+            .arg(define("gevrek_release", release))
             .arg("--define")
             .arg(define("gevrek_programs", &programs.to_string_lossy()))
             .arg("--define")
@@ -662,12 +700,7 @@ fn rpm(arguments: &[String]) -> Result<()> {
             .arg(define("gevrek_root", &root().to_string_lossy()))
             .arg(root().join("packaging").join("rpm").join("gevrek.spec")),
     )?;
-    println!();
-    println!("The package is under {}", top.join("RPMS").display());
-    println!(
-        "  sudo dnf install <the file>     then gevrek is in the login manager's list of sessions"
-    );
-    Ok(())
+    Ok(top)
 }
 
 /// The programs and `packaging/windows` in one folder and one zip under
@@ -677,16 +710,6 @@ fn package(arguments: &[String]) -> Result<()> {
         bail!("`package` makes the Windows package; on Linux there is `cargo xtask rpm`");
     }
     let debug = arguments.iter().any(|argument| argument == "--debug");
-    let mut build = cargo();
-    build.arg("build").arg("--bins");
-    if !debug {
-        build.arg("--release");
-    }
-    build.args(["-p", "gevrek", "-p", "gevrek-studio", "-p", "gevrek-shell"]);
-    run("build", &mut build)?;
-    let built = root()
-        .join("target")
-        .join(if debug { "debug" } else { "release" });
     // Which commit: asked of git, which only reads.
     let commit = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
@@ -698,8 +721,25 @@ fn package(arguments: &[String]) -> Result<()> {
         .filter(|commit| !commit.is_empty())
         .unwrap_or_else(|| "unknown".to_string());
     let name = format!("gevrek-{}-{commit}-windows-x64", env!("CARGO_PKG_VERSION"));
-    let out = root().join("target").join("package");
-    let folder = out.join(&name);
+    let (folder, zip) = windows_package(&target_dir().join("package"), &name, debug)?;
+    println!("== the package is {}", zip.display());
+    println!("   (unpacked: {}; install.ps1 in it installs or updates)", folder.display());
+    Ok(())
+}
+
+/// Build the Windows programs and put them, with the scripts that install
+/// and remove them, in the folder `<out>/<name>` and the zip `<out>/<name>.zip`
+/// (which holds that one folder).
+fn windows_package(out: &Path, name: &str, debug: bool) -> Result<(PathBuf, PathBuf)> {
+    let mut build = cargo();
+    build.arg("build").arg("--bins");
+    if !debug {
+        build.arg("--release");
+    }
+    build.args(["-p", "gevrek", "-p", "gevrek-studio", "-p", "gevrek-shell"]);
+    run("build", &mut build)?;
+    let built = target_dir().join(if debug { "debug" } else { "release" });
+    let folder = out.join(name);
     if folder.exists() {
         std::fs::remove_dir_all(&folder)?;
     }
@@ -736,12 +776,336 @@ fn package(arguments: &[String]) -> Result<()> {
             .arg("-f")
             .arg(&zip)
             .arg("-C")
-            .arg(&out)
-            .arg(&name),
+            .arg(out)
+            .arg(name),
     )?;
-    println!("== the package is {}", zip.display());
-    println!("   (unpacked: {}; install.ps1 in it installs or updates)", folder.display());
+    Ok((folder, zip))
+}
+
+/// The folder of a tool that is not on the PATH of every machine.
+fn find_tool(name: &str, places: &[PathBuf]) -> Option<PathBuf> {
+    let on_path = Command::new(name)
+        .arg("/?")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok();
+    if on_path {
+        return Some(PathBuf::from(name));
+    }
+    places.iter().map(|place| place.join(name)).find(|file| file.exists())
+}
+
+fn has_program(name: &str) -> bool {
+    Command::new(name)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok()
+}
+
+/// What a release offers, under `target/dist`, by names that carry no
+/// version (the address of the newest one is then always the same, and it
+/// is by these names that an installed gevrek finds its update:
+/// `crates/update`):
+///
+/// - Windows: `gevrek-windows-x64.zip` (the programs with `install.ps1`)
+///   and `gevrek-windows-x64-setup.exe` (Inno Setup 6,
+///   `packaging/windows/gevrek.iss`);
+/// - Linux: `gevrek-linux-x64.tar.gz` (the files as a package places
+///   them), `gevrek-linux-x64.deb` (dpkg) and `gevrek-linux-x64.rpm`
+///   (rpmbuild, `packaging/rpm/gevrek.spec`).
+///
+/// `cargo xtask dist` makes all of them that this machine has the tools
+/// for and says which it left out; `cargo xtask dist deb rpm` makes the
+/// named ones and fails if one cannot be made.
+fn dist(arguments: &[String]) -> Result<()> {
+    let debug = arguments.iter().any(|argument| argument == "--debug");
+    let named: Vec<&str> = arguments
+        .iter()
+        .map(String::as_str)
+        .filter(|argument| !argument.starts_with("--"))
+        .collect();
+    let kinds: &[&str] = if cfg!(windows) {
+        &["zip", "setup"]
+    } else {
+        &["tar", "deb", "rpm"]
+    };
+    if let Some(unknown) = named.iter().find(|kind| !kinds.contains(kind)) {
+        bail!("dist {unknown}: on this system there are {}", kinds.join(", "));
+    }
+    let wanted = |kind: &str| named.is_empty() || named.contains(&kind);
+    // Left out, with a word, when nobody named it; an error when somebody did.
+    let without = |kind: &str, tool: &str| -> Result<()> {
+        if named.contains(&kind) {
+            bail!("{tool} is not installed: no {kind}");
+        }
+        println!("== {kind}: left out ({tool} is not installed)");
+        Ok(())
+    };
+    let (label, deb_arch) = match std::env::consts::ARCH {
+        "x86_64" => ("x64", "amd64"),
+        "aarch64" => ("arm64", "arm64"),
+        other => bail!("no package is made for {other}"),
+    };
+    let out = target_dir().join("dist");
+    std::fs::create_dir_all(&out)?;
+    let mut made: Vec<PathBuf> = Vec::new();
+
+    if cfg!(windows) {
+        let name = format!("gevrek-windows-{label}");
+        let (folder, zip) = windows_package(&out, &name, debug)?;
+        if wanted("zip") {
+            made.push(zip);
+        }
+        if wanted("setup") {
+            let places: Vec<PathBuf> = ["ProgramFiles(x86)", "ProgramFiles"]
+                .iter()
+                .filter_map(std::env::var_os)
+                .map(|programs| PathBuf::from(programs).join("Inno Setup 6"))
+                .collect();
+            match find_tool("ISCC.exe", &places) {
+                Some(compiler) => {
+                    // (The numbers alone: what Windows shows as the file's version.)
+                    let numbers = env!("CARGO_PKG_VERSION")
+                        .split(['-', '+'])
+                        .next()
+                        .unwrap_or_default();
+                    run(
+                        "setup program (Inno Setup)",
+                        Command::new(compiler)
+                            .arg("/Qp")
+                            .arg(format!("/DVersion={}", env!("CARGO_PKG_VERSION")))
+                            .arg(format!("/DNumbers={numbers}"))
+                            .arg(format!("/DSource={}", folder.display()))
+                            .arg(format!("/DOut={}", out.display()))
+                            .arg(format!("/DName={name}-setup"))
+                            .arg(root().join("packaging").join("windows").join("gevrek.iss")),
+                    )?;
+                    made.push(out.join(format!("{name}-setup.exe")));
+                }
+                None => without("setup", "Inno Setup 6 (ISCC.exe)")?,
+            }
+        }
+    } else {
+        let name = format!("gevrek-linux-{label}");
+        let programs = build_linux_programs(debug)?;
+        let work = out.join("work");
+        if work.exists() {
+            std::fs::remove_dir_all(&work)?;
+        }
+        if wanted("tar") {
+            let folder = work.join(&name);
+            linux_tree(&programs, &folder, PAM_FEDORA)?;
+            std::fs::copy(root().join("LICENSE"), folder.join("LICENSE"))?;
+            std::fs::copy(
+                root().join("packaging").join("linux").join("README.txt"),
+                folder.join("README.txt"),
+            )?;
+            mode(&folder.join("LICENSE"), false)?;
+            mode(&folder.join("README.txt"), false)?;
+            let file = out.join(format!("{name}.tar.gz"));
+            run(
+                "tar",
+                Command::new("tar")
+                    .args(["--owner=0", "--group=0", "-czf"])
+                    .arg(&file)
+                    .arg("-C")
+                    .arg(&work)
+                    .arg(&name),
+            )?;
+            made.push(file);
+        }
+        if wanted("deb") {
+            if has_program("dpkg-deb") && has_program("dpkg-shlibdeps") {
+                made.push(deb(&programs, &work, &out, &name, deb_arch)?);
+            } else {
+                without("deb", "dpkg-deb with dpkg-shlibdeps (the package dpkg-dev)")?;
+            }
+        }
+        if wanted("rpm") {
+            if has_program("rpmbuild") {
+                let top = rpm_build(&programs, "1")?;
+                let mut found = Vec::new();
+                for arch in std::fs::read_dir(top.join("RPMS"))? {
+                    for file in std::fs::read_dir(arch?.path())? {
+                        found.push(file?.path());
+                    }
+                }
+                let [package] = found.as_slice() else {
+                    bail!("rpmbuild left {} packages, not one", found.len());
+                };
+                let file = out.join(format!("{name}.rpm"));
+                std::fs::copy(package, &file)?;
+                made.push(file);
+            } else {
+                without("rpm", "rpmbuild")?;
+            }
+        }
+        if work.exists() {
+            std::fs::remove_dir_all(&work)?;
+        }
+    }
+    println!("== made:");
+    for file in &made {
+        println!("   {}", file.display());
+    }
     Ok(())
+}
+
+/// How the lock screen checks the password, as every login on the system
+/// does: Fedora and its relatives, and Debian and its.
+const PAM_FEDORA: &str = "#%PAM-1.0\nauth       include      system-auth\naccount    include      system-auth\n";
+const PAM_DEBIAN: &str = "#%PAM-1.0\n@include common-auth\n@include common-account\n";
+
+/// The files of gevrek as a package places them on a Linux system, under
+/// `tree` (`usr/bin`, `usr/lib/systemd/user`, `usr/share`, `etc/pam.d`):
+/// what `packaging/rpm/gevrek.spec` installs, for the packages that are
+/// not made by rpmbuild.
+fn linux_tree(built: &Path, tree: &Path, pam: &str) -> Result<()> {
+    let put = |from: &Path, to: &str, runs: bool| -> Result<()> {
+        let to = tree.join(to);
+        std::fs::create_dir_all(to.parent().context("a file is in a folder")?)?;
+        std::fs::copy(from, &to).with_context(|| format!("copy {}", from.display()))?;
+        mode(&to, runs)
+    };
+    let resources = root().join("resources");
+    for program in programs() {
+        put(&built.join(program), &format!("usr/bin/{program}"), true)?;
+    }
+    put(&resources.join("gevrek-session"), "usr/bin/gevrek-session", true)?;
+    // The units name the programs by their place.
+    for unit in [
+        "gevrek.service",
+        "gevrek-safe.service",
+        "gevrek-shell.service",
+        "gevrek-shutdown.target",
+    ] {
+        let to = tree.join("usr/lib/systemd/user").join(unit);
+        std::fs::create_dir_all(to.parent().context("a file is in a folder")?)?;
+        let text = std::fs::read_to_string(resources.join("systemd").join(unit))?
+            .replace("@BIN@", "/usr/bin");
+        std::fs::write(&to, text)?;
+        mode(&to, false)?;
+    }
+    put(
+        &resources.join("gevrek.desktop"),
+        "usr/share/wayland-sessions/gevrek.desktop",
+        false,
+    )?;
+    put(
+        &resources.join("gevrek-studio.desktop"),
+        "usr/share/applications/gevrek-studio.desktop",
+        false,
+    )?;
+    for (from, place) in brand_icons() {
+        put(
+            &from,
+            &format!("usr/share/icons/hicolor/{}", place.to_string_lossy()),
+            false,
+        )?;
+    }
+    put(
+        &resources.join("gevrek-portals.conf"),
+        "usr/share/xdg-desktop-portal/gevrek-portals.conf",
+        false,
+    )?;
+    put(
+        &resources.join("gevrek.portal"),
+        "usr/share/xdg-desktop-portal/portals/gevrek.portal",
+        false,
+    )?;
+    put(&root().join("docs").join("LINUX.md"), "usr/share/doc/gevrek/LINUX.md", false)?;
+    put(&root().join("LICENSE"), "usr/share/licenses/gevrek/LICENSE", false)?;
+    let lock = tree.join("etc/pam.d/gevrek-lock");
+    std::fs::create_dir_all(lock.parent().context("a file is in a folder")?)?;
+    std::fs::write(&lock, pam)?;
+    mode(&lock, false)
+}
+
+/// A program may be run by everybody, another file read by everybody.
+fn mode(file: &Path, runs: bool) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = if runs { 0o755 } else { 0o644 };
+        std::fs::set_permissions(file, std::fs::Permissions::from_mode(mode))?;
+    }
+    let _ = (file, runs);
+    Ok(())
+}
+
+/// How much room a folder takes, in units of 1024 bytes (what a .deb says
+/// of itself).
+fn size_in_kib(folder: &Path) -> u64 {
+    let mut bytes = 0;
+    let mut left = vec![folder.to_path_buf()];
+    while let Some(folder) = left.pop() {
+        for entry in std::fs::read_dir(&folder).into_iter().flatten().flatten() {
+            match entry.metadata() {
+                Ok(told) if told.is_dir() => left.push(entry.path()),
+                Ok(told) => bytes += told.len(),
+                Err(_) => {}
+            }
+        }
+    }
+    bytes.div_ceil(1024)
+}
+
+/// The .deb: the tree, and what dpkg is to know of it
+/// (`packaging/deb/control`). The libraries it depends on are asked of
+/// dpkg-shlibdeps, which reads them from the programs: they are those of
+/// the system the programs were built on.
+fn deb(programs: &Path, work: &Path, out: &Path, name: &str, arch: &str) -> Result<PathBuf> {
+    let tree = work.join("deb");
+    linux_tree(programs, &tree, PAM_DEBIAN)?;
+    std::fs::copy(
+        root().join("LICENSE"),
+        tree.join("usr/share/doc/gevrek/copyright"),
+    )?;
+    // dpkg-shlibdeps wants to be in a source package: a `debian/control`
+    // is enough of one.
+    let asked = work.join("shlibs");
+    std::fs::create_dir_all(asked.join("debian"))?;
+    std::fs::write(
+        asked.join("debian/control"),
+        format!("Source: gevrek\n\nPackage: gevrek\nArchitecture: {arch}\n"),
+    )?;
+    let mut ask = Command::new("dpkg-shlibdeps");
+    ask.arg("-O").current_dir(&asked);
+    for program in self::programs() {
+        ask.arg(tree.join("usr/bin").join(program));
+    }
+    let told = ask.output().context("dpkg-shlibdeps")?;
+    let libraries = String::from_utf8_lossy(&told.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix("shlibs:Depends=").map(str::to_string))
+        .filter(|libraries| told.status.success() && !libraries.trim().is_empty())
+        .with_context(|| {
+            format!(
+                "dpkg-shlibdeps did not say what the programs need: {}",
+                String::from_utf8_lossy(&told.stderr).trim()
+            )
+        })?;
+    let control = std::fs::read_to_string(root().join("packaging").join("deb").join("control"))?
+        .replace("@VERSION@", &package_version())
+        .replace("@ARCH@", arch)
+        .replace("@SIZE@", &size_in_kib(&tree).to_string())
+        .replace("@LIBRARIES@", libraries.trim());
+    std::fs::create_dir_all(tree.join("DEBIAN"))?;
+    std::fs::write(tree.join("DEBIAN/control"), control)?;
+    // Kept as the person changed it when the package is updated.
+    std::fs::write(tree.join("DEBIAN/conffiles"), "/etc/pam.d/gevrek-lock\n")?;
+    let file = out.join(format!("{name}.deb"));
+    run(
+        "dpkg-deb",
+        Command::new("dpkg-deb")
+            .args(["--root-owner-group", "--build"])
+            .arg(&tree)
+            .arg(&file),
+    )?;
+    Ok(file)
 }
 
 fn main() -> Result<()> {
@@ -752,8 +1116,9 @@ fn main() -> Result<()> {
         Some("install") => install(&arguments[1..]),
         Some("uninstall") => uninstall(&arguments[1..]),
         Some("rpm") => rpm(&arguments[1..]),
+        Some("dist") => dist(&arguments[1..]),
         _ => {
-            println!("cargo xtask check | install [--prefix <dir>] [--debug] | uninstall [--prefix <dir>] | rpm [--debug] | package [--debug]");
+            println!("cargo xtask check | install [--prefix <dir>] [--debug] | uninstall [--prefix <dir>] | rpm [--debug] | package [--debug] | dist [zip|setup|tar|deb|rpm ...] [--debug]");
             Ok(())
         }
     }

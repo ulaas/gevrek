@@ -18,7 +18,22 @@ Then, in a new terminal:
     gevrek stop all             stop it; every window is put back
     gevrek-studio               the settings
 
-To update: unpack the newer package and run its install.ps1.
+(The setup program of the same release, gevrek-windows-x64-setup.exe, does
+the same with a window to click through.)
+
+To update:
+
+    gevrek update               get the newest release and install it
+    gevrek update --check       only say whether there is one
+
+gevrek also looks by itself: once a day, when it starts, it asks GitHub for
+the newest release (nothing is sent but the version of this gevrek), gets a
+newer one ready, and installs it the next time it starts. A desktop that is
+in use is not interrupted. To turn that off:
+
+    gevrek update --automatic off
+
+Or by hand: unpack the newer package and run its install.ps1.
 
 To remove: Settings, Apps, Installed apps, gevrek; or
 

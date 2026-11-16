@@ -623,3 +623,43 @@ cargo xtask install --prefix /usr/local
 A session runs the installed programs, never the build in `target/` that is
 being worked on. The build installed before is kept in
 `<prefix>/lib/gevrek/previous`.
+
+## Releases and updates
+
+```sh
+cargo xtask dist               # what a release offers, under target/dist
+```
+
+On Windows that is `gevrek-windows-x64.zip` (the programs with
+`install.ps1`) and, where Inno Setup 6 is installed, the setup program
+`gevrek-windows-x64-setup.exe`. On Linux it is `gevrek-linux-x64.tar.gz`,
+and the `.deb` and the `.rpm` where dpkg and rpmbuild are there.
+`cargo xtask dist deb` makes the named ones only, and fails if it cannot.
+
+A release is made by GitHub (`.github/workflows/release.yml`) when a tag
+`v<version>` is pushed, where `<version>` is the one in `Cargo.toml`: it
+builds these files on Windows, Ubuntu and Fedora, tries each package, and
+publishes them with `SHA256SUMS.txt`.
+
+A gevrek that was installed on Windows from the zip or the setup program
+updates itself from those releases (`crates/update`):
+
+```powershell
+gevrek update                  # get the newest release and install it now
+gevrek update --check          # only say whether there is one
+gevrek update --automatic off  # do not look by itself (on: look again)
+```
+
+Unless turned off, `gevrek start` leaves a look for a newer release running
+behind itself, at most once a day. It asks GitHub for the latest release
+(with nothing but `gevrek/<version>` as its User-Agent), downloads the zip
+of a newer one, checks it against the release's `SHA256SUMS.txt`, and
+unpacks it in the state folder. Nothing that runs is touched. The next
+`gevrek start` that finds nothing of gevrek running puts the new programs in
+place first, moves the old ones to the folder `previous` beside them, and
+starts the new build; a notification says so. If a step fails, the old
+programs are put back and gevrek starts as it was.
+
+A build made from the sources (`cargo xtask install`) is not replaced:
+there `gevrek update` only says what the newest release is. The same on
+Linux, where the package manager updates.

@@ -974,6 +974,23 @@ enum Commands {
     /// Say whether, and how, gevrek is started when you sign in
     AutostartStatus,
 
+    /// Look for a newer gevrek and install it (Windows, where gevrek was
+    /// installed from its package; elsewhere it only says what there is).
+    /// A gevrek that is running is stopped for it and started again
+    Update {
+        /// Only say whether there is a newer release
+        #[arg(long)]
+        check: bool,
+        /// `on` or `off`: whether gevrek looks by itself, once a day when
+        /// it starts, and installs what it found the next time it starts
+        #[arg(long, value_name = "on|off")]
+        automatic: Option<String>,
+        /// What `gevrek start` leaves running behind itself: look if it is
+        /// time to, and get a newer release ready
+        #[arg(long, hide = true)]
+        background: bool,
+    },
+
     /// Move the active tiled window to the front of the layout, preserving other positions
     Promote,
 
@@ -2782,6 +2799,235 @@ async fn run_json_command(
     Ok(())
 }
 
+/// Where the update keeps what it remembers and what it has ready.
+fn update_folder() -> PathBuf {
+    gevrek_model::paths::state_dir().join("update")
+}
+
+/// The folder this program is in, when it is an install the update may
+/// replace: on Windows, made from the package.
+fn updatable_install() -> Option<PathBuf> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let folder = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    gevrek_update::is_packaged(&folder).then_some(folder)
+}
+
+/// The note the build that was replaced leaves for the new one: its
+/// version, so that the person is told once what happened.
+fn updated_from_note() -> PathBuf {
+    update_folder().join("updated-from")
+}
+
+/// Before `gevrek start` starts anything: if a newer release is ready (the
+/// check behind an earlier start got it), it is put in place now, while
+/// nothing of gevrek runs, and the new build is started in this one's
+/// stead. `None`: there was nothing to do, or it could not be done, and
+/// this build starts as always. An update never keeps gevrek from starting.
+fn start_updated(components: &[Component], foreground: bool) -> Option<std::process::ExitStatus> {
+    if foreground || !components.contains(&Component::Wm) {
+        return None;
+    }
+    let install = updatable_install()?;
+    let folder = update_folder();
+    if !gevrek_update::Settings::load(&folder).automatic {
+        return None;
+    }
+    let (version, package) = gevrek_update::staged(&folder)?;
+    if !gevrek_update::is_newer(&version, gevrek_update::current()) {
+        gevrek_update::unstage(&folder);
+        return None;
+    }
+    // A desktop in use is not taken away under its windows.
+    if Component::all()
+        .iter()
+        .any(|component| get_component_status(component).0)
+    {
+        return None;
+    }
+    println!(
+        "Installing gevrek {version} (this is {})...",
+        gevrek_update::current()
+    );
+    if let Err(error) = gevrek_update::apply(&package, &install) {
+        eprintln!("gevrek {version} was not installed: {error:#}");
+        return None;
+    }
+    gevrek_update::unstage(&folder);
+    gevrek_update::note_installed_version(&version);
+    let _ = std::fs::write(updated_from_note(), gevrek_update::current());
+    // This program is the old build still (its file was moved aside): the
+    // new one does the starting.
+    Command::new(install.join(format!("gevrek{}", std::env::consts::EXE_SUFFIX)))
+        .args(std::env::args_os().skip(1))
+        .status()
+        .map_err(|error| eprintln!("The new gevrek could not be started: {error}"))
+        .ok()
+}
+
+/// After `gevrek start` has started the desktop: leave the look for a
+/// newer release running behind (`gevrek update --background`), where
+/// there is something for it to do.
+fn look_for_update_behind(address: &str) {
+    if updatable_install().is_none() {
+        return;
+    }
+    let due = gevrek_update::Settings::load(&update_folder()).check_due(gevrek_update::now());
+    if !due && !updated_from_note().exists() {
+        return;
+    }
+    let Ok(program) = std::env::current_exe() else {
+        return;
+    };
+    let mut command = Command::new(program);
+    command.args(["--address", address, "update", "--background"]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+        keep_own_output_from_children();
+    }
+    let _ = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+}
+
+/// A notification of gevrek's own, if a window manager is there to pass it
+/// on. Nothing is said here, and nothing is an error.
+async fn notify_quietly(address: &str, title: &str, text: &str) {
+    let command = gevrek_model::command::DispatchCommand::Notify {
+        title: title.to_string(),
+        text: text.to_string(),
+    };
+    if let (Ok(mut client), Ok(json)) = (
+        WMClient::connect(address.to_string()).await,
+        serde_json::to_string(&command),
+    ) {
+        let _ = client.dispatch_command(json).await;
+    }
+}
+
+/// `gevrek update --background`: say that an update was installed, if one
+/// was; and if a day has passed since GitHub was last asked, ask, and get a
+/// newer release ready for the next start.
+async fn update_behind(address: &str) -> Result<()> {
+    let folder = update_folder();
+    // The shell that shows the notification has only just been started, and
+    // at sign-in the network may not be there yet.
+    sleep(Duration::from_secs(20)).await;
+    if let Ok(from) = std::fs::read_to_string(updated_from_note()) {
+        let _ = std::fs::remove_file(updated_from_note());
+        notify_quietly(
+            address,
+            &format!("gevrek {} is installed", gevrek_update::current()),
+            &format!(
+                "It was {}. That build is kept in the folder \"previous\" beside the programs.",
+                from.trim()
+            ),
+        )
+        .await;
+    }
+    let mut settings = gevrek_update::Settings::load(&folder);
+    if updatable_install().is_none() || !settings.check_due(gevrek_update::now()) {
+        return Ok(());
+    }
+    // Noted before asking: a check that fails is not made again at every start.
+    settings.last_check = Some(gevrek_update::now());
+    settings.save(&folder)?;
+    let source = gevrek_update::Source::github();
+    let release = gevrek_update::latest(&source, &folder)?;
+    if !gevrek_update::is_newer(&release.version, gevrek_update::current()) {
+        return Ok(());
+    }
+    if gevrek_update::staged(&folder).is_some_and(|(version, _)| version == release.version) {
+        return Ok(());
+    }
+    gevrek_update::stage(&source, &release, &folder)?;
+    notify_quietly(
+        address,
+        &format!("gevrek {} is ready", release.version),
+        "It is installed the next time gevrek starts. To install it now: gevrek update",
+    )
+    .await;
+    Ok(())
+}
+
+/// `gevrek update` and `gevrek update --check`.
+async fn update_now(address: &str, check_only: bool) -> Result<()> {
+    let folder = update_folder();
+    let source = gevrek_update::Source::github();
+    let current = gevrek_update::current();
+    let release = gevrek_update::latest(&source, &folder)?;
+    let mut settings = gevrek_update::Settings::load(&folder);
+    settings.last_check = Some(gevrek_update::now());
+    let _ = settings.save(&folder);
+    if !gevrek_update::is_newer(&release.version, current) {
+        if release.version == current {
+            println!("gevrek {current} is the newest release.");
+        } else {
+            println!(
+                "This is gevrek {current}; the newest release is {}.",
+                release.version
+            );
+        }
+        return Ok(());
+    }
+    println!(
+        "gevrek {} is there (this is {current}): {}",
+        release.version, release.page
+    );
+    let Some(install) = updatable_install() else {
+        if cfg!(windows) {
+            println!("This gevrek was not installed from the package, so this command does not replace it: install the package from that page, or build the newer sources.");
+        } else {
+            println!("On Linux the package manager updates gevrek: install the newer package from that page.");
+        }
+        return Ok(());
+    };
+    if check_only {
+        println!("Install it with: gevrek update");
+        return Ok(());
+    }
+    let package = match gevrek_update::staged(&folder) {
+        Some((version, package)) if version == release.version => package,
+        _ => {
+            println!("Downloading and checking it...");
+            gevrek_update::stage(&source, &release, &folder)?
+        }
+    };
+    let was_running = get_component_status(&Component::Wm).0;
+    if was_running {
+        println!("gevrek is running: stopping it for the update.");
+        for component in Component::all().iter().rev() {
+            stop_component(component, false, address).await?;
+        }
+        sleep(Duration::from_secs(1)).await;
+    }
+    let applied = gevrek_update::apply(&package, &install);
+    if applied.is_ok() {
+        gevrek_update::unstage(&folder);
+        gevrek_update::note_installed_version(&release.version);
+        println!("Updated: gevrek {current} -> {}", release.version);
+        println!(
+            "(The build before is in {}.)",
+            install.join("previous").display()
+        );
+    }
+    if was_running {
+        // By the program that is in place now: the new one, or, if the
+        // update could not be put in place, the one that was there.
+        println!("Starting gevrek again.");
+        let _ = Command::new(install.join(format!("gevrek{}", std::env::consts::EXE_SUFFIX)))
+            .args(["--address", address, "start", "all"])
+            .status();
+    }
+    applied
+}
+
 fn main() -> Result<()> {
     // The clap command enum is large enough that building and rendering the
     // parser in a debug build exceeds the default 1 MiB main-thread stack
@@ -2814,6 +3060,12 @@ async fn run() -> Result<()> {
                 ));
             }
 
+            // A newer release that is ready is installed first, and starts
+            // in this build's stead.
+            if let Some(status) = start_updated(&components, foreground) {
+                std::process::exit(status.code().unwrap_or(1));
+            }
+
             // Start WM first, then others
             let mut wm_started = false;
             for comp in &components {
@@ -2840,6 +3092,10 @@ async fn run() -> Result<()> {
                 if *comp != Component::Wm {
                     start_component(comp, foreground && components.len() == 1, &cli.address)?;
                 }
+            }
+
+            if wm_started {
+                look_for_update_behind(&cli.address);
             }
         }
 
@@ -4591,6 +4847,33 @@ async fn run() -> Result<()> {
                 "Autostart at sign-in is for Windows. On Linux gevrek is a session of its own, chosen in the login manager."
             ));
         }
+        Commands::Update {
+            check,
+            automatic,
+            background,
+        } => {
+            if let Some(said) = automatic {
+                let on = match said.to_ascii_lowercase().as_str() {
+                    "on" | "true" | "yes" => true,
+                    "off" | "false" | "no" => false,
+                    other => return Err(anyhow!("gevrek update --automatic {other}: on or off")),
+                };
+                let folder = update_folder();
+                let mut settings = gevrek_update::Settings::load(&folder);
+                settings.automatic = on;
+                settings.save(&folder)?;
+                if on {
+                    println!("gevrek looks for a newer release once a day when it starts, and installs it the next time it starts.");
+                } else {
+                    println!("gevrek does not look for updates by itself. `gevrek update` still does when you ask.");
+                }
+            } else if background {
+                update_behind(&cli.address).await?;
+            } else {
+                update_now(&cli.address, check).await?;
+            }
+        }
+
         Commands::EnableAutostart => match enable_autostart()? {
             Autostart::Task(task) => {
                 println!("Autostart enabled: the scheduled task {task} starts gevrek at sign-in")
@@ -5184,6 +5467,36 @@ mod tests {
         assert!(matches!(
             read(["gevrek", "disable-autostart"]).unwrap().command,
             Commands::DisableAutostart
+        ));
+    }
+
+    #[test]
+    fn the_update_command_parses() {
+        assert!(matches!(
+            read(["gevrek", "update"]).unwrap().command,
+            Commands::Update {
+                check: false,
+                automatic: None,
+                background: false
+            }
+        ));
+        assert!(matches!(
+            read(["gevrek", "update", "--check"]).unwrap().command,
+            Commands::Update { check: true, .. }
+        ));
+        assert!(matches!(
+            read(["gevrek", "update", "--automatic", "off"]).unwrap().command,
+            Commands::Update { automatic: Some(said), .. } if said == "off"
+        ));
+        // What `gevrek start` leaves running behind itself.
+        assert!(matches!(
+            read(["gevrek", "--address", "local", "update", "--background"])
+                .unwrap()
+                .command,
+            Commands::Update {
+                background: true,
+                ..
+            }
         ));
     }
 
