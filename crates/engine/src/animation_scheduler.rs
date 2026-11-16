@@ -400,6 +400,12 @@ impl RuntimeAnimationScheduler {
         self.pending_closes.remove(&handle);
     }
 
+    /// Stop a window's movement where it is, leaving what else it has
+    /// under way (its strength, its border, a close that waits) as it is.
+    pub fn cancel_rect(&mut self, handle: WindowHandle) {
+        self.rectangles.remove(&handle);
+    }
+
     pub fn active_count(&self) -> usize {
         self.rectangles.len() + self.borders.len() + self.opacities.len()
     }

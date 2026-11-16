@@ -558,6 +558,9 @@ pub struct WindowManager {
     /// which a window that is still alive (it cancelled the close, e.g. with
     /// a "save changes?" prompt) gets its appearance back.
     close_checks: HashMap<WindowHandle, (Instant, ExitRestore)>,
+    /// The windows that are coming in, each seen as a picture of itself
+    /// while it is unseen in its place (`stand_in`).
+    stand_ins: super::stand_in::StandIns,
 }
 
 /// The border of a window of a program that runs as an administrator:
@@ -745,6 +748,7 @@ impl WindowManager {
             minimise_after_exit: std::collections::HashSet::new(),
             close_checks: HashMap::new(),
             identities: RefCell::new(HashMap::new()),
+            stand_ins: Default::default(),
         }
     }
 
@@ -781,6 +785,7 @@ impl WindowManager {
             minimise_after_exit: std::collections::HashSet::new(),
             close_checks: HashMap::new(),
             identities: RefCell::new(HashMap::new()),
+            stand_ins: Default::default(),
         }
     }
 
@@ -800,6 +805,7 @@ impl WindowManager {
         // (A workspace's windows that are still to be hidden count: the
         // loop comes round at the pace of a frame until they are.)
         self.animation_scheduler.active_count()
+            + self.stand_ins.count()
             + self.going_out.waiting.len()
             + self.going_out.leaving.len()
     }
@@ -1633,6 +1639,7 @@ impl WindowManager {
 
     /// Remove a window from tracking (without closing it)
     pub fn untrack_window(&mut self, handle: WindowHandle) {
+        self.end_stand_in(handle);
         let _ = self.restore_native_window_alpha(handle);
         self.caption_buttons_removed.borrow_mut().remove(&handle);
         self.show_owned_windows(handle);
@@ -1653,6 +1660,8 @@ impl WindowManager {
         if self.animation_scheduler.is_close_pending(handle) {
             return Ok(());
         }
+        // (A window still coming in goes from where it is to be seen.)
+        self.end_stand_in(handle);
         let profile = self.animation_scheduler.profile();
         let style = profile.window_exit_style;
         if self
@@ -1689,6 +1698,7 @@ impl WindowManager {
     }
 
     fn close_window_immediate(&mut self, handle: WindowHandle) -> Result<()> {
+        self.end_stand_in(handle);
         self.animation_scheduler.cancel_window(handle);
         unsafe {
             let hwnd = handle.to_hwnd();
@@ -2286,6 +2296,10 @@ impl WindowManager {
     }
 
     pub fn restore_all_window_alpha_styles(&mut self) -> usize {
+        for handle in self.stand_ins.handles() {
+            self.end_stand_in(handle);
+        }
+        self.stand_ins.sweep();
         let handles = self
             .gevrek_layered_windows
             .iter()
@@ -2309,6 +2323,19 @@ impl WindowManager {
     }
 
     pub fn set_window_alpha(&mut self, handle: WindowHandle, alpha: u8) -> Result<()> {
+        // A window that is coming in stays unseen until it is there: the
+        // strength asked for is its picture's meanwhile, and its own after.
+        if self.stand_ins.has(handle) {
+            let part = self.seen_part(handle.to_hwnd()).unwrap_or_default();
+            self.stand_ins.set_alpha(handle, alpha, part);
+            self.window_alphas.insert(handle, alpha);
+            return Ok(());
+        }
+        self.apply_window_alpha(handle, alpha)
+    }
+
+    /// `set_window_alpha` without regard to a stand-in.
+    fn apply_window_alpha(&mut self, handle: WindowHandle, alpha: u8) -> Result<()> {
         // Changing the layered style sends the window a message and waits.
         // Not recorded, so the next focus-effects pass retries it.
         if is_hung(handle.to_hwnd()) {
@@ -2809,6 +2836,127 @@ impl WindowManager {
             .unwrap_or(WindowCorner::Default)
     }
 
+    // ==================== Stand-ins ====================
+
+    /// What is seen of a window (it without its invisible frame), in the
+    /// window's own coordinates: the part of it a picture of it shows.
+    fn seen_part(&self, hwnd: HWND) -> Option<RECT> {
+        let mut outer = RECT::default();
+        // SAFETY: a plain question about a window that may be gone.
+        unsafe { GetWindowRect(hwnd, &mut outer) }.ok()?;
+        let (left, top, right, bottom) = self.get_window_frame_offsets(hwnd);
+        let width = outer.right - outer.left;
+        let height = outer.bottom - outer.top;
+        (width - left - right > 0 && height - top - bottom > 0).then_some(RECT {
+            left,
+            top,
+            right: width - right,
+            bottom: height - bottom,
+        })
+    }
+
+    /// Bring a window in from `start` to `target` as a picture of itself
+    /// (`stand_in`): the window is put at `target` at once, unseen, and
+    /// only the picture moves. `false` where that cannot be done (the
+    /// caller moves the window itself, as before).
+    fn enter_by_stand_in(
+        &mut self,
+        handle: WindowHandle,
+        start: crate::dwm::container::Rect,
+        target: crate::dwm::container::Rect,
+        duration_ms: u32,
+        now: Instant,
+    ) -> bool {
+        self.end_stand_in(handle);
+        let hwnd = handle.to_hwnd();
+        // SAFETY: plain questions about a window that may be gone.
+        let (exists, ex_style) =
+            unsafe { (IsWindow(hwnd).as_bool(), GetWindowLongW(hwnd, GWL_EXSTYLE)) };
+        if !exists || is_hung(hwnd) || !self.animation_scheduler.moves(TransitionScope::Explicit)
+        {
+            return false;
+        }
+        // A window its program makes see-through itself cannot be made
+        // unseen without spoiling it (`set_window_alpha`).
+        let layered = ex_style & WS_EX_LAYERED.0 as i32 != 0;
+        if layered && !self.gevrek_layered_windows.contains(&handle) {
+            return false;
+        }
+        let alpha = self.window_alphas.get(&handle).copied().unwrap_or(255);
+        if alpha == 0 {
+            return false;
+        }
+        let Some(part) = self.seen_part(hwnd) else {
+            return false;
+        };
+        // The picture first, then the window unseen, then the window in
+        // its place: what is seen never shows the window jump, nor nothing.
+        if !self.stand_ins.open(handle, hwnd, alpha, start, part) {
+            return false;
+        }
+        if self.apply_window_alpha(handle, 0).is_err() {
+            self.stand_ins.take(handle);
+            return false;
+        }
+        self.window_alphas.insert(handle, alpha);
+        if self.batch_move_resize(&[(handle, target)]).is_err() {
+            self.end_stand_in(handle);
+            return false;
+        }
+        if let Some(part) = self.seen_part(hwnd) {
+            self.stand_ins.place(handle, start, part);
+        }
+        let _ = self.update_border_position_explicit(
+            handle,
+            start.x,
+            start.y,
+            start.width,
+            start.height,
+        );
+        if !self
+            .animation_scheduler
+            .schedule_explicit_rect(handle, start, target, duration_ms, now)
+        {
+            self.end_stand_in(handle);
+            return false;
+        }
+        log::debug!("Window {} comes in as a picture of itself", handle.0);
+        true
+    }
+
+    /// A window that came in as a picture of itself is seen again, where
+    /// it is (where its movement was to end), and its picture goes.
+    fn end_stand_in(&mut self, handle: WindowHandle) {
+        let Some(alpha) = self.stand_ins.take(handle) else {
+            return;
+        };
+        // (Its movement was the picture's: the window is already there.)
+        self.animation_scheduler.cancel_rect(handle);
+        if let Err(error) = self.apply_window_alpha(handle, alpha) {
+            log::debug!("Window {} not seen again after coming in: {error}", handle.0);
+        }
+        let _ = self.update_border_position(handle);
+    }
+
+    /// The pictures of the windows that are coming in: put away, once
+    /// their movement is over or their window is gone, hidden or
+    /// minimised.
+    fn settle_stand_ins(&mut self) {
+        self.stand_ins.sweep();
+        for handle in self.stand_ins.handles() {
+            let hwnd = handle.to_hwnd();
+            // SAFETY: plain questions about a window that may be gone.
+            let shown = unsafe {
+                IsWindow(hwnd).as_bool()
+                    && IsWindowVisible(hwnd).as_bool()
+                    && !IsIconic(hwnd).as_bool()
+            };
+            if !shown || self.animation_scheduler.rect_target(handle).is_none() {
+                self.end_stand_in(handle);
+            }
+        }
+    }
+
     // ==================== Batch Operations ====================
 
     /// Schedule a set of layout rectangles through the shared runtime
@@ -2823,6 +2971,37 @@ impl WindowManager {
         }
 
         let now = Instant::now();
+        // A window coming in as a picture of itself: the window goes to
+        // its new place at once (it is unseen), and the picture turns
+        // there from where it is. A place it is already bound for is no
+        // news (a layout pass while it comes in).
+        let mut operations = operations.to_vec();
+        let pictured: Vec<(WindowHandle, crate::dwm::container::Rect)> = operations
+            .iter()
+            .filter(|(handle, _)| self.stand_ins.has(*handle))
+            .copied()
+            .collect();
+        operations.retain(|(handle, _)| !self.stand_ins.has(*handle));
+        for (handle, target) in pictured {
+            if self.animation_scheduler.rect_target(handle) == Some(target) {
+                continue;
+            }
+            let start = self.stand_ins.rect(handle).unwrap_or(target);
+            let _ = self.batch_move_resize(&[(handle, target)]);
+            if let Some(part) = self.seen_part(handle.to_hwnd()) {
+                self.stand_ins.place(handle, start, part);
+            }
+            if !self
+                .animation_scheduler
+                .schedule_rect(handle, start, target, scope, now)
+            {
+                self.end_stand_in(handle);
+            }
+        }
+        let operations = operations.as_slice();
+        if operations.is_empty() {
+            return Ok(());
+        }
         if !self.animation_scheduler.scope_enabled(scope) {
             self.batch_move_resize(operations)?;
             for (handle, rect) in operations {
@@ -2891,6 +3070,15 @@ impl WindowManager {
         // (`workspace_gives_way`): those that come back in at once are no
         // longer going.
         self.going_out.expected = false;
+        // (A window still coming in is moved as a workspace's window now.)
+        let taken_over: Vec<WindowHandle> = operations
+            .iter()
+            .chain(self.going_out.waiting.iter())
+            .map(|(handle, _)| *handle)
+            .collect();
+        for handle in taken_over {
+            self.end_stand_in(handle);
+        }
         let waiting: Vec<(WindowHandle, crate::dwm::container::Rect)> =
             std::mem::take(&mut self.going_out.waiting)
                 .into_iter()
@@ -3049,6 +3237,7 @@ impl WindowManager {
         match style {
             WindowTransitionStyle::None => Ok(false),
             WindowTransitionStyle::Fade => {
+                self.end_stand_in(handle);
                 let target_alpha = self.window_alphas.get(&handle).copied().unwrap_or(255);
                 if target_alpha == 0 {
                     return Ok(false);
@@ -3060,6 +3249,9 @@ impl WindowManager {
             }
             WindowTransitionStyle::Slide => {
                 let start = animation_styles::offset_rect(target, -target.width / 3, 0);
+                if self.enter_by_stand_in(handle, start, target, 0, now) {
+                    return Ok(true);
+                }
                 self.batch_move_resize(&[(handle, start)])?;
                 let _ = self.update_border_position_explicit(
                     handle,
@@ -3074,6 +3266,9 @@ impl WindowManager {
             }
             WindowTransitionStyle::Scale => {
                 let start = animation_styles::centered_scaled_rect(target, 20);
+                if self.enter_by_stand_in(handle, start, target, 0, now) {
+                    return Ok(true);
+                }
                 self.batch_move_resize(&[(handle, start)])?;
                 let _ = self.update_border_position_explicit(
                     handle,
@@ -3134,6 +3329,7 @@ impl WindowManager {
         match animation_styles::start_rect(animation_type, target) {
             // Fade tweens opacity instead of geometry.
             None => {
+                self.end_stand_in(handle);
                 let target_alpha = self.window_alphas.get(&handle).copied().unwrap_or(255);
                 self.set_window_alpha(handle, 0)?;
                 Ok(self.animation_scheduler.schedule_opacity(
@@ -3146,6 +3342,9 @@ impl WindowManager {
             }
             Some(_) if !self.animation_scheduler.moves(TransitionScope::Explicit) => Ok(false),
             Some(start) => {
+                if self.enter_by_stand_in(handle, start, target, duration_ms, now) {
+                    return Ok(true);
+                }
                 self.batch_move_resize(&[(handle, start)])?;
                 let _ = self.update_border_position_explicit(
                     handle,
@@ -3170,7 +3369,17 @@ impl WindowManager {
         let frame = self.animation_scheduler.tick(Instant::now());
         let close_windows = frame.close_windows;
         if !frame.rectangles.is_empty() {
-            self.batch_move_resize(&frame.rectangles)?;
+            // A window coming in stays where it is: its picture moves.
+            let (pictured, moved): (Vec<_>, Vec<_>) = frame
+                .rectangles
+                .iter()
+                .partition(|(handle, _)| self.stand_ins.has(*handle));
+            self.batch_move_resize(&moved)?;
+            for (handle, rect) in pictured {
+                if let Some(part) = self.seen_part(handle.to_hwnd()) {
+                    self.stand_ins.place(handle, rect, part);
+                }
+            }
             for (handle, rect) in &frame.rectangles {
                 let _ = self.update_border_position_explicit(
                     *handle,
@@ -3207,6 +3416,7 @@ impl WindowManager {
         }
         self.undo_cancelled_exits(now);
         self.finish_going_out(now);
+        self.settle_stand_ins();
         Ok(())
     }
 
@@ -4634,6 +4844,7 @@ impl WindowManager {
         if self.animation_scheduler.is_close_pending(handle) {
             return Ok(());
         }
+        self.end_stand_in(handle);
         let fades = self
             .animation_scheduler
             .scope_enabled(TransitionScope::Explicit)
@@ -6721,6 +6932,162 @@ mod exit_animation_tests {
         }
 
         assert_eq!(window_manager.get_window_rect(window).unwrap(), tile);
+        unsafe {
+            let _ = DestroyWindow(HWND(window.0 as _));
+        }
+    }
+
+    /// A shown window, far beyond every display (shown, but seen nowhere).
+    fn shown_window_out_of_sight() -> WindowHandle {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP, WS_VISIBLE,
+        };
+        let hwnd = unsafe {
+            CreateWindowExW(
+                WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                windows::core::w!("STATIC"),
+                windows::core::w!("gevrek stand-in test window"),
+                WS_POPUP | WS_VISIBLE,
+                -30000,
+                -30000,
+                200,
+                150,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        .expect("create shown test window");
+        WindowHandle(hwnd.0 as isize)
+    }
+
+    fn layered_alpha(window: WindowHandle) -> Option<u8> {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetLayeredWindowAttributes, GetWindowLongW, GWL_EXSTYLE,
+            LAYERED_WINDOW_ATTRIBUTES_FLAGS, WS_EX_LAYERED,
+        };
+        let mut alpha = 0u8;
+        let mut flags = LAYERED_WINDOW_ATTRIBUTES_FLAGS(0);
+        unsafe {
+            let layered = GetWindowLongW(HWND(window.0 as _), GWL_EXSTYLE) & WS_EX_LAYERED.0 as i32;
+            if layered == 0 {
+                return None;
+            }
+            GetLayeredWindowAttributes(
+                HWND(window.0 as _),
+                None,
+                Some(&mut alpha),
+                Some(&mut flags),
+            )
+            .ok()?;
+        }
+        Some(alpha)
+    }
+
+    fn scale_entrance_profile() -> crate::settings::AnimationProfile {
+        use crate::settings::{
+            AnimationChannelProfile, AnimationCurve, AnimationProfile, WindowTransitionStyle,
+        };
+        AnimationProfile {
+            enabled: true,
+            layout: AnimationChannelProfile::new(true, 60, AnimationCurve::Linear),
+            window: AnimationChannelProfile::new(true, 60, AnimationCurve::Linear),
+            window_enter_style: WindowTransitionStyle::Scale,
+            ..AnimationProfile::default()
+        }
+    }
+
+    fn run_animations_out(window_manager: &mut WindowManager) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while window_manager.active_animation_count() > 0 && Instant::now() < deadline {
+            window_manager.tick_runtime_animations().unwrap();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn a_window_that_comes_in_stays_in_its_place_while_its_picture_grows() {
+        let mut window_manager = WindowManager::new();
+        window_manager.set_animation_profile(scale_entrance_profile());
+        let window = shown_window_out_of_sight();
+        let tile = Rect::new(-30000, -30000, 600, 400);
+        window_manager.batch_move_resize(&[(window, tile)]).unwrap();
+
+        assert!(window_manager.start_configured_window_enter(window).unwrap());
+        assert!(window_manager.stand_ins.has(window));
+        // The window is in its place at once, at its size, and unseen.
+        assert_eq!(window_manager.get_window_rect(window).unwrap(), tile);
+        assert_eq!(layered_alpha(window), Some(0));
+        assert_eq!(window_manager.window_alpha(window), 255);
+
+        std::thread::sleep(Duration::from_millis(10));
+        window_manager.tick_runtime_animations().unwrap();
+        // Midway it has not been moved or sized: only its picture has.
+        assert_eq!(window_manager.get_window_rect(window).unwrap(), tile);
+        let picture = window_manager.stand_ins.rect(window).unwrap();
+        assert!(picture.width < tile.width && picture.height < tile.height);
+
+        // A strength asked for meanwhile is the window's once it is there.
+        window_manager.set_window_alpha(window, 200).unwrap();
+        assert_eq!(layered_alpha(window), Some(0));
+
+        run_animations_out(&mut window_manager);
+        assert!(!window_manager.stand_ins.has(window));
+        assert_eq!(window_manager.stand_ins.count(), 0);
+        assert_eq!(window_manager.get_window_rect(window).unwrap(), tile);
+        assert_eq!(layered_alpha(window), Some(200));
+        unsafe {
+            let _ = DestroyWindow(HWND(window.0 as _));
+        }
+    }
+
+    #[test]
+    fn a_window_that_comes_in_and_is_laid_out_anew_goes_to_its_new_place() {
+        let mut window_manager = WindowManager::new();
+        window_manager.set_animation_profile(scale_entrance_profile());
+        let window = shown_window_out_of_sight();
+        let tile = Rect::new(-30000, -30000, 600, 400);
+        let new_tile = Rect::new(-30000, -30000, 300, 400);
+        window_manager.batch_move_resize(&[(window, tile)]).unwrap();
+        assert!(window_manager.start_configured_window_enter(window).unwrap());
+
+        window_manager
+            .apply_animated_rectangles(&[(window, new_tile)], crate::dwm::TransitionScope::Layout)
+            .unwrap();
+        // Still a picture; the window itself went to its new place at once.
+        assert!(window_manager.stand_ins.has(window));
+        assert_eq!(window_manager.get_window_rect(window).unwrap(), new_tile);
+
+        run_animations_out(&mut window_manager);
+        assert!(!window_manager.stand_ins.has(window));
+        assert_eq!(window_manager.get_window_rect(window).unwrap(), new_tile);
+        // Solid again as it was: gevrek's see-through style is gone.
+        assert_eq!(layered_alpha(window), None);
+        unsafe {
+            let _ = DestroyWindow(HWND(window.0 as _));
+        }
+    }
+
+    #[test]
+    fn a_window_hidden_while_it_comes_in_is_itself_again() {
+        let mut window_manager = WindowManager::new();
+        window_manager.set_animation_profile(scale_entrance_profile());
+        let window = shown_window_out_of_sight();
+        let tile = Rect::new(-30000, -30000, 600, 400);
+        window_manager.batch_move_resize(&[(window, tile)]).unwrap();
+        assert!(window_manager.start_configured_window_enter(window).unwrap());
+
+        unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+            let _ = ShowWindow(HWND(window.0 as _), SW_HIDE);
+        }
+        window_manager.tick_runtime_animations().unwrap();
+        assert!(!window_manager.stand_ins.has(window));
+        assert_eq!(layered_alpha(window), None);
+        assert_eq!(window_manager.get_window_rect(window).unwrap(), tile);
+        run_animations_out(&mut window_manager);
+        assert_eq!(window_manager.stand_ins.count(), 0);
         unsafe {
             let _ = DestroyWindow(HWND(window.0 as _));
         }
