@@ -111,6 +111,41 @@ fn a_destroyed_window_leaves_the_layout_and_the_other_takes_its_room() {
     );
 }
 
+/// A window that has the keyboard and is on a workspace that is not
+/// shown (it took the keyboard by itself) floats where it is. It used to
+/// be put on the workspace that is shown as well: on two from then on.
+#[test]
+fn a_window_on_another_workspace_floats_where_it_is() {
+    let (mut core, mut desktop) = setup(&["main", "two"]);
+    let on_main = open(&mut core, &mut desktop, "one");
+    core.dispatch(
+        &mut desktop,
+        DispatchCommand::SwitchWorkspaceSelector {
+            selector: WorkspaceSelector::Index(1),
+        },
+    )
+    .expect("switched");
+    core.flush_pending_layouts(&mut desktop).expect("layout");
+    desktop.focused = Some(on_main);
+
+    core.dispatch(&mut desktop, DispatchCommand::ToggleFloating)
+        .expect("toggled");
+    core.flush_pending_layouts(&mut desktop).expect("layout");
+    let workspaces = core.monitor_manager.get_workspaces(OUTPUT).unwrap().elements();
+    let (main, two) = (&workspaces[0], &workspaces[1]);
+    assert_eq!(main.floating_windows.elements(), [on_main]);
+    assert!(main.containers.is_empty());
+    assert!(two.floating_windows.is_empty() && two.containers.is_empty());
+
+    // And tiles again where it is.
+    core.dispatch(&mut desktop, DispatchCommand::ToggleFloating)
+        .expect("toggled back");
+    let workspaces = core.monitor_manager.get_workspaces(OUTPUT).unwrap().elements();
+    assert!(workspaces[0].floating_windows.is_empty());
+    assert_eq!(workspaces[0].containers.len(), 1);
+    assert!(workspaces[1].floating_windows.is_empty() && workspaces[1].containers.is_empty());
+}
+
 #[test]
 fn switching_the_workspace_hides_its_windows_and_shows_the_other_ones() {
     let (mut core, mut desktop) = setup(&["main", "two"]);

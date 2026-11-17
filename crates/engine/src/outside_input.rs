@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex};
 const OUTPUT: MonitorHandle = MonitorHandle(1);
 
 /// Numbers that look like chance and are the same in every run.
-struct Chance(u64);
+pub(crate) struct Chance(pub(crate) u64);
 
 impl Chance {
     fn next(&mut self) -> u64 {
@@ -38,7 +38,7 @@ impl Chance {
         self.0
     }
 
-    fn below(&mut self, count: usize) -> usize {
+    pub(crate) fn below(&mut self, count: usize) -> usize {
         (self.next() % count.max(1) as u64) as usize
     }
 }

@@ -403,11 +403,31 @@ nothing broken on the way. Nothing new is built in this pass.
       journal and the elevated helper's messages (Windows backend), the
       panel's and the shell's own files, the display manager's wire,
       a command as JSON (`gevrek dispatch`).
-- [ ] **any** The engine driven by long random runs of commands and
-      events, with what must always hold checked after each: every
-      window on one workspace, the focus on a window that is there,
-      every tile within its display, none of no size, no two tiles on
-      each other.
+- [x] **any** The engine driven by long runs of chance
+      (`engine/src/random_runs.rs`): the commands the examples bind
+      keys to, more with numbers beyond their edges, and windows that
+      open, close, are minimized, dragged and get the keyboard. After
+      each step: the program lives, every window is in one place only,
+      none that has gone is kept, no tile is without a window, the
+      tiles have a size. 24 runs of 400 steps with the tests (a third
+      of a second); `GEVREK_RUNS=<n>` for n times as many, and
+      `GEVREK_SEED=<seed>` for the one a failure names. 7,200 runs were
+      clean (2026-11-17). Found and mended: Toggle floating, for a
+      window that has the keyboard and is on a workspace that is not
+      shown, put it on the shown one as well, and it was on two from
+      then on (`a_window_on_another_workspace_floats_where_it_is`).
+- [ ] **person** Found by the same runs, to be decided: the layouts
+      that give each new window a share of the last one's room
+      (dwindle, and the like) come down to tiles of a few pixels, one
+      and none with many windows (nine windows, split one way, at 0.7:
+      the last are 3, 1 and 0 wide). Either a tile is never smaller
+      than some size and the rest share what is left, or it stays as
+      it is. It changes where windows go, so it is not done unasked.
+- [ ] **any** The runs of chance with more in them: two displays (a
+      window moved between them, a display taken away), groups and
+      scratchpads with windows in them, the rules; and held against
+      more: the focus on a window that is there, what is hidden and
+      shown on the desktop agreeing with the workspace that is shown.
 - [ ] **W** What happens around the edges, each with a test or a
       `person` item: a display taken away and put back, another scale,
       sleep and waking, the Explorer started anew, a window of an
@@ -712,3 +732,4 @@ wanted, strike it when it is not.
 | 2026-11-17, night (3) | Windows 11 | Step 0 further: the published state is in the engine's bench (34 µs for 9 workspaces and 30 windows without a windowing system); a pass of the Windows runtime is timed in six parts and told at the log's debug level (`RUST_LOG=info,gevrek::passes=debug`). Windows: the backend's 207 tests pass. Not run on the desktop | The person runs gevrek with that for a while and brings the lines; the still desktop's numbers; the state's way out through the server |
 | 2026-11-17, night (4) | Windows 11 and WSL (Fedora 44) | The state's way out timed (`cargo bench -p gevrek-server`): 24 µs in the server and 163 µs at the asking end for 30 windows, most of it the JSON there. The harness of the benches is one file for both. Windows: every test passes; Linux: the engine and the server | Step 0 is done but for what wants the desktop (the passes' lines, a still desktop's numbers) and CI. Step 1 next: files from outside that are cut short or nonsense |
 | 2026-11-17, night (5) | Windows 11 and WSL (Fedora 44) | Step 1 begun: configurations and saved sessions spoilt by the thousand and taken through the engine; one fault found and mended (a number of the graph as large as numbers get was counted past). Windows: every test passes; Linux: the model, the engine, the server and the compositor | The other files read from outside; the engine driven by random commands |
+| 2026-11-17, night (6) | Windows 11 and WSL (Fedora 44) | The engine driven by runs of chance, 7,200 of them clean in the end. One fault found and mended: Toggle floating put a window that is on a workspace not shown on the shown one as well. One thing found for the person to decide: tiles of no size where many windows dwindle. Windows: every test passes; Linux: the model, the engine, the server and the compositor | The runs with two displays, groups and scratchpads; the other files from outside; the notes of the kind TODO |

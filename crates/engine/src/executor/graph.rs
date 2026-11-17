@@ -926,6 +926,26 @@ impl Executor {
                 // Check if window is currently floating
                 let is_floating = monitor_manager.is_window_floating(window_handle);
 
+                // A window with the keyboard that is on another workspace
+                // than the one shown (it took the keyboard by itself, or
+                // was given it by a command) floats or tiles where it is.
+                // It used to be put on the workspace that is shown as
+                // well, and was on two workspaces from then on.
+                if let Some((its_monitor, its_workspace)) = monitor_manager.find_window(window_handle)
+                {
+                    let shown = monitor_manager
+                        .get_workspaces(its_monitor)
+                        .map(|workspaces| workspaces.focused_idx());
+                    if its_monitor != monitor_handle || shown != Some(its_workspace) {
+                        return self.set_window_floating(
+                            window_manager,
+                            monitor_manager,
+                            window_handle,
+                            !is_floating,
+                        );
+                    }
+                }
+
                 if let Some(workspace) = monitor_manager.get_focused_workspace_mut(monitor_handle) {
                     if is_floating {
                         // Convert from floating to tiled
