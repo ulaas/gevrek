@@ -51,6 +51,9 @@ pub mod testing;
 #[cfg(test)]
 mod core_scenarios;
 
+#[cfg(test)]
+mod outside_input;
+
 pub use crate::core::WmCore;
 pub use contract::{Desktop, Effect, WindowQueries};
 pub use gevrek_model::geometry::{Padding, Rect};

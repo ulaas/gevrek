@@ -387,10 +387,22 @@ nothing broken on the way. Nothing new is built in this pass.
       `expect`, an index, a lock that was poisoned): on the paths that
       run while the desktop does, each becomes a fault that is logged
       and lived through, or says why it cannot happen.
-- [ ] **any** No file from outside ends the program: a configuration,
-      a saved session, the hidden journal, a message on the line, cut
-      short or filled with nonsense (tested with made-up input by the
-      thousand).
+- [x] **any** No configuration and no saved session from outside ends
+      the program (`engine/src/outside_input.rs`): each of the examples
+      and a saved session, cut short at a hundred places and spoilt
+      some thousand ways (nonsense where a value belongs, numbers as
+      large as they get, lists emptied or made very long, keys taken
+      out), and taken as far as a real one: read, checked, tidied,
+      written back, made into rules and zones, laid over a desktop
+      with windows, the windows laid out. Ten seconds with the tests;
+      `GEVREK_SPOIL=<n>` does n times as much in other ways (50,000
+      were tried so, 2026-11-17). Found and mended: a pin or a counter
+      of the graph as large as numbers get was counted past (it ended
+      a debug build and began again at nought in a release).
+- [ ] **any** The same for what else is read from outside: the hidden
+      journal and the elevated helper's messages (Windows backend), the
+      panel's and the shell's own files, the display manager's wire,
+      a command as JSON (`gevrek dispatch`).
 - [ ] **any** The engine driven by long random runs of commands and
       events, with what must always hold checked after each: every
       window on one workspace, the focus on a window that is there,
@@ -699,3 +711,4 @@ wanted, strike it when it is not.
 | 2026-11-17, night (2) | Windows 11 and WSL (Fedora 44) | The rules' regular expressions are made once and kept. 20 rules against 50 windows: 9.96 ms before, 0.95 ms after. Windows: every test passes; Linux: the engine, the compositor and the server pass | Step 0: the bench of the published state, the time of a pass, a still desktop's numbers |
 | 2026-11-17, night (3) | Windows 11 | Step 0 further: the published state is in the engine's bench (34 µs for 9 workspaces and 30 windows without a windowing system); a pass of the Windows runtime is timed in six parts and told at the log's debug level (`RUST_LOG=info,gevrek::passes=debug`). Windows: the backend's 207 tests pass. Not run on the desktop | The person runs gevrek with that for a while and brings the lines; the still desktop's numbers; the state's way out through the server |
 | 2026-11-17, night (4) | Windows 11 and WSL (Fedora 44) | The state's way out timed (`cargo bench -p gevrek-server`): 24 µs in the server and 163 µs at the asking end for 30 windows, most of it the JSON there. The harness of the benches is one file for both. Windows: every test passes; Linux: the engine and the server | Step 0 is done but for what wants the desktop (the passes' lines, a still desktop's numbers) and CI. Step 1 next: files from outside that are cut short or nonsense |
+| 2026-11-17, night (5) | Windows 11 and WSL (Fedora 44) | Step 1 begun: configurations and saved sessions spoilt by the thousand and taken through the engine; one fault found and mended (a number of the graph as large as numbers get was counted past). Windows: every test passes; Linux: the model, the engine, the server and the compositor | The other files read from outside; the engine driven by random commands |

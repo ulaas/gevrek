@@ -150,16 +150,18 @@ impl NodeGraph {
         // is known by the number it is filed under, and the next number
         // to give out lies above every one in use. (A file put together
         // by hand, with the counter left at nought, had its first node
-        // written over by the next one added.)
+        // written over by the next one added.) A number as large as
+        // numbers get, in a file that was spoilt, is counted from no
+        // further: it does not end the program.
         let mut highest_pin = 0;
         for (key, node) in &mut self.nodes {
             node.id = *key;
             for pin in node.inputs.iter().chain(node.outputs.iter()) {
-                highest_pin = highest_pin.max(pin.id + 1);
+                highest_pin = highest_pin.max(pin.id.saturating_add(1));
             }
         }
         if let Some(highest) = self.nodes.keys().max() {
-            self.next_node_id = self.next_node_id.max(highest + 1);
+            self.next_node_id = self.next_node_id.max(highest.saturating_add(1));
         }
         self.next_pin_id = self.next_pin_id.max(highest_pin);
         self.connection_set.clear();
@@ -174,7 +176,7 @@ impl NodeGraph {
 
     pub fn add_node(&mut self, node_type: NodeType, position: [f32; 2]) -> NodeId {
         let id = self.next_node_id;
-        self.next_node_id += 1;
+        self.next_node_id = self.next_node_id.saturating_add(1);
 
         let inputs = self.create_inputs_for_type(&node_type);
         let outputs = self.create_outputs_for_type(&node_type);
@@ -531,7 +533,7 @@ impl NodeGraph {
 
                         // Create the converter node
                         let converter_id = self.next_node_id;
-                        self.next_node_id += 1;
+                        self.next_node_id = self.next_node_id.saturating_add(1);
 
                         let converter_inputs = self.create_inputs_for_type(&converter_type);
                         let converter_outputs = self.create_outputs_for_type(&converter_type);
@@ -1512,7 +1514,7 @@ impl NodeGraph {
 
     fn create_pin(&mut self, name: &str, pin_type: PinType) -> Pin {
         let id = self.next_pin_id;
-        self.next_pin_id += 1;
+        self.next_pin_id = self.next_pin_id.saturating_add(1);
         Pin {
             id,
             name: name.to_string(),
@@ -2543,6 +2545,24 @@ fn catalog_group(category: &str) -> Vec<NodeType> {
 #[cfg(test)]
 mod graph_index_tests {
     use super::*;
+
+    /// A file that was spoilt, with a pin or a counter as large as
+    /// numbers get: read, tidied and added to without the program
+    /// ending (the next number used to be counted past the last one).
+    #[test]
+    fn numbers_as_large_as_they_get_do_not_end_the_program() {
+        let mut graph = NodeGraph::new();
+        graph.add_node(NodeType::ManualTrigger, [0.0, 0.0]);
+        let mut written = serde_json::to_value(&graph).unwrap();
+        let most = serde_json::json!(usize::MAX);
+        written["next_pin_id"] = most.clone();
+        written["next_node_id"] = most.clone();
+        written["nodes"]["0"]["outputs"][0]["id"] = most;
+        let mut read: NodeGraph = serde_json::from_value(written).unwrap();
+        read.rebuild_connection_indices();
+        read.add_node(NodeType::ManualTrigger, [10.0, 0.0]);
+        read.add_node(NodeType::ManualTrigger, [20.0, 0.0]);
+    }
 
     /// A file written when a node had fewer pins: its connections follow
     /// the pin names, and refreshing twice from the same file gives the
