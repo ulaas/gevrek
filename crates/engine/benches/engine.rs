@@ -1,6 +1,6 @@
 //! What the engine does most, timed: a layout, a window opened, a change
-//! of workspace, the rules, the overview's arrangement, a reload's plan,
-//! a configuration read and written.
+//! of workspace, the state as it is published, the rules, the overview's
+//! arrangement, a reload's plan, a configuration read and written.
 //!
 //!     cargo bench -p gevrek-engine --features test-support
 //!
@@ -245,6 +245,30 @@ fn main() {
         bench.case(&format!("core/switch_workspace_{count}_on_each"), || {
             shown = 1 - shown;
             switch(&mut core, &mut desktop, shown);
+        });
+    }
+
+    // The state as it is published: every display with its workspaces
+    // and their windows, put together after each pass in which something
+    // happened, and held against the one before for what to tell.
+    {
+        let names = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+        let (mut core, mut desktop) = desk(&names, LayoutType::Dwindle);
+        for workspace in 0..3 {
+            switch(&mut core, &mut desktop, workspace);
+            open(&mut core, &mut desktop, 10);
+        }
+        let config = gevrek_model::examples::starting_configuration().desktop;
+        bench.case("state/9_workspaces_30_windows", || {
+            black_box(core.monitor_data(&desktop, black_box(&config)));
+        });
+        let (before, _) = core.monitor_data(&desktop, &config);
+        let after = before.clone();
+        bench.case("state/what_changed_when_nothing_did", || {
+            black_box(gevrek_engine::overlay_data::changes(black_box(&before), black_box(&after)));
+        });
+        bench.case("state/copied", || {
+            black_box(black_box(&before).clone());
         });
     }
 

@@ -12,6 +12,7 @@ use gevrek_host::process_manager;
 #[cfg(test)]
 mod characterization_tests;
 mod held;
+mod pass_times;
 mod reload;
 #[cfg(test)]
 mod test_support;
@@ -700,8 +701,13 @@ impl Runtime {
         let mut last_drag_check = std::time::Instant::now();
         let mut last_cleanup = std::time::Instant::now();
 
+        // (How long a pass takes and which part of it: told at the log's
+        // debug level only.)
+        let mut pass_times = pass_times::PassTimes::new(std::time::Instant::now());
+
         loop {
             let _loop_start = std::time::Instant::now();
+            pass_times.begin(_loop_start);
             // `health` reports a loop that stopped passing here.
             process_guard::beat();
             if process_guard::session_end_called_off() {
@@ -794,6 +800,7 @@ impl Runtime {
                 let _ = command.response.send(result);
             }
 
+            pass_times.mark(std::time::Instant::now());
             // Check pause flag (handle poisoned mutex gracefully)
             let is_paused = *self
                 .pause_flag
@@ -952,6 +959,7 @@ impl Runtime {
                 }
             }
 
+            pass_times.mark(std::time::Instant::now());
             // Poll window events
             let before_poll = std::time::Instant::now();
             let mut events = self.window_monitor.poll_events();
@@ -1386,6 +1394,7 @@ impl Runtime {
                 self.apply_focus_effects();
             }
 
+            pass_times.mark(std::time::Instant::now());
             // Flush any pending layouts that were deferred during event processing.
             // This coalesces multiple events (e.g., 5 windows created) into one layout pass.
             if let Err(e) = self.core.flush_pending_layouts(&mut self.window_manager) {
@@ -1407,6 +1416,7 @@ impl Runtime {
                 )));
             }
 
+            pass_times.mark(std::time::Instant::now());
             // Process pending window drags - now safe with proper WM_ENTERSIZEMOVE/EXITSIZEMOVE detection
             // This handles fallback cases where DragEnded event might be missed
             if last_drag_check.elapsed() >= std::time::Duration::from_millis(500) {
@@ -1520,6 +1530,7 @@ impl Runtime {
                 }
             }
 
+            pass_times.mark(std::time::Instant::now());
             // Readers see every configuration change made during this pass.
             self.publish_config_if_changed();
             // And the state, where something was told or done in it.
@@ -1551,6 +1562,25 @@ impl Runtime {
                     );
                     for monitor in self.core.monitor_manager.get_all_monitors() {
                         self.core.executor.mark_layout_dirty(monitor.handle);
+                    }
+                }
+            }
+
+            {
+                let now = std::time::Instant::now();
+                pass_times.mark(now);
+                let (slow, summary) = pass_times.end(now);
+                if log::log_enabled!(target: pass_times::LOG, log::Level::Debug) {
+                    if let Some(pass) = slow {
+                        log::debug!(
+                            target: pass_times::LOG,
+                            "a pass of {:.1} ms: {}",
+                            pass.whole.as_secs_f64() * 1000.0,
+                            pass.in_words()
+                        );
+                    }
+                    if let Some(summary) = summary {
+                        log::debug!(target: pass_times::LOG, "the last half minute: {summary}");
                     }
                 }
             }

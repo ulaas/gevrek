@@ -337,12 +337,27 @@ nothing broken on the way. Nothing new is built in this pass.
       and held against another for a reload. `GEVREK_BENCH_OUT=<file>`
       writes the medians down. The first numbers are in the log
       (2026-11-17, late evening).
-- [ ] **W, L** The same for the state as it is published and written to
-      JSON: it is put together in each backend, not in the engine, so
-      its bench belongs there.
-- [ ] **W** The time of a pass of the runtime (an event taken in to the
-      windows placed) measured where it runs, at the log's debug level:
-      the slowest passes are known by name before one is touched.
+- [x] **any** The same for the state as it is published: it is put
+      together in the engine after all (`WmCore::monitor_data`), and
+      the bench has it. 9 workspaces with 30 windows: 34 µs on the
+      desktop without a windowing system; held against the one before,
+      45 ns; copied, 7.7 µs. What it costs on Windows is what it asks
+      the system for each window, which the time of a pass shows (the
+      next item), not a bench.
+- [ ] **any** The state on its way out, not yet timed: made into the
+      protocol's message in the server and into JSON for those who ask
+      (`server/src/lib.rs`).
+- [ ] **person, W** The time of a pass of the runtime, measured where
+      it runs (`runtime/pass_times.rs`, tested): a pass is timed in six
+      parts (commands, looking around, events, layout and motion,
+      checks, state and effects). Nothing is said unless asked for:
+
+          RUST_LOG=info,gevrek::passes=debug
+
+      Then a pass longer than a frame (16 ms) is told at once with its
+      parts, and every half minute the passes are summed up. To tick:
+      the person runs gevrek so for a while of ordinary use, and the
+      lines go into the log here; they say what step 2 begins with.
 - [ ] **any** The large files have their behaviour held by tests before
       they are opened: `window_manager.rs` (8,199 lines),
       `settings.rs` (5,502), the Linux shell's `main.rs` (4,889),
@@ -671,3 +686,4 @@ wanted, strike it when it is not.
 | 2026-11-17, evening | Windows 11 and WSL (Fedora 44) | Committed: the tree as it stood (`ac8f0c5`); gevrek starts with the person's look, without what belongs to one machine (`d08ca9a`); the studio's pages with a list of their own no longer scroll as well, and no page is wider than the window (`f6dc4c4`; looked at in pictures). CI seen for `91859eb`: Windows green to its end, Linux at the pictures only, the dependencies at `chrono`. The plan of the pass for faults and speed written (section 2d) | Section 2d, step 0 first. To push; `chrono` to decide; the studio's changes to be seen in its window |
 | 2026-11-17, late evening | Windows 11 | The first benches of the engine (section 2d, step 0), as medians on the person's machine, release build. A layout of 50 windows: 17 to 204 ns by layout (dwindle the slowest). 50 windows opened one after another on the desktop without a windowing system: 0.46 ms; one more beside 49, opened and closed: 19 µs; a workspace changed with 25 windows on each: 6.4 µs. 20 rules against 50 windows: 9.96 ms. The overview's arrangement of 30 windows: 18 µs. The starting configuration read 159 µs, written 70 µs, checked 284 µs; a reload's plan 0.52 ms with nothing changed, 0.64 ms with one setting. Found: the rules' regular expressions are made anew at every match | The rules' expressions made once (step 2). The bench of the published state in the backends; the time of a pass of the runtime; the numbers of a still desktop |
 | 2026-11-17, night (2) | Windows 11 and WSL (Fedora 44) | The rules' regular expressions are made once and kept. 20 rules against 50 windows: 9.96 ms before, 0.95 ms after. Windows: every test passes; Linux: the engine, the compositor and the server pass | Step 0: the bench of the published state, the time of a pass, a still desktop's numbers |
+| 2026-11-17, night (3) | Windows 11 | Step 0 further: the published state is in the engine's bench (34 µs for 9 workspaces and 30 windows without a windowing system); a pass of the Windows runtime is timed in six parts and told at the log's debug level (`RUST_LOG=info,gevrek::passes=debug`). Windows: the backend's 207 tests pass. Not run on the desktop | The person runs gevrek with that for a while and brings the lines; the still desktop's numbers; the state's way out through the server |
