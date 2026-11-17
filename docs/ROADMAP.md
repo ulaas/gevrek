@@ -423,11 +423,32 @@ nothing broken on the way. Nothing new is built in this pass.
       the last are 3, 1 and 0 wide). Either a tile is never smaller
       than some size and the rest share what is left, or it stays as
       it is. It changes where windows go, so it is not done unasked.
-- [ ] **any** The runs of chance with more in them: two displays (a
-      window moved between them, a display taken away), groups and
-      scratchpads with windows in them, the rules; and held against
-      more: the focus on a window that is there, what is hidden and
-      shown on the desktop agreeing with the workspace that is shown.
+- [x] **any** The runs of chance with more in them: every other run
+      has two displays, the second coming and going, windows opening on
+      either; the rules and the scratchpads of the examples; and one
+      more thing held: no window of a workspace that is not shown is
+      in sight. 6,000 runs clean in the end (2026-11-17). The desktop
+      of the tests takes the keyboard from a window that is hidden, as
+      every real one does. Found and mended, each with a test of its
+      own in `core_scenarios`:
+      - A layout command (a gap, a ratio, the layout itself) given
+        while the window with the keyboard is on a workspace that is
+        not shown laid out that workspace and brought its window into
+        sight. It is for the workspace that is shown now.
+      - "Move to a workspace and follow" followed on the display with
+        the keyboard, not on the window's: with the keyboard on the
+        other display (its desktop pressed on, a workspace sent there),
+        that display changed to whatever it had at the same place and
+        the window was left out of sight. Its own display follows now.
+- [ ] **person, W** Both of these on the desktop with two displays:
+      they may be part of what was reported there (windows not where
+      they belong after a move to the other display; borders around
+      nothing).
+- [ ] **any** Not yet in the runs: a window given the keyboard while
+      it is out of sight (none of the systems does it, but a program
+      may ask), commands that name a window by a selector, the graph's
+      nodes, a reload in the middle. And not yet held: the focus on a
+      window that is there.
 - [ ] **W** What happens around the edges, each with a test or a
       `person` item: a display taken away and put back, another scale,
       sleep and waking, the Explorer started anew, a window of an
@@ -447,6 +468,11 @@ nothing broken on the way. Nothing new is built in this pass.
       written, and without a test (section 2b).
 - [ ] **any** The studio's top bar at the smallest window (760 wide):
       the file and the state lie under the search.
+- [ ] **any** Reported by the person (2026-11-17): the toggles for a
+      display's scale on the studio's Displays page do not work. To
+      find out first what they do not do (nothing is written to the
+      configuration, or it is written and not applied), then mended
+      with a test.
 
 **Step 2: speed and what it costs**
 
@@ -733,3 +759,4 @@ wanted, strike it when it is not.
 | 2026-11-17, night (4) | Windows 11 and WSL (Fedora 44) | The state's way out timed (`cargo bench -p gevrek-server`): 24 µs in the server and 163 µs at the asking end for 30 windows, most of it the JSON there. The harness of the benches is one file for both. Windows: every test passes; Linux: the engine and the server | Step 0 is done but for what wants the desktop (the passes' lines, a still desktop's numbers) and CI. Step 1 next: files from outside that are cut short or nonsense |
 | 2026-11-17, night (5) | Windows 11 and WSL (Fedora 44) | Step 1 begun: configurations and saved sessions spoilt by the thousand and taken through the engine; one fault found and mended (a number of the graph as large as numbers get was counted past). Windows: every test passes; Linux: the model, the engine, the server and the compositor | The other files read from outside; the engine driven by random commands |
 | 2026-11-17, night (6) | Windows 11 and WSL (Fedora 44) | The engine driven by runs of chance, 7,200 of them clean in the end. One fault found and mended: Toggle floating put a window that is on a workspace not shown on the shown one as well. One thing found for the person to decide: tiles of no size where many windows dwindle. Windows: every test passes; Linux: the model, the engine, the server and the compositor | The runs with two displays, groups and scratchpads; the other files from outside; the notes of the kind TODO |
+| 2026-11-17, night (7) | Windows 11 and WSL (Fedora 44) | The runs of chance with two displays, the rules and the scratchpads, and with nothing of a workspace that is not shown in sight. Two more faults found and mended: a layout command brought a hidden workspace's window into sight; move-and-follow changed the wrong display. Noted for later: the scale toggles on the studio's Displays page (reported). Windows and Linux: every test passes (the studio's not run on Linux this time) | The person sees the two on the desktop; the other files from outside; the notes of the kind TODO; the scale toggles |

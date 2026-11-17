@@ -983,9 +983,17 @@ impl Executor {
         // it is that workspace, and never the one of a window that still
         // has the keyboard on another display.
         let display = self.active_monitor(window_manager, monitor_manager);
+        // (And when its workspace is the one that display shows: a window
+        // that a rule sent to another workspace as it opened still has
+        // the keyboard, and a layout command given then used to lay out
+        // the workspace nobody sees and bring its window into sight.)
         let active = queries(window_manager).active_window().and_then(|window| {
             let (monitor, index) = monitor_manager.find_window(window)?;
-            (display.is_none() || display == Some(monitor)).then_some((window, monitor, index))
+            let shown = monitor_manager
+                .get_workspaces(monitor)
+                .map(|workspaces| workspaces.focused_idx());
+            ((display.is_none() || display == Some(monitor)) && shown == Some(index))
+                .then_some((window, monitor, index))
         });
         let (active, monitor, workspace_index) = match active {
             Some((window, monitor, index)) => (Some(window), monitor, index),

@@ -1640,10 +1640,15 @@ impl Executor {
         if follow {
             // Switch to the exact workspace resolved before the move. Resolving
             // selectors such as `empty` again after inserting the window could
-            // select (or create) a different workspace.
-            self.switch_workspace_selector(
+            // select (or create) a different workspace. On the window's
+            // own display: where another display had the keyboard (its
+            // desktop was pressed on, a workspace was sent there), that
+            // one used to change to whatever it had at the same place,
+            // and the window was left out of sight where it had gone.
+            self.switch_workspace_on(
                 window_manager,
                 monitor_manager,
+                monitor,
                 WorkspaceSelector::Index(target_index),
             )?;
             // The window that was moved is the one the user is working

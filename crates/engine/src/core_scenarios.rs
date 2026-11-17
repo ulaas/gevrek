@@ -146,6 +146,97 @@ fn a_window_on_another_workspace_floats_where_it_is() {
     assert!(workspaces[1].floating_windows.is_empty() && workspaces[1].containers.is_empty());
 }
 
+/// A layout command is for the workspace that is shown. Where the window
+/// with the keyboard is on another one (a rule sent it there as it
+/// opened), the command used to lay out that workspace and bring its
+/// window into sight.
+#[test]
+fn a_layout_command_leaves_a_workspace_that_is_not_shown_out_of_sight() {
+    let (mut core, mut desktop) = setup(&["main", "two"]);
+    let on_main = open(&mut core, &mut desktop, "one");
+    command(
+        &mut core,
+        &mut desktop,
+        DispatchCommand::SwitchWorkspaceSelector {
+            selector: WorkspaceSelector::Index(1),
+        },
+    );
+    assert!(!desktop.window(on_main).visible);
+    // (It has the keyboard all the same.)
+    desktop.focused = Some(on_main);
+
+    command(&mut core, &mut desktop, DispatchCommand::SetLayoutGap { gap: 20 });
+    assert!(!desktop.window(on_main).visible, "it stays out of sight");
+    let workspaces = core.monitor_manager.get_workspaces(OUTPUT).unwrap().elements();
+    assert_eq!(workspaces[1].container_padding, crate::Padding::uniform(20));
+    assert_ne!(workspaces[0].container_padding, crate::Padding::uniform(20));
+}
+
+/// A window moved to another workspace "and follow" is followed on its
+/// own display. Where another display had the keyboard, that one used
+/// to change, to whatever it had at the same place, and the window was
+/// left out of sight.
+#[test]
+fn a_window_is_followed_on_its_own_display() {
+    use crate::outputs::MonitorInfo;
+    use gevrek_model::command::MonitorTarget;
+    const SECOND: MonitorHandle = MonitorHandle(2);
+    let (mut core, mut desktop) = setup(&["main", "two"]);
+    let screen = Rect::new(1920, 0, 2560, 1440);
+    let mut monitors = core.monitor_manager.get_all_monitors();
+    monitors.push(MonitorInfo {
+        handle: SECOND,
+        name: "Second".to_string(),
+        device_path: String::new(),
+        is_primary: false,
+        x: screen.x,
+        y: screen.y,
+        width: screen.width,
+        height: screen.height,
+        work_x: screen.x,
+        work_y: screen.y,
+        work_width: screen.width,
+        work_height: screen.height,
+        dpi_scale: 1.0,
+    });
+    core.monitor_manager.replace_monitors(monitors);
+    for name in ["side", "more"] {
+        core.monitor_manager
+            .create_workspace(SECOND, name.to_string(), LayoutType::BSP)
+            .expect("workspace on the second output");
+    }
+    desktop.more_outputs.push((SECOND, screen));
+
+    let editor = open(&mut core, &mut desktop, "editor");
+    // The second display has the keyboard; the editor, on the first, is
+    // still the window that keys go to.
+    command(
+        &mut core,
+        &mut desktop,
+        DispatchCommand::FocusMonitor {
+            target: MonitorTarget::Name("Second".to_string()),
+        },
+    );
+    desktop.focused = Some(editor);
+
+    command(
+        &mut core,
+        &mut desktop,
+        DispatchCommand::MoveToWorkspaceAndFollow {
+            selector: WorkspaceSelector::Name("two".to_string()),
+        },
+    );
+    let shown = |core: &WmCore, output| {
+        core.monitor_manager
+            .get_focused_workspace(output)
+            .map(|workspace| workspace.name.clone())
+    };
+    assert_eq!(shown(&core, OUTPUT).as_deref(), Some("two"), "its display follows");
+    assert_eq!(shown(&core, SECOND).as_deref(), Some("side"), "the other is left");
+    assert!(desktop.window(editor).visible, "and the window is in sight");
+    assert_eq!(tiled(&core), [editor]);
+}
+
 #[test]
 fn switching_the_workspace_hides_its_windows_and_shows_the_other_ones() {
     let (mut core, mut desktop) = setup(&["main", "two"]);

@@ -313,6 +313,11 @@ impl Desktop for FakeDesktop {
                     window.visible = *visible;
                     window.hidden_by_wm = !*visible;
                 }
+                // (A window that is hidden does not keep the keyboard:
+                // the system takes it away, as every real one does.)
+                if !*visible && self.focused == Some(*id) {
+                    self.focused = None;
+                }
             }
             Effect::Focus(target) => {
                 self.focused = target.filter(|id| self.windows.contains_key(id));

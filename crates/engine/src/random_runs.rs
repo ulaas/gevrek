@@ -26,6 +26,56 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 const OUTPUT: MonitorHandle = MonitorHandle(1);
+const SECOND: MonitorHandle = MonitorHandle(2);
+/// Where the second display is, beside the first.
+const SECOND_AT: Rect = Rect { x: 1920, y: 0, width: 2560, height: 1440 };
+
+fn second() -> crate::outputs::MonitorInfo {
+    crate::outputs::MonitorInfo {
+        handle: SECOND,
+        name: "Second".to_string(),
+        device_path: String::new(),
+        is_primary: false,
+        x: SECOND_AT.x,
+        y: SECOND_AT.y,
+        width: SECOND_AT.width,
+        height: SECOND_AT.height,
+        work_x: SECOND_AT.x,
+        work_y: SECOND_AT.y,
+        work_width: SECOND_AT.width,
+        work_height: SECOND_AT.height - 40,
+        dpi_scale: 1.0,
+    }
+}
+
+/// The second display comes (`there`) or goes, as a backend tells the
+/// engine of it.
+fn display_changed(core: &mut WmCore, desktop: &mut FakeDesktop, there: bool) {
+    let mut monitors: Vec<_> = core
+        .monitor_manager
+        .get_all_monitors()
+        .into_iter()
+        .filter(|monitor| monitor.handle != SECOND)
+        .collect();
+    desktop.more_outputs.clear();
+    if there {
+        monitors.push(second());
+        desktop.more_outputs.push((SECOND, SECOND_AT));
+    }
+    let changes = core.monitor_manager.reconcile_with(monitors);
+    if there
+        && core
+            .monitor_manager
+            .get_workspaces(SECOND)
+            .is_none_or(|workspaces| workspaces.is_empty())
+    {
+        let _ = core
+            .monitor_manager
+            .create_workspace(SECOND, "side".to_string(), LayoutType::BSP);
+    }
+    core.executor
+        .apply_monitor_changes(desktop, &core.monitor_manager, &changes);
+}
 
 /// Commands that reach outside the engine (a file of the person's, a
 /// program started, the session ended): not for a run of chance.
@@ -118,9 +168,25 @@ fn commands() -> Vec<serde_json::Value> {
         .collect()
 }
 
-fn desk() -> (WmCore, FakeDesktop) {
-    let rules = Arc::new(Mutex::new(RuleEngine::new()));
-    let executor = Executor::new(NodeGraph::new(), Arc::new(Mutex::new(Vec::new())), rules);
+/// A desktop with four workspaces, the rules and the scratchpads of the
+/// examples, and with `two` a second display beside the first.
+fn desk(two: bool) -> (WmCore, FakeDesktop) {
+    let examples = gevrek_model::examples::built_in_examples();
+    let mut engine = RuleEngine::new();
+    engine.set_declarative_rules(
+        examples
+            .iter()
+            .flat_map(|example| example.config.desktop.window_rules.clone())
+            .collect(),
+    );
+    let rules = Arc::new(Mutex::new(engine));
+    let mut executor = Executor::new(NodeGraph::new(), Arc::new(Mutex::new(Vec::new())), rules);
+    executor.set_scratchpad_profiles(
+        examples
+            .iter()
+            .flat_map(|example| example.config.desktop.scratchpads.clone())
+            .collect(),
+    );
     let mut outputs = Outputs::with_workspace_count(0);
     outputs.add_test_monitor(OUTPUT, "Primary");
     for name in ["1", "2", "3", "4"] {
@@ -134,7 +200,19 @@ fn desk() -> (WmCore, FakeDesktop) {
         FocusManager::new(),
         ZoneManager::new(Default::default()),
     );
-    (core, FakeDesktop::new(OUTPUT))
+    let (mut core, mut desktop) = (core, FakeDesktop::new(OUTPUT));
+    if two {
+        let mut monitors = core.monitor_manager.get_all_monitors();
+        monitors.push(second());
+        core.monitor_manager.replace_monitors(monitors);
+        for name in ["side", "more"] {
+            let _ = core
+                .monitor_manager
+                .create_workspace(SECOND, name.to_string(), LayoutType::BSP);
+        }
+        desktop.more_outputs.push((SECOND, SECOND_AT));
+    }
+    (core, desktop)
 }
 
 /// What must hold after every step. Returns what does not.
@@ -170,6 +248,27 @@ fn broken(core: &WmCore, desktop: &FakeDesktop) -> Option<String> {
                     ));
                 }
             }
+            // No window of a workspace that is not shown is in sight.
+            // (The other way round does not hold: on the workspace that
+            // is shown, the tabs behind a group's first, the windows
+            // behind the one of a monocle and the columns out of view
+            // are kept out of sight on purpose.)
+            let shown = index == ring.focused_idx();
+            let all = workspace
+                .containers
+                .elements()
+                .iter()
+                .flat_map(|container| container.windows.elements().iter().copied())
+                .chain(workspace.floating_windows.elements().iter().copied());
+            for window in all {
+                let hidden = desktop.windows.get(&window).is_some_and(|w| w.hidden_by_wm);
+                if !shown && !hidden {
+                    return Some(format!(
+                        "{window:?} is in sight and on workspace {}, which is not shown",
+                        workspace.name
+                    ));
+                }
+            }
             if workspace
                 .containers
                 .elements()
@@ -179,7 +278,6 @@ fn broken(core: &WmCore, desktop: &FakeDesktop) -> Option<String> {
                 return Some(format!("a tile with no window on workspace {}", workspace.name));
             }
             // The tiles of the workspace that is shown have a size.
-            let shown = index == ring.focused_idx();
             if shown && workspace.tiling_enabled && workspace.expose_state.is_none() {
                 for container in workspace.containers.elements() {
                     let Rect { width, height, .. } = container.rect;
@@ -216,9 +314,15 @@ fn broken(core: &WmCore, desktop: &FakeDesktop) -> Option<String> {
 /// led there.
 fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), String> {
     let mut chance = Chance(seed | 1);
-    let (mut core, mut desktop) = desk();
+    // (Every other run has two displays.)
+    let two = (seed >> 1) & 1 == 1;
+    let mut second_there = two;
+    let (mut core, mut desktop) = desk(two);
     let mut trail: Vec<String> = Vec::new();
     let mut opened = 0;
+    // What a window may be: some are what the examples' rules are about.
+    const TITLES: [&str; 5] = ["window", "Picture in picture", "Slack", "Terminal", "Notes"];
+    const PROGRAMS: [&str; 4] = ["app.exe", "kitty", "wt.exe", "slack.exe"];
     for step in 0..steps {
         let windows: Vec<WindowHandle> = desktop.windows.keys().copied().collect();
         let some = |chance: &mut Chance| windows.get(chance.below(windows.len())).copied();
@@ -226,9 +330,17 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
             // A window opens (not for ever more of them).
             0..=3 if windows.len() < 12 => {
                 opened += 1;
-                let id = desktop.open(&format!("window {opened}"), "app.exe");
+                let title = format!("{} {opened}", TITLES[chance.below(TITLES.len())]);
+                let id = desktop.open(&title, PROGRAMS[chance.below(PROGRAMS.len())]);
+                // (On the second display, now and then.)
+                let on_second = second_there && chance.below(3) == 0;
+                if on_second {
+                    if let Some(window) = desktop.windows.get_mut(&id) {
+                        window.rect = Rect::new(2400, 300, 800, 600);
+                    }
+                }
                 let _ = core.handle_window_event(&mut desktop, WindowEvent::Created(id));
-                format!("{id:?} opens")
+                format!("{id:?} ({title}) opens{}", if on_second { " on the second display" } else { "" })
             }
             4 => match some(&mut chance) {
                 Some(id) => {
@@ -238,7 +350,9 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
                 }
                 None => "nothing".to_string(),
             },
-            5 => match some(&mut chance) {
+            // (A window that is in sight: one that is hidden is given
+            // the keyboard by no system.)
+            5 => match some(&mut chance).filter(|id| !desktop.window(*id).hidden_by_wm) {
                 Some(id) => {
                     desktop.focused = Some(id);
                     let _ = core.handle_window_event(&mut desktop, WindowEvent::Focused(id));
@@ -288,6 +402,11 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
                 }
                 None => "nothing".to_string(),
             },
+            8 if two && chance.below(4) == 0 => {
+                second_there = !second_there;
+                display_changed(&mut core, &mut desktop, second_there);
+                format!("the second display there: {second_there}")
+            }
             _ => {
                 let command = &commands[chance.below(commands.len())];
                 let parsed: DispatchCommand =
@@ -305,6 +424,36 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
         }
         let _ = core.flush_pending_layouts(&mut desktop);
         desktop.applied.clear();
+        if std::env::var_os("GEVREK_TRACE").is_some() {
+            // (With `GEVREK_SEED`: where every window is after each step.)
+            let mut places = Vec::new();
+            for monitor in core.monitor_manager.get_all_monitors() {
+                if let Some(ring) = core.monitor_manager.get_workspaces(monitor.handle) {
+                    for (index, workspace) in ring.elements().iter().enumerate() {
+                        let shown = if index == ring.focused_idx() { "*" } else { "" };
+                        let tiled: Vec<isize> = workspace
+                            .containers
+                            .elements()
+                            .iter()
+                            .flat_map(|container| container.windows.elements().iter().map(|w| w.0))
+                            .collect();
+                        let floating: Vec<isize> =
+                            workspace.floating_windows.elements().iter().map(|w| w.0).collect();
+                        if !tiled.is_empty() || !floating.is_empty() || !shown.is_empty() {
+                            places.push(format!("{}{shown} {tiled:?} {floating:?}", workspace.name));
+                        }
+                    }
+                }
+            }
+            let hidden: Vec<isize> = desktop
+                .windows
+                .iter()
+                .filter(|(_, window)| window.hidden_by_wm)
+                .map(|(id, _)| id.0)
+                .collect();
+            println!("{step:>3} {said}
+      {} | hidden {hidden:?}", places.join("; "));
+        }
         trail.push(said);
         if let Some(what) = broken(&core, &desktop) {
             let from = trail.len().saturating_sub(12);
