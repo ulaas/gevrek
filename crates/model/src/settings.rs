@@ -3014,6 +3014,21 @@ pub struct AnimationProfile {
     /// goes out only where its way is clear of other displays too (else
     /// it is gone at once).
     pub workspace_style: WorkspaceTransitionStyle,
+    /// On Windows: when one workspace gives way to another, pictures of
+    /// the windows slide and the windows themselves stay where they are
+    /// (unseen until the movement is over). Their programs are then not
+    /// told of a new place sixty times a second, which costs less and is
+    /// smoother with programs that are slow to follow. Off: the windows
+    /// themselves are moved. (A window whose picture cannot be had is
+    /// moved itself either way. On Linux the compositor draws every
+    /// window itself and has no use for this.)
+    pub workspace_slides_as_pictures: bool,
+    /// On Windows: while a workspace's windows slide, their shadow and
+    /// glow are left out, and are back when the windows have arrived.
+    /// They are large see-through pictures, and carrying them along at
+    /// every frame is most of what a change of workspace costs the
+    /// graphics card. The border itself stays.
+    pub workspace_slides_without_shadows: bool,
     /// The changes of the whole picture: between the desktop and the
     /// lock screen, and between the login and the desktop.
     pub session: SessionChangeProfile,
@@ -3087,6 +3102,8 @@ impl Default for AnimationProfile {
             window_enter_style: WindowTransitionStyle::Scale,
             window_exit_style: WindowTransitionStyle::Fade,
             workspace_style: WorkspaceTransitionStyle::Slide,
+            workspace_slides_as_pictures: false,
+            workspace_slides_without_shadows: false,
             session: SessionChangeProfile::default(),
         }
     }

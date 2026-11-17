@@ -504,6 +504,13 @@ pub struct WindowManager {
     mark_elevated: bool,
     /// The windows of a workspace that is giving way to another.
     going_out: GoingOut,
+    /// The windows of such a workspace that go out as pictures of
+    /// themselves (`workspace_slides_as_pictures`): their picture stays until
+    /// they are hidden, or until this moment at the latest.
+    pictures_going: HashMap<WindowHandle, Instant>,
+    /// The windows whose shadow and glow are left out while they slide
+    /// with their workspace (`workspace_slides_without_shadows`).
+    effects_resting: HashSet<WindowHandle>,
     /// What was hidden along with the window it belongs to (the dialogs a
     /// window has open, when the window is put away with its workspace):
     /// shown again when that window is.
@@ -724,6 +731,8 @@ impl WindowManager {
             caption_buttons_removed: RefCell::new(HashMap::new()),
             mark_elevated: true,
             going_out: GoingOut::default(),
+            pictures_going: HashMap::new(),
+            effects_resting: HashSet::new(),
             hidden_with_owner: RefCell::new(HashMap::new()),
             cut: RefCell::new(HashMap::new()),
             plain_frame: RefCell::new(HashSet::new()),
@@ -761,6 +770,8 @@ impl WindowManager {
             caption_buttons_removed: RefCell::new(HashMap::new()),
             mark_elevated: true,
             going_out: GoingOut::default(),
+            pictures_going: HashMap::new(),
+            effects_resting: HashSet::new(),
             hidden_with_owner: RefCell::new(HashMap::new()),
             cut: RefCell::new(HashMap::new()),
             plain_frame: RefCell::new(HashSet::new()),
@@ -808,6 +819,7 @@ impl WindowManager {
             + self.stand_ins.count()
             + self.going_out.waiting.len()
             + self.going_out.leaving.len()
+            + self.effects_resting.len()
     }
 
     pub fn animation_summary(&self) -> String {
@@ -1869,6 +1881,12 @@ impl WindowManager {
         if waited.is_none() && left.is_none() {
             return;
         }
+        // (One that went out as a picture and stays in sight after all is
+        // seen itself again. One that is hidden keeps its picture until
+        // it is: `settle_stand_ins`.)
+        if !hide {
+            self.end_stand_in(handle);
+        }
         // SAFETY: plain calls on a window that may be gone meanwhile; both
         // are posted to the window's own thread, in this order, so that a
         // window is not seen where it belongs before it is hidden.
@@ -2855,6 +2873,97 @@ impl WindowManager {
         })
     }
 
+    /// Slide a window with its workspace as a picture of itself, from
+    /// `from` to `to`: the window is unseen meanwhile, at `stays_at`
+    /// (where it is, if none is given), and only its picture moves.
+    /// `false` where that cannot be done: the caller moves the window
+    /// itself, as before.
+    fn slide_as_picture(
+        &mut self,
+        handle: WindowHandle,
+        from: crate::dwm::container::Rect,
+        to: crate::dwm::container::Rect,
+        stays_at: Option<crate::dwm::container::Rect>,
+        now: Instant,
+    ) -> bool {
+        self.end_stand_in(handle);
+        let hwnd = handle.to_hwnd();
+        // SAFETY: plain questions about a window that may be gone.
+        let (exists, ex_style) =
+            unsafe { (IsWindow(hwnd).as_bool(), GetWindowLongW(hwnd, GWL_EXSTYLE)) };
+        if !exists || is_hung(hwnd) {
+            return false;
+        }
+        // A window its program makes see-through itself cannot be made
+        // unseen without spoiling it (`set_window_alpha`).
+        let layered = ex_style & WS_EX_LAYERED.0 as i32 != 0;
+        if layered && !self.gevrek_layered_windows.contains(&handle) {
+            return false;
+        }
+        let alpha = self.window_alphas.get(&handle).copied().unwrap_or(255);
+        if alpha == 0 {
+            return false;
+        }
+        if let Some(at) = stays_at {
+            if self.batch_move_resize(&[(handle, at)]).is_err() {
+                return false;
+            }
+        }
+        let Some(part) = self.seen_part(hwnd) else {
+            return false;
+        };
+        // The picture first, then the window unseen: what is seen never
+        // shows nothing where the window was.
+        if !self.stand_ins.open(handle, hwnd, alpha, from, part) {
+            return false;
+        }
+        if self.apply_window_alpha(handle, 0).is_err() {
+            self.stand_ins.take(handle);
+            return false;
+        }
+        self.window_alphas.insert(handle, alpha);
+        let _ = self.update_border_position_explicit(handle, from.x, from.y, from.width, from.height);
+        if !self
+            .animation_scheduler
+            .schedule_rect(handle, from, to, TransitionScope::Workspace, now)
+        {
+            self.end_stand_in(handle);
+            return false;
+        }
+        true
+    }
+
+    /// The shadow and glow of a window are left out while it slides with
+    /// its workspace, where the configuration says so.
+    fn rest_effects(&mut self, handle: WindowHandle) {
+        if !self.animation_scheduler.profile().workspace_slides_without_shadows {
+            return;
+        }
+        self.effects_resting.insert(handle);
+        self.auras.borrow().set_visible(handle.to_hwnd(), false);
+    }
+
+    /// The windows that have arrived (or are gone) have their shadow and
+    /// glow again.
+    fn settle_resting_effects(&mut self) {
+        if self.effects_resting.is_empty() {
+            return;
+        }
+        let arrived: Vec<WindowHandle> = self
+            .effects_resting
+            .iter()
+            .copied()
+            .filter(|handle| {
+                self.animation_scheduler.rect_target(*handle).is_none()
+                    && !self.going_out.leaving.contains_key(handle)
+            })
+            .collect();
+        for handle in arrived {
+            self.effects_resting.remove(&handle);
+            let _ = self.update_border_position(handle);
+        }
+    }
+
     /// Bring a window in from `start` to `target` as a picture of itself
     /// (`stand_in`): the window is put at `target` at once, unseen, and
     /// only the picture moves. `false` where that cannot be done (the
@@ -2927,6 +3036,7 @@ impl WindowManager {
     /// A window that came in as a picture of itself is seen again, where
     /// it is (where its movement was to end), and its picture goes.
     fn end_stand_in(&mut self, handle: WindowHandle) {
+        self.pictures_going.remove(&handle);
         let Some(alpha) = self.stand_ins.take(handle) else {
             return;
         };
@@ -2951,6 +3061,20 @@ impl WindowManager {
                     && IsWindowVisible(hwnd).as_bool()
                     && !IsIconic(hwnd).as_bool()
             };
+            // A window that went out with its workspace as a picture is
+            // hidden a moment after its picture has gone aside, and by a
+            // message it answers when it gets to it. Seen again before
+            // that, it would flash where it was: its picture stays until
+            // it is hidden (and no longer than a moment, should it never
+            // be).
+            if shown
+                && self
+                    .pictures_going
+                    .get(&handle)
+                    .is_some_and(|latest| Instant::now() < *latest)
+            {
+                continue;
+            }
             if !shown || self.animation_scheduler.rect_target(handle).is_none() {
                 self.end_stand_in(handle);
             }
@@ -3121,6 +3245,7 @@ impl WindowManager {
             + Duration::from_millis(
                 u64::from(self.animation_scheduler.profile().workspace.duration_ms.max(16)) + 60,
             );
+        let pictures = self.animation_scheduler.profile().workspace_slides_as_pictures;
 
         // The old one's windows go: aside, or fainter, and are hidden
         // when they have gone (`finish_going_out`).
@@ -3132,13 +3257,37 @@ impl WindowManager {
                     .schedule_workspace_opacity(*handle, alpha, 0, now)
                     .then_some(Some(alpha))
             } else {
-                ways.go.and_then(|(x, y)| {
-                    let away =
-                        crate::dwm::container::Rect::new(home.x + x, home.y + y, home.width, home.height);
-                    self.animation_scheduler
-                        .schedule_rect(*handle, *home, away, TransitionScope::Workspace, now)
-                        .then_some(None)
-                })
+                match ways.go {
+                    Some((x, y)) => {
+                        let away = crate::dwm::container::Rect::new(
+                            home.x + x,
+                            home.y + y,
+                            home.width,
+                            home.height,
+                        );
+                        // As a picture of itself where that is asked for
+                        // and can be had; else the window itself is moved.
+                        let pictured = pictures
+                            && self.slide_as_picture(*handle, *home, away, None, now);
+                        if pictured {
+                            self.pictures_going
+                                .insert(*handle, until + Duration::from_millis(1500));
+                        }
+                        let moves = pictured
+                            || self.animation_scheduler.schedule_rect(
+                                *handle,
+                                *home,
+                                away,
+                                TransitionScope::Workspace,
+                                now,
+                            );
+                        if moves {
+                            self.rest_effects(*handle);
+                        }
+                        moves.then_some(None)
+                    }
+                    None => None,
+                }
             };
             match going {
                 Some(alpha) => {
@@ -3181,6 +3330,25 @@ impl WindowManager {
                 )
             })
             .collect::<Vec<_>>();
+        // As pictures of themselves where that is asked for and can be
+        // had: such a window is in its place from the start, unseen, and
+        // its picture comes in. The others are moved themselves.
+        let mut moved: Vec<(
+            WindowHandle,
+            crate::dwm::container::Rect,
+            crate::dwm::container::Rect,
+        )> = Vec::new();
+        for ((handle, start), (_, target)) in starts.iter().zip(operations.iter()) {
+            if pictures && self.slide_as_picture(*handle, *start, *target, Some(*target), now) {
+                self.rest_effects(*handle);
+                continue;
+            }
+            moved.push((*handle, *start, *target));
+        }
+        let starts: Vec<(WindowHandle, crate::dwm::container::Rect)> = moved
+            .iter()
+            .map(|(handle, start, _)| (*handle, *start))
+            .collect();
         self.batch_move_resize(&starts)?;
         for (handle, start) in &starts {
             let _ = self.update_border_position_explicit(
@@ -3191,7 +3359,7 @@ impl WindowManager {
                 start.height,
             );
         }
-        for ((handle, start), (_, target)) in starts.iter().zip(operations.iter()) {
+        for (handle, start, target) in &moved {
             self.animation_scheduler.schedule_rect(
                 *handle,
                 *start,
@@ -3199,6 +3367,7 @@ impl WindowManager {
                 TransitionScope::Workspace,
                 now,
             );
+            self.rest_effects(*handle);
         }
         Ok(true)
     }
@@ -3417,6 +3586,7 @@ impl WindowManager {
         self.undo_cancelled_exits(now);
         self.finish_going_out(now);
         self.settle_stand_ins();
+        self.settle_resting_effects();
         Ok(())
     }
 
@@ -3807,6 +3977,10 @@ impl WindowManager {
             return;
         }
         let target_hwnd = target.to_hwnd();
+        // (Left out while the window slides with its workspace.)
+        if self.effects_resting.contains(&target) {
+            return;
+        }
         let Some(info) = self.border_windows.get(&target) else {
             auras.remove(target_hwnd);
             return;
@@ -4453,6 +4627,17 @@ impl WindowManager {
                     border_height_total
                 );
 
+                // A border that only moves (its window slides: a change of
+                // workspace, a window coming in) keeps its shape and its
+                // picture. Cut and painted again on every frame, each
+                // border of both workspaces was drawn anew and handed to
+                // the compositor sixty times a second for nothing.
+                let mut was = RECT::default();
+                let same_size = IsWindowVisible(border_hwnd).as_bool()
+                    && GetWindowRect(border_hwnd, &mut was).is_ok()
+                    && was.right - was.left == border_width_total
+                    && was.bottom - was.top == border_height_total;
+
                 // Move and resize border window
                 SetWindowPos(
                     border_hwnd,
@@ -4461,20 +4646,26 @@ impl WindowManager {
                     border_y,
                     border_width_total,
                     border_height_total,
-                    SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                    if same_size {
+                        SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOSIZE
+                    } else {
+                        SWP_NOACTIVATE | SWP_SHOWWINDOW
+                    },
                 )?;
 
-                apply_border_window_region(
-                    border_hwnd,
-                    border_width_total,
-                    border_height_total,
-                    border_width,
-                    border_offset,
-                    border_style,
-                );
+                if !same_size {
+                    apply_border_window_region(
+                        border_hwnd,
+                        border_width_total,
+                        border_height_total,
+                        border_width,
+                        border_offset,
+                        border_style,
+                    );
 
-                // Invalidate border window to trigger repaint
-                let _ = InvalidateRect(border_hwnd, None, false);
+                    // Invalidate border window to trigger repaint
+                    let _ = InvalidateRect(border_hwnd, None, false);
+                }
             }
 
             self.sync_effects(target_handle);
@@ -7041,6 +7232,136 @@ mod exit_animation_tests {
         assert_eq!(layered_alpha(window), Some(200));
         unsafe {
             let _ = DestroyWindow(HWND(window.0 as _));
+        }
+    }
+
+    /// What was posted to this thread's windows is carried out (a window
+    /// hidden by a message is hidden once it has had the message).
+    fn messages_are_heard() {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE,
+        };
+        let mut message = MSG::default();
+        unsafe {
+            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+    }
+
+    fn workspace_slide_profile(pictures: bool, rest: bool) -> crate::settings::AnimationProfile {
+        use crate::settings::{
+            AnimationChannelProfile, AnimationCurve, AnimationProfile, WorkspaceTransitionStyle,
+        };
+        AnimationProfile {
+            enabled: true,
+            workspace: AnimationChannelProfile::new(true, 400, AnimationCurve::Linear),
+            workspace_style: WorkspaceTransitionStyle::Slide,
+            workspace_slides_as_pictures: pictures,
+            workspace_slides_without_shadows: rest,
+            ..AnimationProfile::default()
+        }
+    }
+
+    fn is_shown(window: WindowHandle) -> bool {
+        use windows::Win32::UI::WindowsAndMessaging::IsWindowVisible;
+        unsafe { IsWindowVisible(HWND(window.0 as _)).as_bool() }
+    }
+
+    #[test]
+    fn a_workspace_gives_way_as_pictures_and_its_windows_stay_where_they_are() {
+        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE, SW_SHOWNA};
+        let mut window_manager = WindowManager::new();
+        window_manager.set_animation_profile(workspace_slide_profile(true, true));
+        let (going, coming) = (shown_window_out_of_sight(), shown_window_out_of_sight());
+        let home = Rect::new(-30000, -30000, 600, 400);
+        let tile = Rect::new(-30000, -29000, 500, 300);
+        window_manager
+            .batch_move_resize(&[(going, home), (coming, tile)])
+            .unwrap();
+        unsafe {
+            let _ = ShowWindow(HWND(coming.0 as _), SW_HIDE);
+        }
+
+        // As a change of workspace goes: the old one's window is asked to
+        // hide and stays shown, the new one's is laid out while hidden,
+        // the change begins, the new one's window is shown.
+        window_manager.workspace_gives_way();
+        window_manager.hide_window(going).unwrap();
+        assert!(is_shown(going));
+        assert!(window_manager
+            .begin_workspace_transition(&[(coming, tile)], 800, 0)
+            .unwrap());
+        unsafe {
+            let _ = ShowWindow(HWND(coming.0 as _), SW_SHOWNA);
+        }
+        // Both are pictures of themselves; neither window has moved, and
+        // neither is seen itself. Their shadow and glow rest.
+        for (window, place) in [(going, home), (coming, tile)] {
+            assert!(window_manager.stand_ins.has(window));
+            assert_eq!(window_manager.get_window_rect(window).unwrap(), place);
+            assert_eq!(layered_alpha(window), Some(0));
+            assert!(window_manager.effects_resting.contains(&window));
+        }
+        let (went_from, came_from) = (
+            window_manager.stand_ins.rect(going).unwrap(),
+            window_manager.stand_ins.rect(coming).unwrap(),
+        );
+        assert_eq!(went_from, home);
+        assert_ne!(came_from, tile);
+
+        std::thread::sleep(Duration::from_millis(30));
+        window_manager.tick_runtime_animations().unwrap();
+        // Under way: the pictures have moved, the windows have not.
+        assert_ne!(window_manager.stand_ins.rect(going).unwrap(), went_from);
+        assert_ne!(window_manager.stand_ins.rect(coming).unwrap(), came_from);
+        assert_eq!(window_manager.get_window_rect(going).unwrap(), home);
+        assert_eq!(window_manager.get_window_rect(coming).unwrap(), tile);
+
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while window_manager.active_animation_count() > 0 && Instant::now() < deadline {
+            window_manager.tick_runtime_animations().unwrap();
+            messages_are_heard();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // Over: the new one's window is seen itself, in its place; the old
+        // one's is hidden where it was, as solid as it was for the next
+        // time; no picture is left, and the effects are back.
+        assert_eq!(window_manager.stand_ins.count(), 0);
+        assert!(window_manager.pictures_going.is_empty());
+        assert!(window_manager.effects_resting.is_empty());
+        assert!(is_shown(coming));
+        assert_eq!(layered_alpha(coming), None);
+        assert_eq!(window_manager.get_window_rect(coming).unwrap(), tile);
+        assert!(!is_shown(going));
+        assert_eq!(layered_alpha(going), None);
+        assert_eq!(window_manager.get_window_rect(going).unwrap(), home);
+        unsafe {
+            let _ = DestroyWindow(HWND(going.0 as _));
+            let _ = DestroyWindow(HWND(coming.0 as _));
+        }
+    }
+
+    #[test]
+    fn a_workspace_that_is_not_to_go_as_pictures_moves_its_windows() {
+        let mut window_manager = WindowManager::new();
+        window_manager.set_animation_profile(workspace_slide_profile(false, false));
+        let coming = shown_window_out_of_sight();
+        let tile = Rect::new(-30000, -29000, 500, 300);
+        window_manager.batch_move_resize(&[(coming, tile)]).unwrap();
+        assert!(window_manager
+            .begin_workspace_transition(&[(coming, tile)], 800, 0)
+            .unwrap());
+        // The window itself was put aside to come in, seen as it is.
+        assert!(!window_manager.stand_ins.has(coming));
+        assert_ne!(window_manager.get_window_rect(coming).unwrap(), tile);
+        assert_eq!(layered_alpha(coming), None);
+        assert!(window_manager.effects_resting.is_empty());
+        run_animations_out(&mut window_manager);
+        assert_eq!(window_manager.get_window_rect(coming).unwrap(), tile);
+        unsafe {
+            let _ = DestroyWindow(HWND(coming.0 as _));
         }
     }
 

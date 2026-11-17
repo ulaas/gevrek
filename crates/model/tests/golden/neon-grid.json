@@ -180,6 +180,8 @@
       "window_enter_style": "slide",
       "window_exit_style": "scale",
       "workspace_style": "slide",
+      "workspace_slides_as_pictures": false,
+      "workspace_slides_without_shadows": false,
       "session": {
         "enabled": true,
         "duration_ms": 480,
