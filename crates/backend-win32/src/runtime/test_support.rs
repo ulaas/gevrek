@@ -145,6 +145,8 @@ pub(crate) fn test_runtime(config: Config) -> ManuallyDrop<Runtime> {
         event_loop_fps: 0.0,
         gesture_progress: None,
         published_monitors: Vec::new(),
+        state_stale: std::cell::Cell::new(false),
+        hot_corners: Default::default(),
         gesture_progress_updated: None,
         display_change_pending: None,
         held_openings: Default::default(),

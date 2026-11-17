@@ -994,6 +994,35 @@ impl Executor {
         window_manager: &mut dyn Desktop,
         monitor_manager: &mut MonitorManager,
     ) -> Result<()> {
+        // As pictures of the windows, where the desktop can show them so:
+        // of the display with the keyboard's window, or else of the one
+        // the pointer is on. Nothing is moved, and nothing is kept here.
+        let shown = queries(window_manager)
+            .active_window()
+            .and_then(|window| monitor_of(window_manager, monitor_manager, window))
+            .or_else(|| monitor_at_cursor(window_manager, monitor_manager));
+        if let Some(monitor) = shown {
+            let arranged = monitor_manager
+                .get_focused_workspace(monitor.handle)
+                .is_some_and(|workspace| self.expose_workspaces.contains(&workspace.id));
+            if !arranged {
+                let area = monitor_manager
+                    .get_adjusted_work_area(monitor.handle, window_manager)
+                    .unwrap_or_else(|| monitor.work_area_rect());
+                let windows = monitor_manager
+                    .get_focused_workspace(monitor.handle)
+                    .map(|workspace| workspace.all_windows())
+                    .unwrap_or_default();
+                if let Some(up) = window_manager.toggle_window_overview(&windows, area) {
+                    log::info!(
+                        "The overview of {} window(s) is {}",
+                        windows.len(),
+                        if up { "shown" } else { "put away" }
+                    );
+                    return Ok(());
+                }
+            }
+        }
         if let Some(window_handle) = queries(window_manager).active_window() {
             if let Some(monitor_info) = monitor_of(window_manager, monitor_manager, window_handle) {
                 let monitor_handle = monitor_info.handle;

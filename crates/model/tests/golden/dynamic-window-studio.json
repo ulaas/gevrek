@@ -447,6 +447,20 @@
       "scroll_fingers": 3,
       "profiles": []
     },
+    "hot_corners": {
+      "enabled": true,
+      "delay_ms": 250,
+      "size": 4,
+      "corners": [
+        {
+          "corner": "top_left",
+          "enabled": true,
+          "command": {
+            "command": "toggle_expose"
+          }
+        }
+      ]
+    },
     "window_rules": [
       {
         "name": "Center dialogs",

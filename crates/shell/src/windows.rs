@@ -2501,7 +2501,13 @@ fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
             Event::Changed { .. } => state.borrow().link.send(Request::Fetch),
             // What the shell itself changed is what runs, from this
             // revision on.
-            Event::Applied(revision) => state.borrow_mut().revision = revision,
+            // And what it made of the state is asked for at once (the
+            // window manager publishes it before it answers).
+            Event::Applied(revision) => {
+                let mut state = state.borrow_mut();
+                state.revision = revision;
+                state.link.send(Request::State);
+            }
             // A change of the shell's that was not taken: said, and what
             // runs is fetched again.
             Event::Conflict(why) | Event::ApplyFailed(why) => {

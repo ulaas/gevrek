@@ -205,6 +205,25 @@ impl StandIns {
         self.live.len() + self.retired.len()
     }
 
+    /// The picture of `handle` over every window that does not stay on
+    /// top (over what an overview has put behind the pictures).
+    pub fn raise(&self, handle: WindowHandle) {
+        if let Some(stand_in) = self.live.get(&handle) {
+            // SAFETY: the window is this program's own.
+            unsafe {
+                let _ = SetWindowPos(
+                    stand_in.hwnd,
+                    HWND_TOP,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
+            }
+        }
+    }
+
     /// Put the picture of `handle` at `rect`.
     pub fn place(&mut self, handle: WindowHandle, rect: Rect, part: RECT) {
         if let Some(stand_in) = self.live.get_mut(&handle) {

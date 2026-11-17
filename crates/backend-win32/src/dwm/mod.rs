@@ -8,6 +8,7 @@ pub mod hidden_journal;
 pub mod hwnd_map;
 pub mod monitor;
 pub mod reach;
+mod overview;
 mod stand_in;
 use gevrek_engine::overlay_data;
 pub(crate) mod window_manager;

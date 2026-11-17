@@ -101,6 +101,8 @@ pub struct DesktopConfig {
     pub scratchpads: Vec<ScratchpadProfile>,
     pub bindings: Vec<BindingProfile>,
     pub gestures: GestureSettings,
+    /// What the pointer does when it is put into a corner of a display.
+    pub hot_corners: HotCornersProfile,
     pub window_rules: Vec<WindowRuleProfile>,
     /// The desktop's own surfaces: the panel.
     pub shell: ShellConfig,
@@ -148,6 +150,7 @@ impl Default for DesktopConfig {
             scratchpads: Vec::new(),
             bindings: Vec::new(),
             gestures: GestureSettings::default(),
+            hot_corners: HotCornersProfile::default(),
             window_rules: Vec::new(),
             shell: ShellConfig::default(),
             input: Default::default(),
@@ -3574,6 +3577,92 @@ pub enum BindingTrigger {
     Release,
     Repeat,
     LongPress,
+}
+
+/// A corner of a display.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ScreenCorner {
+    #[default]
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+/// What one corner of the displays does when the pointer is put into it.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default)]
+pub struct HotCorner {
+    pub corner: ScreenCorner,
+    pub enabled: bool,
+    pub command: DispatchCommand,
+    /// Keys this version does not know: kept, and written back as they
+    /// were, so a file from a newer gevrek survives being edited here.
+    #[serde(flatten)]
+    pub extra: crate::Extra,
+}
+
+impl Default for HotCorner {
+    fn default() -> Self {
+        Self {
+            extra: Default::default(),
+            corner: ScreenCorner::TopLeft,
+            enabled: true,
+            command: DispatchCommand::ToggleExpose,
+        }
+    }
+}
+
+/// Hot corners: the pointer, put into a corner of a display and left
+/// there for a moment, runs that corner's command. Every display has its
+/// corners. Unless said otherwise there is one: the top left corner shows
+/// the overview of the workspace's windows.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default)]
+pub struct HotCornersProfile {
+    pub enabled: bool,
+    /// How long the pointer has to stay in the corner, in milliseconds
+    /// (up to 5000), so that one it only passes through does nothing.
+    pub delay_ms: u32,
+    /// How far from the very corner still counts, in pixels (1 to 64).
+    pub size: u32,
+    pub corners: Vec<HotCorner>,
+    /// Keys this version does not know: kept, and written back as they
+    /// were, so a file from a newer gevrek survives being edited here.
+    #[serde(flatten)]
+    pub extra: crate::Extra,
+}
+
+impl Default for HotCornersProfile {
+    fn default() -> Self {
+        Self {
+            extra: Default::default(),
+            enabled: true,
+            delay_ms: 250,
+            size: 4,
+            corners: vec![HotCorner::default()],
+        }
+    }
+}
+
+impl HotCornersProfile {
+    /// Whether the pointer has to be watched at all.
+    pub fn watched(&self) -> bool {
+        self.enabled && self.corners.iter().any(|corner| corner.enabled)
+    }
+
+    /// How long the pointer has to stay, in milliseconds, within bounds.
+    pub fn delay(&self) -> u64 {
+        u64::from(self.delay_ms.min(5000))
+    }
+
+    /// How far from the corner counts, in pixels, within bounds.
+    pub fn reach(&self) -> i32 {
+        self.size.clamp(1, 64) as i32
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]

@@ -174,7 +174,7 @@ impl Page {
             Page::Wallpaper => "The picture, or the colour, behind the windows. A display can have its own.",
             Page::Bar => "The panel at the edge of each display, and what stands on it.",
             Page::Bindings => "What the keys do.",
-            Page::Gestures => "Touchpad gestures.",
+            Page::Gestures => "What the corners of a display do, and touchpad gestures.",
             Page::Rules => "What happens to a window when it opens, by what it is.",
             Page::Scratchpads => "Programs that come and go on a key.",
             Page::Zones => "Places on a display that windows snap to.",
@@ -359,7 +359,10 @@ impl Page {
         ];
         const WALLPAPER: &[Card] = &[card("Wallpaper", "/desktop/wallpaper", Show::AllBut(&[]))];
         const BINDINGS: &[Card] = &[card("Bindings", "/desktop/bindings", Show::Place)];
-        const GESTURES: &[Card] = &[card("Gestures", "/desktop/gestures", Show::AllBut(&[]))];
+        const GESTURES: &[Card] = &[
+            card("Hot corners", "/desktop/hot_corners", Show::AllBut(&[])),
+            card("Gestures", "/desktop/gestures", Show::AllBut(&[])),
+        ];
         const RULES: &[Card] = &[
             card("Rules", "/desktop/window_rules", Show::Place),
             card(

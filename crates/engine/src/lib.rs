@@ -26,6 +26,7 @@ pub mod focus;
 pub mod focus_manager;
 pub mod gesture;
 pub mod groups;
+pub mod hot_corners;
 pub mod input;
 pub mod layouts;
 pub mod lifecycle;

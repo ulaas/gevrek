@@ -325,6 +325,14 @@ impl gevrek_engine::contract::Desktop for WindowManager {
         WindowManager::workspace_gives_way(self);
     }
 
+    fn toggle_window_overview(
+        &mut self,
+        windows: &[crate::dwm::WindowHandle],
+        area: gevrek_model::geometry::Rect,
+    ) -> Option<bool> {
+        Some(WindowManager::toggle_window_overview(self, windows, area))
+    }
+
     fn begin_workspace_transition(
         &mut self,
         operations: &[(crate::dwm::WindowHandle, gevrek_model::geometry::Rect)],

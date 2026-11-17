@@ -484,6 +484,41 @@ unsafe fn apply_border_window_region(
 
 pub use gevrek_model::window::WindowInfo;
 
+/// The overview of a workspace's windows, while it is shown: the window
+/// behind the pictures, and the pictures (`dwm::overview`).
+struct Overview {
+    backdrop: super::overview::Backdrop,
+    /// The windows that are shown, each with where its picture is.
+    items: Vec<(WindowHandle, crate::dwm::container::Rect)>,
+    /// The one that is pointed at.
+    marked: Option<usize>,
+    /// The window that had the keyboard before.
+    before: Option<WindowHandle>,
+    opened: Instant,
+}
+
+/// How an overview ends.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum OverviewEnd {
+    /// With this window chosen: it gets the keyboard.
+    Chosen(WindowHandle),
+    /// With none chosen: the window that had the keyboard has it again.
+    Back,
+    /// The keyboard went elsewhere meanwhile: it stays there.
+    Away,
+}
+
+/// (A copy of the window manager's state does not own the overview's
+/// window, as with `aura::Auras`: it has none.)
+#[derive(Default)]
+struct OverviewShown(Option<Overview>);
+
+impl Clone for OverviewShown {
+    fn clone(&self) -> Self {
+        Self(None)
+    }
+}
+
 #[derive(Clone)]
 pub struct WindowManager {
     windows: HashMap<WindowHandle, WindowInfo>,
@@ -511,6 +546,11 @@ pub struct WindowManager {
     /// The windows whose shadow and glow are left out while they slide
     /// with their workspace (`workspace_slides_without_shadows`).
     effects_resting: HashSet<WindowHandle>,
+    /// The overview of a workspace's windows, while it is shown.
+    overview: OverviewShown,
+    /// The windows of an overview that is over, whose pictures are on
+    /// their way back: the borders are back when they have arrived.
+    overview_leaving: HashSet<WindowHandle>,
     /// What was hidden along with the window it belongs to (the dialogs a
     /// window has open, when the window is put away with its workspace):
     /// shown again when that window is.
@@ -733,6 +773,8 @@ impl WindowManager {
             going_out: GoingOut::default(),
             pictures_going: HashMap::new(),
             effects_resting: HashSet::new(),
+            overview: OverviewShown::default(),
+            overview_leaving: HashSet::new(),
             hidden_with_owner: RefCell::new(HashMap::new()),
             cut: RefCell::new(HashMap::new()),
             plain_frame: RefCell::new(HashSet::new()),
@@ -772,6 +814,8 @@ impl WindowManager {
             going_out: GoingOut::default(),
             pictures_going: HashMap::new(),
             effects_resting: HashSet::new(),
+            overview: OverviewShown::default(),
+            overview_leaving: HashSet::new(),
             hidden_with_owner: RefCell::new(HashMap::new()),
             cut: RefCell::new(HashMap::new()),
             plain_frame: RefCell::new(HashSet::new()),
@@ -1864,6 +1908,7 @@ impl WindowManager {
     /// another: they stay shown until `begin_workspace_transition` says
     /// how they go (or, if that never comes, until the next pass).
     pub fn workspace_gives_way(&mut self) {
+        self.close_window_overview(OverviewEnd::Away);
         self.going_out.expected = true;
     }
 
@@ -2956,6 +3001,7 @@ impl WindowManager {
             .filter(|handle| {
                 self.animation_scheduler.rect_target(*handle).is_none()
                     && !self.going_out.leaving.contains_key(handle)
+                    && !self.overview_holds(*handle)
             })
             .collect();
         for handle in arrived {
@@ -3075,9 +3121,316 @@ impl WindowManager {
             {
                 continue;
             }
+            // (The pictures of an overview stay while it is shown.)
+            if shown && self.overview_holds(handle) {
+                continue;
+            }
             if !shown || self.animation_scheduler.rect_target(handle).is_none() {
                 self.end_stand_in(handle);
             }
+        }
+    }
+
+    // ==================== The overview of windows ====================
+
+    fn overview_holds(&self, handle: WindowHandle) -> bool {
+        self.overview
+            .0
+            .as_ref()
+            .is_some_and(|overview| overview.items.iter().any(|(held, _)| *held == handle))
+    }
+
+    /// Whether the overview of a workspace's windows is shown.
+    pub fn window_overview_is_shown(&self) -> bool {
+        self.overview.0.is_some()
+    }
+
+    /// Show `windows` as live pictures of themselves, small, in `area`,
+    /// to choose one of; or put that away where it is shown. `true`: it
+    /// is shown now.
+    ///
+    /// The windows stay where they are and as large as they are, unseen;
+    /// only their pictures move, to the places `expose::arrange` gives
+    /// them, and back when the overview is over. A window that cannot be
+    /// made unseen (one its program makes see-through itself, one that
+    /// does not answer) is left out, as it is.
+    pub fn toggle_window_overview(
+        &mut self,
+        windows: &[WindowHandle],
+        area: crate::dwm::container::Rect,
+    ) -> bool {
+        if self.overview.0.is_some() {
+            self.close_window_overview(OverviewEnd::Back);
+            return false;
+        }
+        // (One that is still on its way out is out.)
+        for handle in std::mem::take(&mut self.overview_leaving) {
+            self.end_stand_in(handle);
+        }
+        let now = Instant::now();
+        let there: Vec<(WindowHandle, crate::dwm::container::Rect)> = windows
+            .iter()
+            .filter_map(|handle| {
+                let hwnd = handle.to_hwnd();
+                // SAFETY: plain questions about a window that may be gone.
+                let shown = unsafe {
+                    IsWindow(hwnd).as_bool()
+                        && IsWindowVisible(hwnd).as_bool()
+                        && !IsIconic(hwnd).as_bool()
+                };
+                if !shown || is_hung(hwnd) {
+                    return None;
+                }
+                let rect = self.get_window_rect(*handle).ok()?;
+                (rect.width > 0 && rect.height > 0).then_some((*handle, rect))
+            })
+            .collect();
+        // SAFETY: a plain question.
+        let foreground = unsafe { GetForegroundWindow() };
+        // (Not in a test: the keyboard is whoever runs it's, and stays.)
+        let before = (!cfg!(test) && !foreground.is_invalid())
+            .then(|| WindowHandle::from_hwnd(foreground));
+        // The pictures first, each where its window is; then what is
+        // behind them, and the pictures over that.
+        let mut items = Vec::new();
+        for (handle, place) in gevrek_engine::expose::arrange(&there, area) {
+            let Some((_, home)) = there.iter().find(|(known, _)| *known == handle) else {
+                continue;
+            };
+            if self.picture_for_overview(handle, *home, place, now) {
+                items.push((handle, place));
+            }
+        }
+        if items.is_empty() {
+            return false;
+        }
+        let shown = items
+            .iter()
+            .map(|(handle, place)| super::overview::Shown {
+                rect: *place,
+                title: self.get_window_title_live(*handle),
+            })
+            .collect();
+        let accent = self
+            .border_windows
+            .values()
+            .next()
+            .map(|border| border.active_color)
+            .unwrap_or((90, 150, 255));
+        let Some(backdrop) = super::overview::Backdrop::open(area, shown, accent) else {
+            for (handle, _) in items {
+                self.end_stand_in(handle);
+            }
+            return false;
+        };
+        self.hide_all_borders();
+        self.hide_all_stackbars();
+        for (handle, _) in &items {
+            self.stand_ins.raise(*handle);
+            self.effects_resting.insert(*handle);
+        }
+        // The window that had the keyboard is the one pointed at first:
+        // Enter goes back to it, the arrows go on from it.
+        let marked = before.and_then(|before| items.iter().position(|(handle, _)| *handle == before));
+        backdrop.mark(marked);
+        self.overview.0 = Some(Overview {
+            backdrop,
+            items,
+            marked,
+            before,
+            opened: now,
+        });
+        true
+    }
+
+    /// A window of an overview as a picture of itself, from `from` (where
+    /// the window is) to `to`: the window stays, unseen. `false` where
+    /// that cannot be done.
+    fn picture_for_overview(
+        &mut self,
+        handle: WindowHandle,
+        from: crate::dwm::container::Rect,
+        to: crate::dwm::container::Rect,
+        now: Instant,
+    ) -> bool {
+        self.end_stand_in(handle);
+        let hwnd = handle.to_hwnd();
+        // SAFETY: a plain question about a window that may be gone.
+        let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) };
+        // A window its program makes see-through itself cannot be made
+        // unseen without spoiling it (`set_window_alpha`).
+        let layered = ex_style & WS_EX_LAYERED.0 as i32 != 0;
+        if layered && !self.gevrek_layered_windows.contains(&handle) {
+            return false;
+        }
+        let alpha = self.window_alphas.get(&handle).copied().unwrap_or(255);
+        if alpha == 0 {
+            return false;
+        }
+        let Some(part) = self.seen_part(hwnd) else {
+            return false;
+        };
+        // The picture first, then the window unseen: what is seen never
+        // shows nothing where the window was.
+        if !self.stand_ins.open(handle, hwnd, alpha, from, part) {
+            return false;
+        }
+        if self.apply_window_alpha(handle, 0).is_err() {
+            self.stand_ins.take(handle);
+            return false;
+        }
+        self.window_alphas.insert(handle, alpha);
+        if !self
+            .animation_scheduler
+            .schedule_rect(handle, from, to, TransitionScope::Workspace, now)
+        {
+            // (No movement is asked for: it is there at once.)
+            self.stand_ins.place(handle, to, part);
+        }
+        true
+    }
+
+    /// The overview is over: the pictures go back to where their windows
+    /// are, and the windows are seen themselves again when they have.
+    fn close_window_overview(&mut self, end: OverviewEnd) {
+        let Some(overview) = self.overview.0.take() else {
+            return;
+        };
+        let now = Instant::now();
+        for (handle, place) in &overview.items {
+            if !self.stand_ins.has(*handle) {
+                continue;
+            }
+            let from = self.stand_ins.rect(*handle).unwrap_or(*place);
+            let moves = self.get_window_rect(*handle).is_ok_and(|home| {
+                self.animation_scheduler.schedule_rect(
+                    *handle,
+                    from,
+                    home,
+                    TransitionScope::Workspace,
+                    now,
+                )
+            });
+            if moves {
+                self.overview_leaving.insert(*handle);
+            } else {
+                self.end_stand_in(*handle);
+            }
+        }
+        let before = overview.before;
+        // (Its window goes: the pictures fly back over the desktop.)
+        drop(overview);
+        let to = match end {
+            OverviewEnd::Chosen(chosen) => Some(chosen),
+            OverviewEnd::Back => before,
+            OverviewEnd::Away => None,
+        };
+        if let Some(window) = to.filter(|window| self.window_exists(*window)) {
+            // (Over the others on its way back, as it will be there.)
+            self.stand_ins.raise(window);
+            let _ = self.focus_window(window);
+        }
+        if self.overview_leaving.is_empty() {
+            self.window_overview_is_over();
+        }
+    }
+
+    /// Every picture of an overview has arrived: what was put away for
+    /// it is back.
+    fn window_overview_is_over(&mut self) {
+        self.show_all_borders();
+        self.show_all_stackbars();
+    }
+
+    /// The overview, each pass: it gets dark, its pictures that are gone
+    /// are forgotten, and what the person did at it is done.
+    fn tick_window_overview(&mut self) {
+        use super::overview::Said;
+        if !self.overview_leaving.is_empty() {
+            let stand_ins = &self.stand_ins;
+            self.overview_leaving.retain(|handle| stand_ins.has(*handle));
+            if self.overview_leaving.is_empty() && self.overview.0.is_none() {
+                self.window_overview_is_over();
+            }
+        }
+        let Some(overview) = self.overview.0.as_mut() else {
+            return;
+        };
+        // Darker over a moment, not at once.
+        let dark = (overview.opened.elapsed().as_millis() as f32 / 160.0).min(1.0);
+        overview
+            .backdrop
+            .darken((f32::from(super::overview::DARK) * dark) as u8);
+        // A window of it went (closed, minimised): the overview is over.
+        if overview
+            .items
+            .iter()
+            .any(|(handle, _)| !self.stand_ins.has(*handle))
+        {
+            self.close_window_overview(OverviewEnd::Back);
+            return;
+        }
+        let places: Vec<crate::dwm::container::Rect> =
+            overview.items.iter().map(|(_, place)| *place).collect();
+        let at = |x: i32, y: i32| {
+            places.iter().position(|place| {
+                x >= place.x
+                    && x < place.x + place.width
+                    && y >= place.y
+                    && y < place.y + place.height
+            })
+        };
+        let mut end = None;
+        for said in overview.backdrop.said() {
+            match said {
+                Said::Pointed(x, y) => {
+                    // (Off the pictures, the one the keys went to stays.)
+                    if let Some(pointed) = at(x, y) {
+                        overview.marked = Some(pointed);
+                    }
+                }
+                Said::Pressed(x, y) => {
+                    end = Some(match at(x, y) {
+                        Some(pressed) => OverviewEnd::Chosen(overview.items[pressed].0),
+                        None => OverviewEnd::Back,
+                    });
+                }
+                // Escape.
+                Said::Key(0x1B) => end = Some(OverviewEnd::Back),
+                // Enter and the space bar.
+                Said::Key(0x0D | 0x20) => {
+                    end = Some(match overview.marked {
+                        Some(marked) => OverviewEnd::Chosen(overview.items[marked].0),
+                        None => OverviewEnd::Back,
+                    });
+                }
+                // The arrows, and Tab for the next.
+                Said::Key(key @ (0x25..=0x28 | 0x09)) => {
+                    let count = places.len();
+                    overview.marked = Some(match (overview.marked, key) {
+                        (None, _) => 0,
+                        (Some(from), 0x09) => (from + 1) % count,
+                        (Some(from), key) => {
+                            let (across, down) = match key {
+                                0x25 => (-1, 0),
+                                0x26 => (0, -1),
+                                0x27 => (1, 0),
+                                _ => (0, 1),
+                            };
+                            super::overview::towards(&places, from, across, down).unwrap_or(from)
+                        }
+                    });
+                }
+                Said::Key(_) => {}
+                Said::Left => end = Some(OverviewEnd::Away),
+            }
+            if end.is_some() {
+                break;
+            }
+        }
+        overview.backdrop.mark(overview.marked);
+        if let Some(end) = end {
+            self.close_window_overview(end);
         }
     }
 
@@ -3093,6 +3446,8 @@ impl WindowManager {
         if operations.is_empty() {
             return Ok(());
         }
+        // (Windows are laid out anew: an overview of them is over.)
+        self.close_window_overview(OverviewEnd::Away);
 
         let now = Instant::now();
         // A window coming in as a picture of itself: the window goes to
@@ -3587,6 +3942,7 @@ impl WindowManager {
         self.finish_going_out(now);
         self.settle_stand_ins();
         self.settle_resting_effects();
+        self.tick_window_overview();
         Ok(())
     }
 
@@ -7340,6 +7696,108 @@ mod exit_animation_tests {
         unsafe {
             let _ = DestroyWindow(HWND(going.0 as _));
             let _ = DestroyWindow(HWND(coming.0 as _));
+        }
+    }
+
+    #[test]
+    fn an_overview_shows_pictures_of_the_windows_and_leaves_them_as_they_are() {
+        let mut window_manager = WindowManager::new();
+        window_manager.set_animation_profile(workspace_slide_profile(false, false));
+        let (one, two) = (shown_window_out_of_sight(), shown_window_out_of_sight());
+        let (home_one, home_two) = (
+            Rect::new(-30000, -30000, 900, 700),
+            Rect::new(-29000, -30000, 600, 400),
+        );
+        window_manager
+            .batch_move_resize(&[(one, home_one), (two, home_two)])
+            .unwrap();
+        let area = Rect::new(-30000, -30000, 1600, 900);
+
+        assert!(window_manager.toggle_window_overview(&[one, two], area));
+        assert!(window_manager.window_overview_is_shown());
+        // Each is a picture of itself, which starts where the window is;
+        // the windows are unseen, where they were and as large.
+        for (window, home) in [(one, home_one), (two, home_two)] {
+            assert_eq!(window_manager.stand_ins.rect(window), Some(home));
+            assert_eq!(window_manager.get_window_rect(window).unwrap(), home);
+            assert_eq!(layered_alpha(window), Some(0));
+        }
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while (window_manager.animation_scheduler.rect_target(one).is_some()
+            || window_manager.animation_scheduler.rect_target(two).is_some())
+            && Instant::now() < deadline
+        {
+            window_manager.tick_runtime_animations().unwrap();
+            messages_are_heard();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // The pictures have arrived: small, in the area, and they stay
+        // for as long as the overview does.
+        for _ in 0..5 {
+            window_manager.tick_runtime_animations().unwrap();
+            messages_are_heard();
+        }
+        for (window, home) in [(one, home_one), (two, home_two)] {
+            let picture = window_manager.stand_ins.rect(window).unwrap();
+            assert!(picture.width < home.width && picture.height < home.height);
+            assert!(picture.x >= area.x && picture.x + picture.width <= area.x + area.width);
+            assert!(picture.y >= area.y && picture.y + picture.height <= area.y + area.height);
+            assert_eq!(window_manager.get_window_rect(window).unwrap(), home);
+            assert_eq!(layered_alpha(window), Some(0));
+        }
+        assert!(window_manager.window_overview_is_shown());
+
+        // Put away: the pictures go back, and the windows are seen
+        // themselves again, where they always were.
+        assert!(!window_manager.toggle_window_overview(&[one, two], area));
+        assert!(!window_manager.window_overview_is_shown());
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while window_manager.active_animation_count() > 0 && Instant::now() < deadline {
+            window_manager.tick_runtime_animations().unwrap();
+            messages_are_heard();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(window_manager.stand_ins.count(), 0);
+        assert!(window_manager.overview_leaving.is_empty());
+        assert!(window_manager.effects_resting.is_empty());
+        for (window, home) in [(one, home_one), (two, home_two)] {
+            assert!(is_shown(window));
+            assert_eq!(layered_alpha(window), None);
+            assert_eq!(window_manager.get_window_rect(window).unwrap(), home);
+        }
+        unsafe {
+            let _ = DestroyWindow(HWND(one.0 as _));
+            let _ = DestroyWindow(HWND(two.0 as _));
+        }
+    }
+
+    #[test]
+    fn an_overview_ends_when_a_window_of_it_goes() {
+        let mut window_manager = WindowManager::new();
+        window_manager.set_animation_profile(workspace_slide_profile(false, false));
+        let (one, two) = (shown_window_out_of_sight(), shown_window_out_of_sight());
+        let area = Rect::new(-30000, -30000, 1600, 900);
+        assert!(window_manager.toggle_window_overview(&[one, two], area));
+        // Nothing to show: no overview.
+        let mut other = WindowManager::new();
+        assert!(!other.toggle_window_overview(&[], area));
+        unsafe {
+            let _ = DestroyWindow(HWND(two.0 as _));
+        }
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while (window_manager.window_overview_is_shown()
+            || window_manager.active_animation_count() > 0)
+            && Instant::now() < deadline
+        {
+            window_manager.tick_runtime_animations().unwrap();
+            messages_are_heard();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!window_manager.window_overview_is_shown());
+        assert_eq!(window_manager.stand_ins.count(), 0);
+        assert_eq!(layered_alpha(one), None);
+        unsafe {
+            let _ = DestroyWindow(HWND(one.0 as _));
         }
     }
 

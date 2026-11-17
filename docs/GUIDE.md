@@ -329,6 +329,24 @@ with Super (the Windows key) held:
 | Super+Shift+E | quit the session |
 | Super+Escape | take the keys back from a program that asked for all of them (a virtual machine, a nested gevrek), or hand them over again |
 
+**The overview of the windows.** Its key (`toggle_expose`) shows the windows
+of the workspace small, side by side, each in its own shape and all made
+smaller by the same measure, with their titles under them. Press one to go
+to it; the arrows and Enter do the same, Escape or a press beside them puts
+the overview away. On Windows the windows themselves stay as they are: what
+is shown are live pictures of them, so no program is resized. How large a
+window is shown follows from the room the overview has, not from the window:
+one window alone is still shown smaller than it is.
+
+**Hot corners** (`desktop.hot_corners`; in the studio under *Mouse and
+gestures*). The pointer, put into a corner of a display and left there for a
+moment (`delay_ms`), runs that corner's command. Every display has its
+corners. Unless the configuration says otherwise there is one: the top left
+corner shows the overview of the windows. A corner runs once, and again
+after the pointer has left it; nothing runs while a mouse button is held or
+over a program that fills the display. On Linux the corners are not watched
+yet.
+
 The launcher, panels, lock, screenshots, sound, brightness and media are the
 shell's to carry out: a binding announces what is wanted (`gevrek log --json`
 shows `shell.command`, and `gevrek shell <action>` announces the same from

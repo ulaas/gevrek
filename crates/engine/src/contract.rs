@@ -402,6 +402,14 @@ pub trait Desktop: WindowQueries {
     /// `desktop.animations.workspace_style` says; a desktop that draws
     /// its windows itself needs nothing of this.
     fn workspace_gives_way(&mut self) {}
+    /// Show these windows as live pictures of themselves, small, in
+    /// `area`, to choose one of (`expose::arrange` says where); or put
+    /// that away where it is shown. The windows themselves stay as they
+    /// are. `None`: this desktop cannot, and the windows themselves are
+    /// arranged instead (`expose::activate`).
+    fn toggle_window_overview(&mut self, _windows: &[WindowId], _area: Rect) -> Option<bool> {
+        None
+    }
     fn begin_workspace_transition(
         &mut self,
         operations: &[(WindowId, Rect)],

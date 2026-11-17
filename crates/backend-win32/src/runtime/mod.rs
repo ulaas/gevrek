@@ -79,6 +79,14 @@ pub struct Runtime {
     gesture_progress: Option<crate::dwm::GestureProgressData>,
     /// The outputs as last published, to tell subscribers what changed.
     published_monitors: Vec<gevrek_engine::overlay_data::MonitorData>,
+    /// Something was told, or done, since the state was last published:
+    /// it is published again at the end of the pass. (Who hears of a
+    /// change asks for the state; an answer from before the change showed
+    /// a panel the old until something else happened.)
+    state_stale: std::cell::Cell<bool>,
+    /// The corner of a display the pointer is in, and since when
+    /// (`desktop.hot_corners`).
+    hot_corners: gevrek_engine::hot_corners::Watch,
     gesture_progress_updated: Option<std::time::Instant>,
     /// When the last display notification arrived; the monitor model is
     /// reconciled once notifications have been quiet for a moment.
@@ -410,6 +418,8 @@ impl Runtime {
             event_loop_fps: 0.0,
             gesture_progress: None,
             published_monitors: Vec::new(),
+            state_stale: std::cell::Cell::new(false),
+            hot_corners: Default::default(),
             gesture_progress_updated: None,
             display_change_pending: None,
             held_openings: held::Held::default(),
@@ -504,6 +514,11 @@ impl Runtime {
         }
         if let Some(new_config) = hot_reload {
             self.reload_configuration(new_config);
+            // The state as it is now, before anybody is told that the
+            // configuration is: who made the change asks for the state as
+            // soon as it hears, and is to get what the change made of it
+            // (a workspace's new title, on its tab).
+            self.send_debug_overlay_data(Some("configuration".to_string()));
             if from_request {
                 // Its own publish, right away: the server waits for this
                 // request, and its revision must not be shared with a
@@ -547,6 +562,14 @@ impl Runtime {
         window_handle: Option<crate::dwm::WindowHandle>,
         fields: impl IntoIterator<Item = (String, String)>,
     ) {
+        // (A window that is dragged tells of its place many times a
+        // second; nothing that is published follows it.)
+        if !matches!(
+            kind,
+            RuntimeEventKind::WindowMoved | RuntimeEventKind::WindowResized
+        ) {
+            self.state_stale.set(true);
+        }
         let Some(broadcast) = &self.node_event_broadcast else {
             return;
         };
@@ -1430,6 +1453,17 @@ impl Runtime {
                 }
             }
 
+            // Hot corners: the pointer, left in a corner of a display
+            // for a moment, runs that corner's command.
+            if self.config.desktop.hot_corners.watched() {
+                if let Some(command) = self.hot_corner_due() {
+                    log::info!("A hot corner runs: {}", command.display_name());
+                    if let Err(error) = self.execute_runtime_dispatch(command) {
+                        log::error!("A hot corner's command could not be run: {error}");
+                    }
+                }
+            }
+
             // Focus-follows-mouse: check cursor position and focus window under cursor
             if self.core.focus_manager.focus_follows_mouse() {
                 let delay = std::time::Duration::from_millis(
@@ -1488,6 +1522,10 @@ impl Runtime {
 
             // Readers see every configuration change made during this pass.
             self.publish_config_if_changed();
+            // And the state, where something was told or done in it.
+            if self.state_stale.get() {
+                self.send_debug_overlay_data(None);
+            }
 
             self.window_manager.tick_effects();
 
@@ -1542,11 +1580,25 @@ impl Runtime {
                     || self.display_change_pending.is_some()
                     || self.gesture_progress.is_some(),
                 since_work: last_work.map(|at| at.elapsed()),
-                watch_mouse_every: self.core.focus_manager.focus_follows_mouse().then(|| {
-                    std::time::Duration::from_millis(
-                        self.core.focus_manager.config().focus_delay_ms as u64,
-                    )
-                }),
+                watch_mouse_every: {
+                    let follows = self.core.focus_manager.focus_follows_mouse().then(|| {
+                        std::time::Duration::from_millis(
+                            self.core.focus_manager.config().focus_delay_ms as u64,
+                        )
+                    });
+                    // (The pointer is looked for in the corners, often
+                    // enough for the moment it has to stay there.)
+                    let corners = self
+                        .config
+                        .desktop
+                        .hot_corners
+                        .watched()
+                        .then(|| std::time::Duration::from_millis(50));
+                    match (follows, corners) {
+                        (Some(one), Some(other)) => Some(one.min(other)),
+                        (one, other) => one.or(other),
+                    }
+                },
             };
             wait::for_work(wait::interval(frame, activity), frame);
         }
@@ -2342,6 +2394,7 @@ impl Runtime {
 
     /// Send authoritative all-workspace state to the debug overlay and IPC.
     fn send_debug_overlay_data(&mut self, last_event: Option<String>) {
+        self.state_stale.set(false);
         if let Some(ref overlay_data_mutex) = self.debug_overlay_data {
             let (monitor_data, total_windows) = self
                 .core
@@ -2436,6 +2489,52 @@ impl Runtime {
                 }
             }
         }
+    }
+
+    /// The command of the hot corner the pointer has been in for long
+    /// enough, if one is due now.
+    fn hot_corner_due(&mut self) -> Option<DispatchCommand> {
+        use windows::Win32::Foundation::POINT;
+        use windows::Win32::UI::Input::KeyboardAndMouse::{
+            GetAsyncKeyState, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+        let mut point = POINT::default();
+        // SAFETY: plain questions with a valid place for the answer.
+        let held = unsafe {
+            GetCursorPos(&mut point).ok()?;
+            [VK_LBUTTON, VK_RBUTTON, VK_MBUTTON]
+                .iter()
+                .any(|button| GetAsyncKeyState(button.0 as i32) < 0)
+        };
+        let displays: Vec<gevrek_model::geometry::Rect> = self
+            .core
+            .monitor_manager
+            .get_all_monitors()
+            .iter()
+            .map(|monitor| {
+                gevrek_model::geometry::Rect::new(
+                    monitor.x,
+                    monitor.y,
+                    monitor.width,
+                    monitor.height,
+                )
+            })
+            .collect();
+        let command = self.hot_corners.step(
+            &self.config.desktop.hot_corners,
+            &displays,
+            (point.x, point.y),
+            held,
+            std::time::Instant::now(),
+        )?;
+        // Not over a program that fills the display (a game, a film): a
+        // pointer in its corner means something there.
+        let fills = gevrek_engine::contract::WindowQueries::active_window(&self.window_manager)
+            .is_some_and(|window| {
+                gevrek_engine::contract::WindowQueries::is_fullscreen(&self.window_manager, window)
+            });
+        (!fills).then_some(command)
     }
 
     /// Get the window under the current cursor position (for focus-follows-mouse).
@@ -2666,6 +2765,7 @@ impl Runtime {
     }
 
     fn execute_runtime_dispatch(&mut self, command: DispatchCommand) -> Result<()> {
+        self.state_stale.set(true);
         let command_name = command.display_name().to_string();
         let command_json = serde_json::to_string(&command).unwrap_or_else(|_| command_name.clone());
         let result = match command {

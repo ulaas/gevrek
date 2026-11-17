@@ -1513,6 +1513,14 @@ impl Studio {
                         });
                         continue;
                     }
+                    // The hot corners, corner by corner: a display has
+                    // four, and each does one thing.
+                    if card.pointer == "/desktop/hot_corners" {
+                        widgets::card(ui, card.title, |ui| {
+                            crate::hot_corners::show(ui, &mut self.document)
+                        });
+                        continue;
+                    }
                     // The night light's settings are a span of the day
                     // and a colour: drawn as those, not as four lines.
                     if card.pointer == "/desktop/night_light" {

@@ -19,6 +19,7 @@ pub mod form;
 pub mod gesture_live;
 pub mod graph;
 pub mod history;
+pub mod hot_corners;
 pub mod inspect;
 pub mod keyboard_layouts;
 pub mod night_light;

@@ -18,6 +18,145 @@ pub const GRID_OUTER_PADDING: i32 = 20;
 /// Windows to move and where.
 pub type Moves = Vec<(WindowId, Rect)>;
 
+/// Between two pictures of an overview that shows the windows as
+/// pictures of themselves ([`arrange`]).
+pub const PICTURE_GAP: i32 = 36;
+/// Under each picture: the room of its window's title.
+pub const PICTURE_TITLE: i32 = 30;
+/// The largest a picture gets, of the room the pictures have, each way.
+/// (One window alone is not shown as large as it is: an overview is seen
+/// to be one.)
+pub const PICTURE_LARGEST: f64 = 0.72;
+
+/// Where the pictures of windows go in an overview of them, in `area`:
+/// every window as it looks (its own shape), all of them made smaller by
+/// the same measure, so that what is large stays larger than what is
+/// small; in rows, in the order they stand on the screen, the whole in
+/// the middle of the area. The measure is the largest at which all of
+/// them fit, and at which none is larger than [`PICTURE_LARGEST`] of the
+/// area: the area says how large a window is shown, not the window.
+///
+/// `windows` are the windows with where they are; one without a size is
+/// left out.
+pub fn arrange(windows: &[(WindowId, Rect)], area: Rect) -> Moves {
+    let mut ordered: Vec<(WindowId, Rect)> = windows
+        .iter()
+        .copied()
+        .filter(|(_, rect)| rect.width > 0 && rect.height > 0)
+        .collect();
+    if ordered.is_empty() {
+        return Vec::new();
+    }
+    // From the top, and from the left where two are as high.
+    ordered.sort_by_key(|(window, rect)| {
+        (
+            rect.y + rect.height / 2,
+            rect.x + rect.width / 2,
+            window.0,
+        )
+    });
+    let margin = ((area.width / 14).max(24), (area.height / 14).max(24));
+    let room = Rect::new(
+        area.x + margin.0,
+        area.y + margin.1,
+        (area.width - 2 * margin.0).max(1),
+        (area.height - 2 * margin.1).max(1),
+    );
+    let total: f64 = ordered.iter().map(|(_, rect)| f64::from(rect.width)).sum();
+    // The rows a number of rows makes: each as wide as the others, as
+    // far as whole windows allow.
+    let rows_of = |count: usize| -> Vec<Vec<usize>> {
+        let each = total / count as f64;
+        let mut rows = vec![Vec::new(); count];
+        let mut before = 0.0;
+        for (index, (_, rect)) in ordered.iter().enumerate() {
+            let middle = before + f64::from(rect.width) / 2.0;
+            rows[((middle / each) as usize).min(count - 1)].push(index);
+            before += f64::from(rect.width);
+        }
+        rows.retain(|row| !row.is_empty());
+        rows
+    };
+    // The measure at which these rows fit.
+    let measure_of = |rows: &[Vec<usize>]| -> f64 {
+        let across = rows
+            .iter()
+            .map(|row| {
+                let width: f64 = row.iter().map(|at| f64::from(ordered[*at].1.width)).sum();
+                f64::from(room.width - PICTURE_GAP * (row.len() as i32 - 1)) / width
+            })
+            .fold(f64::INFINITY, f64::min);
+        let heights: f64 = rows
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|at| f64::from(ordered[*at].1.height))
+                    .fold(0.0, f64::max)
+            })
+            .sum();
+        let count = rows.len() as i32;
+        let down =
+            f64::from(room.height - PICTURE_TITLE * count - PICTURE_GAP * (count - 1)) / heights;
+        across.min(down)
+    };
+    let largest = ordered
+        .iter()
+        .map(|(_, rect)| {
+            (PICTURE_LARGEST * f64::from(room.width) / f64::from(rect.width))
+                .min(PICTURE_LARGEST * f64::from(room.height) / f64::from(rect.height))
+        })
+        .fold(1.0, f64::min);
+    let mut best: Option<(f64, Vec<Vec<usize>>)> = None;
+    for count in 1..=ordered.len() {
+        let rows = rows_of(count);
+        let measure = measure_of(&rows).min(largest);
+        if best.as_ref().is_none_or(|(so_far, _)| measure > *so_far + 1e-9) {
+            best = Some((measure, rows));
+        }
+    }
+    let Some((measure, mut rows)) = best else {
+        return Vec::new();
+    };
+    // (Very many windows on a small display: seen, however small.)
+    let measure = measure.max(0.02);
+    let small = |length: i32| ((f64::from(length) * measure).round() as i32).max(1);
+    let row_height = |row: &[usize]| {
+        row.iter()
+            .map(|at| small(ordered[*at].1.height))
+            .max()
+            .unwrap_or(1)
+    };
+    let whole: i32 = rows
+        .iter()
+        .map(|row| row_height(row) + PICTURE_TITLE)
+        .sum::<i32>()
+        + PICTURE_GAP * (rows.len() as i32 - 1);
+    let mut top = room.y + (room.height - whole) / 2;
+    let mut places = Vec::with_capacity(ordered.len());
+    for row in &mut rows {
+        // In a row, from the left.
+        row.sort_by_key(|at| {
+            let rect = ordered[*at].1;
+            (rect.x + rect.width / 2, rect.y, ordered[*at].0 .0)
+        });
+        let height = row_height(row);
+        let width: i32 = row.iter().map(|at| small(ordered[*at].1.width)).sum::<i32>()
+            + PICTURE_GAP * (row.len() as i32 - 1);
+        let mut left = room.x + (room.width - width) / 2;
+        for at in row.iter() {
+            let (window, rect) = ordered[*at];
+            let (wide, high) = (small(rect.width), small(rect.height));
+            places.push((
+                window,
+                Rect::new(left, top + (height - high) / 2, wide, high),
+            ));
+            left += wide + PICTURE_GAP;
+        }
+        top += height + PICTURE_TITLE + PICTURE_GAP;
+    }
+    places
+}
+
 pub fn is_active(workspace: &Workspace) -> bool {
     workspace.expose_state.is_some()
 }
@@ -235,6 +374,89 @@ mod tests {
         assert_eq!(restored[0], (W1, Rect::new(100, 0, 500, 400)));
         assert!(!is_active(&ws));
         assert!(deactivate(&mut ws).is_empty());
+    }
+
+    fn within(inner: Rect, outer: Rect) -> bool {
+        inner.x >= outer.x
+            && inner.y >= outer.y
+            && inner.x + inner.width <= outer.x + outer.width
+            && inner.y + inner.height <= outer.y + outer.height
+    }
+
+    #[test]
+    fn pictures_keep_their_shape_and_all_fit_the_area() {
+        // Two halves of the screen and a small window over them.
+        let windows = [
+            (W1, Rect::new(0, 0, 960, 1040)),
+            (W2, Rect::new(960, 0, 960, 1040)),
+            (W3, Rect::new(700, 300, 400, 300)),
+        ];
+        let places = arrange(&windows, AREA);
+        assert_eq!(places.len(), 3);
+        for (window, place) in &places {
+            let was = windows.iter().find(|(id, _)| id == window).unwrap().1;
+            assert!(within(*place, AREA), "{place:?} is not in the area");
+            // Smaller, and of the shape it has.
+            assert!(place.width < was.width && place.height < was.height);
+            let shape = f64::from(was.width) / f64::from(was.height);
+            let shown = f64::from(place.width) / f64::from(place.height);
+            assert!((shape - shown).abs() < 0.02, "{was:?} is shown as {place:?}");
+        }
+        // By the same measure: the small one stays the smallest.
+        let width = |window| places.iter().find(|(id, _)| *id == window).unwrap().1.width;
+        assert!(width(W3) < width(W1));
+        assert_eq!(width(W1), width(W2));
+        // None over another.
+        for (index, (_, one)) in places.iter().enumerate() {
+            for (_, other) in &places[index + 1..] {
+                let apart = one.x + one.width <= other.x
+                    || other.x + other.width <= one.x
+                    || one.y + one.height <= other.y
+                    || other.y + other.height <= one.y;
+                assert!(apart, "{one:?} and {other:?} are over each other");
+            }
+        }
+    }
+
+    #[test]
+    fn the_area_says_how_large_a_picture_is() {
+        // One window that fills the screen: shown well smaller than it is.
+        let alone = arrange(&[(W1, AREA)], AREA);
+        let place = alone[0].1;
+        assert!(f64::from(place.width) <= f64::from(AREA.width) * PICTURE_LARGEST);
+        assert!(f64::from(place.height) <= f64::from(AREA.height) * PICTURE_LARGEST);
+        // In the middle of the area.
+        let middle = place.x + place.width / 2;
+        assert!((middle - AREA.width / 2).abs() <= 1);
+        // A small window is not made larger than it is.
+        let small = arrange(&[(W1, Rect::new(10, 10, 300, 200))], AREA);
+        assert_eq!((small[0].1.width, small[0].1.height), (300, 200));
+        // In half the area the same windows are shown half as large.
+        let half = Rect::new(0, 0, 960, 520);
+        let there = arrange(&[(W1, AREA)], half);
+        assert!((there[0].1.width * 2 - place.width).abs() <= 4);
+    }
+
+    #[test]
+    fn many_windows_are_shown_in_rows_from_where_they_stand() {
+        let windows: Vec<(WindowId, Rect)> = (0..9)
+            .map(|at| {
+                (
+                    WindowId(at + 1),
+                    Rect::new((at as i32 % 3) * 640, (at as i32 / 3) * 340, 640, 340),
+                )
+            })
+            .collect();
+        let places = arrange(&windows, AREA);
+        assert_eq!(places.len(), 9);
+        assert!(places.iter().all(|(_, place)| within(*place, AREA)));
+        let place = |window| places.iter().find(|(id, _)| *id == WindowId(window)).unwrap().1;
+        // The one at the top left is shown at the top left, the one at
+        // the bottom right at the bottom right.
+        assert!(place(1).x < place(3).x && place(1).y < place(9).y);
+        assert!(place(9).x > place(7).x);
+        assert!(arrange(&[], AREA).is_empty());
+        assert!(arrange(&[(W1, Rect::new(0, 0, 0, 10))], AREA).is_empty());
     }
 
     #[test]
