@@ -244,13 +244,84 @@ pub fn edit_entry(document: &mut Document, name: &str, change: impl FnOnce(&mut 
     });
 }
 
+/// The displays that are written down and not among `attached` (not
+/// attached now, or all of them where no window manager says which are):
+/// each with all of its settings, and a way to take it out. This is the
+/// one place a display is set that the window manager does not have now.
+fn written_down(ui: &mut Ui, document: &mut Document, attached: &[String], running: bool) {
+    let palette = theme::pal(ui.ctx());
+    let entries: Vec<(usize, String)> = document
+        .get(LIST)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .map(|(index, entry)| (index, entry["name"].as_str().unwrap_or("").to_string()))
+        .filter(|(_, name)| !attached.iter().any(|known| known.eq_ignore_ascii_case(name)))
+        .collect();
+    if !running {
+        ui.label(
+            egui::RichText::new(
+                "The window manager is not running: its displays, and the modes they offer, are not known here.",
+            )
+            .color(palette.muted),
+        );
+    }
+    if entries.is_empty() {
+        return;
+    }
+    ui.add_space(8.0);
+    gevrek_ui::widgets::caption(
+        ui,
+        if running {
+            "Written down, not attached now"
+        } else {
+            "Written down"
+        },
+    );
+    let mut remove = None;
+    for (index, name) in entries {
+        let title = if name.trim().is_empty() {
+            "A display without a name".to_string()
+        } else {
+            name
+        };
+        egui::CollapsingHeader::new(title)
+            .id_salt(("a display written down", index))
+            .show(ui, |ui| {
+                crate::form::Form::new(document).fields(ui, &format!("{LIST}/{index}"), &[]);
+                if gevrek_ui::widgets::text_button(ui, gevrek_ui::icons::TRASH, "Take it out")
+                    .clicked()
+                {
+                    remove = Some(index);
+                }
+            });
+    }
+    if let Some(index) = remove {
+        document.edit(LIST, |list| {
+            if let Value::Array(entries) = list {
+                if index < entries.len() {
+                    entries.remove(index);
+                }
+            }
+        });
+    }
+}
+
 /// The settings of each display the window manager has: its mode from
-/// the ones it offers, its scale, whether it is used.
+/// the ones it offers, its scale, whether it is used, how it is turned;
+/// and below them the displays that are written down and not attached.
+/// Every setting of a display is here and nowhere else on the page.
 pub fn settings(ui: &mut Ui, document: &mut Document, state: Option<&Value>) {
     let palette = theme::pal(ui.ctx());
     let Some(state) = state else {
+        written_down(ui, document, &[], false);
         return;
     };
+    let attached: Vec<String> = displays_of(state)
+        .into_iter()
+        .map(|display| display.name)
+        .collect();
     for display in displays_of(state) {
         let entry = document
             .get(LIST)
@@ -322,8 +393,60 @@ pub fn settings(ui: &mut Ui, document: &mut Document, state: Option<&Value>) {
                     edit_entry(document, &display.name, |entry| entry["enabled"] = Value::Bool(used));
                 }
             });
+            // What is set more rarely, under it: how it is turned,
+            // whether its refresh rate follows the program that fills
+            // it, and whether it is the first of the displays.
+            ui.horizontal(|ui| {
+                ui.add_space(14.0);
+                let turned = entry["transform"].as_str().unwrap_or("normal").to_string();
+                let ways: Vec<(String, String, String)> = [
+                    ("normal", "Upright"),
+                    ("right", "Turned to the right"),
+                    ("upside_down", "Upside down"),
+                    ("left", "Turned to the left"),
+                ]
+                .into_iter()
+                .map(|(value, name)| (value.to_string(), name.to_string(), String::new()))
+                .collect();
+                if let Some(new) = gevrek_ui::widgets::dropdown(ui, "turned", &turned, &ways, 170.0) {
+                    edit_entry(document, &display.name, |entry| {
+                        entry["transform"] = Value::String(new)
+                    });
+                }
+                let mut follows = entry["variable_refresh"].as_bool().unwrap_or(false);
+                if gevrek_ui::widgets::checkbox(ui, &mut follows, "Variable refresh")
+                    .on_hover_text(
+                        "The refresh rate follows the program that fills the display, where the display can.",
+                    )
+                    .changed()
+                {
+                    edit_entry(document, &display.name, |entry| {
+                        entry["variable_refresh"] = Value::Bool(follows)
+                    });
+                }
+                let mut primary = entry["primary"].as_bool().unwrap_or(false);
+                if gevrek_ui::widgets::checkbox(ui, &mut primary, "Primary")
+                    .on_hover_text("New windows and the first workspace go to it.")
+                    .changed()
+                {
+                    // (One display is that: the others are not.)
+                    if primary {
+                        document.edit(LIST, |list| {
+                            for other in list.as_array_mut().into_iter().flatten() {
+                                if other.get("primary").is_some() {
+                                    other["primary"] = Value::Bool(false);
+                                }
+                            }
+                        });
+                    }
+                    edit_entry(document, &display.name, |entry| {
+                        entry["primary"] = Value::Bool(primary)
+                    });
+                }
+            });
         });
     }
+    written_down(ui, document, &attached, true);
     ui.add_space(2.0);
     ui.label(
         egui::RichText::new("A new mode, or a display switched off, is on trial when applied: keep it within 15 seconds or it goes back.")

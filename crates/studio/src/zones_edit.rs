@@ -4,8 +4,10 @@
 //! taken by its middle and moved, or by an edge or a corner and made
 //! wider or narrower; what is dragged catches on the display's edges and
 //! on the other zones' edges, so that zones that are meant to meet do.
-//! Zones are added and taken out here, and a layout begun from one of
-//! the ones gevrek knows. The same numbers are in the form below.
+//! Zones are added and taken out here, a layout begun from one of the
+//! ones gevrek knows, and a display given a layout of its own. The zones'
+//! places are set here and nowhere else: the form below has only how
+//! they behave.
 
 use crate::document::Document;
 use egui::{RichText, Ui};
@@ -411,6 +413,84 @@ impl ZonesEdit {
                 );
             }
         });
+        // The room around the chosen zone's window.
+        if let Some(chosen) = self.chosen.filter(|chosen| *chosen < zones.len()) {
+            crate::form::Form::new(document).only(ui, &format!("{zones_at}/{chosen}"), &["gap"]);
+        }
+
+        // What a layout is called, and the layouts single displays have
+        // of their own: set here too, so that everything of the zones'
+        // places is in this card and nowhere else.
+        ui.add_space(6.0);
+        let mut add_own = false;
+        let mut remove_own = false;
+        egui::CollapsingHeader::new("This layout's name, and layouts of single displays")
+            .id_salt("the zones' layouts")
+            .show(ui, |ui| {
+                crate::form::Form::new(document).only(ui, &layout, &["name", "description"]);
+                if self.which > 0 {
+                    crate::form::Form::new(document).only(
+                        ui,
+                        &format!("{ZONES}/monitor_layouts/{}", self.which - 1),
+                        &["enabled", "monitor"],
+                    );
+                }
+                ui.horizontal(|ui| {
+                    if gevrek_ui::widgets::text_button(
+                        ui,
+                        icons::PLUS,
+                        "A layout of its own for a display",
+                    )
+                    .on_hover_text("Begun as a copy of the one shown; then say which display.")
+                    .clicked()
+                    {
+                        add_own = true;
+                    }
+                    if self.which > 0
+                        && gevrek_ui::widgets::text_button(
+                            ui,
+                            icons::TRASH,
+                            "Take this display's own layout out",
+                        )
+                        .clicked()
+                    {
+                        remove_own = true;
+                    }
+                });
+            });
+        if add_own {
+            let copy = document.get(&layout).cloned().unwrap_or(Value::Null);
+            let mut own = serde_json::to_value(gevrek_model::settings::MonitorZoneLayout::default())
+                .unwrap_or_else(|_| json!({}));
+            if !copy.is_null() {
+                own["layout"] = copy;
+            }
+            let mut count = 0;
+            document.edit(&format!("{ZONES}/monitor_layouts"), |layouts| {
+                if let Some(layouts) = layouts.as_array_mut() {
+                    layouts.push(own);
+                    count = layouts.len();
+                }
+            });
+            if count > 0 {
+                self.which = count;
+                self.chosen = None;
+                self.drag = None;
+            }
+        }
+        if remove_own {
+            let at = self.which - 1;
+            document.edit(&format!("{ZONES}/monitor_layouts"), |layouts| {
+                if let Some(layouts) = layouts.as_array_mut() {
+                    if at < layouts.len() {
+                        layouts.remove(at);
+                    }
+                }
+            });
+            self.which = 0;
+            self.chosen = None;
+            self.drag = None;
+        }
     }
 }
 

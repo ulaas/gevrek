@@ -290,6 +290,7 @@ impl<'a> Form<'a> {
             .get(pointer)
             .and_then(Value::as_array)
             .map_or(0, Vec::len);
+        let ordered_here = !ORDERED_ELSEWHERE.contains(&pointer);
         let mut add = false;
         ui.horizontal(|ui| {
             section_title(ui, &format!("{label}  ·  {count}"), node.description());
@@ -318,7 +319,7 @@ impl<'a> Form<'a> {
                     if let Some(new) = changed {
                         self.document.set(&place, new);
                     }
-                    item_buttons(ui, index, count, &mut action);
+                    item_buttons(ui, index, count, ordered_here, &mut action);
                 });
                 continue;
             }
@@ -337,7 +338,7 @@ impl<'a> Form<'a> {
                 .show_header(ui, |ui| {
                     ui.label(RichText::new(summary).strong());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        item_buttons(ui, index, count, &mut action);
+                        item_buttons(ui, index, count, ordered_here, &mut action);
                     });
                 })
                 .body(|ui| self.inside(ui, &place, item, depth + 1));
@@ -867,9 +868,22 @@ enum ItemAction {
     Down(usize),
 }
 
-fn item_buttons(ui: &mut Ui, index: usize, count: usize, action: &mut Option<ItemAction>) {
+/// The lists whose order is set somewhere better than by an item's two
+/// arrows (dragged, on their page): they have no arrows here.
+const ORDERED_ELSEWHERE: [&str; 1] = ["/desktop/window_rules"];
+
+fn item_buttons(
+    ui: &mut Ui,
+    index: usize,
+    count: usize,
+    ordered_here: bool,
+    action: &mut Option<ItemAction>,
+) {
     if widgets::small_icon_button(ui, icons::TRASH, "Remove").clicked() {
         *action = Some(ItemAction::Remove(index));
+    }
+    if !ordered_here {
+        return;
     }
     if index + 1 < count && widgets::small_icon_button(ui, icons::ARROW_DOWN, "Move down").clicked()
     {

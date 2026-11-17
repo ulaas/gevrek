@@ -1383,8 +1383,8 @@ impl Studio {
                         crate::system_idle::show(ui);
                     });
                 }
-                // The panel's modules, placed by dragging (the same
-                // lists are in the form below).
+                // The panel's modules, placed by dragging (the form below
+                // leaves these lists out).
                 if page == Page::Bar {
                     widgets::card(ui, "What stands on it", |ui| {
                         crate::panel_modules::show(ui, &mut self.document);
@@ -1480,6 +1480,39 @@ impl Studio {
                     });
                 }
                 for card in page.cards() {
+                    // The displays are set in the cards above, each by
+                    // its own controls: no second list of them here.
+                    if card.pointer == "/desktop/outputs" {
+                        continue;
+                    }
+                    // A display's scale is set with the display. The list
+                    // of scales by name is the older way to say the same:
+                    // shown only where a file still has something in it.
+                    if card.pointer == "/desktop/platform/wayland"
+                        && matches!(card.show, Show::Only(_))
+                    {
+                        let older = self
+                            .document
+                            .get("/desktop/platform/wayland/output_scales")
+                            .and_then(|scales| scales.as_object())
+                            .is_some_and(|scales| !scales.is_empty());
+                        widgets::card(ui, card.title, |ui| {
+                            let mut form = Form::new(&mut self.document);
+                            form.highlight = highlight.as_deref();
+                            form.only(ui, card.pointer, &["output_scale"]);
+                            if older {
+                                ui.label(
+                                    RichText::new(
+                                        "Scales by a display's name, from an older file. A display's own scale, above, comes first.",
+                                    )
+                                    .size(12.0)
+                                    .color(palette.muted),
+                                );
+                                form.only(ui, card.pointer, &["output_scales"]);
+                            }
+                        });
+                        continue;
+                    }
                     // The night light's settings are a span of the day
                     // and a colour: drawn as those, not as four lines.
                     if card.pointer == "/desktop/night_light" {
@@ -1526,7 +1559,9 @@ impl Studio {
                                     form.place(ui, card.pointer, node, card.title, 0);
                                 }
                             }
-                            Show::AllBut(skip) => form.fields(ui, card.pointer, skip),
+                            Show::AllBut(skip) | Show::Rest(skip) => {
+                                form.fields(ui, card.pointer, skip)
+                            }
                             Show::Only(names) => form.only(ui, card.pointer, names),
                         }
                     });

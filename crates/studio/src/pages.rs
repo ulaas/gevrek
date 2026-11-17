@@ -46,6 +46,10 @@ pub enum Show {
     AllBut(&'static [&'static str]),
     /// These fields of the object, in this order.
     Only(&'static [&'static str]),
+    /// Every field of the object; these of them are drawn by a card of
+    /// the page's own (dragged, chosen by looking), and the form leaves
+    /// them out. One thing is set in one place.
+    Rest(&'static [&'static str]),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -327,7 +331,12 @@ impl Page {
             &[card("Workspaces", "/desktop/workspaces", Show::Place)];
         const ANIMATIONS: &[Card] = &[card("Animations", "/desktop/animations", Show::AllBut(&[]))];
         const BAR: &[Card] = &[
-            card("Panel", "/desktop/shell/panel", Show::AllBut(&[])),
+            // (What stands on it is placed by dragging, in the card above.)
+            card(
+                "Panel",
+                "/desktop/shell/panel",
+                Show::Rest(&["left", "centre", "right"]),
+            ),
             card(
                 "Control centre and notifications",
                 "/desktop/shell/glass",
@@ -360,10 +369,20 @@ impl Page {
             ),
         ];
         const SCRATCHPADS: &[Card] = &[card("Scratchpads", "/desktop/scratchpads", Show::Place)];
-        const ZONES: &[Card] = &[card("Snap zones", "/desktop/zones", Show::AllBut(&[]))];
+        // (The zones themselves are drawn and dragged in the card above.)
+        const ZONES: &[Card] = &[card(
+            "How they behave",
+            "/desktop/zones",
+            Show::Rest(&["default_layout", "monitor_layouts"]),
+        )];
         const FOCUS: &[Card] = &[card("Focus", "/desktop/focus", Show::AllBut(&[]))];
         const INPUT: &[Card] = &[
-            card("Keyboard", "/desktop/input/keyboard", Show::AllBut(&[])),
+            // (Its layouts are chosen by name in the card above.)
+            card(
+                "Keyboard",
+                "/desktop/input/keyboard",
+                Show::Rest(&["layouts"]),
+            ),
             card("Mouse", "/desktop/input/mouse", Show::AllBut(&[])),
             card("Touchpad", "/desktop/input/touchpad", Show::AllBut(&[])),
         ];
@@ -430,7 +449,9 @@ impl Page {
         let mut places = Vec::new();
         for card in self.cards() {
             match card.show {
-                Show::Place | Show::AllBut(_) => places.push(card.pointer.to_string()),
+                Show::Place | Show::AllBut(_) | Show::Rest(_) => {
+                    places.push(card.pointer.to_string())
+                }
                 Show::Only(names) => {
                     places.extend(names.iter().map(|name| format!("{}/{name}", card.pointer)))
                 }
@@ -453,7 +474,7 @@ impl Card {
         };
         let first = rest.split('/').next().unwrap_or(rest);
         match self.show {
-            Show::Place => true,
+            Show::Place | Show::Rest(_) => true,
             Show::AllBut(skipped) => !skipped.contains(&first),
             Show::Only(names) => names.contains(&first),
         }
@@ -496,7 +517,7 @@ mod tests {
                     page,
                     card.pointer
                 );
-                if let Show::Only(names) | Show::AllBut(names) = card.show {
+                if let Show::Only(names) | Show::AllBut(names) | Show::Rest(names) = card.show {
                     for name in names {
                         let place = format!("{}/{name}", card.pointer);
                         assert!(

@@ -4,8 +4,8 @@
 //! that are not on the panel, to be dragged onto it. A piece dragged to
 //! those is taken off.
 //!
-//! The same lists are in the form below it (`left`, `centre`, `right` of
-//! `desktop.shell.panel`); this is the quicker way to the same thing.
+//! These are the lists `left`, `centre`, `right` of `desktop.shell.panel`.
+//! They are set here and nowhere else: the form below leaves them out.
 
 use crate::document::Document;
 use egui::{RichText, Ui};
