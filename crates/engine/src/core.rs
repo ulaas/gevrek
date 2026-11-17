@@ -183,6 +183,9 @@ impl WmCore {
                 workspace_id: placement.map(|(_, index)| index),
                 workspace_name: workspace.map(|workspace| workspace.name.clone()),
                 monitor: placement.map(|(monitor, _)| monitor),
+                monitor_known_as: placement
+                    .and_then(|(monitor, _)| self.monitor_manager.get_monitor(monitor))
+                    .map(crate::executor::display_known_as),
                 is_floating: workspace.is_some_and(|workspace| {
                     workspace
                         .floating_windows
@@ -198,11 +201,20 @@ impl WmCore {
                 }),
             });
         }
-        for (handle, _info) in self.monitor_manager.get_monitors_with_handles() {
+        for (handle, info) in self.monitor_manager.get_monitors_with_handles() {
             if let Some(workspaces) = self.monitor_manager.get_workspaces(handle) {
                 state
                     .focused_workspaces
                     .insert(handle, workspaces.focused_idx());
+                if let Some(shown) = workspaces.get(workspaces.focused_idx()) {
+                    state
+                        .shown_workspaces
+                        .push(crate::persistence::ShownWorkspace {
+                            monitor: handle,
+                            monitor_known_as: crate::executor::display_known_as(&info),
+                            workspace_name: shown.name.clone(),
+                        });
+                }
             }
         }
         state.persistent_window_sizes = self.executor.persistent_window_sizes();

@@ -74,6 +74,11 @@ impl State {
         if !self.held.is_empty() && !self.paused {
             return true;
         }
+        // (The pointer rests in a hot corner: its moment is over by time
+        // alone, with no event to say so.)
+        if self.hot_corners.waits() && !self.paused {
+            return true;
+        }
         if self.pending_program.is_some()
             || self.wallpapers.borrow().any_fading()
             || self.lock_change.is_some()
@@ -250,6 +255,8 @@ impl State {
             }
         }
         self.tick_held(std::time::Instant::now());
+        self.tick_hot_corners(std::time::Instant::now());
+        self.sync_window_overview();
         self.tick_lock_change();
 
         let due = self.host.as_ref().is_some_and(|host| {
@@ -322,6 +329,12 @@ impl State {
         if let Some(new_config) = new_config {
             self.host_pace.last_work = Some(std::time::Instant::now());
             self.reload_configuration(new_config);
+            // The state as it is now, before anybody is told that the
+            // configuration is: who made the change asks for the state as
+            // soon as it hears, and is to get what the change made of it
+            // (a workspace's new title, on its tab), not what was there a
+            // quarter of a second ago.
+            self.publish_overlay(Some("configuration".to_string()));
             if from_request {
                 // Its own publish, right away: the server waits for it.
                 self.config_dirty = false;

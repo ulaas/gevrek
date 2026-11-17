@@ -208,6 +208,9 @@ impl<'a> Form<'a> {
         let highlight = self.highlight == Some(pointer);
         let current = self.document.get(pointer).cloned().unwrap_or(Value::Null);
         let mut changed = None;
+        let workspaces = (matches!(kind, Kind::Text) && names_a_workspace(self.document, pointer))
+            .then(|| workspaces_of(self.document))
+            .filter(|workspaces| !workspaces.is_empty());
         // A setting that does not take effect at once says when it does,
         // beside its name, and why, with what it is for.
         let waits = gevrek_schema::waits(pointer);
@@ -229,7 +232,13 @@ impl<'a> Form<'a> {
             highlight,
             |ui| {
                 ui.push_id(pointer, |ui| {
-                    changed = control(ui, pointer, kind, &current);
+                    // A workspace's name is chosen from the workspaces
+                    // there are, not typed: a name that is typed and
+                    // names none does nothing, and says nothing.
+                    changed = match &workspaces {
+                        Some(workspaces) => workspace_control(ui, workspaces, &current),
+                        None => control(ui, pointer, kind, &current),
+                    };
                 });
             },
         );
@@ -299,7 +308,8 @@ impl<'a> Form<'a> {
             }
         });
         if add {
-            let new = item.blank();
+            let mut new = item.blank();
+            new_for_this_system(&mut new, gevrek_model::examples::default_terminal());
             self.document.edit_in_place(pointer, &mut |list| {
                 if let Value::Array(items) = list {
                     items.push(new.clone());
@@ -671,6 +681,160 @@ fn is_simple(kind: &Kind<'_>) -> bool {
     }
 }
 
+/// A new entry of a list begins as the model's own (`Default`), which
+/// names Windows' terminal as the program to start and to look for (a
+/// new startup program, a new scratchpad). Where the terminal of this
+/// system is another, the new entry names that one: an entry that
+/// starts nothing here is no place to begin from. (The model's own stays
+/// as it is: what a file leaves out is read the same on every system.)
+pub fn new_for_this_system(new: &mut Value, terminal: &str) {
+    if terminal.eq_ignore_ascii_case("wt.exe") {
+        return;
+    }
+    match new {
+        Value::String(text) => {
+            if text.eq_ignore_ascii_case("wt.exe")
+                || text.eq_ignore_ascii_case("WindowsTerminal.exe")
+            {
+                *text = terminal.to_string();
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                new_for_this_system(item, terminal);
+            }
+        }
+        Value::Object(fields) => {
+            for (_, field) in fields.iter_mut() {
+                new_for_this_system(field, terminal);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Whether the text at `pointer` is the name of a workspace: the name a
+/// command goes by (`WorkspaceSelector::Name`, which the commands have
+/// as `selector` or `workspace`), or what a rule holds a window's
+/// workspace against where it asks for exactly that name.
+pub fn names_a_workspace(document: &dyn Store, pointer: &str) -> bool {
+    let Some((parent, "value")) = pointer.rsplit_once('/') else {
+        return false;
+    };
+    if parent.ends_with("/selector") || parent.ends_with("/workspace") {
+        // (Of its kinds only the name is a text.)
+        return document
+            .get(parent)
+            .is_some_and(|selector| selector["kind"] == "name");
+    }
+    parent.contains("/predicates/")
+        && document.get(parent).is_some_and(|predicate| {
+            predicate["kind"] == "Workspace" && predicate["strategy"] == "Equals"
+        })
+}
+
+/// The workspaces the configuration has, each once, in their order: the
+/// name it is known by, and what is shown of it (its title, or the name
+/// where it has none). Empty where the store is not a whole
+/// configuration.
+pub fn workspaces_of(document: &dyn Store) -> Vec<(String, String)> {
+    let mut found: Vec<(String, String)> = Vec::new();
+    for entry in document
+        .get("/desktop/workspaces")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let name = entry["name"].as_str().unwrap_or("").trim();
+        if name.is_empty() {
+            continue;
+        }
+        let title = entry["title"].as_str().unwrap_or("").trim();
+        match found
+            .iter_mut()
+            .find(|(known, _)| known.eq_ignore_ascii_case(name))
+        {
+            // (A display's own entry may be the one with the title.)
+            Some((known, shown)) => {
+                if shown == known && !title.is_empty() {
+                    *shown = title.to_string();
+                }
+            }
+            None => found.push((
+                name.to_string(),
+                if title.is_empty() { name } else { title }.to_string(),
+            )),
+        }
+    }
+    found
+}
+
+/// What the list shows of a workspace: its title, and its name beside it
+/// where that is another.
+pub fn workspace_line(name: &str, shown: &str) -> String {
+    if shown == name {
+        name.to_string()
+    } else {
+        format!("{shown}  ({name})")
+    }
+}
+
+/// The control for a workspace's name: the one that is chosen, and the
+/// others on a press. A name that none of them has is shown as it is,
+/// and said to be none of them (a workspace of the moment may have it:
+/// those go by their numbers). The pencil beside it is for such a name.
+fn workspace_control(ui: &mut Ui, workspaces: &[(String, String)], current: &Value) -> Option<Value> {
+    let name = current.as_str().unwrap_or("").to_string();
+    let typed = ui.scope_id().with("a workspace's name is typed");
+    let mut typing = ui.data(|data| data.get_temp::<bool>(typed)).unwrap_or(false);
+    let mut new = None;
+    ui.horizontal(|ui| {
+        if typing {
+            let mut text = name.clone();
+            if widgets::text_field(ui, &mut text, 190.0).changed() {
+                new = Some(Value::String(text));
+            }
+            if widgets::small_icon_button(ui, icons::CARET_DOWN, "Choose from the workspaces")
+                .clicked()
+            {
+                typing = false;
+            }
+            return;
+        }
+        let mut options: Vec<(String, String, String)> = workspaces
+            .iter()
+            .map(|(name, shown)| (name.clone(), workspace_line(name, shown), String::new()))
+            .collect();
+        let known = options
+            .iter()
+            .find(|(known, _, _)| known.eq_ignore_ascii_case(&name))
+            .map(|(known, _, _)| known.clone());
+        let chosen = match known {
+            Some(known) => known,
+            None => {
+                options.push((
+                    name.clone(),
+                    if name.trim().is_empty() {
+                        "(none chosen)".to_string()
+                    } else {
+                        format!("{name}  (not one of them)")
+                    },
+                    "No workspace of the configuration has this name.".to_string(),
+                ));
+                name.clone()
+            }
+        };
+        if let Some(picked) = widgets::dropdown(ui, "workspace", &chosen, &options, 220.0) {
+            new = Some(Value::String(picked));
+        }
+        if widgets::small_icon_button(ui, icons::PENCIL_SIMPLE, "Type a name").clicked() {
+            typing = true;
+        }
+    });
+    ui.data_mut(|data| data.insert_temp(typed, typing));
+    new
+}
+
 /// What a text names that is a place on the machine, by where it stands
 /// in the configuration: a picture's file, a folder. `None` for a text
 /// that is no path (or one that need not be there: a program by its
@@ -927,5 +1091,128 @@ fn section_title(ui: &mut Ui, label: &str, description: &str) {
     let response = ui.label(RichText::new(label).strong().color(palette.text));
     if !description.is_empty() {
         response.on_hover_text(description);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gevrek_model::command::{DispatchCommand, WorkspaceSelector};
+    use gevrek_model::settings::{
+        BindingProfile, MonitorSelector, RulePredicate, WindowRuleProfile, WorkspaceProfile,
+    };
+    use gevrek_model::Config;
+
+    fn document() -> Document {
+        let mut config = Config::default();
+        let workspace = |name: &str, title: Option<&str>, monitor: MonitorSelector| WorkspaceProfile {
+            name: name.to_string(),
+            title: title.map(str::to_string),
+            monitor,
+            ..WorkspaceProfile::default()
+        };
+        config.desktop.workspaces = vec![
+            workspace("web", None, MonitorSelector::Any),
+            workspace("code", Some("Work"), MonitorSelector::Any),
+            // A display's own entry of one that is there already.
+            workspace("web", Some("Browsing"), MonitorSelector::Name("DELL".to_string())),
+        ];
+        config.desktop.bindings = vec![
+            BindingProfile {
+                command: DispatchCommand::SwitchWorkspaceSelector {
+                    selector: WorkspaceSelector::Name("code".to_string()),
+                },
+                ..BindingProfile::default()
+            },
+            BindingProfile {
+                command: DispatchCommand::SwitchWorkspaceSelector {
+                    selector: WorkspaceSelector::Next,
+                },
+                ..BindingProfile::default()
+            },
+        ];
+        config.desktop.window_rules = vec![WindowRuleProfile {
+            predicates: vec![
+                RulePredicate {
+                    kind: gevrek_model::rules::MatchKind::Workspace,
+                    strategy: gevrek_model::rules::MatchStrategy::Equals,
+                    value: "web".to_string(),
+                    ..RulePredicate::default()
+                },
+                RulePredicate {
+                    kind: gevrek_model::rules::MatchKind::Workspace,
+                    strategy: gevrek_model::rules::MatchStrategy::Regex,
+                    value: "w.*".to_string(),
+                    ..RulePredicate::default()
+                },
+                RulePredicate {
+                    kind: gevrek_model::rules::MatchKind::Title,
+                    strategy: gevrek_model::rules::MatchStrategy::Equals,
+                    value: "web".to_string(),
+                    ..RulePredicate::default()
+                },
+            ],
+            ..WindowRuleProfile::default()
+        }];
+        Document::new(&config)
+    }
+
+    #[test]
+    fn the_workspaces_to_choose_from_are_each_there_once_with_what_is_shown_of_them() {
+        let document = document();
+        assert_eq!(
+            workspaces_of(&document),
+            vec![
+                ("web".to_string(), "Browsing".to_string()),
+                ("code".to_string(), "Work".to_string()),
+            ]
+        );
+        assert_eq!(workspace_line("code", "Work"), "Work  (code)");
+        assert_eq!(workspace_line("3", "3"), "3");
+    }
+
+    #[test]
+    fn a_new_entry_names_the_terminal_of_the_system_it_is_made_on() {
+        use gevrek_model::settings::{ScratchpadProfile, StartupProfile};
+        let startup = serde_json::to_value(StartupProfile::default()).unwrap();
+        let scratchpad = serde_json::to_value(ScratchpadProfile::default()).unwrap();
+        // On Windows they are as the model has them.
+        let mut here = startup.clone();
+        new_for_this_system(&mut here, "wt.exe");
+        assert_eq!(here, startup);
+        // Elsewhere the program that is started, and the one looked for,
+        // is that system's terminal; nothing else is another.
+        let mut there = startup.clone();
+        new_for_this_system(&mut there, "kitty");
+        assert_eq!(there["launch"]["program"], "kitty");
+        assert_eq!(there["name"], startup["name"]);
+        let mut pad = scratchpad.clone();
+        new_for_this_system(&mut pad, "kitty");
+        assert_eq!(pad["launch"]["program"], "kitty");
+        assert_eq!(pad["pattern"], "kitty");
+        assert_eq!(pad["width_percent"], scratchpad["width_percent"]);
+        assert!(!pad.to_string().to_lowercase().contains("wt.exe"));
+        assert!(!pad.to_string().contains("WindowsTerminal"));
+    }
+
+    #[test]
+    fn a_workspaces_name_is_known_by_where_it_stands() {
+        let document = document();
+        // The name a key's command goes by.
+        let named = "/desktop/bindings/0/command/selector/value";
+        assert_eq!(document.get(named), Some(&Value::from("code")));
+        assert!(names_a_workspace(&document, named));
+        // A selector that is no name has no text to choose.
+        assert!(!names_a_workspace(
+            &document,
+            "/desktop/bindings/1/command/selector/value"
+        ));
+        // What a rule holds a window's workspace against: exactly that
+        // name, not a pattern, and not what it holds a title against.
+        let rule = "/desktop/window_rules/0/predicates";
+        assert!(names_a_workspace(&document, &format!("{rule}/0/value")));
+        assert!(!names_a_workspace(&document, &format!("{rule}/1/value")));
+        assert!(!names_a_workspace(&document, &format!("{rule}/2/value")));
+        assert!(!names_a_workspace(&document, "/desktop/workspaces/0/name"));
     }
 }

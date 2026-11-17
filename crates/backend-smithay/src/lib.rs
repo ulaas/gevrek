@@ -43,6 +43,7 @@ mod toplevel_management;
 pub mod udev;
 mod virtual_pointer;
 pub mod wallpaper;
+pub mod window_overview;
 pub mod winit;
 mod workspace_management;
 pub mod xdnd;

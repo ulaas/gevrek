@@ -1075,6 +1075,7 @@ impl State {
         elements.append(&mut top);
         elements.append(&mut windows);
         self.overview_elements(renderer, output, screen, &mut elements);
+        self.window_overview_elements(renderer, output, screen, &mut elements);
         // Below the windows: desktop widgets, the wallpaper.
         self.layer_elements(
             renderer,
@@ -1202,6 +1203,74 @@ impl State {
             Kind::Unspecified,
         )));
         elements
+    }
+
+    /// The overview of one workspace's windows, as far as it is on this
+    /// display: under each picture its window's title, and a frame around
+    /// the picture that is pointed at (`window_overview.rs`).
+    fn window_overview_elements<R>(
+        &self,
+        renderer: &mut R,
+        output: MonitorHandle,
+        screen: gevrek_engine::Rect,
+        elements: &mut Vec<OutputElement<R>>,
+    ) where
+        R: Renderer + ImportAll + ImportMem + ClipRenderer,
+        R::TextureId: Send + Clone + 'static,
+    {
+        let accent = self.core.wallpaper_accent.unwrap_or((64, 224, 208));
+        let accent = Color32F::new(
+            f32::from(accent.0) / 255.0,
+            f32::from(accent.1) / 255.0,
+            f32::from(accent.2) / 255.0,
+            1.0,
+        );
+        for shown in &self.window_overview.shown {
+            let middle = (
+                shown.rect.x + shown.rect.width / 2,
+                shown.rect.y + shown.rect.height / 2,
+            );
+            if self.desktop.output_at(middle.0, middle.1) != Some(output) {
+                continue;
+            }
+            let (x, y) = (shown.rect.x - screen.x, shown.rect.y - screen.y);
+            let (w, h) = (shown.rect.width, shown.rect.height);
+            let t = crate::window_overview::MARK;
+            match MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                (
+                    f64::from(x + (w - shown.label_size.0) / 2),
+                    f64::from(y + h + t + 2),
+                ),
+                &shown.label,
+                None,
+                None,
+                None,
+                Kind::Unspecified,
+            ) {
+                Ok(element) => elements.push(OutputElement::Memory(element)),
+                Err(error) => log::debug!("a window's title in the overview: {error:?}"),
+            }
+            if self.window_overview.marked == Some(shown.window) {
+                for (id, rect) in [
+                    (0, (x - t, y - t, w + 2 * t, t)),
+                    (1, (x - t, y + h, w + 2 * t, t)),
+                    (2, (x - t, y, t, h)),
+                    (3, (x + w, y, t, h)),
+                ] {
+                    elements.push(OutputElement::Solid(SolidColorRenderElement::new(
+                        shown.ids[id].clone(),
+                        Rectangle::new(
+                            (rect.0, rect.1).into(),
+                            (rect.2.max(1), rect.3.max(1)).into(),
+                        ),
+                        self.backdrop_commit,
+                        accent,
+                        Kind::Unspecified,
+                    )));
+                }
+            }
+        }
     }
 
     /// The overview of every workspace, as far as it is on this display:

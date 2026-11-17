@@ -19,6 +19,12 @@ pub struct Watch {
     /// The entry of the profile (by its place) and when the pointer came.
     within: Option<(usize, Instant)>,
     ran: bool,
+    /// The pointer has been seen somewhere that is no corner. Until then
+    /// a corner does nothing: when a session starts the pointer is where
+    /// it was left, or at the very top left (where a compositor has it
+    /// before it has been moved), and nobody put it there to ask for
+    /// anything.
+    been_elsewhere: bool,
 }
 
 /// The entry of `profile` whose corner of one of `displays` the point is
@@ -50,6 +56,13 @@ pub fn corner_at(profile: &HotCornersProfile, displays: &[Rect], point: (i32, i3
 }
 
 impl Watch {
+    /// The pointer is in a corner whose command has not been run yet:
+    /// time alone brings it, so the desktop has to look again soon,
+    /// though nothing moves.
+    pub fn waits(&self) -> bool {
+        self.been_elsewhere && self.within.is_some() && !self.ran
+    }
+
     /// The pointer is at `point` now (`held`: with a mouse button down).
     /// The command to run, if one is due.
     pub fn step(
@@ -67,8 +80,12 @@ impl Watch {
         let Some(at) = at else {
             self.within = None;
             self.ran = false;
+            self.been_elsewhere = true;
             return None;
         };
+        if !self.been_elsewhere {
+            return None;
+        }
         // (Let go in the corner, the moment starts then.)
         if held {
             self.within = None;
@@ -131,6 +148,18 @@ mod tests {
         let mut watch = Watch::default();
         let start = Instant::now();
         let displays = [DISPLAY];
+        // In the corner from the start, as when a session begins: nobody
+        // put it there, and however long it rests nothing runs.
+        assert!(watch.step(&profile, &displays, (0, 0), false, start).is_none());
+        assert!(watch
+            .step(&profile, &displays, (0, 0), false, after(start, 5000))
+            .is_none());
+        assert!(!watch.waits());
+        // Moved out of it once, it is a pointer that is put somewhere.
+        assert!(watch
+            .step(&profile, &displays, (500, 500), false, after(start, 5000))
+            .is_none());
+        let start = after(start, 6000);
         // Come: not yet. Stayed for the moment: once. Stayed on: no more.
         assert!(watch.step(&profile, &displays, (1, 1), false, start).is_none());
         assert!(watch
@@ -142,6 +171,7 @@ mod tests {
         assert!(watch
             .step(&profile, &displays, (0, 0), false, after(start, 900))
             .is_none());
+        assert!(!watch.waits(), "it has run");
         // Left and come back: again, after the moment.
         assert!(watch
             .step(&profile, &displays, (300, 300), false, after(start, 1000))
@@ -149,6 +179,7 @@ mod tests {
         assert!(watch
             .step(&profile, &displays, (0, 0), false, after(start, 1100))
             .is_none());
+        assert!(watch.waits(), "it is in the corner, and its moment is not over");
         assert!(watch
             .step(&profile, &displays, (0, 0), false, after(start, 1500))
             .is_some());
@@ -160,6 +191,7 @@ mod tests {
         let mut watch = Watch::default();
         let start = Instant::now();
         let displays = [DISPLAY];
+        assert!(watch.step(&profile, &displays, (500, 500), false, start).is_none());
         // Dragged into the corner and held there.
         assert!(watch.step(&profile, &displays, (0, 0), true, start).is_none());
         assert!(watch

@@ -248,6 +248,9 @@ struct State {
     night_light: bool,
     /// The tutorial, while it is taken: its card's surface, how far it
     /// is, and the practice windows it opened.
+    /// The ring around what the tutorial's step is about: its four
+    /// sides, each a surface, and what they are around now.
+    ring: Option<([SurfaceId; 4], crate::tutoring::Around)>,
     tutorial: Option<(
         SurfaceId,
         crate::tutoring::Tutoring,
@@ -381,6 +384,7 @@ pub fn run() -> anyhow::Result<()> {
         keys: None,
         control_centre: None,
         night_light: false,
+        ring: None,
         tutorial: None,
         config: None,
         revision: 0,
@@ -1762,12 +1766,12 @@ fn tutorial_start(state: &Rc<RefCell<State>>, lesson: Option<&str>, control: &mu
         height: crate::coach::SIZE.1,
         reserve: false,
         keyboard: Keyboard::Never,
-        margin: 28,
+        margin: crate::tutoring::CARD_MARGIN as i32,
         output: None,
     };
     let shared = Rc::clone(state);
     let mut fonts = false;
-    let id = control.open(place, move |ui, _| {
+    let id = control.open(place, move |ui, control| {
         use crate::tutoring::Shown;
         let mut state = shared.borrow_mut();
         let state = &mut *state;
@@ -1784,11 +1788,24 @@ fn tutorial_start(state: &Rc<RefCell<State>>, lesson: Option<&str>, control: &mu
             facts.surfaces.push("gevrek-control-centre".to_string());
         }
         let still = state.settings.reduce_motion;
+        let accent = state.accent;
+        // (The panel of the display the tutorial is on: the first there
+        // is, where that display is not known among them.)
+        let panel = state
+            .places
+            .iter()
+            .find(|(name, _)| *name == facts.display)
+            .or(state.places.first())
+            .map(|(_, at)| *at);
         let Some((_, tutoring, _)) = state.tutorial.as_mut() else {
+            put_ring(&mut state.ring, None, accent, control);
             return Flow::Close;
         };
-        let mut todo = tutoring.facts(facts, now);
+        let mut todo = tutoring.facts(facts.clone(), now);
         todo.extend(tutoring.tick(now));
+        // The ring around what the step that waits is about.
+        let around = crate::tutoring::ring_around(tutoring.spot(), &facts, panel);
+        put_ring(&mut state.ring, around, accent, control);
         let pressed = match tutoring.shown(now) {
             Shown::Setting(lesson) => crate::coach::draw_setting(ui, &palette, lesson),
             Shown::Step {
@@ -1829,6 +1846,7 @@ fn tutorial_start(state: &Rc<RefCell<State>>, lesson: Option<&str>, control: &mu
         }
         tutorial_do(state, todo);
         if state.tutorial.is_none() {
+            put_ring(&mut state.ring, None, accent, control);
             return Flow::Close;
         }
         // (Looked at again a few times a second: a step is done, help
@@ -1840,6 +1858,60 @@ fn tutorial_start(state: &Rc<RefCell<State>>, lesson: Option<&str>, control: &mu
     let state = &mut *state;
     state.tutorial = Some((id, tutoring, Vec::new()));
     tutorial_do(state, todo);
+}
+
+/// The ring is around `around` (none: there is no ring): its four sides
+/// are opened where there were none, put where they belong where it is
+/// around something else, and closed where there is nothing to be around.
+/// Each side is a thin surface of the accent's colour (one surface as
+/// large as the display would be black on Windows unless the graphics
+/// device draws with DirectX 12).
+fn put_ring(
+    ring: &mut Option<([SurfaceId; 4], crate::tutoring::Around)>,
+    around: Option<crate::tutoring::Around>,
+    accent: egui::Color32,
+    control: &mut Control,
+) {
+    let area = |(x, y, width, height): crate::tutoring::Around| Area::new(x, y, width, height);
+    match (ring.as_mut(), around) {
+        (None, None) => {}
+        (Some((sides, _)), None) => {
+            for side in sides.iter() {
+                if control.is_open(*side) {
+                    control.close(*side);
+                }
+            }
+            *ring = None;
+        }
+        (Some((sides, at)), Some(around)) => {
+            if *at != around {
+                *at = around;
+                for (side, place) in sides.iter().zip(crate::tutoring::ring_sides(around)) {
+                    control.put_at(*side, area(place));
+                }
+            }
+        }
+        (None, Some(around)) => {
+            let sides = crate::tutoring::ring_sides(around).map(|side| {
+                let place = Place {
+                    name: surface_name("gevrek-ring"),
+                    edge: Edge::Top,
+                    level: Level::Overlay,
+                    width: side.2.max(1) as u32,
+                    height: side.3.max(1) as u32,
+                    reserve: false,
+                    keyboard: Keyboard::Never,
+                    margin: 0,
+                    output: None,
+                };
+                control.open_at(place, area(side), move |ui, _| {
+                    ui.painter().rect_filled(ui.max_rect(), 0.0, accent);
+                    Flow::Continue
+                })
+            });
+            *ring = Some((sides, around));
+        }
+    }
 }
 
 /// Carry out what the tutorial asks for: commands for the window
@@ -1857,7 +1929,12 @@ fn tutorial_do(state: &mut State, todo: Vec<crate::tutoring::Do>) {
             Do::End => {
                 if let Some((_, tutoring, windows)) = state.tutorial.take() {
                     log::info!("the tutorial ends");
-                    crate::tutoring::tidy(tutoring.before.clone(), windows, state.link.teller());
+                    crate::tutoring::tidy(
+                        tutoring.before.clone(),
+                        windows,
+                        tutoring.own_windows(),
+                        state.link.teller(),
+                    );
                 }
             }
         }
@@ -2551,7 +2628,20 @@ fn sync_panels(state: &Rc<RefCell<State>>, control: &mut Control) {
         return;
     };
     let wanted = if bar.enabled && shared.with_panel {
-        shared.places.clone()
+        // (Not on a display the configuration gives no panel.)
+        shared
+            .places
+            .iter()
+            .filter(|(name, _)| {
+                let place = shared
+                    .views
+                    .get(name)
+                    .map(|view| view.place.clone())
+                    .unwrap_or_else(|| gevrek_model::settings::DisplayRef::named(name));
+                panel::bar_on(&bar, name, &place).is_some()
+            })
+            .cloned()
+            .collect()
     } else {
         Vec::new()
     };
@@ -2651,6 +2741,10 @@ fn draw_panel(
     let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
     theme::apply(&context, &palette, &state.settings);
     let (surface, view) = (one.surface, one.view.clone());
+    // What stands on this display's panel: the configuration may give a
+    // display its own, as on Linux.
+    let own = panel::bar_on(bar, display, &view.place);
+    let bar = own.as_ref().unwrap_or(bar);
     let asked = panel::draw(
         ui,
         &panel::Shown {

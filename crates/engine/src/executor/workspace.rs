@@ -1762,6 +1762,16 @@ impl Executor {
             let (Some(monitor), Some(saved_index)) = (saved.monitor, saved.workspace_id) else {
                 continue;
             };
+            // (The display by its handle, or by what it is known as where
+            // the handle is another since: the machine was started again,
+            // the display taken off and put on.)
+            let Some(monitor) = super::display_of_session(
+                monitor_manager,
+                monitor,
+                saved.monitor_known_as.as_deref(),
+            ) else {
+                continue;
+            };
             // By name when one was saved: the order of workspaces may have
             // changed since. A name that is gone means the workspace is gone.
             let index = match &saved.workspace_name {
@@ -1809,7 +1819,35 @@ impl Executor {
                 ),
             }
         }
-        for (monitor, index) in &state.focused_workspaces {
+        // What each display showed: by the display as it is known and
+        // the workspace's name where the session has them, by handle and
+        // place where it is an older one.
+        let shown: Vec<(MonitorHandle, usize)> = if state.shown_workspaces.is_empty() {
+            state
+                .focused_workspaces
+                .iter()
+                .map(|(monitor, index)| (*monitor, *index))
+                .collect()
+        } else {
+            state
+                .shown_workspaces
+                .iter()
+                .filter_map(|shown| {
+                    let monitor = super::display_of_session(
+                        monitor_manager,
+                        shown.monitor,
+                        Some(&shown.monitor_known_as),
+                    )?;
+                    let index = monitor_manager
+                        .get_workspaces(monitor)?
+                        .elements()
+                        .iter()
+                        .position(|workspace| workspace.name == shown.workspace_name)?;
+                    Some((monitor, index))
+                })
+                .collect()
+        };
+        for (monitor, index) in &shown {
             let showing = monitor_manager
                 .get_workspaces(*monitor)
                 .map(|workspaces| workspaces.focused_idx());

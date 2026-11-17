@@ -166,7 +166,8 @@ pub enum ReloadStep {
     SnapshotBorders,
     /// The graph changed: swap it and run its startup again.
     Graph,
-    /// The graph did not change: evaluate the dynamic rules again.
+    /// The graph did not change: evaluate the dynamic rules again, with
+    /// the workspaces as the configuration has them now.
     DynamicRules,
     /// Key bindings and gestures are registered again.
     Bindings,
@@ -210,10 +211,15 @@ impl ConfigDiff {
         when(true, PruneWindows);
         when(true, SnapshotBorders);
         when(self.graph, Graph);
-        when(!self.graph, DynamicRules);
         when(true, Bindings);
         when(self.appearance, Appearance);
         when(self.reapplies_any_profile(), ReapplyProfiles);
+        // After the workspaces are as the configuration has them: a rule
+        // that goes by a window's workspace (its name, its place among
+        // the display's) is held against the workspaces there are now,
+        // not against those of before (a workspace taken out, another
+        // put before it).
+        when(!self.graph, DynamicRules);
         when(true, ReleaseIgnored);
         when(true, RefreshBorders);
         when(true, MarkLayouts);
@@ -433,8 +439,8 @@ mod tests {
                 StoreProfiles,
                 PruneWindows,
                 SnapshotBorders,
-                DynamicRules,
                 Bindings,
+                DynamicRules,
                 ReleaseIgnored,
                 RefreshBorders,
                 MarkLayouts,
@@ -442,6 +448,20 @@ mod tests {
                 FocusEffects
             ]
         );
+
+        // The rules are held against the workspaces as they are after
+        // the change: a workspace taken out, or put elsewhere among the
+        // display's, is a change of its profile.
+        let mut fewer = base.clone();
+        fewer.desktop.workspaces.push(gevrek_model::settings::WorkspaceProfile {
+            name: "another".to_string(),
+            ..Default::default()
+        });
+        let steps = ConfigDiff::between(&fewer, &base).steps();
+        let at = |step: ReloadStep| steps.iter().position(|one| *one == step);
+        assert!(at(ReapplyProfiles).is_some());
+        assert!(at(ReapplyProfiles) < at(DynamicRules));
+        assert!(at(DynamicRules) < at(ReleaseIgnored));
 
         // A graph change runs the graph instead of the dynamic rules.
         let mut graph = base.clone();

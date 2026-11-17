@@ -1001,13 +1001,41 @@ pub fn show_tab(view: &View, index: usize) -> Option<String> {
     serde_json::to_string(&command).ok()
 }
 
+/// The panel as it is on a display: with what the configuration sets
+/// for that display in place of the common settings
+/// (`PanelProfile::on`); `None` where that display has no panel. The
+/// display is known by several names (what the window manager calls it,
+/// its connector): an entry of the configuration by any of them is its.
+pub fn bar_on(
+    bar: &PanelProfile,
+    display: &str,
+    place: &gevrek_model::settings::DisplayRef,
+) -> Option<PanelProfile> {
+    let own = bar
+        .displays
+        .iter()
+        .map(|entry| entry.name.trim())
+        .find(|name| !name.is_empty() && place.is_called(name));
+    bar.on(own.unwrap_or(display))
+}
+
 /// The command that shows a workspace of a display by its place among
 /// the display's workspaces. On the display with the keyboard that is a
 /// switch; on another the display is named, or the workspace of that
 /// place on the display with the keyboard would be shown.
-pub fn show_workspace_at(display: &str, focused: bool, index: usize) -> String {
+///
+/// A workspace that has a name is shown by it, on its display: its place
+/// among the display's may be another by the time the command is carried
+/// out (a workspace before it closed, the configuration put them in
+/// another order), its name is not. One without a name by its place.
+pub fn show_workspace_at(display: &str, focused: bool, index: usize, name: &str) -> String {
     use gevrek_model::command::{DispatchCommand, MonitorTarget, WorkspaceSelector};
-    let command = if focused {
+    let command = if !name.trim().is_empty() && !display.is_empty() {
+        DispatchCommand::FocusMonitorWorkspace {
+            target: MonitorTarget::Name(display.to_string()),
+            workspace: WorkspaceSelector::Name(name.to_string()),
+        }
+    } else if focused {
         DispatchCommand::SwitchWorkspaceSelector {
             selector: WorkspaceSelector::Index(index),
         }
@@ -3269,10 +3297,39 @@ mod tests {
     }
 
     #[test]
+    fn a_display_has_the_panel_the_configuration_gives_it() {
+        use gevrek_model::settings::{DisplayRef, PanelOnDisplay};
+        let mut bar = PanelProfile::default();
+        let common = bar.left.clone();
+        bar.displays = vec![PanelOnDisplay {
+            name: "DP-2".to_string(),
+            left: Some(vec![PanelModule::Clock]),
+            ..PanelOnDisplay::default()
+        }];
+        // A display the window manager calls one thing and whose
+        // connector is another: the entry by its connector is its.
+        let second = DisplayRef {
+            names: vec!["Monitor B".to_string(), "DP-2".to_string()],
+            index: Some(1),
+            primary: false,
+        };
+        let own = bar_on(&bar, "Monitor B", &second).expect("a panel");
+        assert_eq!(own.left, vec![PanelModule::Clock]);
+        assert_eq!(own.right, bar.right);
+        // Another display has the common panel.
+        let first = DisplayRef::named("Monitor A");
+        assert_eq!(bar_on(&bar, "Monitor A", &first).expect("a panel").left, common);
+        // Switched off for that display: none there.
+        bar.displays[0].enabled = false;
+        assert!(bar_on(&bar, "Monitor B", &second).is_none());
+        assert!(bar_on(&bar, "Monitor A", &first).is_some());
+    }
+
+    #[test]
     fn a_workspace_of_a_display_is_shown_by_a_command_the_model_reads() {
         use gevrek_model::command::{DispatchCommand, MonitorTarget, WorkspaceSelector};
         let here: DispatchCommand =
-            serde_json::from_str(&show_workspace_at("Monitor X", true, 2)).expect("a command");
+serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a command");
         assert_eq!(
             here,
             DispatchCommand::SwitchWorkspaceSelector {
@@ -3281,7 +3338,7 @@ mod tests {
         );
         // On a display without the keyboard, the display is named.
         let there: DispatchCommand =
-            serde_json::from_str(&show_workspace_at("Monitor X", false, 2)).expect("a command");
+            serde_json::from_str(&show_workspace_at("Monitor X", false, 2, " ")).expect("a command");
         assert_eq!(
             there,
             DispatchCommand::FocusMonitorWorkspace {
@@ -3289,6 +3346,20 @@ mod tests {
                 workspace: WorkspaceSelector::Index(2)
             }
         );
+        // One that has a name is shown by it, on its display, wherever
+        // among the display's workspaces it is by then.
+        for focused in [true, false] {
+            let named: DispatchCommand =
+                serde_json::from_str(&show_workspace_at("Monitor X", focused, 2, "mail"))
+                    .expect("a command");
+            assert_eq!(
+                named,
+                DispatchCommand::FocusMonitorWorkspace {
+                    target: MonitorTarget::Name("Monitor X".to_string()),
+                    workspace: WorkspaceSelector::Name("mail".to_string())
+                }
+            );
+        }
     }
 
     #[test]

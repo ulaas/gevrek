@@ -34,6 +34,14 @@ struct Sample {
     fonts: bool,
     /// What it says of itself under its name.
     says: &'static str,
+    /// A practice window asks the window manager how it stands (it has
+    /// the keyboard, it floats, it is one of three tabs) and says so:
+    /// what a step of the tutorial did is read on the window it was done
+    /// to. The line to the window manager, what it last said, and when
+    /// it was last asked.
+    link: Option<gevrek_link::Link>,
+    stands: Option<String>,
+    asked: Option<std::time::Instant>,
 }
 
 impl eframe::App for Sample {
@@ -44,6 +52,33 @@ impl eframe::App for Sample {
             self.fonts = true;
         }
         let colour = tint(&self.name);
+        if let Some(link) = &self.link {
+            let mut ask = self
+                .asked
+                .is_none_or(|asked| asked.elapsed() >= std::time::Duration::from_secs(1));
+            for event in link.poll() {
+                match event {
+                    gevrek_link::Event::State(state) => {
+                        self.stands = gevrek_tutorial::facts::Standing::of(&state, &self.name)
+                            .map(|standing| standing.words());
+                    }
+                    // Something happened on the desktop: how this window
+                    // stands may be another.
+                    gevrek_link::Event::Runtime { .. } | gevrek_link::Event::Connected(_) => {
+                        ask = true;
+                    }
+                    gevrek_link::Event::Disconnected(_) => self.stands = None,
+                    _ => {}
+                }
+            }
+            if ask {
+                self.asked = Some(std::time::Instant::now());
+                link.send(gevrek_link::Request::StateAfter(
+                    std::time::Duration::from_millis(150),
+                ));
+            }
+            context.request_repaint_after(std::time::Duration::from_secs(1));
+        }
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
@@ -61,6 +96,10 @@ impl eframe::App for Sample {
                     egui::RichText::new(self.says)
                         .color(egui::Color32::from_gray(150)),
                 );
+                if let Some(stands) = &self.stands {
+                    ui.add_space(6.0);
+                    ui.label(egui::RichText::new(stands).size(16.0).color(colour));
+                }
                 ui.add_space(12.0);
                 // A few lines, as text in a program would stand.
                 let painter = ui.painter().clone();
@@ -82,13 +121,13 @@ impl eframe::App for Sample {
 
 /// Open a sample window called `name` and stay until it is closed.
 pub fn run(name: &str) -> anyhow::Result<()> {
-    open(name, "gevrek-sample", "A sample window of the sandbox", None)
+    open(name, "gevrek-sample", "A sample window of the sandbox", None, None)
 }
 
 /// Open a practice window of the tutorial called `name`: a sample
 /// window that says whose it is, and that the window manager knows by
 /// its own name.
-pub fn practice(name: &str) -> anyhow::Result<()> {
+pub fn practice(name: &str, address: &str) -> anyhow::Result<()> {
     // Held by whoever opened it: gone when they let go, or are gone.
     if std::env::var_os(gevrek_tutorial::HELD).is_some() {
         std::thread::spawn(|| {
@@ -114,6 +153,7 @@ pub fn practice(name: &str) -> anyhow::Result<()> {
         "gevrek-practice",
         "A practice window of the tutorial. Do with it what you like.",
         Some([140.0 + step as f32 * 44.0, 120.0 + step as f32 * 36.0]),
+        Some(address.to_string()),
     )
 }
 
@@ -122,6 +162,8 @@ fn open(
     app: &str,
     says: &'static str,
     at: Option<[f32; 2]>,
+    // The window manager to ask how the window stands (a practice window).
+    address: Option<String>,
 ) -> anyhow::Result<()> {
     let title = name.to_string();
     let mut viewport = egui::ViewportBuilder::default()
@@ -137,11 +179,16 @@ fn open(
             viewport,
             ..Default::default()
         },
-        Box::new(move |_| {
+        Box::new(move |creation| {
+            let wake = creation.egui_ctx.clone();
             Ok(Box::new(Sample {
                 name: title,
                 fonts: false,
                 says,
+                link: address
+                    .map(|address| gevrek_link::Link::start(address, move || wake.request_repaint())),
+                stands: None,
+                asked: None,
             }))
         }),
     )

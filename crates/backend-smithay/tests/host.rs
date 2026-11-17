@@ -592,6 +592,105 @@ fn ctrl_alt_f_keys_are_ordinary_chords_unless_gevrek_owns_a_virtual_terminal() {
 }
 
 #[test]
+fn the_overview_of_the_windows_has_titles_a_mark_and_keys() {
+    // evdev: Escape, Enter, the right arrow.
+    const KEY_ESC: u32 = 1;
+    const KEY_ENTER: u32 = 28;
+    const KEY_RIGHT: u32 = 106;
+    let mut harness = Harness::new(Config::new());
+    let client = harness.connect();
+    let (_, editor) = harness.open(client, "editor", "org.test.editor");
+    let (_, terminal) = harness.open(client, "terminal", "org.test.terminal");
+    let focused = harness.state.desktop.focused.expect("a window has the keyboard");
+    let other = if focused == editor { terminal } else { editor };
+    let before = (harness.rect(editor), harness.rect(terminal));
+    assert!(!harness.state.window_overview_is_up());
+
+    // The overview: a picture of each, smaller, with its title, and the
+    // window with the keyboard pointed at.
+    harness.state.run_command(DispatchCommand::ToggleExpose).unwrap();
+    harness.pump();
+    harness.state.sync_window_overview();
+    assert!(harness.state.window_overview_is_up());
+    let shown = &harness.state.window_overview.shown;
+    let mut titles: Vec<&str> = shown.iter().map(|shown| shown.title.as_str()).collect();
+    titles.sort();
+    assert_eq!(titles, ["editor", "terminal"]);
+    assert!(shown.iter().all(|shown| shown.rect.width < before.0.width));
+    assert_eq!(harness.state.window_overview.marked, Some(focused));
+    // (The windows themselves are as large as they were.)
+    assert_eq!((harness.rect(editor), harness.rect(terminal)), before);
+
+    // The keys are the overview's: nothing of them reaches the program.
+    harness.clients[client].app.keys.clear();
+    // An arrow goes to the other picture (whichever side it is on, one
+    // of the two arrows does; Tab goes to the next in any case).
+    harness.chord(&[KEY_RIGHT]);
+    if harness.state.window_overview.marked == Some(focused) {
+        const KEY_TAB: u32 = 15;
+        harness.chord(&[KEY_TAB]);
+    }
+    assert_eq!(harness.state.window_overview.marked, Some(other));
+    // Enter goes to it: the overview is over, and it has the keyboard.
+    harness.chord(&[KEY_ENTER]);
+    harness.state.sync_window_overview();
+    assert!(!harness.state.window_overview_is_up());
+    assert!(harness.state.window_overview.shown.is_empty());
+    assert_eq!(harness.state.desktop.focused, Some(other));
+    assert!(harness.clients[client].app.keys.is_empty());
+
+    // Up again, and Escape puts it away with nothing chosen.
+    harness.state.run_command(DispatchCommand::ToggleExpose).unwrap();
+    harness.pump();
+    harness.state.sync_window_overview();
+    assert!(harness.state.window_overview_is_up());
+    harness.chord(&[KEY_ESC]);
+    harness.state.sync_window_overview();
+    assert!(!harness.state.window_overview_is_up());
+    assert_eq!(harness.state.desktop.focused, Some(other));
+    assert!(harness.clients[client].app.keys.is_empty());
+    // Away, the keys are the program's again.
+    harness.chord(&[KEY_A]);
+    assert_eq!(harness.clients[client].app.keys.len(), 2);
+}
+
+#[test]
+fn the_pointer_left_in_a_corner_runs_that_corners_command() {
+    use gevrek_model::settings::{HotCorner, HotCornersProfile, ScreenCorner};
+    use std::time::{Duration, Instant};
+    // The corner enters a submap of its own, so that it is seen to run.
+    let mut marker = binding("F9", false, DispatchCommand::FocusNext);
+    marker.submap = "corner".to_string();
+    let mut config = config_with(vec![marker]);
+    config.desktop.hot_corners = HotCornersProfile {
+        corners: vec![HotCorner {
+            corner: ScreenCorner::TopRight,
+            command: DispatchCommand::SetBindingSubmap {
+                name: "corner".to_string(),
+            },
+            ..HotCorner::default()
+        }],
+        ..HotCornersProfile::default()
+    };
+    let mut harness = Harness::new(config);
+    let start = Instant::now();
+    // Elsewhere, and in another corner: nothing.
+    harness.state.pointer_moved((400.0, 300.0).into(), 0);
+    harness.state.pointer_moved((0.0, 0.0).into(), 0);
+    harness.state.tick_hot_corners(start + Duration::from_secs(2));
+    assert_eq!(harness.state.active_submap, "default");
+    assert!(!harness.state.hot_corners.waits());
+    // In its corner: not at once, and the host is asked to look again.
+    harness.state.pointer_moved((1919.0, 0.0).into(), 0);
+    assert_eq!(harness.state.active_submap, "default");
+    assert!(harness.state.hot_corners.waits());
+    // Left there for its moment: once.
+    harness.state.tick_hot_corners(Instant::now() + Duration::from_millis(600));
+    assert_eq!(harness.state.active_submap, "corner");
+    assert!(!harness.state.hot_corners.waits());
+}
+
+#[test]
 fn the_pointer_stays_on_the_outputs() {
     let mut harness = Harness::new(Config::new());
     // A place beyond every edge of the 1920x1080 output, as a host reports

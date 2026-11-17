@@ -86,7 +86,94 @@ pub struct Tutoring {
     file: PathBuf,
     /// The workspace that was shown before the tutorial's own.
     pub before: String,
+    /// The display the tutorial is on: the one the person was on when it
+    /// began (empty where the desktop did not say: the main one then).
+    display: String,
     facts: Facts,
+}
+
+/// How thick the ring around what a step is about is, and how far
+/// outside it the ring stands.
+pub const RING: i32 = 4;
+const RING_GAP: i32 = 3;
+
+/// A rectangle of the desktop: its left, its top, how wide, how high.
+pub type Around = (i32, i32, i32, i32);
+
+/// What the ring is drawn around for a step that waits, as the desktop
+/// stands: the window with the keyboard, all the windows of the
+/// workspace together, or the panel (`panel`: where it is on the
+/// tutorial's display). Nothing where the step is about nothing that has
+/// a place (or about a surface of the shell's own, which the shell
+/// shows where it likes), and where what it is about is not there.
+pub fn ring_around(
+    spot: gevrek_tutorial::Spot,
+    facts: &Facts,
+    panel: Option<Around>,
+) -> Option<Around> {
+    use gevrek_tutorial::Spot;
+    let sized = |around: &Around| around.2 > 0 && around.3 > 0;
+    match spot {
+        Spot::None | Spot::Surface(_) => None,
+        Spot::Focused => facts
+            .windows
+            .iter()
+            .find(|window| window.focused)
+            .map(|window| window.at)
+            .filter(sized),
+        Spot::Windows => {
+            let all: Vec<Around> = facts
+                .windows
+                .iter()
+                .map(|window| window.at)
+                .filter(sized)
+                .collect();
+            let left = all.iter().map(|at| at.0).min()?;
+            let top = all.iter().map(|at| at.1).min()?;
+            let right = all.iter().map(|at| at.0 + at.2).max()?;
+            let bottom = all.iter().map(|at| at.1 + at.3).max()?;
+            Some((left, top, right - left, bottom - top))
+        }
+        Spot::Panel => panel.filter(sized),
+    }
+}
+
+/// The four sides of the ring around a rectangle, each a rectangle of
+/// its own (a surface as large as the display would be black on Windows
+/// unless the graphics device draws with DirectX 12): above, below, at
+/// the left, at the right. The corners belong to the two that lie.
+pub fn ring_sides(around: Around) -> [Around; 4] {
+    let (x, y, width, height) = (
+        around.0 - RING_GAP - RING,
+        around.1 - RING_GAP - RING,
+        around.2 + 2 * (RING_GAP + RING),
+        around.3 + 2 * (RING_GAP + RING),
+    );
+    [
+        (x, y, width, RING),
+        (x, y + height - RING, width, RING),
+        (x, y + RING, RING, height - 2 * RING),
+        (x + width - RING, y + RING, RING, height - 2 * RING),
+    ]
+}
+
+/// How far the card stands from the display's edge, and how much room
+/// is left between it and the tiles above it.
+pub const CARD_MARGIN: u32 = 28;
+const CARD_GAP: u32 = 12;
+
+/// The room the card takes at the foot of the display is kept free of
+/// tiles on the workspace that is shown (the tutorial's own): its tiles
+/// end above the card. The room goes with the workspace when the
+/// tutorial ends.
+fn card_room() -> Do {
+    command(serde_json::json!({
+        "command": "set_workspace_work_area_offset",
+        "left": 0,
+        "top": 0,
+        "right": 0,
+        "bottom": crate::coach::SIZE.1 + CARD_MARGIN + CARD_GAP,
+    }))
 }
 
 fn command(json: serde_json::Value) -> Do {
@@ -141,10 +228,11 @@ impl Tutoring {
             before: Some(now_shown.workspace.clone())
                 .filter(|name| name != gevrek_tutorial::WORKSPACE)
                 .unwrap_or_default(),
+            display: now_shown.display.clone(),
             facts: now_shown.clone(),
         };
         let mut todo = vec![
-            command(serde_json::json!({"command": "focus_monitor", "target": {"kind": "primary"}})),
+            tutoring.display_focused(),
             tutoring.workspace_laid(),
             command(serde_json::json!({
                 "command": "switch_workspace_selector",
@@ -155,6 +243,42 @@ impl Tutoring {
         Some((tutoring, todo))
     }
 
+    /// The display the tutorial is on, as a command names it: the one the
+    /// person was on when it began. (It used to be the main display
+    /// always: begun from another, the tutorial went away to where
+    /// nobody was looking.)
+    fn target(&self) -> serde_json::Value {
+        if self.display.trim().is_empty() {
+            serde_json::json!({"kind": "primary"})
+        } else {
+            serde_json::json!({"kind": "name", "value": self.display})
+        }
+    }
+
+    /// The keyboard to the tutorial's display.
+    fn display_focused(&self) -> Do {
+        command(serde_json::json!({"command": "focus_monitor", "target": self.target()}))
+    }
+
+    /// What the ring is around now: what the step that waits is about.
+    /// Nothing while a scene is set, between two lessons, and once the
+    /// step is done.
+    pub fn spot(&self) -> gevrek_tutorial::Spot {
+        match &self.phase {
+            Phase::Running(run) if run.state() == StepState::Waiting && !run.paused() => {
+                run.step().spot
+            }
+            _ => gevrek_tutorial::Spot::None,
+        }
+    }
+
+    /// The windows on the tutorial's workspace that are the person's own
+    /// (no practice windows), as far as the desktop was last seen: they
+    /// are taken along when the tutorial ends (`tidy`).
+    pub fn own_windows(&self) -> Vec<u64> {
+        own_windows(&self.facts)
+    }
+
     /// The tutorial's workspace, there and with the lesson's layout: said
     /// of the workspace by its name. (Seen on the desktop, with two
     /// displays: a layout asked of "the workspace" went to the one on
@@ -163,7 +287,7 @@ impl Tutoring {
     fn workspace_laid(&self) -> Do {
         command(serde_json::json!({
             "command": "ensure_named_workspace",
-            "target": {"kind": "primary"},
+            "target": self.target(),
             "name": gevrek_tutorial::WORKSPACE,
             "layout": layout_named(self.lesson.scene.layout),
         }))
@@ -289,13 +413,18 @@ impl Tutoring {
                         *opened = true;
                         *since = now;
                         let wants = self.lesson.scene.windows;
+                        // The card's room is kept free of tiles on the
+                        // tutorial's workspace (which is the one shown
+                        // now): the card lay over the foot of the window
+                        // at the lower right.
                         if wants <= have {
-                            return Vec::new();
+                            return vec![card_room()];
                         }
                         // (New windows come where the keyboard is: on
                         // the tutorial's display.)
                         return vec![
-                            command(serde_json::json!({"command": "focus_monitor", "target": {"kind": "primary"}})),
+                            card_room(),
+                            self.display_focused(),
                             Do::OpenPractice(wants - have),
                         ];
                     }
@@ -414,12 +543,60 @@ pub fn open_practice(windows: &mut Vec<std::process::Child>, count: usize) {
     }
 }
 
+/// The windows of the tutorial's workspace that are the person's own:
+/// those that are no practice windows, where the workspace that is shown
+/// is the tutorial's.
+pub fn own_windows(facts: &Facts) -> Vec<u64> {
+    if facts.workspace != gevrek_tutorial::WORKSPACE {
+        return Vec::new();
+    }
+    facts
+        .windows
+        .iter()
+        .filter(|window| !window.app.eq_ignore_ascii_case(gevrek_tutorial::PRACTICE_APP))
+        .map(|window| window.id)
+        .collect()
+}
+
+/// What the window manager is asked to do when the tutorial has ended,
+/// in this order: the person's own windows that are on the tutorial's
+/// workspace go to the workspace that was shown before (a workspace with
+/// a window on it is not closed: one window of the person's that had
+/// come there kept the tutorial's workspace for good); the tutorial's
+/// workspace is shown and closed; what was shown before is shown again.
+pub fn tidy_commands(before: &str, own: &[u64]) -> Vec<serde_json::Value> {
+    let mut commands = Vec::new();
+    if !before.is_empty() {
+        for window in own {
+            commands.push(serde_json::json!({
+                "command": "move_window_to_workspace",
+                "window": {"kind": "handle", "value": window},
+                "workspace": {"kind": "name", "value": before},
+            }));
+        }
+    }
+    commands.push(serde_json::json!({
+        "command": "switch_workspace_selector",
+        "selector": {"kind": "name", "value": gevrek_tutorial::WORKSPACE},
+    }));
+    commands.push(serde_json::json!({"command": "close_workspace"}));
+    if !before.is_empty() {
+        commands.push(serde_json::json!({
+            "command": "switch_workspace_selector",
+            "selector": {"kind": "name", "value": before},
+        }));
+    }
+    commands
+}
+
 /// The tutorial has ended: its practice windows are closed, its
 /// workspace goes once they are gone (a moment), and what was shown
-/// before (`before`: a workspace's name) is shown again.
+/// before (`before`: a workspace's name) is shown again. `own`: the
+/// person's own windows on the tutorial's workspace, which go there too.
 pub fn tidy(
     before: String,
     windows: Vec<std::process::Child>,
+    own: Vec<u64>,
     tell: impl Fn(gevrek_link::Request) + Send + 'static,
 ) {
     for mut window in windows {
@@ -430,16 +607,8 @@ pub fn tidy(
         let dispatch =
             |command: serde_json::Value| tell(gevrek_link::Request::Dispatch(command.to_string()));
         std::thread::sleep(Duration::from_millis(600));
-        dispatch(serde_json::json!({
-            "command": "switch_workspace_selector",
-            "selector": {"kind": "name", "value": gevrek_tutorial::WORKSPACE},
-        }));
-        dispatch(serde_json::json!({"command": "close_workspace"}));
-        if !before.is_empty() {
-            dispatch(serde_json::json!({
-                "command": "switch_workspace_selector",
-                "selector": {"kind": "name", "value": before},
-            }));
+        for command in tidy_commands(&before, &own) {
+            dispatch(command);
         }
     });
 }
@@ -465,7 +634,10 @@ pub fn tidy_after_a_stop(
     progress.save(&file);
     if let Some(before) = left_behind(wm) {
         log::info!("a tutorial that was stopped is tidied up after");
-        tidy(before, Vec::new(), tell);
+        // (Its practice windows went with the shell that held them: what
+        // is on its workspace now, where that is the one shown, is the
+        // person's.)
+        tidy(before, Vec::new(), own_windows(&Facts::of(wm)), tell);
     }
 }
 
@@ -578,6 +750,7 @@ mod tests {
 
     fn desk(workspace: &str, windows: usize, focused: u64) -> Facts {
         Facts {
+            display: String::new(),
             workspace: workspace.to_string(),
             layout: "Dwindle".to_string(),
             windows: (1..=windows as u64)
@@ -600,6 +773,143 @@ mod tests {
         std::env::temp_dir()
             .join(format!("gevrek-tutoring-{name}-{}", std::process::id()))
             .join("tutorial.json")
+    }
+
+    #[test]
+    fn the_ring_is_around_what_a_step_is_about() {
+        use gevrek_tutorial::Spot;
+        // Two windows side by side; the second has the keyboard.
+        let mut facts = desk(gevrek_tutorial::WORKSPACE, 2, 2);
+        facts.windows[0].at = (0, 40, 900, 1000);
+        facts.windows[1].at = (900, 40, 1020, 1000);
+        let panel = Some((0, 0, 1920, 36));
+        assert_eq!(ring_around(Spot::Focused, &facts, panel), Some((900, 40, 1020, 1000)));
+        assert_eq!(ring_around(Spot::Windows, &facts, panel), Some((0, 40, 1920, 1000)));
+        assert_eq!(ring_around(Spot::Panel, &facts, panel), panel);
+        // About nothing with a place, or about what is not there: none.
+        assert_eq!(ring_around(Spot::None, &facts, panel), None);
+        assert_eq!(ring_around(Spot::Surface("gevrek-launcher"), &facts, panel), None);
+        assert_eq!(ring_around(Spot::Panel, &facts, None), None);
+        let empty = desk(gevrek_tutorial::WORKSPACE, 0, 0);
+        assert_eq!(ring_around(Spot::Focused, &empty, panel), None);
+        assert_eq!(ring_around(Spot::Windows, &empty, panel), None);
+
+        // Its four sides lie around the rectangle, outside it, and meet
+        // at the corners without lying over each other.
+        let around = (100, 200, 600, 400);
+        let sides = ring_sides(around);
+        let outer = (
+            around.0 - RING_GAP - RING,
+            around.1 - RING_GAP - RING,
+            around.2 + 2 * (RING_GAP + RING),
+            around.3 + 2 * (RING_GAP + RING),
+        );
+        for side in &sides {
+            assert!(side.2 > 0 && side.3 > 0);
+            // Within the outer rectangle, and nowhere on what it is around.
+            assert!(side.0 >= outer.0 && side.0 + side.2 <= outer.0 + outer.2);
+            assert!(side.1 >= outer.1 && side.1 + side.3 <= outer.1 + outer.3);
+            let apart = side.0 + side.2 <= around.0
+                || around.0 + around.2 <= side.0
+                || side.1 + side.3 <= around.1
+                || around.1 + around.3 <= side.1;
+            assert!(apart, "{side:?} lies on {around:?}");
+        }
+        let area: i32 = sides.iter().map(|side| side.2 * side.3).sum();
+        assert_eq!(area, outer.2 * outer.3 - (outer.2 - 2 * RING) * (outer.3 - 2 * RING));
+    }
+
+    #[test]
+    fn the_cards_room_is_kept_free_of_tiles() {
+        use gevrek_model::command::DispatchCommand;
+        let Do::Dispatch(json) = card_room() else {
+            panic!("a command");
+        };
+        let command: DispatchCommand = serde_json::from_str(&json).expect("a command");
+        // All of the card, its distance from the edge, and a little more.
+        let wanted = (crate::coach::SIZE.1 + CARD_MARGIN) as i32;
+        assert!(matches!(
+            command,
+            DispatchCommand::SetWorkspaceWorkAreaOffset { left: 0, top: 0, right: 0, bottom }
+                if bottom > wanted && bottom < wanted + 40
+        ));
+    }
+
+    #[test]
+    fn the_tutorial_is_on_the_display_the_person_is_on() {
+        use gevrek_model::command::{DispatchCommand, MonitorTarget};
+        let targets = |todo: &[Do]| -> Vec<MonitorTarget> {
+            todo.iter()
+                .filter_map(|one| match one {
+                    Do::Dispatch(json) => serde_json::from_str::<DispatchCommand>(json).ok(),
+                    _ => None,
+                })
+                .filter_map(|command| match command {
+                    DispatchCommand::FocusMonitor { target }
+                    | DispatchCommand::EnsureNamedWorkspace { target, .. } => Some(target),
+                    _ => None,
+                })
+                .collect()
+        };
+        // Begun on the second display: everything of it is asked there.
+        let mut second = desk("mail", 0, 0);
+        second.display = "DELL (2)".to_string();
+        let (_, todo) =
+            Tutoring::begin(None, file("display-second"), &second, Instant::now()).expect("begun");
+        let asked = targets(&todo);
+        assert!(!asked.is_empty());
+        assert!(asked
+            .iter()
+            .all(|target| *target == MonitorTarget::Name("DELL (2)".to_string())));
+        // Where the desktop does not say which display that is: the main one.
+        let (_, todo) =
+            Tutoring::begin(None, file("display-unknown"), &desk("mail", 0, 0), Instant::now())
+                .expect("begun");
+        let asked = targets(&todo);
+        assert!(!asked.is_empty());
+        assert!(asked.iter().all(|target| *target == MonitorTarget::Primary));
+    }
+
+    #[test]
+    fn the_persons_own_windows_leave_the_tutorials_workspace_with_it() {
+        use gevrek_model::command::{DispatchCommand, WindowSelector, WorkspaceSelector};
+        // On the tutorial's workspace: two practice windows and one of
+        // the person's own.
+        let mut facts = desk(gevrek_tutorial::WORKSPACE, 2, 1);
+        let mut own = facts.windows[0].clone();
+        own.id = 77;
+        own.app = "org.mozilla.firefox".to_string();
+        facts.windows.push(own);
+        assert_eq!(own_windows(&facts), [77]);
+        // On any other workspace nothing is the tutorial's to move.
+        assert!(own_windows(&desk("mail", 2, 1)).is_empty());
+
+        // It goes to the workspace of before, then the tutorial's is
+        // closed, then that one is shown: each a command the model reads.
+        let commands: Vec<DispatchCommand> = tidy_commands("mail", &[77])
+            .iter()
+            .map(|json| serde_json::from_value(json.clone()).expect("a command"))
+            .collect();
+        let name = |name: &str| WorkspaceSelector::Name(name.to_string());
+        assert_eq!(
+            commands,
+            [
+                DispatchCommand::MoveWindowToWorkspace {
+                    window: WindowSelector::Handle(77),
+                    workspace: name("mail"),
+                },
+                DispatchCommand::SwitchWorkspaceSelector {
+                    selector: name(gevrek_tutorial::WORKSPACE),
+                },
+                DispatchCommand::CloseWorkspace,
+                DispatchCommand::SwitchWorkspaceSelector {
+                    selector: name("mail"),
+                },
+            ]
+        );
+        // With no workspace of before there is nowhere to take them, and
+        // nothing to show after: the tutorial's is only tried to close.
+        assert_eq!(tidy_commands("", &[77]).len(), 2);
     }
 
     #[test]

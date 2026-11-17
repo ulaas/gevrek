@@ -891,34 +891,39 @@ impl Executor {
         }
         self.last_focused_window = Some(handle);
 
-        // Expose mode: promote/demote windows on focus change
+        // In the overview of a workspace's windows, a window that takes
+        // the keyboard is the one that was chosen (a press on its
+        // picture): the overview is over, every window is where it was,
+        // and this one is on top, with the keyboard. (As where the
+        // desktop shows the overview itself, `toggle_window_overview`.
+        // It used to be brought to the middle of the overview, which
+        // then had to be left by its key.)
         if let Some((monitor_handle, _)) = monitor_manager.find_window(handle) {
-            let work_area = monitor_manager.get_adjusted_work_area(monitor_handle, window_manager);
             if let Some(workspace) = monitor_manager.get_focused_workspace_mut(monitor_handle) {
-                if self.expose_workspaces.contains(&workspace.id) {
-                    // The focused window is promoted to the centre; the
-                    // previous one goes back to its cell at its own size.
-                    let promoted = expose::promote(workspace, handle, work_area, |previous| {
-                        queries(window_manager)
-                            .rect(previous)
-                            .map_err(anyhow::Error::msg)
-                            .ok()
-                    });
-                    if let Some(ops) = promoted {
-                        if !ops.is_empty() {
-                            let _ = Self::batch_move_resize_and_sync_borders(window_manager, &ops);
-                            // Mark transition time to suppress Moved handler feedback loop
-                            self.last_expose_transition = Instant::now();
-                        }
-                        // Bring promoted window to front of z-order
-                        let _ = effect(
-                            window_manager,
-                            Effect::Stack {
-                                id: handle,
-                                op: StackOp::Raise,
-                            },
-                        );
+                let chosen = self.expose_workspaces.contains(&workspace.id)
+                    && workspace
+                        .expose_state
+                        .as_ref()
+                        .is_some_and(|overview| overview.grid_rects.contains_key(&handle));
+                if chosen {
+                    let workspace_id = workspace.id;
+                    let back = expose::deactivate(workspace);
+                    if !back.is_empty() {
+                        let _ = Self::batch_move_resize_and_sync_borders(window_manager, &back);
+                        // (What the windows say of their way back is not
+                        // a move of the person's.)
+                        self.last_expose_transition = Instant::now();
                     }
+                    self.expose_workspaces.remove(&workspace_id);
+                    let _ = effect(window_manager, Effect::DecorationsVisible(true));
+                    let _ = effect(
+                        window_manager,
+                        Effect::Stack {
+                            id: handle,
+                            op: StackOp::Raise,
+                        },
+                    );
+                    log::info!("The overview of workspace {workspace_id} is over: a window was chosen");
                 }
             }
         }
@@ -1217,6 +1222,34 @@ impl Executor {
     }
 
     /// The user let go of a window.
+    /// The display a window was dropped on. Where it was moved, that is
+    /// the display the pointer is on: there is where the person put it.
+    /// (Most of a large window still lies on the display it came from
+    /// when it is let go just beyond the edge; asked where most of it
+    /// was, it had not gone anywhere, and it took a few tries to get a
+    /// window to the display beside.) Where it was only made another
+    /// size, it is the display most of it is on.
+    fn display_dropped_on(
+        window_manager: &dyn Desktop,
+        monitor_manager: &MonitorManager,
+        handle: WindowHandle,
+        was: Option<gevrek_model::geometry::Rect>,
+    ) -> Option<crate::outputs::MonitorInfo> {
+        let now = queries(window_manager)
+            .rect(handle)
+            .map_err(anyhow::Error::msg)
+            .ok();
+        let sized = was.zip(now).is_some_and(|(was, now)| {
+            (was.width - now.width).abs() > 10 || (was.height - now.height).abs() > 10
+        });
+        if !sized {
+            if let Some(under_pointer) = monitor_at_cursor(window_manager, monitor_manager) {
+                return Some(under_pointer);
+            }
+        }
+        monitor_of(window_manager, monitor_manager, handle)
+    }
+
     fn on_drag_ended(
         &mut self,
         window_manager: &mut dyn Desktop,
@@ -1251,8 +1284,13 @@ impl Executor {
                     let registered = monitor_manager
                         .find_window(handle)
                         .map(|(output, _)| output);
-                    let dropped_on = monitor_of(window_manager, monitor_manager, handle)
-                        .map(|monitor| monitor.handle);
+                    let dropped_on = Self::display_dropped_on(
+                        window_manager,
+                        monitor_manager,
+                        handle,
+                        drag_state.original_rect,
+                    )
+                    .map(|monitor| monitor.handle);
                     if let (Some(from), Some(to)) = (registered, dropped_on) {
                         if from != to && monitor_manager.get_focused_workspace(to).is_some() {
                             monitor_manager.find_and_remove_window(handle);
@@ -1280,7 +1318,12 @@ impl Executor {
                 // Skip all tiling/zone logic
             } else {
                 // --- Tiled window drag logic ---
-                let current_monitor = monitor_of(window_manager, monitor_manager, handle);
+                let current_monitor = Self::display_dropped_on(
+                    window_manager,
+                    monitor_manager,
+                    handle,
+                    drag_state.original_rect,
+                );
 
                 if let Some(current_monitor_info) = current_monitor {
                     let current_monitor_handle = current_monitor_info.handle;

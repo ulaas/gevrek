@@ -1008,6 +1008,30 @@ impl State {
                                 BindingTrigger::Press,
                             ));
                         }
+                        // The overview of one workspace's windows is up:
+                        // its keys are its own (Escape, the arrows, Tab,
+                        // Enter), and so is their release, though the
+                        // overview may be gone by then.
+                        if chord == (false, false, false, false)
+                            && ((pressed
+                                && crate::window_overview::is_its_key(&name)
+                                && state.window_overview_is_up())
+                                || (!pressed
+                                    && state.window_overview.held.contains(&code.raw())))
+                        {
+                            if pressed {
+                                state.window_overview.held.insert(code.raw());
+                                state.window_overview.asked = Some(name.to_string());
+                            } else {
+                                state.window_overview.held.remove(&code.raw());
+                            }
+                            return FilterResult::Intercept((
+                                Vec::new(),
+                                String::new(),
+                                *modifiers,
+                                BindingTrigger::Press,
+                            ));
+                        }
                         // The overview of every workspace is up: Escape
                         // puts it away, and is nobody else's (nor is its
                         // release, when the overview is gone by then).
@@ -1078,6 +1102,10 @@ impl State {
                 }
                 if std::mem::take(&mut self.overview_leave_asked) {
                     self.leave_workspace_overview(None);
+                }
+                if let Some(key) = self.window_overview.asked.take() {
+                    self.window_overview_key(&key);
+                    self.sync_window_overview();
                 }
                 if toggle_inhibit && !self.toggle_shortcuts_inhibit() {
                     log::debug!("Super+Escape: no program has asked for every key");
@@ -1254,6 +1282,54 @@ impl State {
             if let Some(id) = window {
                 self.focus_window(id);
             }
+        }
+        // (Over a picture of the overview of the windows: it is the one
+        // pointed at.)
+        self.window_overview_pointed();
+        // A hot corner: come into, or left. Its moment is looked for by
+        // the host's passes, which are asked for while it lasts.
+        self.tick_hot_corners(std::time::Instant::now());
+        if self.hot_corners.waits() {
+            self.host_soon();
+        }
+    }
+
+    /// Hot corners (`desktop.hot_corners`): the pointer, left in a corner
+    /// of a display for a moment, runs that corner's command. Called when
+    /// the pointer moves and from the host's passes; `now` is a parameter
+    /// so that tests can move time.
+    pub fn tick_hot_corners(&mut self, now: std::time::Instant) {
+        if self.paused || !self.config.desktop.hot_corners.watched() {
+            return;
+        }
+        let displays: Vec<gevrek_model::geometry::Rect> = self
+            .desktop
+            .outputs
+            .iter()
+            .map(|output| output.rect)
+            .collect();
+        // (Something is dragged there, not pointed at.)
+        let held = self.desktop.primary_button_down || self.drag.is_some();
+        let Some(command) = self.hot_corners.step(
+            &self.config.desktop.hot_corners,
+            &displays,
+            self.desktop.pointer,
+            held,
+            now,
+        ) else {
+            return;
+        };
+        // Not over a program that fills the display (a game, a film): a
+        // pointer in its corner means something there.
+        let fills = self.desktop.focused.is_some_and(|window| {
+            gevrek_engine::WindowQueries::is_fullscreen(&self.desktop, window)
+        });
+        if fills {
+            return;
+        }
+        log::info!("A hot corner runs: {}", command.display_name());
+        if let Err(error) = self.run_command(command) {
+            log::warn!("a hot corner's command could not be run: {error}");
         }
     }
 

@@ -632,6 +632,92 @@ fn going_to_an_output_with_nothing_on_it_takes_the_keyboard_along() {
 }
 
 #[test]
+fn a_window_chosen_in_the_overview_ends_it_and_has_the_keyboard() {
+    let (mut core, mut desktop) = setup(&["main"]);
+    let editor = open(&mut core, &mut desktop, "editor");
+    let terminal = open(&mut core, &mut desktop, "terminal");
+    focus(&mut core, &mut desktop, editor);
+    let before = (desktop.window(editor).rect, desktop.window(terminal).rect);
+
+    // The overview: both windows shown smaller, each at its own shape,
+    // side by side. It stays while nothing is chosen.
+    command(&mut core, &mut desktop, DispatchCommand::ToggleExpose);
+    let shown = (desktop.window(editor).rect, desktop.window(terminal).rect);
+    assert!(shown.0.width < before.0.width && shown.1.width < before.1.width);
+    assert!(shown.0.x + shown.0.width <= shown.1.x || shown.1.x + shown.1.width <= shown.0.x);
+    core.flush_pending_layouts(&mut desktop).expect("layout");
+    assert_eq!(desktop.window(editor).rect, shown.0, "nothing lays it out meanwhile");
+
+    // The other window is chosen: the overview is over, both are where
+    // they were, and it has the keyboard.
+    focus(&mut core, &mut desktop, terminal);
+    assert_eq!(
+        (desktop.window(editor).rect, desktop.window(terminal).rect),
+        before
+    );
+    assert_eq!(desktop.focused, Some(terminal));
+    // Its key shows it again (it was over, not only looked over).
+    command(&mut core, &mut desktop, DispatchCommand::ToggleExpose);
+    assert_eq!(desktop.window(editor).rect, shown.0);
+    // And puts it away, with nothing chosen.
+    command(&mut core, &mut desktop, DispatchCommand::ToggleExpose);
+    assert_eq!(
+        (desktop.window(editor).rect, desktop.window(terminal).rect),
+        before
+    );
+}
+
+#[test]
+fn a_window_dropped_with_the_pointer_on_another_output_goes_there() {
+    use crate::outputs::MonitorInfo;
+    const SECOND: MonitorHandle = MonitorHandle(2);
+    let (mut core, mut desktop) = setup(&["main"]);
+    let screen = Rect::new(1920, 0, 2560, 1440);
+    let mut monitors = core.monitor_manager.get_all_monitors();
+    monitors.push(MonitorInfo {
+        handle: SECOND,
+        name: "Second".to_string(),
+        device_path: String::new(),
+        is_primary: false,
+        x: screen.x,
+        y: screen.y,
+        width: screen.width,
+        height: screen.height,
+        work_x: screen.x,
+        work_y: screen.y,
+        work_width: screen.width,
+        work_height: screen.height,
+        dpi_scale: 1.0,
+    });
+    core.monitor_manager.replace_monitors(monitors);
+    core.monitor_manager
+        .create_workspace(SECOND, "side".to_string(), LayoutType::BSP)
+        .expect("workspace on the second output");
+    desktop.more_outputs.push((SECOND, screen));
+
+    let editor = open(&mut core, &mut desktop, "editor");
+    assert_eq!(core.monitor_manager.find_window(editor), Some((OUTPUT, 0)));
+    // Taken by its title and let go just beyond the edge: the window is
+    // where it was (most of it on the first output, as the test's desktop
+    // has it), and the pointer is on the second. That is where it was put.
+    core.handle_window_event(&mut desktop, WindowEvent::DragStarted(editor))
+        .expect("taken");
+    assert_eq!(
+        crate::contract::Desktop::output_of(&desktop, editor),
+        Some(OUTPUT)
+    );
+    desktop.output = SECOND;
+    core.handle_window_event(&mut desktop, WindowEvent::DragEnded(editor))
+        .expect("let go");
+    core.flush_pending_layouts(&mut desktop).expect("layout");
+    assert_eq!(core.monitor_manager.find_window(editor), Some((SECOND, 0)));
+    assert!(tiled(&core).is_empty(), "it has left the first output");
+    // It is laid out there: within that output.
+    let rect = desktop.window(editor).rect;
+    assert!(rect.x >= screen.x && rect.x + rect.width <= screen.x + screen.width);
+}
+
+#[test]
 fn a_layout_is_set_on_the_output_the_user_went_to_not_where_the_window_is() {
     use crate::outputs::MonitorInfo;
     use gevrek_model::command::MonitorTarget;
@@ -1026,7 +1112,45 @@ fn after_a_restart_the_saved_session_puts_windows_back_on_their_workspaces() {
     }
     assert_eq!(core.restore_session(&mut desktop, &gone).unwrap(), 0);
 
-    // A window that is no longer the same window is left where it is.
+    // The display has another handle than when the session was saved
+    // (the machine was started again): it is found by what it is known
+    // as, and the window goes back, and the workspace it showed is shown.
+    let (mut core, _) = setup(&["one", "two"]);
+    core.adopt_existing_windows(&mut desktop).unwrap();
+    let mut elsewhere = saved.clone();
+    let other = MonitorHandle(OUTPUT.0 + 4711);
+    for window in &mut elsewhere.windows {
+        assert!(window.monitor_known_as.is_some());
+        window.monitor = window.monitor.map(|_| other);
+    }
+    for shown in &mut elsewhere.shown_workspaces {
+        shown.monitor = other;
+    }
+    elsewhere.focused_workspaces.clear();
+    assert_eq!(core.restore_session(&mut desktop, &elsewhere).unwrap(), 1);
+    assert_eq!(
+        core.monitor_manager.find_window(terminal),
+        Some((OUTPUT, 1))
+    );
+    assert_eq!(
+        core.monitor_manager
+            .get_workspaces(OUTPUT)
+            .map(|workspaces| workspaces.focused_idx()),
+        saved.focused_workspaces.get(&OUTPUT).copied()
+    );
+    // A display that is known as nothing there is, is none: nothing moves.
+    let (mut core, _) = setup(&["one", "two"]);
+    core.adopt_existing_windows(&mut desktop).unwrap();
+    let mut nowhere = elsewhere.clone();
+    for window in &mut nowhere.windows {
+        window.monitor_known_as = Some("a display that is not there".to_string());
+    }
+    nowhere.shown_workspaces.clear();
+    assert_eq!(core.restore_session(&mut desktop, &nowhere).unwrap(), 0);
+
+    // A window that is no longer the same window is left where it is
+    // (the other one is back on its workspace first).
+    assert_eq!(core.restore_session(&mut desktop, &saved).unwrap(), 1);
     let mut stale = saved.clone();
     stale.windows[0].class = "SomethingElse".to_string();
     stale.windows[0].workspace_id = Some(1);

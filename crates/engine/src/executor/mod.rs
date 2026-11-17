@@ -417,6 +417,35 @@ fn monitor_of(
         .and_then(|output| outputs.get_monitor(output).cloned())
 }
 
+/// What a display is known by beyond this run of the system: its device
+/// path, or its name where it has none (a saved session finds it by this
+/// when its handle is another).
+pub fn display_known_as(display: &crate::outputs::MonitorInfo) -> String {
+    if display.device_path.trim().is_empty() {
+        display.name.clone()
+    } else {
+        display.device_path.clone()
+    }
+}
+
+/// The display a saved session means: the one with that handle, or else
+/// the one known as it was.
+fn display_of_session(
+    outputs: &MonitorManager,
+    handle: MonitorHandle,
+    known_as: Option<&str>,
+) -> Option<MonitorHandle> {
+    if outputs.get_monitor(handle).is_some() {
+        return Some(handle);
+    }
+    let known_as = known_as.map(str::trim).filter(|known| !known.is_empty())?;
+    outputs
+        .get_all_monitors()
+        .iter()
+        .find(|display| display_known_as(display).eq_ignore_ascii_case(known_as))
+        .map(|display| display.handle)
+}
+
 /// The monitor the pointer is on.
 fn monitor_at_cursor(
     desktop: &dyn Desktop,

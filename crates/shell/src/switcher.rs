@@ -37,7 +37,12 @@ pub fn entries(wm: &Value) -> Vec<Entry> {
         let shown = &monitor["workspace"]["id"];
         let has_keyboard = monitor["is_focused"].as_bool().unwrap_or(false);
         for workspace in monitor["workspaces"].as_array().into_iter().flatten() {
-            let name = workspace["name"].as_str().unwrap_or_default();
+            // (What is shown of a workspace: its title, or its name.)
+            let name = workspace["title"]
+                .as_str()
+                .filter(|title| !title.trim().is_empty())
+                .or(workspace["name"].as_str())
+                .unwrap_or_default();
             let is_shown = &workspace["id"] == shown;
             for window in workspace["detailed_windows"]
                 .as_array()

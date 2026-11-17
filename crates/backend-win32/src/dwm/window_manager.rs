@@ -1931,6 +1931,10 @@ impl WindowManager {
         // it is: `settle_stand_ins`.)
         if !hide {
             self.end_stand_in(handle);
+        } else {
+            // (Its border, which went out with it, goes with it: left
+            // shown, it stayed around nothing on the workspace that came.)
+            let _ = self.hide_border(handle);
         }
         // SAFETY: plain calls on a window that may be gone meanwhile; both
         // are posted to the window's own thread, in this order, so that a
@@ -1991,6 +1995,25 @@ impl WindowManager {
         for handle in waiting.into_iter().chain(over) {
             self.stop_going_out(handle, true);
         }
+    }
+
+    /// Whether gevrek has hidden this window, or has asked for it to be
+    /// and Windows has not done so yet. A window is hidden by a message it
+    /// answers when it gets to it, and until then Windows still calls it
+    /// visible. A border that was placed in that moment was shown again,
+    /// and stayed around nothing once the window was gone: nothing hid it
+    /// a second time. So a window that is to be out of sight has no
+    /// border, whatever Windows says of it meanwhile. One that goes out
+    /// with its workspace keeps its border on the way; it is hidden with
+    /// the window (`stop_going_out`).
+    fn kept_out_of_sight(&self, handle: WindowHandle) -> bool {
+        super::hidden_journal::is_hidden(handle)
+            && !self.going_out.leaving.contains_key(&handle)
+            && !self
+                .going_out
+                .waiting
+                .iter()
+                .any(|(waiting, _)| *waiting == handle)
     }
 
     /// Hide a window (for workspace switching)
@@ -3417,7 +3440,7 @@ impl WindowManager {
                                 0x27 => (1, 0),
                                 _ => (0, 1),
                             };
-                            super::overview::towards(&places, from, across, down).unwrap_or(from)
+                            gevrek_engine::expose::towards(&places, from, across, down).unwrap_or(from)
                         }
                     });
                 }
@@ -3905,6 +3928,11 @@ impl WindowManager {
                 }
             }
             for (handle, rect) in &frame.rectangles {
+                // (The pictures of an overview have none: the borders are
+                // put away for it, and are back when it is over.)
+                if self.overview_holds(*handle) || self.overview_leaving.contains(handle) {
+                    continue;
+                }
                 let _ = self.update_border_position_explicit(
                     *handle,
                     rect.x,
@@ -4851,7 +4879,10 @@ impl WindowManager {
                 return Ok(());
             }
 
-            if IsIconic(target_hwnd).as_bool() || !IsWindowVisible(target_hwnd).as_bool() {
+            if IsIconic(target_hwnd).as_bool()
+                || !IsWindowVisible(target_hwnd).as_bool()
+                || self.kept_out_of_sight(target_handle)
+            {
                 let _ = ShowWindow(border_hwnd, SW_HIDE);
                 self.auras.borrow().set_visible(target_hwnd, false);
                 if let Some(border_info) = self.border_windows.get_mut(&target_handle) {
@@ -4955,7 +4986,10 @@ impl WindowManager {
                     return Ok(());
                 }
 
-                if IsIconic(target_hwnd).as_bool() || !IsWindowVisible(target_hwnd).as_bool() {
+                if IsIconic(target_hwnd).as_bool()
+                || !IsWindowVisible(target_hwnd).as_bool()
+                || self.kept_out_of_sight(target_handle)
+            {
                     let _ = ShowWindow(border_hwnd, SW_HIDE);
                     self.auras.borrow().set_visible(target_hwnd, false);
                     return Ok(());
@@ -5247,6 +5281,7 @@ impl WindowManager {
                 if !IsWindow(target_hwnd).as_bool()
                     || IsIconic(target_hwnd).as_bool()
                     || !IsWindowVisible(target_hwnd).as_bool()
+                    || self.kept_out_of_sight(target_handle)
                 {
                     return Ok(());
                 }
@@ -5324,6 +5359,7 @@ impl WindowManager {
                 if !IsWindow(target_hwnd).as_bool()
                     || IsIconic(target_hwnd).as_bool()
                     || !IsWindowVisible(target_hwnd).as_bool()
+                    || self.kept_out_of_sight(*target_handle)
                 {
                     continue;
                 }
@@ -7768,6 +7804,48 @@ mod exit_animation_tests {
         unsafe {
             let _ = DestroyWindow(HWND(one.0 as _));
             let _ = DestroyWindow(HWND(two.0 as _));
+        }
+    }
+
+    #[test]
+    fn a_window_that_is_being_hidden_is_out_of_sight_for_its_border() {
+        let mut window_manager = WindowManager::new();
+        window_manager.set_animation_profile(workspace_slide_profile(false, false));
+        let window = shown_window_out_of_sight();
+        let home = Rect::new(-30000, -30000, 600, 400);
+        window_manager.batch_move_resize(&[(window, home)]).unwrap();
+        assert!(!window_manager.kept_out_of_sight(window));
+
+        // Hidden, as a window that leaves a workspace is: asked for, and
+        // not done yet (the message is not heard here). Windows still
+        // calls it visible; for its border it is out of sight already.
+        window_manager.hide_window(window).unwrap();
+        assert!(is_shown(window));
+        assert!(window_manager.kept_out_of_sight(window));
+        messages_are_heard();
+        assert!(!is_shown(window));
+        assert!(window_manager.kept_out_of_sight(window));
+
+        // Shown again, it is to be seen, and its border with it.
+        window_manager.show_window(window).unwrap();
+        messages_are_heard();
+        assert!(!window_manager.kept_out_of_sight(window));
+
+        // One that goes out with its workspace keeps its border on the
+        // way, and loses it when it is hidden at the end of it.
+        window_manager.workspace_gives_way();
+        window_manager.hide_window(window).unwrap();
+        assert!(is_shown(window));
+        assert!(!window_manager.kept_out_of_sight(window));
+        window_manager.stop_going_out(window, true);
+        assert!(window_manager.kept_out_of_sight(window));
+        messages_are_heard();
+        assert!(!is_shown(window));
+
+        window_manager.show_window(window).unwrap();
+        messages_are_heard();
+        unsafe {
+            let _ = DestroyWindow(HWND(window.0 as _));
         }
     }
 

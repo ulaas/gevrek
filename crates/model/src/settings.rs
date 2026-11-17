@@ -1294,6 +1294,49 @@ impl DesktopConfig {
         true
     }
 
+    /// The key most of the bindings are held with: Super (the Windows
+    /// key), unless more of them are held with Alt and not with Super.
+    pub fn main_key(&self) -> MainKey {
+        let with = |super_held: bool, alt_held: bool| {
+            self.bindings
+                .iter()
+                .filter(|binding| binding.enabled && binding.win == super_held && binding.alt == alt_held)
+                .count()
+        };
+        if with(false, true) > with(true, false) {
+            MainKey::Alt
+        } else {
+            MainKey::Super
+        }
+    }
+
+    /// Hold the bindings with another main key: every binding and every
+    /// gesture's key that was held with Super is held with Alt, and one
+    /// that was held with Alt with Super. Each keeps the other keys it
+    /// had, so two bindings that were on different keys still are (the
+    /// two keys change places; nothing is lost and nothing collides that
+    /// did not before). Nothing happens where `to` is the key they are
+    /// held with already. Returns what then lies on keys the system or
+    /// most programs use themselves ([`MainKey::taken_by_others`]): the
+    /// names of those bindings with their keys, for the person to be
+    /// told.
+    pub fn set_main_key(&mut self, to: MainKey) -> Vec<(String, String)> {
+        if self.main_key() != to {
+            for binding in &mut self.bindings {
+                std::mem::swap(&mut binding.win, &mut binding.alt);
+            }
+        }
+        self.bindings
+            .iter()
+            .filter(|binding| binding.enabled)
+            .filter_map(|binding| {
+                let held = (binding.win, binding.alt, binding.ctrl, binding.shift);
+                MainKey::taken_by_others(held, &binding.key)
+                    .map(|keys| (binding.name.clone(), keys.to_string()))
+            })
+            .collect()
+    }
+
     pub fn validate(&self) -> Vec<ConfigIssue> {
         let mut issues = Vec::new();
         for (path, message) in self
@@ -3579,6 +3622,35 @@ pub enum BindingTrigger {
     LongPress,
 }
 
+/// The key gevrek's bindings are held with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MainKey {
+    /// The Windows key.
+    #[default]
+    Super,
+    Alt,
+}
+
+impl MainKey {
+    /// The keys a binding lies on, where the system or most programs
+    /// use those themselves (held: Super, Alt, Ctrl, Shift): a binding
+    /// there takes them away from what a person knows them to do.
+    pub fn taken_by_others(held: (bool, bool, bool, bool), key: &str) -> Option<&'static str> {
+        let key = key.trim().to_ascii_uppercase();
+        match (held, key.as_str()) {
+            // (Not Alt+Tab: gevrek's own switcher is on it on purpose,
+            // where the system's would be.)
+            ((false, true, false, false), "F4") => Some("Alt+F4"),
+            ((false, true, false, false), "SPACE") => Some("Alt+Space"),
+            ((false, true, false, false), "ESCAPE" | "ESC") => Some("Alt+Escape"),
+            ((false, true, false, false), "ENTER" | "RETURN") => Some("Alt+Enter"),
+            ((false, true, true, false), "DELETE" | "DEL") => Some("Ctrl+Alt+Delete"),
+            ((true, false, false, false), "L") => Some("Super+L"),
+            _ => None,
+        }
+    }
+}
+
 /// A corner of a display.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
@@ -4242,6 +4314,74 @@ mod tests {
         assert_eq!(config.animations.border.duration_ms, 140);
         assert_eq!(config.animations.window.duration_ms, 220);
         assert!(config.validate().is_empty());
+    }
+
+    #[test]
+    fn the_main_key_of_the_bindings_is_changed_and_changed_back() {
+        let binding = |name: &str, key: &str, held: (bool, bool, bool, bool)| BindingProfile {
+            name: name.to_string(),
+            key: key.to_string(),
+            win: held.0,
+            alt: held.1,
+            ctrl: held.2,
+            shift: held.3,
+            ..BindingProfile::default()
+        };
+        let mut desktop = DesktopConfig {
+            bindings: vec![
+                binding("close", "Q", (true, false, false, false)),
+                binding("terminal", "T", (true, false, false, false)),
+                binding("fullscreen", "ENTER", (true, false, false, false)),
+                binding("switcher", "TAB", (false, true, false, false)),
+                binding("both", "X", (true, true, false, false)),
+                binding("plain", "F9", (false, false, true, false)),
+            ],
+            ..DesktopConfig::default()
+        };
+        let before: Vec<(bool, bool, bool, bool)> = desktop
+            .bindings
+            .iter()
+            .map(|binding| (binding.win, binding.alt, binding.ctrl, binding.shift))
+            .collect();
+        let held = |desktop: &DesktopConfig| -> Vec<(bool, bool, bool, bool)> {
+            desktop
+                .bindings
+                .iter()
+                .map(|binding| (binding.win, binding.alt, binding.ctrl, binding.shift))
+                .collect()
+        };
+        assert_eq!(desktop.main_key(), MainKey::Super);
+        // Already so: nothing changes, and nothing of the system's is taken.
+        assert!(desktop.set_main_key(MainKey::Super).is_empty());
+        assert_eq!(held(&desktop), before);
+
+        // To Alt: the two keys change places in every binding; the other
+        // keys stay. What then lies on keys of the system's is told.
+        let taken = desktop.set_main_key(MainKey::Alt);
+        assert_eq!(desktop.main_key(), MainKey::Alt);
+        assert_eq!(
+            held(&desktop),
+            [
+                (false, true, false, false),
+                (false, true, false, false),
+                (false, true, false, false),
+                (true, false, false, false),
+                (true, true, false, false),
+                (false, false, true, false),
+            ]
+        );
+        assert_eq!(taken, [("fullscreen".to_string(), "Alt+Enter".to_string())]);
+        // No two bindings that were apart are on the same keys now.
+        let chords: HashSet<((bool, bool, bool, bool), String)> = held(&desktop)
+            .into_iter()
+            .zip(desktop.bindings.iter().map(|binding| binding.key.clone()))
+            .collect();
+        assert_eq!(chords.len(), desktop.bindings.len());
+
+        // And back: as it was.
+        desktop.set_main_key(MainKey::Super);
+        assert_eq!(desktop.main_key(), MainKey::Super);
+        assert_eq!(held(&desktop), before);
     }
 
     #[test]

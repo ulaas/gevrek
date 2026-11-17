@@ -251,6 +251,7 @@ mod tests {
             app: crate::PRACTICE_APP.to_string(),
         };
         Facts {
+            display: String::new(),
             workspace: crate::WORKSPACE.to_string(),
             layout: "Dwindle".to_string(),
             windows: vec![window(1, 0), window(2, 800), window(3, 1600)],

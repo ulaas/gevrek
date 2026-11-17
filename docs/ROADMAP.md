@@ -28,20 +28,25 @@ system. The archive is not: git leaves it out through
 ## Where things stand (2026-11-17)
 
 - Version 0.6.0 is public, with installers for Windows and Linux and
-  updates on Windows. `main` is five commits ahead of what is pushed
-  (`61faf40`, `0cfcd38`, `8314a98`, `8d93932`, `4e8350c`), and the tree
-  holds more that is not committed (the last lines of the log).
+  updates on Windows. `main` is pushed up to `91859eb`. The tree holds
+  more that is not committed: 64 files changed and one new
+  (`backend-smithay/src/window_overview.rs`), the log's rows from
+  "afternoon (1)" on. The person is building and trying it on Windows.
 - Everything since 2026-11-17 was written on Windows. What it left to
   do on Linux is gathered in section 2c: start there.
 - The window manager, the shell, the studio, the lock screen and the
   display manager work on both systems. Linux was last tested by the
   person on 2026-11-17: all of it passes.
-- CI is red on every push so far (section 1).
+- CI on `91859eb` (run 44074103140): the Windows job is green to its
+  end, tests and clippy. The Linux job fails at the studio's picture
+  test alone (its remedy is in the tree, not committed). The check of
+  the dependencies fails since that day on `chrono` (section 1).
 - The check scripts (`tests/desktop`, `tests/nested`, `tests/vm`,
   `tests/wayland`) are not in this repository: the public one leaves
   them out. On this machine only the crates' own tests can be run.
-- The tutorial has its tour on both systems. Its ring, its chapters and
-  what belongs around it are not written.
+- The tutorial has its tour on both systems, and on Windows its ring
+  (not committed, not seen on a desktop). The ring on Linux, the
+  chapters and what belongs around it are not written.
 
 Before a session, on the system you are on:
 
@@ -50,8 +55,19 @@ Before a session, on the system you are on:
 | Everything quick | `cargo xtask check` | `cargo xtask check` |
 | The other system, type-checked | `pwsh scripts/check-linux.ps1` | `scripts/check-windows.sh` |
 
-(The Windows machine's WSL has no cargo: what is only Linux's is not
-checked from there.)
+(On the Windows machine the Linux side builds and its tests run in WSL,
+in the distribution `FedoraLinux-44`, as its own user and not as root:
+
+    wsl -d FedoraLinux-44 -- bash -lc '. ~/.cargo/env; cd /mnt/e/source/private/gevrek && CARGO_TARGET_DIR=$HOME/gevrek-target cargo test --workspace --exclude gevrek-win32'
+
+What cannot be had there is the desktop itself. The studio's picture
+test ends with a fault in WSL's own graphics (its Direct3D driver, and
+OpenGL) unless everything is drawn on the processor; all three of these
+are needed:
+
+    LIBGL_ALWAYS_SOFTWARE=1 WGPU_BACKEND=vulkan VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json cargo test -p gevrek-studio --lib
+
+and with `GEVREK_BLESS=1` before it the pictures are drawn anew.)
 
 ---
 
@@ -59,21 +75,37 @@ checked from there.)
 
 Do these first. Until they are done, a fault can come in unseen.
 
-- [ ] **W** CI, the Windows job: the test of `conflicts` that failed
-      on the runner and passed here. Found (2026-11-18): the runner is
+- [x] **W** CI, the Windows job: the test of `conflicts` that failed
+      on the runner and passed here. Found (2026-11-17): the runner is
       an administrator, and `notices` says so, rightly; the test asked
       for no notice at all. It asks now for none of FancyZones
       (`nothing_is_said_of_fancyzones_when_the_zones_are_not_on_shift`),
       and a second test holds what is said of the machine against what
-      is so there. To tick: the Windows job gets past it on a push. What
-      fails after it there, if anything, is not known yet.
+      is so there. The Windows job on `91859eb` is green: every test,
+      and clippy after them (2026-11-17, run 44074103140).
 - [ ] **L** CI, the Linux job: the studio's
       `every_page_looks_as_its_picture` fails with every page 3 to 10 %
-      off its picture. To find: what the runner draws otherwise (the
-      letters, most likely), and whether the test brings its own fonts
-      or is left out on CI.
-- [ ] **any** CI green once, to the end: the clippy step on Windows and
-      the nested checks on Linux have never been reached there.
+      off its picture. Found (2026-11-17): the studio writes in the
+      system's own font unless told otherwise (`fc-match sans-serif`),
+      so every line of every page was another on another machine; the
+      pictures agreed only with the machine they were drawn on. The
+      test writes in gevrek's own letters now, and the pictures were
+      drawn anew so (2026-11-17, in WSL, by the Vulkan driver that
+      computes on the processor; looked at; the test passes there three
+      times running). Not committed yet: on `91859eb` the job still
+      fails at this test, and at nothing before it. To tick: the job on
+      a push with the new pictures, and the test on the person's Linux. Should a machine's driver still draw a page
+      otherwise, the next step is the driver named in the test itself.
+- [ ] **any** CI green once, to the end. Windows is (`91859eb`); the
+      nested checks on Linux have never been reached.
+- [ ] **person, any** The check of the dependencies (cargo-deny) fails
+      since 2026-11-17, and passed the day before with the same
+      `Cargo.lock`: RUSTSEC-2026-0543 calls `chrono` unmaintained, in
+      every version, and `deny.toml` lets a crate nobody maintains fail
+      where gevrek uses it directly (`gevrek`, `gevrek-engine` and
+      more). To decide: `chrono` gives way to `jiff` or `time` (the
+      advisory's two), or it is named under `ignore` in `deny.toml`
+      with the reason beside it until then.
 - [ ] **person** The check scripts brought back to this machine
       (`tests/desktop` above all), from wherever the private tree is.
       They stay out of the public repository; `.git/info/exclude` gets
@@ -104,86 +136,127 @@ person at the machine.
 
 Written and tested (the log has what). Still open:
 
-- [ ] **person, L** The Linux shell builds and the panel's tabs, their
-      renaming and the hot-plugging of a display behave as on Windows
-      (`shell/src/main.rs` was changed without being built).
-- [ ] **L** The studio's picture of the workspaces and displays pages
-      drawn anew (`GEVREK_BLESS=1`): both pages changed.
+- [ ] **person, L** The panel's tabs, their renaming and the
+      hot-plugging of a display behave on Linux as on Windows. (The
+      Linux shell builds and its tests pass, in WSL; this is about the
+      desktop.)
+- [x] **L** The studio's picture of the workspaces and displays pages
+      drawn anew, with every other page's (2026-11-17, in WSL; looked
+      at; not committed yet).
 - [ ] **person, W** Seen on the desktop: a tab renamed twice, on each
       display; a workspace taken out, put in another order and added in
       the studio while windows are open; a workspace of the moment kept.
 - [ ] **person** The person's own configuration tidied in the studio
       (`Saturn`, `Gevrek`, `Web` are names there, with `1`, `Gevrek2`,
       `4` as titles on one display; `Gitem-2` and `gitem` are strays).
-- [ ] **any** Key bindings, rules and the graph choose a workspace from
-      those there are, instead of a typed name.
-- [ ] **any** A title given by the configuration re-evaluates the rules
-      that go by a workspace's name, as a renaming by command does.
-- [ ] **any** The overview and the window switcher name a workspace by
-      display and name, not by its place (`overview.rs`).
+- [x] **any** Key bindings, gestures, hot corners and rules choose a
+      workspace from those there are, instead of a typed name: the one
+      chosen is shown, with its title, the others on a press, and a name
+      that none of them has is said to be none (`form.rs`,
+      `workspace_control`). The graph names no workspace that is there
+      (its one name is of a workspace it makes). (2026-11-17, tested,
+      not committed yet)
+- [x] **any** Rules and a change of the workspaces. Found: a rule goes
+      by a workspace's name and its place, never by its title, so a
+      title changes nothing for it. What was wrong was the order of a
+      reload: the rules were held against the workspaces before they
+      were put as the configuration has them (one taken out, another
+      put before it). They are held against them after it now
+      (`engine/reload.rs`), on both systems. (2026-11-17, tested, not
+      committed yet)
+- [x] **any** The overview of every workspace goes to a workspace by
+      its display and name (by its place only where it has no name),
+      and it and the window switcher show a workspace's title.
+      (2026-11-17, tested, not committed yet)
 - [ ] **L** The compositor's workspace protocol tells the title.
-- [ ] **any** A saved session finds its workspaces by name on a display
-      that has another handle than before.
-- [ ] **W** The panel's modules display by display (`bar.on()` is never
-      asked on Windows).
-- [ ] **any** The studio does not offer Apply while the window manager
-      is away (a first try broke the trial's test: the session there
-      has no line).
-- [ ] **any** From the studio's audit: slider ranges that are not the
-      model's limits; a new startup program or scratchpad is Windows
-      Terminal on Linux too; `--file` mode writes over a change made
-      elsewhere.
+- [x] **any** A saved session finds its display by what it is known as
+      (its device path, or its name) where its handle is another, and
+      the workspace each display showed by its name. Older sessions are
+      read as before. (2026-11-17, tested, not committed yet)
+- [x] **W** The panel's modules display by display on Windows
+      (`panel::bar_on`), and a display the configuration gives no panel
+      has none and keeps no room for one (`Outputs::bar_on`).
+      (2026-11-17, tested, not committed yet; to be seen by the person)
+- [x] **any** The studio does not offer Apply while the window manager
+      is away, and does not go on sending what is changed live; what is
+      changed stays and can be applied when it is back. (2026-11-17,
+      tested, not committed yet)
+- [x] **any** From the studio's audit: the slider ranges lie within the
+      model's limits, with a test that holds them there (border width,
+      opacities, fps, the zones' two parts of one, gestures, long
+      press, hot corners); a new startup program or scratchpad names
+      the terminal of the system it is made on; `--file` mode does not
+      write over a file that was changed elsewhere without saying so (a
+      second Save does). (2026-11-17, tested, not committed yet)
 
 ## 2c. Next time on Linux
 
-Everything the Windows sessions since 2026-11-17 changed without being
-able to build or see it on Linux, in the order to take it.
+What the Windows sessions since 2026-11-17 left for Linux. Most of it
+was done from Windows after all, on 2026-11-17, once it was found that
+the Linux side builds in WSL (section "Where things stand"): what is
+ticked here was built and tested there, and not seen on a desktop.
 
-First, that it builds and still passes:
+- [x] **L** It builds, and the tests pass (`cargo test --workspace
+      --exclude gevrek-win32` in WSL; all but the studio's pictures).
+      `shell/src/main.rs`, edited unbuilt before, was right.
+      (2026-11-17)
+- [x] **L** A renamed workspace is on its tab at once: the compositor
+      publishes its state before it answers an Apply (it did so a
+      quarter of a second later at the latest), and the shell asks for
+      it on `Applied`. (2026-11-17, built; to be seen)
+- [x] **L** Hot corners are watched by the compositor
+      (`State::tick_hot_corners`, from the pointer's movement and from
+      the host's passes, which go on while the pointer rests in a
+      corner). A test of the compositor holds it. (2026-11-17)
+- [x] **L** The overview of the windows there. The compositor drew the
+      windows as pictures already; they were fitted into a grid that
+      filled the display. They are placed by `expose::arrange` now, as
+      on Windows: each at its shape, all smaller by one measure.
+      (2026-11-17, tested in the engine; to be seen)
+- [x] **L** The compositor's workspace protocol tells a workspace's
+      title as its name; its lasting id is still made of its name.
+      (2026-11-17, built)
+- [x] **L** The two settings of the workspace slide say in their own
+      words that they are for Windows (what the studio shows beside
+      them). (2026-11-17)
 
-- [ ] **L** `cargo xtask check` and `scripts/check-windows.sh`. The
-      shared crates changed a great deal (`model`, `engine`, `protocol`,
-      `server`, `shell/panel.rs`, `studio`); `shell/src/main.rs` and
-      nothing else of Linux's own was edited, unbuilt.
+Still open there:
+
+- [x] **L** The studio's pictures drawn anew, every page (the test
+      writes in gevrek's own letters now, section 1; and workspaces,
+      displays, animations, panel, snap zones, input, window rules,
+      mouse and gestures had changed besides). Drawn in WSL with the
+      settings above, and looked at. (2026-11-17)
+- [ ] **person, L** The picture test passes on the person's Linux too
+      (`cargo test -p gevrek-studio`). If a page is off there, say by
+      how much before anything is kept anew.
 - [ ] **person, L** The desktop as on 2026-11-17 (the person's own
       round of tests), again: nothing of it should be different.
-
-Then what is known to be missing or unseen there:
-
-- [ ] **L** The studio's pictures drawn anew (`GEVREK_BLESS=1 cargo
-      test -p gevrek-studio every_page_looks_as_its_picture`) and looked
-      at before they are kept: workspaces, displays, animations, panel,
-      snap zones, input, window rules, mouse and gestures all changed.
-- [ ] **person, L** Workspaces (section 2b, its first item): the
-      panel's tabs, a tab renamed, a display plugged in and out, each
-      display with its own workspaces.
-- [ ] **L** A renamed workspace is on its tab at once. On Windows the
-      window manager published its state too rarely and the shell did
-      not ask on `Applied` (`runtime/mod.rs`, `shell/windows.rs`). To
-      find: when the compositor publishes its state
-      (`backend-smithay`), and `Event::Applied` in `shell/main.rs`,
-      which only notes the revision.
-- [ ] **L** Hot corners (`desktop.hot_corners`) are not watched. The
-      logic is shared and tested (`engine/hot_corners.rs`,
-      `Watch::step`); the compositor has to call it with the pointer's
-      place from `pointer_moved` (`backend-smithay/src/input.rs`) and
-      again when the moment is over though the pointer rests (a timer:
-      no motion event comes then). Then the sentence in the guide that
-      says they are not watched on Linux goes.
-- [ ] **L** The overview of the windows (`toggle_expose`). On Windows
-      it shows pictures (`Desktop::toggle_window_overview`,
-      `expose::arrange`). The compositor does not answer that call, so
-      there the windows themselves are still sized into a grid. A
-      compositor can draw a window at any size: it should answer the
-      call and draw them small where `arrange` says, with the titles,
-      the mark and the keys of `backend-win32/src/dwm/overview.rs`.
-- [ ] **L** The two settings of the workspace slide
-      (`workspace_slides_as_pictures`, `workspace_slides_without_shadows`)
-      do nothing on Linux, where the compositor slides pictures anyway.
-      Said so in the studio, or not shown there.
-- [ ] **L** The compositor's workspace protocol tells the title
-      (section 2b).
-- [ ] **L** CI, the Linux job (section 1).
+- [ ] **person, L** Seen: the panel's tabs and a tab renamed; a display
+      plugged in and out; the hot corner; the overview of the windows
+      (smaller pictures, in rows); a window dragged to the display
+      beside.
+- [x] **L** A window chosen in the overview there (a press on its
+      picture) ends the overview and has the keyboard, as on Windows;
+      it used to be brought to the middle. (2026-11-17, a scenario of
+      the engine holds it; to be seen)
+- [x] **L** The overview of the windows on Linux has what it has on
+      Windows: each window's title under its picture, a frame around
+      the one pointed at, the arrows and Tab from picture to picture,
+      Enter to go to one, Escape to put it away
+      (`backend-smithay/src/window_overview.rs`; the way an arrow goes
+      is the engine's for both, `expose::towards`). A test of the
+      compositor holds the keys; what is drawn was looked at in a
+      picture of the compositor without a display (three windows of
+      the test client). (2026-11-17)
+- [x] **any** A pointer that lies in a hot corner when gevrek starts
+      does nothing until it has been moved out of it: the compositor
+      has the pointer at the top left before anybody moved it, and
+      showed the overview by itself at the start of a session (found
+      by that picture). (2026-11-17, tested)
+- [ ] **person, L** A new startup program and a new scratchpad in the
+      studio name kitty there, not Windows Terminal.
+- [ ] **L** CI, the Linux job (section 1): on a push.
 
 Not Linux's, but waiting for the person on Windows from the same days:
 
@@ -193,13 +266,29 @@ Not Linux's, but waiting for the person on Windows from the same days:
 - [ ] **person, W** The hot corner at the top left, with the panel
       there; the moment it takes (250 ms).
 - [ ] **person, W** A workspace renamed from its tab: there at once.
+- [ ] **person, W** A window dragged to the display beside goes there
+      at the first try (reported 2026-11-17: it took a few). It went to
+      the display most of it was on, and most of a large window is
+      still on the one it came from when it is let go just beyond the
+      edge. It goes to the display the pointer is on now
+      (`display_dropped_on`), on both systems.
+- [ ] **person, W** Borders around nothing, seen now and then on a
+      workspace (reported 2026-11-17). One cause found and closed: a
+      window is hidden by a message it answers later (and one that
+      fades out with its workspace only after that), Windows calls it
+      visible meanwhile, and a border placed in that moment was shown
+      again with nothing to hide it afterwards. A window gevrek has
+      hidden or asked to be hidden has no border now, and one that went
+      out with its workspace loses it when it is hidden. To be seen:
+      whether they are gone. If not, the next to look at: a window that
+      shows itself again on a workspace that is not shown.
 - [ ] **person, W** The setup program with the helper's checkbox, an
       update over it, and the uninstall (never run on this machine);
       the release workflow's new step on a runner.
 - [ ] **person, W** The two settings of the workspace slide: what they
       do to the graphics card's load (nothing was measured).
 
-**This file is in the repository** (since 2026-11-18): a pull on the
+**This file is in the repository** (since 2026-11-17): a pull on the
 Linux system brings it. Its archive, `docs/ROADMAP-archive-2026-11.md`,
 is not (`.git/info/exclude`); nothing here needs it.
 
@@ -211,23 +300,45 @@ code: `crates/tutorial`, `shell/src/tutoring.rs`, `shell/src/coach.rs`,
 
 ### Stage 1: the tour, finished
 
-- [ ] **any** Practice windows say how they stand: the keyboard,
-      floating, a tab of how many. Today they show one sentence that
-      never changes.
-- [ ] **any** The ring around what a step is about (a window, every
-      window, the panel, a surface). Lessons name it already (`Spot`);
-      nothing draws it. On Windows a see-through surface as large as the
-      display is black unless the graphics device draws with DirectX 12:
-      four thin surfaces for the ring's sides, for which a `Place` must
-      be able to say where on the display it is.
-- [ ] **any** The tutorial on the display the person is on, not always
-      the main one.
-- [ ] **any** A window of the person's own on the tutorial's workspace
-      no longer keeps that workspace from going at the end.
-- [ ] **any** The card does not lie over the lower right window's foot.
-- [ ] **any** The welcome window: the main key chosen there (every
-      binding rewritten, with what collides said); and it folds into the
-      coach's card instead of closing.
+- [x] **any** Practice windows say how they stand: the keyboard,
+      floating, maximized, a tab of how many. A practice window asks
+      the window manager (`Standing::of`, by its title and its
+      application) when something happens on the desktop, and writes it
+      under its name. (2026-11-17, tested; to be seen in the tour)
+- [x] **W** The ring around what a step is about: the window with
+      the keyboard, every window of the workspace, or the panel. What
+      it is around is worked out the same on both systems
+      (`ring_around`, `ring_sides`); the Windows shell draws it as four
+      thin surfaces in the accent's colour, put where they belong as
+      the desktop changes (a surface as large as the display would be
+      black there). (2026-11-17, the places tested; to be seen)
+- [ ] **L** The ring on Linux: a compositor places a shell's surface
+      itself, so the four sides cannot be put at a rectangle there. It
+      wants either one surface over the display with a see-through
+      ground, or the compositor to draw the ring when asked.
+- [ ] **any** A ring around a surface of the shell's own (the
+      launcher, the control centre): the shell knows where it put them.
+- [x] **any** The tutorial on the display the person is on, not always
+      the main one: the display with the keyboard when it begins, by
+      its name; the main one where the desktop does not say.
+      (2026-11-17, tested; to be seen with two displays)
+- [x] **any** A window of the person's own on the tutorial's workspace
+      no longer keeps that workspace from going at the end: it is taken
+      to the workspace that was shown before (`tidy_commands`), also
+      after a gevrek that stopped in the middle. (2026-11-17, tested)
+- [x] **any** The card does not lie over the lower right window's foot:
+      its room at the foot of the display is kept free of tiles on the
+      tutorial's workspace (`card_room`, the workspace's own offset,
+      which goes with the workspace). (2026-11-17, tested; to be seen)
+- [x] **any** The welcome window: the main key chosen there, Super or
+      Alt. Every binding that was held with the one is held with the
+      other (`DesktopConfig::set_main_key`: the two change places, so
+      nothing collides that did not before), and what then lies on keys
+      the system or most programs use is said under the choice.
+      (2026-11-17, tested; the page looked at in a picture)
+- [ ] **any** The welcome folds into the coach's card instead of
+      closing (the welcome is the studio's window, the card the
+      shell's surface: to be seen on a desktop).
 - [ ] **any** Every lesson played by a check, each step done by its own
       command and seen done: headless on Linux, the tour on the Windows
       desktop. Waits for the check scripts (section 1).
@@ -371,4 +482,12 @@ wanted, strike it when it is not.
 | 2026-11-17, night | Windows 11, two displays | What a change of workspace costs the graphics card (asked for). A border that only moves is not cut and painted anew at every frame. Two settings, both off, on the animations page: `workspace_slides_as_pictures` (the windows stay, unseen, and DWM pictures of them slide, as for a window coming in) and `workspace_slides_without_shadows` (shadow and glow left out while they slide) | 1068 tests pass (two new, of the pictures and of the windows moved themselves); clippy nothing new. Not measured, not seen on the desktop. The studio's picture of the animations page is to be drawn anew on Linux. Not committed |
 | 2026-11-17, late night | Windows 11, two displays | The studio set one thing in one place (asked for): where a card of the page's own sets something, the form below no longer does. The panel's modules (dragged), the keyboard's layouts, the zones' places (the drag editor has a zone's gap, a layout's name and a display's own layout now), the displays (each display's card has how it is turned, variable refresh and primary; displays written down and not attached are listed under it; the list of outputs is gone), the rules' order (dragged; no arrows in the list). The older list of scales by name is shown only where a file has something in it | 1068 tests pass; clippy nothing new. The studio's pictures of panel, zones, displays, input and rules are to be drawn anew on Linux. Not committed |
 | 2026-11-17, towards morning | Windows 11, two displays | Three things asked for. (1) A renamed workspace was on its tab only after a press elsewhere: the window manager published its state on window events and once a second, not after a configuration was applied or a command run, so the panel that asked at once got the old. Now it is published again at the end of every pass in which something was told or done, and before an Apply is answered; the shell asks for it on `Applied`. (2) The overview of the windows (`toggle_expose`) on Windows shows live pictures of the windows, small, over a dark backdrop with titles, mouse and keys (`dwm/overview.rs`, `expose::arrange`); the windows are not resized any more. (3) Hot corners (`desktop.hot_corners`, `engine/hot_corners.rs`, a card of its own in the studio); the first is the top left, for the overview. The installer registers, updates and removes `gevrek-elevated` (the day's earlier work). 1,078 tests and more pass. Not seen on the desktop. Not committed | Linux: the corners are not watched (needs a timer in the compositor's pointer path), the overview there still arranges the windows themselves, and the shell does not ask for the state on `Applied`; the studio's pictures of the gestures page |
-| 2026-11-18 | Windows 11, two displays | The roadmap is in the repository, with section 2c for the next time on Linux (`29f7ee5`); the installer and the overview, hot corners and state committed (`e25c950`, `d3cd849`). The Windows CI test: the runner is an administrator and `notices` says so; the test asks only for what it is about now. Passes here; not run as an administrator. Not committed | The Windows job on a push; the Linux job |
+| 2026-11-17, midday | Windows 11, two displays | The roadmap is in the repository, with section 2c for the next time on Linux (`29f7ee5`); the installer and the overview, hot corners and state committed (`e25c950`, `d3cd849`). The Windows CI test: the runner is an administrator and `notices` says so; the test asks only for what it is about now. Passes here; not run as an administrator. Not committed | The Windows job on a push; the Linux job |
+| 2026-11-17, afternoon (1) | Windows 11, two displays | The three of section 2b that could be done here: a workspace is chosen from a list wherever its name was typed; the rules are held against the workspaces after a reload has rearranged them (the roadmap had the cause wrong: titles never mattered to a rule); the studio offers no Apply while the window manager is away. And, reported meanwhile, borders around nothing: a window that is hidden, or asked to be, gets no border (`kept_out_of_sight`), and the overview's pictures none. 1,084 tests pass. Not seen on the desktop. Not committed | The borders, seen; the rest of 2b |
+| 2026-11-17, afternoon (2) | Windows 11, two displays | The rest of section 2b that can be done on Windows: the overview and the switcher by name and title; a saved session finds its display where the handle is another; the panel display by display on Windows, with no room kept where a display has none; the slider ranges within the model's limits; a new entry's terminal; file mode and a file changed elsewhere. 1,089 tests pass. Not seen on the desktop. Not committed | What is left of 2b is Linux's or the person's. Sections 3 (the tutorial) and 5 are not begun |
+| 2026-11-17, afternoon (3) | Windows 11, two displays, and WSL (Fedora 44) | Found: the Linux side builds and its tests run in WSL as the distribution's own user (the note that it could not had looked as root only). So, from Windows: the Linux build and tests (all pass but the pictures); the renaming on Linux; hot corners in the compositor, with a test; the overview there placed as on Windows; the workspace protocol's title. The cause of the Linux CI job: the studio's pictures were drawn in the system's own font; the test uses gevrek's own now, and the pictures are to be drawn anew on a Linux that can (WSL's graphics fault in that test; the pictures here are as they were). Reported and mended: a window dragged to the display beside goes to the display the pointer is on. Windows: 1,090 tests pass. Not seen on a desktop. Not committed | The pictures, on Linux; what is the person's to see |
+| 2026-11-17, afternoon (4) | Windows 11 and WSL (Fedora 44) | The studio's pictures after all: the fault in the picture test was WSL's graphics, not the test (a larger stack alone did not help; the processor's Vulkan driver alone did). Every page drawn anew in gevrek's own letters, looked at, and the test passed three times running there. Linux: all tests pass. Not committed | Whether CI and the person's Linux draw the same |
+| 2026-11-17, afternoon (5) | Windows 11 and WSL (Fedora 44) | The overview of the windows on Linux made as on Windows (a window chosen ends it; titles, a mark, the arrow keys, Enter, Escape), tested with real clients and looked at in a picture drawn by the compositor without a display. That picture found a fault: a hot corner ran at the start of a session, the pointer lying at the top left before it was ever moved; a corner waits now until the pointer has been elsewhere. Windows: 1,091 tests pass; Linux: all, the pictures among them. Not seen on a desktop. Not committed | The person's part on both systems; the job on a push |
+| 2026-11-17, afternoon (6) | Windows 11 and WSL (Fedora 44) | Begun on the tutorial's first stage, with what can be tested without a desktop: it runs on the display the person is on; the person's own windows leave its workspace with it; practice windows say how they stand. Windows: 1,094 tests pass. Not seen on a desktop. Not committed | The rest of stage 1 is drawn (the ring, the card's place, the welcome) and wants a desktop to be seen on |
+| 2026-11-17, afternoon (7) | Windows 11 and WSL (Fedora 44) | More of the tutorial's first stage: the card's room kept free of tiles; the main key chosen in the welcome, with every binding following it. Windows: 1,096 tests pass. Not seen on a desktop. Not committed | Of stage 1: the ring, the welcome folding into the card, the lessons played by a check |
+| 2026-11-17, afternoon (8) | Windows 11 and WSL (Fedora 44) | The tutorial's ring on Windows: around the window with the keyboard, all the windows, or the panel, as four thin surfaces. Windows: 1,097 tests pass. Not seen on a desktop. Not committed | The ring on Linux and around the shell's own surfaces; the welcome folding into the card; the lessons played by a check |

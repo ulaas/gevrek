@@ -245,6 +245,11 @@ pub struct Studio {
     /// defaults, and saving them over the file would lose it. While this
     /// is set nothing is saved.
     file_problem: Option<String>,
+    /// What the file was when it was last read or written here (a mark
+    /// of what is in it; `None`: it was not there). A save holds the
+    /// file against it: one that was changed elsewhere since is not
+    /// written over without a word.
+    file_mark: Option<u64>,
     /// The window manager answers, and its configuration could not be
     /// fetched: what is shown is gevrek's defaults, and nothing can be
     /// applied.
@@ -253,6 +258,16 @@ pub struct Studio {
 
 /// Where the schema describes a command.
 const COMMAND: &str = "/desktop/bindings/0/command";
+
+/// A mark of what is in a file: another when anything in it is another.
+/// `None` where the file is not there (or cannot be read).
+fn file_mark(path: &std::path::Path) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let bytes = std::fs::read(path).ok()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    Some(hasher.finish())
+}
 
 impl Studio {
     pub fn new(context: &egui::Context, options: Options) -> Self {
@@ -288,6 +303,7 @@ impl Studio {
         };
         let generation = document.generation();
         Self {
+            file_mark: file.as_deref().and_then(file_mark),
             file_problem,
             fetch_problem: None,
             link,
@@ -631,14 +647,27 @@ impl Studio {
             }
         }
         let waiting = generation != self.sent_generation;
-        if self.live && waiting && !self.applying && self.changed_at.elapsed() >= LIVE_PAUSE {
+        if self.live
+            && waiting
+            && !self.applying
+            && self.reaches()
+            && self.changed_at.elapsed() >= LIVE_PAUSE
+        {
             self.apply();
         }
+    }
+
+    /// Whether what is applied has somewhere to go: a file, or a window
+    /// manager that is there. (While it is away nothing can be applied to
+    /// it: what is changed here is kept, and applied when it is back.)
+    fn reaches(&self) -> bool {
+        self.file.is_some() || self.connected()
     }
 
     fn can_apply(&self) -> bool {
         let conflict = self.session.as_ref().is_some_and(Session::has_conflict);
         self.document.config().is_some()
+            && self.reaches()
             && !self.applying
             && !conflict
             && self.dirty()
@@ -653,8 +682,24 @@ impl Studio {
             return;
         }
         if let Some(path) = self.file.clone() {
+            // Changed elsewhere since it was read here (another editor,
+            // a gevrek that runs from it): said, and not written over.
+            // A second Save is the answer that it is to be.
+            let now = file_mark(&path);
+            if now != self.file_mark {
+                self.file_mark = now;
+                self.toast(
+                    Tone::Warn,
+                    format!(
+                        "{} was changed elsewhere since it was read here. Not saved: what is there would be written over. Save again to do that.",
+                        path.display()
+                    ),
+                );
+                return;
+            }
             match config.save(&path) {
                 Ok(()) => {
+                    self.file_mark = file_mark(&path);
                     self.document.replace(&config);
                     self.forget_changes();
                     // The file is what History compares with: read it anew.
@@ -963,7 +1008,11 @@ impl Studio {
                 self.sandbox_button(ui);
                 let label = if self.file.is_some() { "Save" } else { "Apply" };
                 if widgets::primary_button(ui, self.can_apply(), label)
-                    .on_hover_text("Ctrl+S")
+                    .on_hover_text(if self.reaches() {
+                        "Ctrl+S"
+                    } else {
+                        "The window manager is not running: there is nothing to apply this to. What you change stays here until it is back."
+                    })
                     .clicked()
                 {
                     self.apply();
@@ -3110,6 +3159,13 @@ mod tests {
                 script: Vec::new(),
             },
         );
+        // The letters gevrek brings itself, not the machine's: unless
+        // told otherwise the studio writes in the system's own font
+        // (whatever `fc-match sans-serif` names there), and then every
+        // line of every page is another on another machine. The pictures
+        // were drawn so once, and no machine but the one they were drawn
+        // on agreed with them (CI's least of all).
+        studio.appearance.system_font = false;
         let mut other = Vec::new();
         for page in Page::ALL {
             studio.page = page;
@@ -3263,6 +3319,80 @@ mod tests {
     }
 
     #[test]
+    fn a_file_changed_elsewhere_is_not_written_over_without_a_word() {
+        let context = egui::Context::default();
+        let folder = std::env::temp_dir().join(format!(
+            "gevrek-studio-test-elsewhere-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("config.json");
+        Config::default().save(&path).unwrap();
+        let mut studio = Studio::new(
+            &context,
+            Options {
+                source: Source::File(path.clone()),
+                page: Page::Overview,
+                appearance: folder.join("appearance.json"),
+                script: Vec::new(),
+            },
+        );
+        let change = |studio: &mut Studio, size: u64| {
+            studio
+                .document
+                .edit("/desktop/focus/history_size", |value| *value = serde_json::json!(size));
+            studio.follow_edits();
+        };
+        let on_disk = || Config::load(&path).unwrap().desktop.focus.history_size;
+
+        // Nobody else touched it: saved.
+        change(&mut studio, 11);
+        studio.apply();
+        assert_eq!(on_disk(), 11);
+
+        // Somebody else writes it, and then it is saved here: not
+        // written over, and what was changed here is still here.
+        let mut other = Config::load(&path).unwrap();
+        other.desktop.focus.history_size = 99;
+        other.save(&path).unwrap();
+        change(&mut studio, 12);
+        studio.apply();
+        assert_eq!(on_disk(), 99);
+        assert_eq!(
+            studio.document.config().unwrap().desktop.focus.history_size,
+            12
+        );
+        // Save again: that is the answer.
+        studio.apply();
+        assert_eq!(on_disk(), 12);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn nothing_is_applied_to_a_window_manager_that_is_away() {
+        let context = egui::Context::default();
+        let mut studio = studio(&context);
+        studio.file = None;
+        studio.session = Some(Session::new("test", Config::default(), 1));
+        studio.document.replace(&Config::default());
+        studio.forget_changes();
+        studio
+            .document
+            .edit("/desktop/focus/history_size", |value| *value = serde_json::json!(7));
+        studio.follow_edits();
+        // Changed, and nowhere to apply it to.
+        assert!(studio.dirty());
+        assert!(!studio.can_apply());
+        // It is back: the change is still here, and can be applied.
+        studio.peer = Some(Default::default());
+        assert!(studio.can_apply());
+        // A file is always there to be saved to.
+        studio.peer = None;
+        studio.file = Some(std::env::temp_dir().join("gevrek-studio-test-apply.json"));
+        assert!(studio.reaches());
+    }
+
+    #[test]
     fn a_configuration_on_trial_goes_back_by_itself_unless_it_is_kept() {
         let context = egui::Context::default();
         let size = |studio: &Studio| studio.document.config().unwrap().desktop.focus.history_size;
@@ -3276,6 +3406,8 @@ mod tests {
             let mut studio = studio(&context);
             studio.file = None;
             studio.session = Some(Session::new("test", Config::default(), 1));
+            // (A window manager is there, as far as the studio knows.)
+            studio.peer = Some(Default::default());
             studio.document.replace(&Config::default());
             studio.forget_changes();
             let before = size(&studio);

@@ -4,7 +4,9 @@
 //!
 //! A range here is what a slider offers, not a limit: the model's own
 //! validation decides what is accepted, and a value outside the range is
-//! shown as it is.
+//! shown as it is. A range lies within the model's limits, though: a
+//! slider does not offer what is then refused (the test below holds the
+//! ones that have a limit against it).
 
 /// How to offer a number.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -57,7 +59,35 @@ const PLACES: &[(&str, Hint)] = &[
         "/desktop/platform/wayland/output_scale",
         of(0.5, 4.0, 0.05, "×"),
     ),
-    ("/desktop/animations/fps", of(30.0, 360.0, 1.0, "fps")),
+    ("/desktop/animations/fps", of(30.0, 240.0, 1.0, "fps")),
+    // (A window nobody sees cannot be found again: not below 20.)
+    (
+        "/desktop/appearance/window_opacity",
+        of(20.0, 255.0, 1.0, ""),
+    ),
+    (
+        "/desktop/appearance/inactive_window_opacity",
+        of(20.0, 255.0, 1.0, ""),
+    ),
+    (
+        "/desktop/appearance/stackbar/height",
+        of(10.0, 96.0, 1.0, "px"),
+    ),
+    (
+        "/desktop/appearance/invisible_borders/size",
+        of(1.0, 96.0, 1.0, "px"),
+    ),
+    // (Parts of one, not of 255, and no pixels.)
+    (
+        "/desktop/zones/behavior/snap_threshold",
+        of(0.0, 1.0, 0.01, ""),
+    ),
+    (
+        "/desktop/zones/behavior/preview_opacity",
+        of(0.0, 1.0, 0.01, ""),
+    ),
+    ("/desktop/hot_corners/size", of(1.0, 64.0, 1.0, "px")),
+    ("/desktop/hot_corners/delay_ms", of(0.0, 2000.0, 10.0, "ms")),
     ("/desktop/focus/history_size", of(1.0, 256.0, 1.0, "")),
     ("/desktop/schema_version", of(0.0, 1000.0, 1.0, "")),
     ("/version", of(0.0, 1000.0, 1.0, "")),
@@ -65,7 +95,8 @@ const PLACES: &[(&str, Hint)] = &[
 
 /// By the last part of the name.
 const NAMES: &[(&str, Hint)] = &[
-    ("duration_ms", of(0.0, 2000.0, 10.0, "ms")),
+    ("duration_ms", of(16.0, 2000.0, 10.0, "ms")),
+    ("long_press_ms", of(100.0, 5000.0, 10.0, "ms")),
     ("focus_delay_ms", of(0.0, 1000.0, 10.0, "ms")),
     ("idle_timeout_ms", of(50.0, 2000.0, 10.0, "ms")),
     ("repeat_delay_ms", of(100.0, 2000.0, 10.0, "ms")),
@@ -75,7 +106,7 @@ const NAMES: &[(&str, Hint)] = &[
     ("displays_off_after_minutes", of(0.0, 120.0, 1.0, "min")),
     ("every_minutes", of(1.0, 1440.0, 1.0, "min")),
     ("angle", of(0.0, 360.0, 1.0, "°")),
-    ("border_width", of(0.0, 16.0, 1.0, "px")),
+    ("border_width", of(1.0, 32.0, 1.0, "px")),
     ("border_offset", of(-16.0, 16.0, 1.0, "px")),
     ("corner_radius", of(0.0, 48.0, 1.0, "px")),
     ("radius", of(0.0, 96.0, 1.0, "px")),
@@ -95,13 +126,13 @@ const NAMES: &[(&str, Hint)] = &[
     ("bottom", of(0.0, 400.0, 1.0, "px")),
     ("gap", of(0.0, 64.0, 1.0, "px")),
     ("padding", of(0.0, 64.0, 1.0, "px")),
-    ("snap_threshold", of(0.0, 200.0, 1.0, "px")),
-    ("axis_lock_ratio", of(1.0, 4.0, 0.05, "")),
-    ("distance_percent", of(1.0, 100.0, 1.0, "%")),
+    ("snap_threshold", of(0.0, 1.0, 0.01, "")),
+    ("axis_lock_ratio", of(1.0, 3.0, 0.05, "")),
+    ("distance_percent", of(2.0, 100.0, 1.0, "%")),
     ("speed", of(-1.0, 1.0, 0.05, "")),
     ("scale", of(0.5, 4.0, 0.05, "×")),
     ("ratio", of(0.05, 0.95, 0.01, "")),
-    ("fingers", of(3.0, 5.0, 1.0, "")),
+    ("fingers", of(2.0, 5.0, 1.0, "")),
     ("scroll_fingers", of(0.0, 5.0, 1.0, "")),
 ];
 
@@ -179,5 +210,50 @@ mod tests {
             assert_eq!(waits(place), Some((*when, *why)));
         }
         assert_eq!(waits("/desktop/animations/enabled"), None);
+    }
+
+    #[test]
+    fn a_slider_offers_nothing_the_model_refuses() {
+        // The settings the model limits (`DesktopConfig::validate` and
+        // the parts' own), each with what it accepts.
+        let limits: &[(&str, f64, f64)] = &[
+            ("/desktop/appearance/border_width", 1.0, 32.0),
+            ("/desktop/workspaces/0/border_width", 1.0, 32.0),
+            ("/desktop/appearance/window_opacity", 20.0, 255.0),
+            ("/desktop/appearance/inactive_window_opacity", 20.0, 255.0),
+            ("/desktop/appearance/stackbar/height", 10.0, 200.0),
+            ("/desktop/appearance/invisible_borders/size", 1.0, 200.0),
+            ("/desktop/appearance/shadow/radius", 0.0, 200.0),
+            ("/desktop/appearance/shadow/offset_x", -200.0, 200.0),
+            ("/desktop/appearance/glow/radius", 0.0, 200.0),
+            ("/desktop/animations/fps", 30.0, 240.0),
+            ("/desktop/animations/workspace/duration_ms", 16.0, 5000.0),
+            ("/desktop/animations/session/duration_ms", 0.0, 5000.0),
+            ("/desktop/zones/behavior/snap_threshold", 0.0, 1.0),
+            ("/desktop/zones/behavior/preview_opacity", 0.0, 1.0),
+            ("/desktop/zones/default_layout/zones/0/gap", 0.0, 500.0),
+            ("/desktop/bindings/0/long_press_ms", 100.0, 10000.0),
+            ("/desktop/gestures/idle_timeout_ms", 50.0, 5000.0),
+            ("/desktop/gestures/axis_lock_ratio", 1.0, 3.0),
+            ("/desktop/gestures/profiles/0/fingers", 2.0, 5.0),
+            ("/desktop/gestures/profiles/0/distance_percent", 2.0, 100.0),
+            ("/desktop/hot_corners/size", 1.0, 64.0),
+            ("/desktop/hot_corners/delay_ms", 0.0, 5000.0),
+            ("/desktop/input/keyboard/repeat_delay_ms", 100.0, 2000.0),
+            ("/desktop/input/touchpad/speed", -1.0, 1.0),
+            ("/desktop/outputs/0/scale", 0.5, 4.0),
+            ("/desktop/focus/history_size", 1.0, 256.0),
+            ("/desktop/shell/notifications/shown", 1.0, 10.0),
+            ("/desktop/shell/notifications/stay_seconds", 1.0, 60.0),
+        ];
+        for (place, least, most) in limits {
+            let offered = hint(place).unwrap_or_else(|| panic!("{place} has no range"));
+            assert!(
+                offered.min >= *least && offered.max <= *most,
+                "{place} is offered from {} to {}; the model takes {least} to {most}",
+                offered.min,
+                offered.max
+            );
+        }
     }
 }

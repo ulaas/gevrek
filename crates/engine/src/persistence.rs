@@ -122,12 +122,28 @@ pub struct WindowState {
     #[serde(default)]
     pub workspace_name: Option<String>,
     pub monitor: Option<MonitorHandle>,
+    /// What the display is known by beyond this run of the system: its
+    /// device path, or its name where it has none. A display's handle is
+    /// another after the machine was started again, or the display taken
+    /// off and put on; a restore finds the display by this then.
+    #[serde(default)]
+    pub monitor_known_as: Option<String>,
     /// Whether this window was floating (true) or tiled (false)
     #[serde(default)]
     pub is_floating: bool,
     /// Container index within workspace (for tiled windows)
     #[serde(default)]
     pub container_index: Option<usize>,
+}
+
+/// The workspace a display showed when a session was saved.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShownWorkspace {
+    pub monitor: MonitorHandle,
+    /// What the display is known by beyond this run (as
+    /// `WindowState::monitor_known_as`).
+    pub monitor_known_as: String,
+    pub workspace_name: String,
 }
 
 /// Complete window manager state for persistence
@@ -138,6 +154,12 @@ pub struct WindowManagerState {
     pub windows: Vec<WindowState>,
     /// Monitor handle -> focused workspace index
     pub focused_workspaces: HashMap<MonitorHandle, usize>,
+    /// The workspace each display showed, by what the display is known
+    /// as and by the workspace's name: found again where the handle and
+    /// the order are others. (Before it was written, `focused_workspaces`
+    /// alone was.)
+    #[serde(default)]
+    pub shown_workspaces: Vec<ShownWorkspace>,
     /// Size cache for windows matched by a persistent-size rule. This survives
     /// application closure and graceful WM restarts.
     #[serde(default)]
@@ -151,6 +173,7 @@ impl WindowManagerState {
             timestamp: Utc::now().to_rfc3339(),
             windows: Vec::new(),
             focused_workspaces: HashMap::new(),
+            shown_workspaces: Vec::new(),
             persistent_window_sizes: Vec::new(),
         }
     }

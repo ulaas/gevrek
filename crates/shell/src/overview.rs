@@ -32,7 +32,10 @@ pub struct Pane {
 pub struct Space {
     /// Its place among the display's workspaces.
     pub index: usize,
+    /// What it is known by (to the command that shows it).
     pub name: String,
+    /// What is shown of it: its title, or its name where it has none.
+    pub title: String,
     /// It is the one the display shows.
     pub shown: bool,
     pub panes: Vec<Pane>,
@@ -75,6 +78,12 @@ pub fn displays(wm: &Value) -> Vec<Display> {
                 .map(|(index, workspace)| Space {
                     index,
                     name: workspace["name"].as_str().unwrap_or_default().to_string(),
+                    title: workspace["title"]
+                        .as_str()
+                        .filter(|title| !title.trim().is_empty())
+                        .or(workspace["name"].as_str())
+                        .unwrap_or_default()
+                        .to_string(),
                     shown: &workspace["id"] == shown,
                     panes: workspace["detailed_windows"]
                         .as_array()
@@ -187,9 +196,10 @@ impl Remembered {
 /// Where the overview goes when something in it is chosen.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Go {
-    /// A workspace: its display, whether that has the keyboard, and the
-    /// workspace's place among the display's.
-    Space(String, bool, usize),
+    /// A workspace: its display, whether that has the keyboard, the
+    /// workspace's place among the display's, and its name (it is shown
+    /// by its name where it has one: `panel::show_workspace_at`).
+    Space(String, bool, usize, String),
     Window(u64),
 }
 
@@ -197,8 +207,8 @@ impl Go {
     /// The command that goes there.
     pub fn command(&self) -> String {
         match self {
-            Go::Space(display, focused, index) => {
-                crate::panel::show_workspace_at(display, *focused, *index)
+            Go::Space(display, focused, index, name) => {
+                crate::panel::show_workspace_at(display, *focused, *index, name)
             }
             Go::Window(window) => serde_json::json!({
                 "command": "focus_window",
@@ -348,7 +358,14 @@ impl Overview {
                 display
                     .spaces
                     .get(place.1)
-                    .map(|space| Go::Space(display.name.clone(), display.focused, space.index))
+                    .map(|space| {
+                        Go::Space(
+                            display.name.clone(),
+                            display.focused,
+                            space.index,
+                            space.name.clone(),
+                        )
+                    })
             })
         };
         if enter {
@@ -494,10 +511,10 @@ impl Overview {
                                             egui::StrokeKind::Outside,
                                         );
                                     }
-                                    let name = if space.name.is_empty() {
+                                    let name = if space.title.is_empty() {
                                         (space.index + 1).to_string()
                                     } else {
-                                        space.name.clone()
+                                        space.title.clone()
                                     };
                                     let words = one_line(
                                         ui,
@@ -526,9 +543,12 @@ impl Overview {
                                     if response.clicked() {
                                         asked.go = Some(match under {
                                             Some((window, _)) => Go::Window(window),
-                                            None => {
-                                                Go::Space(display.name.clone(), display.focused, space.index)
-                                            }
+                                            None => Go::Space(
+                                                display.name.clone(),
+                                                display.focused,
+                                                space.index,
+                                                space.name.clone(),
+                                            ),
                                         });
                                     }
                                 }
@@ -628,6 +648,16 @@ mod tests {
             .map(|space| (space.name.as_str(), space.shown, space.panes.len()))
             .collect();
         assert_eq!(names, [("one", false, 1), ("two", true, 3), ("three", false, 0)]);
+        // What is shown of one is its title, or its name where it has none.
+        assert_eq!(first.spaces[0].title, "one");
+        let titled = super::displays(&serde_json::json!({"monitors": [{
+            "name": "A", "size": {"width": 100, "height": 100}, "workspace": {"id": 1},
+            "workspaces": [{"id": 1, "name": "web", "title": "Browsing", "detailed_windows": []}],
+        }]}));
+        assert_eq!(
+            (titled[0].spaces[0].name.as_str(), titled[0].spaces[0].title.as_str()),
+            ("web", "Browsing")
+        );
         // A window's place is a part of its display.
         let browser = &first.spaces[1].panes[1];
         assert_eq!(browser.id, 22);
@@ -651,10 +681,14 @@ mod tests {
         assert_eq!(stepped(&[], (0, 0), 1), (0, 0));
         // Where it goes: a switch on the display with the keyboard, the
         // display named on another; a window by its number.
-        let here = Go::Space("Monitor A".to_string(), true, 2).command();
+        let here = Go::Space("Monitor A".to_string(), true, 2, String::new()).command();
         assert!(here.contains("switch_workspace_selector"), "{here}");
-        let there = Go::Space("Monitor B".to_string(), false, 0).command();
+        let there = Go::Space("Monitor B".to_string(), false, 0, String::new()).command();
         assert!(there.contains("Monitor B"), "{there}");
+        // One with a name: by its name, on its display.
+        let named = Go::Space("Monitor A".to_string(), true, 2, "three".to_string()).command();
+        assert!(named.contains("Monitor A") && named.contains("three"), "{named}");
+        assert!(!named.contains("switch_workspace_selector"), "{named}");
         assert!(Go::Window(22).command().contains("focus_window"));
     }
 
@@ -772,12 +806,12 @@ mod tests {
         assert_eq!(frame(&mut overview, &[egui::Key::ArrowRight]), Asked::default());
         assert_eq!(
             frame(&mut overview, &[egui::Key::Enter]).go,
-            Some(Go::Space("Monitor A".to_string(), true, 2))
+            Some(Go::Space("Monitor A".to_string(), true, 2, "three".to_string()))
         );
         // A digit: that workspace of the display with the keyboard.
         assert_eq!(
             frame(&mut overview, &[egui::Key::Num1]).go,
-            Some(Go::Space("Monitor A".to_string(), true, 0))
+            Some(Go::Space("Monitor A".to_string(), true, 0, "one".to_string()))
         );
         assert!(frame(&mut overview, &[egui::Key::Escape]).close);
     }

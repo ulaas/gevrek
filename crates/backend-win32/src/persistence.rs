@@ -157,6 +157,7 @@ mod tests {
             workspace_id: Some(0),
             workspace_name: None,
             monitor: Some(MonitorHandle(1)),
+            monitor_known_as: Some("DP-1".to_string()),
             container_index: Some(0),
             is_floating: false,
         });

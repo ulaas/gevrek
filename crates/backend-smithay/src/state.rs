@@ -348,6 +348,9 @@ pub struct State {
     pub(crate) paced_wake: bool,
     /// The overview of every workspace, while it is up (`overview.rs`).
     pub workspace_overview: Option<crate::overview::WorkspaceOverview>,
+    /// What stands around the pictures of the overview of one workspace's
+    /// windows, and what chooses among them (`window_overview.rs`).
+    pub window_overview: crate::window_overview::WindowOverview,
     /// Escape was pressed while it was up: it is put away after the key.
     pub(crate) overview_leave_asked: bool,
     /// The Escape key that put it away, until that key is let go.
@@ -400,6 +403,9 @@ pub struct State {
     /// Keys and buttons held down that a repeat or long-press binding
     /// waits on.
     pub held: Vec<Held>,
+    /// The corner of a display the pointer is in, and since when
+    /// (`desktop.hot_corners`).
+    pub hot_corners: gevrek_engine::hot_corners::Watch,
     /// Keys that went down in the key event being handled.
     pub pending_holds: Vec<(u32, String)>,
     /// Mouse buttons whose press a binding kept from the client.
@@ -778,6 +784,8 @@ impl State {
             started: false,
             drag: None,
             held: Vec::new(),
+            hot_corners: Default::default(),
+            window_overview: Default::default(),
             pending_holds: Vec::new(),
             suppressed_buttons: Default::default(),
             popup_grab: None,

@@ -335,7 +335,7 @@ impl Outputs {
         // The bar's place comes from the configuration (`set_bar`), so it is
         // free before the bar is there.
         let mut work_area = self.work_area_excluding_overlays(monitor, &[])?;
-        if let Some(bar) = self.bar.as_ref().filter(|_| self.bar_is_kept(desktop)) {
+        if let Some(bar) = self.bar_on(monitor).filter(|_| self.bar_is_kept(desktop)) {
             let reserved = bar.reserved().min((work_area.height - 1).max(0));
             use gevrek_model::settings::PanelEdge;
             if bar.edge.is_upright() {
@@ -420,8 +420,21 @@ impl Outputs {
         self.details.get(&monitor)
     }
 
-    pub fn bar_rect(&self, monitor: MonitorHandle) -> Option<Rect> {
+    /// The panel of a display: the configuration's, unless it says that
+    /// this display has none (`PanelOnDisplay::enabled`). No room is kept
+    /// there then, and no panel has a place.
+    fn bar_on(&self, monitor: MonitorHandle) -> Option<&gevrek_model::settings::PanelProfile> {
         let bar = self.bar.as_ref()?;
+        let none_here = self.get_monitor(monitor).is_some_and(|display| {
+            bar.displays.iter().any(|entry| {
+                !entry.enabled && !entry.name.trim().is_empty() && display.is_called(&entry.name)
+            })
+        });
+        (!none_here).then_some(bar)
+    }
+
+    pub fn bar_rect(&self, monitor: MonitorHandle) -> Option<Rect> {
+        let bar = self.bar_on(monitor)?;
         let area = self.get_configured_work_area(monitor)?;
         let margin = bar.margin.min(100) as i32;
         let height = bar.height.clamp(16, 200) as i32;
@@ -1294,6 +1307,39 @@ mod tests {
         assert!(outputs.set_panel_seen(true));
         assert!(!outputs.set_panel_seen(true), "said twice is no news");
         assert!(outputs.bar_is_kept(&desktop));
+    }
+
+    #[test]
+    fn a_display_the_configuration_gives_no_panel_keeps_no_room_for_one() {
+        use gevrek_model::settings::{PanelOnDisplay, PanelProfile};
+        let desktop = crate::testing::FakeDesktop::new(MonitorHandle(1));
+        let mut outputs = Outputs::new();
+        outputs.set_monitors_only(vec![
+            named(1, "Monitor A", "DP-1", 0),
+            named(2, "Monitor B", "DP-2", 1920),
+        ]);
+        let bar = PanelProfile {
+            // (By the display's device, as well as by its name.)
+            displays: vec![PanelOnDisplay {
+                name: "dp-2".to_string(),
+                enabled: false,
+                ..PanelOnDisplay::default()
+            }],
+            ..PanelProfile::default()
+        };
+        let kept = bar.reserved();
+        assert!(kept > 0);
+        outputs.set_bar(Some(bar));
+        outputs.set_panel_seen(true);
+        let (first, second) = (MonitorHandle(1), MonitorHandle(2));
+        // The first has its panel, and the windows the room beside it.
+        assert!(outputs.bar_rect(first).is_some());
+        let with = outputs.get_adjusted_work_area(first, &desktop).unwrap();
+        assert_eq!(with.height, 1040 - kept);
+        // The second has none: no place for one, and all the room.
+        assert!(outputs.bar_rect(second).is_none());
+        let without = outputs.get_adjusted_work_area(second, &desktop).unwrap();
+        assert_eq!(without.height, 1040);
     }
 
     #[test]

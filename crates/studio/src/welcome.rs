@@ -87,10 +87,12 @@ pub struct Welcome {
     pub layout: LayoutType,
     /// Where the panel is; none: no panel.
     pub edge: Option<PanelEdge>,
+    /// The key gevrek's bindings are held with.
+    pub main_key: gevrek_model::settings::MainKey,
     /// Something was chosen that is not what gevrek starts with anyway.
-    /// Which of the three was chosen here: the layout, the look, the
-    /// panel.
-    touched: [bool; 3],
+    /// Which of the four was chosen here: the layout, the look, the
+    /// panel, the main key.
+    touched: [bool; 4],
 }
 
 impl Default for Welcome {
@@ -108,7 +110,8 @@ impl Default for Welcome {
                 .first()
                 .map_or(LayoutType::Dwindle, |workspace| workspace.layout),
             edge: start.shell.panel.enabled.then_some(start.shell.panel.edge),
-            touched: [false; 3],
+            main_key: start.main_key(),
+            touched: [false; 4],
             looks,
         }
     }
@@ -244,7 +247,15 @@ impl Welcome {
             }
             None => panel.enabled = false,
         }
+        config.desktop.set_main_key(self.main_key);
         config
+    }
+
+    /// What lies on keys the system or most programs use themselves
+    /// when the bindings are held with the main key that is chosen: said
+    /// under the choice, so that it is made knowing it.
+    pub fn taken_keys(&self) -> Vec<(String, String)> {
+        self.chosen().desktop.set_main_key(self.main_key)
     }
 
     /// A configuration that runs, with what was chosen here laid over
@@ -270,6 +281,9 @@ impl Welcome {
                 }
                 None => panel.enabled = false,
             }
+        }
+        if self.touched[3] {
+            config.desktop.set_main_key(self.main_key);
         }
         config
     }
@@ -327,7 +341,7 @@ impl Welcome {
         ui.label(egui::RichText::new("Make it yours").size(22.0).strong().color(palette.text));
         ui.label(
             egui::RichText::new(
-                "Three choices to begin with. Each can be changed at any time in gevrek studio, and there is much more there.",
+                "A few choices to begin with. Each can be changed at any time in gevrek studio, and there is much more there.",
             )
             .size(13.0)
             .color(palette.muted),
@@ -471,6 +485,44 @@ impl Welcome {
                 .size(12.5)
                 .color(palette.faint),
             );
+        });
+        ui.add_space(10.0);
+
+        // The main key: every binding is held with it.
+        widgets::caption(ui, "The key gevrek's shortcuts are held with");
+        use gevrek_model::settings::MainKey;
+        let keys = [(MainKey::Super, "Super (the Windows key)"), (MainKey::Alt, "Alt")];
+        ui.horizontal(|ui| {
+            if let Some(key) = widgets::segmented(
+                ui,
+                ui.scope_id().with("the main key"),
+                Some(&self.main_key),
+                &keys,
+                false,
+            ) {
+                if key != self.main_key {
+                    self.main_key = key;
+                    self.touched[3] = true;
+                }
+            }
+            let taken = self.taken_keys();
+            let says = match (self.main_key, taken.is_empty()) {
+                (MainKey::Super, true) => {
+                    "Programs do not use it for themselves, so nothing of theirs is taken.".to_string()
+                }
+                (MainKey::Alt, true) => {
+                    "Programs use Alt for their menus: a shortcut of gevrek's comes first.".to_string()
+                }
+                (_, false) => format!(
+                    "These would take keys you may know otherwise: {}.",
+                    taken
+                        .iter()
+                        .map(|(name, keys)| format!("{keys} ({name})"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            };
+            ui.label(egui::RichText::new(says).size(12.5).color(palette.faint));
         });
     }
 
@@ -899,6 +951,24 @@ mod tests {
             serde_json::to_value(&theirs).unwrap()
         );
         welcome.touched[0] = true;
+        // The main key: chosen, every shortcut that was held with Super
+        // is held with Alt, in what is chosen and in what is laid over a
+        // configuration that runs; not chosen, a running one keeps its own.
+        {
+            use gevrek_model::settings::MainKey;
+            let mut keys = Welcome::default();
+            assert_eq!(keys.main_key, MainKey::Super);
+            assert_eq!(keys.chosen().desktop.main_key(), MainKey::Super);
+            let running = keys.chosen();
+            keys.main_key = MainKey::Alt;
+            assert_eq!(keys.laid_over(&running).desktop.main_key(), MainKey::Super);
+            keys.touched[3] = true;
+            assert!(keys.has_chosen());
+            assert_eq!(keys.chosen().desktop.main_key(), MainKey::Alt);
+            let laid = keys.laid_over(&running);
+            assert_eq!(laid.desktop.main_key(), MainKey::Alt);
+            assert_eq!(laid.desktop.bindings.len(), running.desktop.bindings.len());
+        }
         let over = welcome.laid_over(&theirs);
         assert!(over.desktop.workspaces.iter().all(|workspace| workspace.layout == LayoutType::Columns));
         assert_eq!(over.desktop.focus.history_size, theirs.desktop.focus.history_size);

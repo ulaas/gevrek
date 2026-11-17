@@ -61,7 +61,11 @@ fn main() -> anyhow::Result<()> {
         return gevrek_studio::sample::run(name);
     }
     if let Some(name) = &args.practice {
-        return gevrek_studio::sample::practice(name);
+        let address = args
+            .address
+            .clone()
+            .unwrap_or_else(|| gevrek_protocol::DEFAULT_WM_ENDPOINT.to_string());
+        return gevrek_studio::sample::practice(name, &address);
     }
     if args.shortcuts || args.welcome {
         let address = args

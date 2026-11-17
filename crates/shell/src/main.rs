@@ -1151,10 +1151,14 @@ mod linux {
                 Event::Changed { .. } => state.borrow().link.send(Request::Fetch),
                 // What the shell itself changed is what runs, from this
                 // revision on.
+                // And what it made of the state is asked for at once (the
+                // window manager publishes it before it answers).
                 Event::Applied(revision) => {
-                    if let Some((_, known)) = state.borrow_mut().running.as_mut() {
+                    let mut state = state.borrow_mut();
+                    if let Some((_, known)) = state.running.as_mut() {
                         *known = revision;
                     }
+                    state.link.send(Request::State);
                 }
                 // A change of the shell's that was not taken: said, and
                 // what runs is fetched again.
@@ -4602,7 +4606,7 @@ mod linux {
             height: crate::coach::SIZE.1,
             reserve: false,
             keyboard: Keyboard::Never,
-            margin: 28,
+            margin: crate::tutoring::CARD_MARGIN as i32,
             output: None,
         };
         let shared = Rc::clone(state);
@@ -4703,7 +4707,12 @@ mod linux {
                 Do::End => {
                     if let Some((_, tutoring, windows)) = state.tutorial.take() {
                         log::info!("the tutorial ends");
-                        crate::tutoring::tidy(tutoring.before.clone(), windows, state.link.teller());
+                        crate::tutoring::tidy(
+                        tutoring.before.clone(),
+                        windows,
+                        tutoring.own_windows(),
+                        state.link.teller(),
+                    );
                     }
                 }
             }

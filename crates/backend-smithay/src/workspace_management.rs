@@ -29,7 +29,12 @@ const VERSION: u32 = 1;
 pub(crate) struct Facts {
     /// The engine's number of it, the same while it lives.
     id: usize,
+    /// What it is known by (to keys and rules; the same from session to
+    /// session).
     name: String,
+    /// What is shown of it: its title, or its name where it has none.
+    /// This is what a panel is told as its name.
+    title: String,
     output: MonitorHandle,
     output_name: String,
     /// Its place among the display's workspaces.
@@ -158,8 +163,8 @@ fn tell(
                 if entry.told == *fact {
                     continue;
                 }
-                if entry.told.name != fact.name {
-                    entry.handle.name(fact.name.clone());
+                if entry.told.title != fact.title {
+                    entry.handle.name(fact.title.clone());
                 }
                 if entry.told.index != fact.index {
                     entry
@@ -189,7 +194,7 @@ fn tell(
                 };
                 bound.manager.workspace(&handle);
                 handle.id(fact.lasting_id());
-                handle.name(fact.name.clone());
+                handle.name(fact.title.clone());
                 handle.coordinates((fact.index as u32).to_ne_bytes().to_vec());
                 handle.capabilities(ext_workspace_handle_v1::WorkspaceCapabilities::Activate);
                 handle.state(state_of(fact));
@@ -225,6 +230,7 @@ impl State {
                 facts.push(Facts {
                     id: workspace.id,
                     name: workspace.name.clone(),
+                    title: workspace.label().to_string(),
                     output: *output,
                     output_name: monitor.name.clone(),
                     index,

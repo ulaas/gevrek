@@ -15,10 +15,103 @@ pub struct Window {
     pub app: String,
 }
 
+/// How one window stands, for it to say of itself: a practice window
+/// shows it, so that what a step did is read on the window it was done
+/// to (it has the keyboard now, it floats, it is one of three tabs).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Standing {
+    pub keyboard: bool,
+    pub floating: bool,
+    pub maximized: bool,
+    /// It is one of so many windows that share a place as tabs.
+    pub tab_of: Option<usize>,
+}
+
+impl Standing {
+    /// How the practice window with this title stands, by the window
+    /// manager's state: looked for on every workspace of every display
+    /// (a practice window may have been sent to another). `None` where
+    /// the state has no such window.
+    pub fn of(state: &Value, title: &str) -> Option<Standing> {
+        let whole = |value: &Value| value.as_f64().unwrap_or(0.0).round() as i64;
+        let place = |window: &Value| {
+            (
+                whole(&window["position"]["x"]),
+                whole(&window["position"]["y"]),
+                whole(&window["size"]["width"]),
+                whole(&window["size"]["height"]),
+            )
+        };
+        let is = |window: &Value, key: &str| window[key].as_bool().unwrap_or(false);
+        for monitor in state["monitors"].as_array().into_iter().flatten() {
+            let all = monitor["workspaces"].as_array().into_iter().flatten();
+            for workspace in all.chain(std::iter::once(&monitor["workspace"])) {
+                let windows: Vec<&Value> = workspace["detailed_windows"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|window| !is(window, "is_border_window"))
+                    .collect();
+                let Some(own) = windows.iter().find(|window| {
+                    window["title"].as_str() == Some(title)
+                        && [&window["app_id"], &window["class"]].iter().any(|app| {
+                            app.as_str()
+                                .is_some_and(|app| app.eq_ignore_ascii_case(crate::PRACTICE_APP))
+                        })
+                }) else {
+                    continue;
+                };
+                let floating = is(own, "is_floating");
+                // Tabs share one place: the tiled windows that are where
+                // this one is. (Only where the workspace has fewer places
+                // than tiled windows: else two windows of one size are
+                // two windows.)
+                let tiled: Vec<&&Value> = windows
+                    .iter()
+                    .filter(|window| !is(window, "is_floating") && !is(window, "is_minimized"))
+                    .collect();
+                let places = workspace["container_count"].as_u64().unwrap_or(u64::MAX);
+                let sharing = tiled
+                    .iter()
+                    .filter(|window| place(window) == place(own))
+                    .count();
+                let tab_of = (!floating && places < tiled.len() as u64 && sharing > 1)
+                    .then_some(sharing);
+                return Some(Standing {
+                    keyboard: is(own, "is_focused"),
+                    floating,
+                    maximized: is(own, "is_maximized"),
+                    tab_of,
+                });
+            }
+        }
+        None
+    }
+
+    /// It in words, as a window says it of itself.
+    pub fn words(&self) -> String {
+        let keyboard = if self.keyboard {
+            "Has the keyboard"
+        } else {
+            "Does not have the keyboard"
+        };
+        let how = match (self.maximized, self.floating, self.tab_of) {
+            (true, _, _) => "maximized".to_string(),
+            (_, true, _) => "floating".to_string(),
+            (_, _, Some(count)) => format!("one of {count} tabs"),
+            _ => "tiled".to_string(),
+        };
+        format!("{keyboard}  ·  {how}")
+    }
+}
+
 /// The desktop as far as a step looks at it: the workspace shown on the
 /// display that has the keyboard, and the shell's surfaces that are up.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Facts {
+    /// The display that has the keyboard, by its name (empty where the
+    /// desktop does not say).
+    pub display: String,
     /// The workspace's name.
     pub workspace: String,
     /// Its layout, as the window manager names it (`Dwindle`).
@@ -75,6 +168,7 @@ impl Facts {
             })
             .collect();
         Facts {
+            display: monitor["name"].as_str().unwrap_or_default().to_string(),
             workspace: workspace["name"].as_str().unwrap_or_default().to_string(),
             layout: workspace["layout_type"].as_str().unwrap_or_default().to_string(),
             windows,
@@ -211,6 +305,7 @@ mod tests {
 
     fn desk() -> Facts {
         Facts {
+            display: String::new(),
             workspace: "Tutorial".to_string(),
             layout: "Dwindle".to_string(),
             windows: vec![
@@ -222,6 +317,50 @@ mod tests {
             displays: 1,
             surfaces: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_practice_window_is_told_how_it_stands() {
+        let window = |title: &str, at: i32, focused: bool, floating: bool| {
+            json!({"window_id": at, "title": title, "app_id": "gevrek-practice", "class": "",
+                   "position": {"x": at, "y": 0}, "size": {"width": 600, "height": 400},
+                   "is_focused": focused, "is_floating": floating, "is_maximized": false})
+        };
+        // Three places: two tiles beside each other and a floating one.
+        let state = json!({"monitors": [{"is_focused": true,
+            "workspace": {"name": "Tutorial", "container_count": 2, "detailed_windows": []},
+            "workspaces": [{"name": "Tutorial", "container_count": 2, "detailed_windows": [
+                window("Notes", 0, true, false),
+                window("Browser", 600, false, false),
+                window("Music", 100, false, true),
+            ]}]}]});
+        let notes = Standing::of(&state, "Notes").unwrap();
+        assert_eq!(
+            notes,
+            Standing { keyboard: true, floating: false, maximized: false, tab_of: None }
+        );
+        assert_eq!(notes.words(), "Has the keyboard  ·  tiled");
+        assert_eq!(
+            Standing::of(&state, "Music").unwrap().words(),
+            "Does not have the keyboard  ·  floating"
+        );
+        assert_eq!(Standing::of(&state, "Mail"), None);
+
+        // Two of them joined as tabs: one place for both, and each says so.
+        let tabs = json!({"monitors": [{"is_focused": true,
+            "workspace": {"name": "Tutorial", "container_count": 1, "detailed_windows": [
+                window("Notes", 0, false, false),
+                window("Browser", 0, true, false),
+            ]}}]});
+        assert_eq!(
+            Standing::of(&tabs, "Browser").unwrap().words(),
+            "Has the keyboard  ·  one of 2 tabs"
+        );
+        assert_eq!(Standing::of(&tabs, "Notes").unwrap().tab_of, Some(2));
+        // A window of the person's own with the same title is not it.
+        let other = json!({"monitors": [{"workspace": {"detailed_windows": [
+            {"title": "Notes", "app_id": "org.gnome.Notes", "class": "notes"}]}}]});
+        assert_eq!(Standing::of(&other, "Notes"), None);
     }
 
     #[test]

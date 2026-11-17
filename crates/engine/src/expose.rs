@@ -177,8 +177,7 @@ pub fn activate(
         .iter()
         .filter_map(|window| Some((*window, current(*window)?)))
         .collect();
-    let grid_rects =
-        ExposeState::calculate_grid(&windows, work_area, GRID_PADDING, GRID_OUTER_PADDING);
+    let grid_rects = places(&windows, &original_rects, work_area);
     let moves = windows
         .iter()
         .filter_map(|window| Some((*window, *grid_rects.get(window)?)))
@@ -191,6 +190,56 @@ pub fn activate(
         promoted_rects: HashMap::new(),
     });
     Some(moves)
+}
+
+/// Where the windows of an overview go: each at its own shape, all made
+/// smaller by the same measure ([`arrange`]), from where they were when
+/// the overview came up. Where one of them is not known to be anywhere
+/// (no size to show it at), all of them are given the cells of a grid, as
+/// before there was a measure.
+fn places(
+    windows: &[WindowId],
+    where_they_were: &HashMap<WindowId, Rect>,
+    work_area: Rect,
+) -> HashMap<WindowId, Rect> {
+    let known: Vec<(WindowId, Rect)> = windows
+        .iter()
+        .filter_map(|window| Some((*window, *where_they_were.get(window)?)))
+        .collect();
+    let arranged: HashMap<WindowId, Rect> = arrange(&known, work_area).into_iter().collect();
+    if arranged.len() == windows.len() {
+        arranged
+    } else {
+        ExposeState::calculate_grid(windows, work_area, GRID_PADDING, GRID_OUTER_PADDING)
+    }
+}
+
+/// The picture among `places` to go to from the one at `from` with an
+/// arrow key (`across` and `down`: -1, 0 or 1): the nearest one that lies
+/// that way. `None` where none does.
+pub fn towards(places: &[Rect], from: usize, across: i32, down: i32) -> Option<usize> {
+    let middle = |rect: &Rect| (rect.x + rect.width / 2, rect.y + rect.height / 2);
+    let (x, y) = middle(places.get(from)?);
+    places
+        .iter()
+        .enumerate()
+        .filter(|(at, _)| *at != from)
+        .filter_map(|(at, rect)| {
+            let (there_x, there_y) = middle(rect);
+            let (by_x, by_y) = (there_x - x, there_y - y);
+            // How far it is that way, and how far beside the way.
+            let (along, beside) = if across != 0 {
+                (by_x * across, by_y.abs())
+            } else {
+                (by_y * down, by_x.abs())
+            };
+            // (That way at all, and more that way than beside it; a row
+            // above or below counts whatever is beside.)
+            let lies = along > 0 && (across == 0 || beside <= along);
+            lies.then_some((along + 2 * beside, at))
+        })
+        .min()
+        .map(|(_, at)| at)
 }
 
 /// Leave expose: every window goes back to where it was. Empty when expose
@@ -239,8 +288,7 @@ pub fn window_destroyed(
     };
     let mut remaining: Vec<WindowId> = expose.grid_rects.keys().copied().collect();
     remaining.sort();
-    expose.grid_rects =
-        ExposeState::calculate_grid(&remaining, work_area, GRID_PADDING, GRID_OUTER_PADDING);
+    expose.grid_rects = places(&remaining, &expose.original_rects, work_area);
     let moves = remaining
         .iter()
         .filter(|window| expose.promoted_window != Some(**window))
@@ -366,9 +414,23 @@ mod tests {
         let moves = start(&mut ws);
         assert_eq!(moves.len(), 3);
         assert!(is_active(&ws));
-        // Three windows: a 2 x 2 grid inside the outer padding.
-        assert_eq!(cell(&ws, W1), Rect::new(20, 20, 935, 495));
-        assert_eq!(cell(&ws, W3).y, 20 + 495 + 10);
+        // Three windows of 500 by 400, side by side at the top: shown at
+        // the size they have (they fit), in a row, in the middle.
+        for window in [W1, W2, W3] {
+            let place = cell(&ws, window);
+            assert_eq!((place.width, place.height), (500, 400));
+            assert!(place.x >= AREA.x && place.x + place.width <= AREA.width);
+        }
+        assert!(cell(&ws, W1).x < cell(&ws, W2).x && cell(&ws, W2).x < cell(&ws, W3).x);
+        assert_eq!(cell(&ws, W1).y, cell(&ws, W3).y);
+        // A window that is not known to be anywhere: the grid, as before.
+        let mut unknown = workspace();
+        activate(&mut unknown, AREA, |window| {
+            (window != W3).then(|| Rect::new(0, 0, 500, 400))
+        })
+        .unwrap();
+        assert_eq!(cell(&unknown, W1), Rect::new(20, 20, 935, 495));
+        assert_eq!(cell(&unknown, W3).y, 20 + 495 + 10);
 
         let restored = deactivate(&mut ws);
         assert_eq!(restored[0], (W1, Rect::new(100, 0, 500, 400)));
@@ -460,6 +522,25 @@ mod tests {
     }
 
     #[test]
+    fn an_arrow_goes_to_the_nearest_picture_that_way() {
+        // Two rows of two.
+        let places = [
+            Rect::new(0, 0, 100, 100),
+            Rect::new(200, 0, 100, 100),
+            Rect::new(0, 200, 100, 100),
+            Rect::new(200, 200, 100, 100),
+        ];
+        assert_eq!(towards(&places, 0, 1, 0), Some(1));
+        assert_eq!(towards(&places, 1, -1, 0), Some(0));
+        assert_eq!(towards(&places, 0, 0, 1), Some(2));
+        assert_eq!(towards(&places, 3, 0, -1), Some(1));
+        // Nothing lies further that way.
+        assert_eq!(towards(&places, 1, 1, 0), None);
+        assert_eq!(towards(&places, 0, 0, -1), None);
+        assert_eq!(towards(&places, 9, 1, 0), None);
+    }
+
+    #[test]
     fn an_empty_workspace_does_not_enter_expose() {
         let mut ws = Workspace::new(0, "empty".into());
         assert_eq!(activate(&mut ws, AREA, |_| None), None);
@@ -471,7 +552,7 @@ mod tests {
         let mut ws = workspace();
         start(&mut ws);
         let first = promote(&mut ws, W1, Some(AREA), |_| None).unwrap();
-        let centred = Rect::new((1920 - 935) / 2, (1040 - 495) / 2, 935, 495);
+        let centred = Rect::new((1920 - 500) / 2, (1040 - 400) / 2, 500, 400);
         assert_eq!(first, vec![(W1, centred)]);
         assert_eq!(
             promote(&mut ws, W1, Some(AREA), |_| None),
@@ -501,7 +582,7 @@ mod tests {
         start(&mut ws);
         promote(&mut ws, W1, Some(AREA), |_| None);
 
-        let dragged = Rect::new(5, 5, 935, 495);
+        let dragged = Rect::new(5, 5, 500, 400);
         assert_eq!(
             correct_move(&mut ws, W2, Some(AREA), || Some(dragged)),
             Some((W2, cell(&ws, W2)))

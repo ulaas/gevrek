@@ -103,7 +103,11 @@ pub fn small(rect: Rect, screen: Rect, cell: Rect) -> Rect {
 
 /// A workspace's name as a small picture: light letters on a dark ground,
 /// in the accent's colour for the workspace that is shown.
-fn label(name: &str, width: i32, colour: (u8, u8, u8)) -> (MemoryRenderBuffer, (i32, i32)) {
+pub(crate) fn label(
+    name: &str,
+    width: i32,
+    colour: (u8, u8, u8),
+) -> (MemoryRenderBuffer, (i32, i32)) {
     let (width, height) = (width.clamp(40, 600), LABEL - 4);
     let fill = (22u8, 22u8, 28u8);
     let mut pixels = vec![0u8; (width * height * 4) as usize];
