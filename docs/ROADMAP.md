@@ -28,10 +28,12 @@ system. The archive is not: git leaves it out through
 ## Where things stand (2026-11-17)
 
 - Version 0.6.0 is public, with installers for Windows and Linux and
-  updates on Windows. `main` is pushed up to `91859eb`. The tree holds
-  more that is not committed: 64 files changed and one new
-  (`backend-smithay/src/window_overview.rs`), the log's rows from
-  "afternoon (1)" on. The person is building and trying it on Windows.
+  updates on Windows. `main` is pushed up to `91859eb` and three
+  commits ahead of it (`ac8f0c5`, `d08ca9a`, `f6dc4c4`); nothing is
+  left uncommitted but this file. The person is building and trying
+  it on Windows.
+- What comes next is section 2d: a pass for faults and for speed, in
+  which nothing new is built and nothing that works may stop working.
 - Everything since 2026-11-17 was written on Windows. What it left to
   do on Linux is gathered in section 2c: start there.
 - The window manager, the shell, the studio, the lock screen and the
@@ -39,7 +41,7 @@ system. The archive is not: git leaves it out through
   person on 2026-11-17: all of it passes.
 - CI on `91859eb` (run 44074103140): the Windows job is green to its
   end, tests and clippy. The Linux job fails at the studio's picture
-  test alone (its remedy is in the tree, not committed). The check of
+  test alone (its remedy is committed in `ac8f0c5`, not pushed). The check of
   the dependencies fails since that day on `chrono` (section 1).
 - The check scripts (`tests/desktop`, `tests/nested`, `tests/vm`,
   `tests/wayland`) are not in this repository: the public one leaves
@@ -292,6 +294,152 @@ Not Linux's, but waiting for the person on Windows from the same days:
 Linux system brings it. Its archive, `docs/ROADMAP-archive-2026-11.md`,
 is not (`.git/info/exclude`); nothing here needs it.
 
+## 2d. Faults and speed: the pass before 0.7.0
+
+Asked for on 2026-11-17: faster, better, stronger, more efficient, and
+nothing broken on the way. Nothing new is built in this pass.
+
+**The rules of it**
+
+- What works keeps working. The configuration's format, the commands,
+  the protocol and what a key does stay as they are (the golden files,
+  the schema's tests and `core_scenarios` hold them).
+- A fault that is mended gets a test that failed before it was. Where a
+  test cannot reach it (it wants a desktop), it is a `person` item with
+  what to look at.
+- Nothing is made faster that was not measured first. Each such change
+  has its number before and after in the log, and is taken back where
+  the number is no better.
+- One thing in one commit. Moving code and changing it are never the
+  same commit.
+- Before each commit: the tests on Windows, and the Linux side in WSL.
+  No full desktop run unless the person asks.
+
+**Step 0: the net** (first; the rest leans on it)
+
+- [ ] **any** CI green to the end on both systems: the pictures pushed,
+      `chrono` decided (section 1). From then on a red run stops the
+      pass until it is green again.
+- [ ] **any** The numbers as they are now, written down in the log, on
+      the person's machine: processor and memory of a still gevrek
+      (window manager, shell) over five minutes; handles and GDI objects
+      on Windows; the time from start to the first layout; the size of
+      the programs.
+- [ ] **any** Benches (there are none yet) for what runs most: a layout
+      of 1, 10 and 50 windows in each layout; the state as it is
+      published and written to JSON; a reload of a configuration as
+      large as the person's (95 kB, 116 bindings); the rules held
+      against 50 windows; the overview's arrangement.
+- [ ] **W** The time of a pass of the runtime (an event taken in to the
+      windows placed) measured where it runs, at the log's debug level:
+      the slowest passes are known by name before one is touched.
+- [ ] **any** The large files have their behaviour held by tests before
+      they are opened: `window_manager.rs` (8,199 lines),
+      `settings.rs` (5,502), the Linux shell's `main.rs` (4,889),
+      `server/src/lib.rs` (3,591). Where a part has none, tests that
+      say what it does now come first.
+
+**Step 1: faults**
+
+- [ ] **person, W** The two that were reported and mended without being
+      seen: borders around nothing; a window dragged to the other
+      display (section 2c). Not closed until seen for a day.
+- [ ] **any** The 64 notes of the kind TODO and FIXME in the code read,
+      each one: done, made an item here, or taken out as no longer so.
+- [ ] **W** The `unsafe` of the Windows backend read through (most of
+      the 507 in the tree are there): every handle closed once and by
+      whoever owns it, nothing used after its window is gone, a line
+      beside each block saying why it holds.
+- [ ] **any** The 71 places that sleep: each one waits for something
+      that could be waited for itself (an event, an answer, a time
+      limit), or says why it cannot.
+- [ ] **any** What can end the program outside the tests (`unwrap`,
+      `expect`, an index, a lock that was poisoned): on the paths that
+      run while the desktop does, each becomes a fault that is logged
+      and lived through, or says why it cannot happen.
+- [ ] **any** No file from outside ends the program: a configuration,
+      a saved session, the hidden journal, a message on the line, cut
+      short or filled with nonsense (tested with made-up input by the
+      thousand).
+- [ ] **any** The engine driven by long random runs of commands and
+      events, with what must always hold checked after each: every
+      window on one workspace, the focus on a window that is there,
+      every tile within its display, none of no size, no two tiles on
+      each other.
+- [ ] **W** What happens around the edges, each with a test or a
+      `person` item: a display taken away and put back, another scale,
+      sleep and waking, the Explorer started anew, a window of an
+      administrator's program without the helper, the window manager
+      ended by force (the hidden windows come back).
+- [ ] **W** Nothing is left behind over time: ten thousand changes of
+      workspace and a thousand windows opened and closed, with the
+      handles, GDI objects, pictures of windows, borders and memory
+      counted before and after.
+- [ ] **L** The same for the compositor without a display (headless):
+      clients that come and go by the thousand, surfaces and buffers
+      counted.
+- [ ] **any** Every answer on the line has a time limit, and each side
+      lives through the other going away and coming back (the shell
+      without the window manager, the studio without either).
+- [ ] **any** The compositor's workspace protocol tells the title:
+      written, and without a test (section 2b).
+- [ ] **any** The studio's top bar at the smallest window (760 wide):
+      the file and the state lie under the search.
+
+**Step 2: speed and what it costs**
+
+By what step 0 measured; the order below is a guess until then.
+
+- [ ] **any** A still desktop does nothing: no pass, no state, no
+      picture drawn while nothing happens. Every timer that fires by
+      itself (the state once a second, the shell's and the studio's
+      repaints, the hot corners) is named, and stays only where
+      nothing else can wake what it wakes.
+- [ ] **any** The state is put together only when something changed,
+      and only what is asked for; what did not change is not written to
+      JSON again. Told to those who listen once per pass, not once per
+      event.
+- [ ] **W** A pass places only the windows whose place changed, and
+      asks Windows once for what it asks several times now.
+- [ ] **W** Motion: one frame's work in one frame's time on both
+      displays, with the frames that came late counted; borders and
+      pictures of windows drawn only when they change (begun in
+      `8314a98`).
+- [ ] **L** The compositor draws what changed and no more, on each
+      display by itself; what a frame is made of is kept from the frame
+      before where it is the same.
+- [ ] **any** The shell: the panel draws when what it shows changes;
+      what it reads of the system (network, sound, battery, the
+      numbers) is read as often as it can change and no oftener, and
+      not at all for a module that is not shown.
+- [ ] **any** The studio: a page is not laid out anew while nothing on
+      it changes; the schema and the form's lists are made once.
+- [ ] **any** From start to the first layout, and a reload: what is
+      read or made twice is read or made once.
+- [ ] **any** Memory: what is copied for every event (the state, the
+      configuration, the lists of windows) is lent where it can be.
+- [ ] **any** The numbers of step 0 taken again and written beside the
+      first; a check that fails where a bench grows by more than a
+      tenth ("Kept an eye on", section 5, is this).
+
+**Step 3: stronger**
+
+- [ ] **any** The large files in parts, each part moved as it is and
+      its tests with it; nothing changed in the same commit.
+- [ ] **any** One way to do a thing where there are two (found on the
+      way through steps 1 and 2, listed here as they are found).
+- [ ] **any** The warnings: clippy without any on both systems (two
+      are known in the shell), then CI refuses new ones.
+- [ ] **any** What the log says at each level read through once: a
+      fault says what was being done and to which window; nothing is
+      said a hundred times a second.
+
+**Done when** every item above is ticked or handed to the person with
+what to look at, the numbers are no worse anywhere and better where
+this was after them, and CI is green. Then 0.7.0 (section 5).
+
+---
+
 ## 3. The tutorial
 
 The designs are in the archive under "The welcome and the tutorial". The
@@ -491,3 +639,4 @@ wanted, strike it when it is not.
 | 2026-11-17, afternoon (6) | Windows 11 and WSL (Fedora 44) | Begun on the tutorial's first stage, with what can be tested without a desktop: it runs on the display the person is on; the person's own windows leave its workspace with it; practice windows say how they stand. Windows: 1,094 tests pass. Not seen on a desktop. Not committed | The rest of stage 1 is drawn (the ring, the card's place, the welcome) and wants a desktop to be seen on |
 | 2026-11-17, afternoon (7) | Windows 11 and WSL (Fedora 44) | More of the tutorial's first stage: the card's room kept free of tiles; the main key chosen in the welcome, with every binding following it. Windows: 1,096 tests pass. Not seen on a desktop. Not committed | Of stage 1: the ring, the welcome folding into the card, the lessons played by a check |
 | 2026-11-17, afternoon (8) | Windows 11 and WSL (Fedora 44) | The tutorial's ring on Windows: around the window with the keyboard, all the windows, or the panel, as four thin surfaces. Windows: 1,097 tests pass. Not seen on a desktop. Not committed | The ring on Linux and around the shell's own surfaces; the welcome folding into the card; the lessons played by a check |
+| 2026-11-17, evening | Windows 11 and WSL (Fedora 44) | Committed: the tree as it stood (`ac8f0c5`); gevrek starts with the person's look, without what belongs to one machine (`d08ca9a`); the studio's pages with a list of their own no longer scroll as well, and no page is wider than the window (`f6dc4c4`; looked at in pictures). CI seen for `91859eb`: Windows green to its end, Linux at the pictures only, the dependencies at `chrono`. The plan of the pass for faults and speed written (section 2d) | Section 2d, step 0 first. To push; `chrono` to decide; the studio's changes to be seen in its window |
