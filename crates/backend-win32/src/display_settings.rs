@@ -11,7 +11,8 @@
 //!   or that it is the main one. A display no entry says more of is as
 //!   Windows has it, and stays so.
 //! - Positions are in the pixels of the desktop, as Windows counts them
-//!   (not divided by a scale; the scale is the system's here). The main
+//!   (not divided by a scale; a display's scale is set by itself, in
+//!   `display_scale.rs`). The main
 //!   display is at the corner: all positions are moved together so that it
 //!   is.
 //! - A mode the display does not offer is not asked for; every change is
@@ -68,7 +69,7 @@ fn arranges(profile: &OutputProfile) -> bool {
             || profile.primary)
 }
 
-fn means(profile: &OutputProfile, display: &Display) -> bool {
+pub(crate) fn means(profile: &OutputProfile, display: &Display) -> bool {
     let wanted = profile.name.trim();
     let short = display.device.trim_start_matches(r"\\.\");
     [&display.name, &display.path, &display.device]

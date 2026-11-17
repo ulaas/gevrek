@@ -168,6 +168,7 @@ pub(crate) fn test_runtime(config: Config) -> ManuallyDrop<Runtime> {
         transitions_off: false,
         display_refused: None,
         displays_own: Vec::new(),
+        scales_own: std::collections::HashMap::new(),
         config,
     })
 }

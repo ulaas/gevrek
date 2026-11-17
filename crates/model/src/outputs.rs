@@ -6,9 +6,9 @@
 //! right of the others at its preferred mode.
 //!
 //! Where gevrek owns the displays (Linux, as the compositor) everything
-//! here is applied. Where the system owns them (Windows) the arrangement
-//! and the mode are applied through the system and the scale is the
-//! system's; the backend says so through its capabilities.
+//! here is applied. Where the system owns them (Windows) the arrangement,
+//! the mode and the scale are applied through the system (a scale only
+//! where the display offers it: Windows has its own steps).
 //!
 //! On Windows today only `enabled` is read: a display that is switched off
 //! stays part of the Windows desktop, and gevrek leaves it alone (no

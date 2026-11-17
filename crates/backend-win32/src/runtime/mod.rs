@@ -128,6 +128,10 @@ pub struct Runtime {
     /// nothing of the displays any more (a trial's configuration put
     /// back by the program that tried it, an entry taken out).
     displays_own: Vec<crate::display_settings::Saved>,
+    /// The scale each display had before gevrek changed it (in per cent,
+    /// by Windows' name for the display): given back when
+    /// `desktop.outputs` gives that display no scale any more.
+    scales_own: std::collections::HashMap<String, u32>,
 }
 
 /// New display settings on trial: a mode the display cannot show after
@@ -439,6 +443,7 @@ impl Runtime {
             transitions_off: false,
             display_refused: None,
             displays_own: Vec::new(),
+            scales_own: std::collections::HashMap::new(),
         })
     }
 
@@ -1934,6 +1939,62 @@ impl Runtime {
         Ok(Some(saved))
     }
 
+    /// The displays' scales as `desktop.outputs` gives them
+    /// (`display_scale.rs`): set where an entry gives one that its
+    /// display has not, and given back where an entry gives none any
+    /// more. One the display does not offer is said and nothing is set.
+    fn apply_display_scales(&mut self) {
+        let displays: Vec<_> = crate::display_settings::displays()
+            .into_iter()
+            .filter_map(|display| {
+                let scale = crate::display_scale::now(&display.device)?;
+                Some((display, scale))
+            })
+            .collect();
+        let changes = match crate::display_scale::plan(
+            &self.config.desktop.outputs,
+            &displays,
+            &self.scales_own,
+        ) {
+            Ok(changes) => changes,
+            Err(why) => {
+                log::warn!("desktop.outputs: {why}; the scales are left as they are");
+                return;
+            }
+        };
+        for change in changes {
+            let had = displays
+                .iter()
+                .find(|(display, _)| display.device == change.device)
+                .map(|(_, scale)| scale.current);
+            match crate::display_scale::set(&change.device, change.steps) {
+                Ok(()) => {
+                    log::info!(
+                        "Display {}: its scale is {} %{}",
+                        change.name,
+                        change.to,
+                        if change.back { ", as it was before" } else { "" }
+                    );
+                    if change.back {
+                        self.scales_own.remove(&change.device);
+                    } else if let Some(had) = had {
+                        // (What it had before the first change, not
+                        // before this one.)
+                        self.scales_own.entry(change.device.clone()).or_insert(had);
+                    }
+                    // Windows tells of the change as of any other: the
+                    // monitors are looked at again when it has settled.
+                    self.display_change_pending = Some(std::time::Instant::now());
+                }
+                Err(why) => log::warn!(
+                    "Display {}: its scale could not be set to {} %: {why}",
+                    change.name,
+                    change.to
+                ),
+            }
+        }
+    }
+
     /// `desktop.outputs` asks nothing of the displays any more, and
     /// gevrek had changed them: they get the settings they had before.
     /// (Seen on the real displays, 2026-11-15: a mode on trial stayed
@@ -1968,6 +2029,7 @@ impl Runtime {
                 self.display_refused = Some(why);
             }
         }
+        self.apply_display_scales();
     }
 
     /// `desktop.outputs` changed from `old` to what the configuration has
@@ -1987,6 +2049,7 @@ impl Runtime {
         };
         self.notices_checked = None;
         self.give_displays_back_when_nothing_is_asked();
+        self.apply_display_scales();
         // A change on top of one that is on trial: what counts is still
         // what was there before the first.
         let (before, mut kept) = match self.display_trial.take() {

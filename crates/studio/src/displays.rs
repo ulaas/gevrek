@@ -223,6 +223,37 @@ pub fn modes_of(state: &Value, name: &str) -> Vec<Mode> {
         .collect()
 }
 
+/// The scale the display `name` has now, as the window manager says.
+pub fn scale_of(state: &Value, name: &str) -> Option<f64> {
+    state["monitors"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|monitor| {
+            monitor["connector"].as_str() == Some(name) || monitor["name"].as_str() == Some(name)
+        })
+        .and_then(|monitor| monitor["scale"].as_f64())
+        .filter(|scale| *scale > 0.0)
+}
+
+/// The scales a display is offered, and the one that is chosen: the one
+/// the configuration gives it (`configured`), else the one it has
+/// (`has`), else 1. A scale that is none of the usual four (a display at
+/// 1.75) is offered too, in its place, so that what is so is shown.
+pub fn scale_choice(configured: Option<f64>, has: Option<f64>) -> (Vec<(f64, String)>, Option<f64>) {
+    let mut scales = vec![1.0, 1.25, 1.5, 2.0];
+    let current = configured.or(has).unwrap_or(1.0);
+    for scale in [configured, has].into_iter().flatten() {
+        if (0.25..=8.0).contains(&scale) && !scales.iter().any(|known| (known - scale).abs() < 0.01) {
+            scales.push((scale * 100.0).round() / 100.0);
+        }
+    }
+    scales.sort_by(|one, other| one.total_cmp(other));
+    let selected = scales.iter().copied().find(|scale| (scale - current).abs() < 0.01);
+    let options = scales.into_iter().map(|scale| (scale, format!("{scale}×"))).collect();
+    (options, selected)
+}
+
 /// Change the entry of the display `name` in `desktop.outputs`, making
 /// one when it has none.
 pub fn edit_entry(document: &mut Document, name: &str, change: impl FnOnce(&mut Value)) {
@@ -379,11 +410,13 @@ pub fn settings(ui: &mut Ui, document: &mut Document, state: Option<&Value>) {
                         });
                     }
                 }
-                // The scale.
+                // The scale: the one the configuration gives the
+                // display, else the one the display has (faint: nothing
+                // is written down for it).
                 let scale = entry["scale"].as_f64();
-                let options = [(1.0, "1×"), (1.25, "1.25×"), (1.5, "1.5×"), (2.0, "2×")];
-                let current = scale.unwrap_or(1.0);
-                let selected = options.iter().map(|(value, _)| *value).find(|value| (value - current).abs() < 0.01);
+                let (options, selected) = scale_choice(scale, scale_of(state, &display.name));
+                let options: Vec<(f64, &str)> =
+                    options.iter().map(|(value, label)| (*value, label.as_str())).collect();
                 if let Some(new) = gevrek_ui::widgets::segmented(ui, ui.scope_id().with("scale"), selected.as_ref(), &options, scale.is_none()) {
                     edit_entry(document, &display.name, |entry| entry["scale"] = Value::from(new));
                 }
@@ -644,6 +677,35 @@ mod tests {
         let placed = placed(displays, Some(&outputs));
         assert_eq!((placed[0].x, placed[0].y), (1920, 0));
         assert_eq!(placed[1].x, 2560);
+    }
+
+    #[test]
+    fn a_displays_scale_is_shown_as_it_is() {
+        let labels = |options: &[(f64, String)]| -> Vec<String> {
+            options.iter().map(|(_, label)| label.clone()).collect()
+        };
+        // Nothing written down, nothing known: 1.
+        let (options, selected) = scale_choice(None, None);
+        assert_eq!(labels(&options), ["1×", "1.25×", "1.5×", "2×"]);
+        assert_eq!(selected, Some(1.0));
+        // Nothing written down: the one the display has.
+        assert_eq!(scale_choice(None, Some(1.5)).1, Some(1.5));
+        // Written down: that one, whatever the display has now.
+        assert_eq!(scale_choice(Some(2.0), Some(1.5)).1, Some(2.0));
+        // One that is none of the usual four is offered in its place.
+        let (options, selected) = scale_choice(None, Some(1.75));
+        assert_eq!(labels(&options), ["1×", "1.25×", "1.5×", "1.75×", "2×"]);
+        assert_eq!(selected, Some(1.75));
+        let (options, _) = scale_choice(Some(2.5), Some(1.75));
+        assert_eq!(labels(&options), ["1×", "1.25×", "1.5×", "1.75×", "2×", "2.5×"]);
+
+        let state = json!({"monitors": [
+            {"name": "Left", "connector": "DP-1", "scale": 1.5},
+            {"name": "Right", "scale": 0.0}]});
+        assert_eq!(scale_of(&state, "Left"), Some(1.5));
+        assert_eq!(scale_of(&state, "DP-1"), Some(1.5));
+        assert_eq!(scale_of(&state, "Right"), None);
+        assert_eq!(scale_of(&state, "Other"), None);
     }
 
     #[test]

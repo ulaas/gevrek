@@ -14,6 +14,7 @@
 
 pub mod apply;
 pub mod conflicts;
+pub mod display_scale;
 pub mod display_settings;
 pub mod dwm;
 pub mod elevated;
