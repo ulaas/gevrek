@@ -238,6 +238,11 @@ pub struct Outputs {
     reserved_areas: HashMap<MonitorHandle, ReservedArea>,
     /// The place kept for gevrek's bar on every monitor, if it has one.
     bar: Option<gevrek_model::settings::PanelProfile>,
+    /// The displays are measured in their own pixels (Windows), not in
+    /// pixels that already count the scale in (a compositor): the panel's
+    /// height and margin, which the configuration gives as they are seen,
+    /// are then so many more pixels on a display with a larger scale.
+    bar_in_display_pixels: bool,
     /// Until then the bar's place is kept although no bar is seen yet
     /// (the bar starts after the window manager).
     bar_expected_until: Option<std::time::Instant>,
@@ -336,10 +341,12 @@ impl Outputs {
         // free before the bar is there.
         let mut work_area = self.work_area_excluding_overlays(monitor, &[])?;
         if let Some(bar) = self.bar_on(monitor).filter(|_| self.bar_is_kept(desktop)) {
-            let reserved = bar.reserved().min((work_area.height - 1).max(0));
+            // (As many pixels as the panel is high on this display.)
+            let room = self.bar_pixels(monitor, bar.reserved());
+            let reserved = room.min((work_area.height - 1).max(0));
             use gevrek_model::settings::PanelEdge;
             if bar.edge.is_upright() {
-                let reserved = bar.reserved().min((work_area.width - 1).max(0));
+                let reserved = room.min((work_area.width - 1).max(0));
                 if bar.edge == PanelEdge::Left {
                     work_area.x += reserved;
                 }
@@ -423,6 +430,24 @@ impl Outputs {
     /// The panel of a display: the configuration's, unless it says that
     /// this display has none (`PanelOnDisplay::enabled`). No room is kept
     /// there then, and no panel has a place.
+    /// The backend measures the displays in their own pixels: the panel
+    /// is as high as its display's scale makes it (see the field).
+    pub fn set_bar_in_display_pixels(&mut self, on: bool) {
+        self.bar_in_display_pixels = on;
+    }
+
+    /// A length of the panel (its height, its margin), as the
+    /// configuration gives it, in the pixels the display `monitor` is
+    /// measured in.
+    fn bar_pixels(&self, monitor: MonitorHandle, length: i32) -> i32 {
+        let scale = self
+            .get_monitor(monitor)
+            .filter(|_| self.bar_in_display_pixels)
+            .map_or(1.0, |display| display.dpi_scale)
+            .clamp(0.5, 8.0);
+        (length as f32 * scale).round() as i32
+    }
+
     fn bar_on(&self, monitor: MonitorHandle) -> Option<&gevrek_model::settings::PanelProfile> {
         let bar = self.bar.as_ref()?;
         let none_here = self.get_monitor(monitor).is_some_and(|display| {
@@ -436,8 +461,8 @@ impl Outputs {
     pub fn bar_rect(&self, monitor: MonitorHandle) -> Option<Rect> {
         let bar = self.bar_on(monitor)?;
         let area = self.get_configured_work_area(monitor)?;
-        let margin = bar.margin.min(100) as i32;
-        let height = bar.height.clamp(16, 200) as i32;
+        let margin = self.bar_pixels(monitor, bar.margin.min(100) as i32);
+        let height = self.bar_pixels(monitor, bar.height.clamp(16, 200) as i32);
         use gevrek_model::settings::PanelEdge;
         // (`height` is the panel's thickness: across a panel that goes
         // down a side.)
@@ -501,6 +526,7 @@ impl Outputs {
             reserved_areas: HashMap::new(),
             details: HashMap::new(),
             bar: None,
+            bar_in_display_pixels: false,
             bar_expected_until: None,
             panel_seen: false,
             global_work_area_offset: ReservedArea::default(),
@@ -1340,6 +1366,44 @@ mod tests {
         assert!(outputs.bar_rect(second).is_none());
         let without = outputs.get_adjusted_work_area(second, &desktop).unwrap();
         assert_eq!(without.height, 1040);
+    }
+
+    /// Where the displays are measured in their own pixels, the panel is
+    /// as many pixels high as its display's scale makes it, and so much
+    /// room is kept for it. (At 150 % what the panel shows was half as
+    /// high again as the panel, and was cut off.)
+    #[test]
+    fn the_panel_is_as_high_as_its_displays_scale_makes_it() {
+        use gevrek_model::settings::PanelProfile;
+        let desktop = crate::testing::FakeDesktop::new(MonitorHandle(1));
+        let mut outputs = Outputs::new();
+        let mut large = named(2, "Monitor B", "DP-2", 1920);
+        large.dpi_scale = 1.5;
+        outputs.set_monitors_only(vec![named(1, "Monitor A", "DP-1", 0), large]);
+        let bar = PanelProfile {
+            height: 36,
+            margin: 4,
+            ..PanelProfile::default()
+        };
+        outputs.set_bar(Some(bar));
+        outputs.set_panel_seen(true);
+        let (first, second) = (MonitorHandle(1), MonitorHandle(2));
+        let room = |outputs: &Outputs, monitor| {
+            1040 - outputs.get_adjusted_work_area(monitor, &desktop).unwrap().height
+        };
+
+        // Pixels that count the scale in already (a compositor): as given.
+        assert_eq!(outputs.bar_rect(second).unwrap().height, 36);
+        assert_eq!(room(&outputs, second), 40);
+
+        // The displays' own pixels: by each display's scale.
+        outputs.set_bar_in_display_pixels(true);
+        assert_eq!(outputs.bar_rect(first).unwrap().height, 36);
+        assert_eq!(room(&outputs, first), 40);
+        let place = outputs.bar_rect(second).unwrap();
+        assert_eq!(place.height, 54);
+        assert_eq!((place.x, place.y), (1920 + 6, 6), "its margin too");
+        assert_eq!(room(&outputs, second), 60);
     }
 
     #[test]

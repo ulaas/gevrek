@@ -2295,6 +2295,9 @@ impl Runtime {
         gevrek_engine::config_apply::configure_monitor_profiles(monitor_manager, config);
         // The bar is a program of this backend: its place is kept here.
         monitor_manager.set_bar(Some(config.shell.panel.clone()));
+        // (Windows measures a display in its own pixels: the panel is as
+        // many of them high as the display's scale makes it.)
+        monitor_manager.set_bar_in_display_pixels(true);
     }
 
     fn apply_workspace_profiles(&mut self) {

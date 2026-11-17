@@ -472,26 +472,42 @@ nothing broken on the way. Nothing new is built in this pass.
       without the window manager, the studio without either).
 - [ ] **any** The compositor's workspace protocol tells the title:
       written, and without a test (section 2b).
+- [ ] **person, W** Reported by the person (2026-11-17): with another
+      scale chosen for a display, what the panel shows grew and the
+      panel did not, so it was cut off. Found: the window manager says
+      where the panel is and keeps its room, and took the height and
+      the margin of the configuration as pixels whatever the display's
+      scale; the shell draws at the display's scale. Now both are as
+      many pixels as the display's scale makes them, where the displays
+      are measured in their own pixels (Windows; a compositor counts
+      the scale in already)
+      (`the_panel_is_as_high_as_its_displays_scale_makes_it`). To tick:
+      seen at 100 %, 125 % and 150 %, and with the scale changed while
+      the panel is up.
 - [ ] **any** The studio's top bar at the smallest window (760 wide):
       the file and the state lie under the search.
 - [ ] **person, W** Reported by the person (2026-11-17): the toggles
-      for a display's scale on the studio's Displays page do not work.
-      Found: the studio writes the scale to the configuration
-      (`desktop.outputs[].scale`, tested), and the compositor on Linux
-      applies it; the Windows backend never did, on purpose
-      (`display_settings.rs`: "the scale is the system's here"). So on
-      Windows the toggle changes the file and nothing else. Also: it
-      shows what the configuration says (1× where it says nothing),
-      not the scale the display has. To decide, one of:
-      - gevrek sets the scale on Windows as the Settings window does.
-        Windows has no documented way for a program to do that; the
-        one the Settings window itself uses (the display
-        configuration's DPI value) is known and works on Windows 10
-        and 11, and may change without notice.
-      - On Windows the page shows the scale the display has, does not
-        offer to change it, and has a button that opens the system's
-        display settings there.
-      Either way the page shows the scale the display has.
+      for a display's scale on the studio's Displays page did nothing
+      on Windows. The studio wrote the scale to the configuration, and
+      the Windows backend never applied one. Decided: gevrek sets it,
+      as the Settings window does. Written (`display_scale.rs`): the
+      scale an entry of `desktop.outputs` gives its display is set
+      where the display offers it (Windows' own steps, 100 % to 500 %,
+      counted from the one it recommends), said and left where it does
+      not; a display whose entry gives none any more gets back what it
+      had. Windows has no documented way for this: the two values the
+      Settings window itself uses are used, and a later Windows may
+      answer them otherwise (then nothing is set and the log says so).
+      The page shows the scale the display has where none is written
+      down. Tested: the plan and the reading of Windows' answer; asked
+      on the person's machine, the three displays answer rightly.
+      **Not run: the setting itself**, which changes how the person's
+      screen looks. To tick: a scale chosen on the page is the
+      display's, another is, and with the entry's scale taken out it
+      is the one of before.
+      Note: a configuration that already gives a display a scale (the
+      toggle was pressed before, and did nothing) has it set at the
+      next start.
 
 **Step 2: speed and what it costs**
 
@@ -780,3 +796,5 @@ wanted, strike it when it is not.
 | 2026-11-17, night (6) | Windows 11 and WSL (Fedora 44) | The engine driven by runs of chance, 7,200 of them clean in the end. One fault found and mended: Toggle floating put a window that is on a workspace not shown on the shown one as well. One thing found for the person to decide: tiles of no size where many windows dwindle. Windows: every test passes; Linux: the model, the engine, the server and the compositor | The runs with two displays, groups and scratchpads; the other files from outside; the notes of the kind TODO |
 | 2026-11-17, night (7) | Windows 11 and WSL (Fedora 44) | The runs of chance with two displays, the rules and the scratchpads, and with nothing of a workspace that is not shown in sight. Two more faults found and mended: a layout command brought a hidden workspace's window into sight; move-and-follow changed the wrong display. Noted for later: the scale toggles on the studio's Displays page (reported). Windows and Linux: every test passes (the studio's not run on Linux this time) | The person sees the two on the desktop; the other files from outside; the notes of the kind TODO; the scale toggles |
 | 2026-11-17, night (8) | Windows 11 | Looked into: the scale toggles of the studio's Displays page write the configuration, and the Windows backend does not apply a scale (by design so far); a decision for the person. The notes of the kind TODO: there are none (the count was of a variable's name) | The person decides about the scale on Windows; the other files from outside |
+| 2026-11-17, night (9) | Windows 11 and WSL (Fedora 44) | A display's scale is set on Windows as the Settings window sets it (decided by the person), and the studio shows the scale a display has. Asked on this machine without setting anything: the three displays answer rightly. Windows: every test passes; Linux: the studio's pass | The person tries the toggles on the Displays page; the other files from outside |
+| 2026-11-17, night (10) | Windows 11 and WSL (Fedora 44) | The panel is as high as its display's scale makes it (reported: at another scale what it shows was cut off). Windows and Linux: every test passes (the studio's not run on Linux this time) | The person sees the panel at several scales, and tries the scale toggles |
