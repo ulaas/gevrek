@@ -5,6 +5,37 @@ use crate::contract::Desktop;
 use crate::rules::{MatchKind, MatchStrategy};
 use crate::WindowHandle;
 
+/// The regular expression of a pattern, made once and kept: a rule is
+/// held against every window there is, after each reload and for every
+/// new window, and making the expression costs a thousand times what
+/// matching with it does. `None`: the pattern does not compile (kept
+/// too, so that it is not tried again and again).
+pub fn regex_for(pattern: &str, case_sensitive: bool) -> Option<regex::Regex> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    type Kept = HashMap<(String, bool), Option<regex::Regex>>;
+    static KEPT: OnceLock<Mutex<Kept>> = OnceLock::new();
+    // (Patterns come from the configuration, and from commands too: no
+    // more are kept than a configuration could hold.)
+    const MOST: usize = 512;
+    let mut kept = KEPT
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(regex) = kept.get(&(pattern.to_string(), case_sensitive)) {
+        return regex.clone();
+    }
+    let regex = regex::RegexBuilder::new(pattern)
+        .case_insensitive(!case_sensitive)
+        .build()
+        .ok();
+    if kept.len() >= MOST {
+        kept.clear();
+    }
+    kept.insert((pattern.to_string(), case_sensitive), regex.clone());
+    regex
+}
+
 /// Whether `value` matches `pattern` under `strategy`. A regular expression
 /// that does not compile matches nothing.
 pub fn text_matches(
@@ -14,10 +45,7 @@ pub fn text_matches(
     case_sensitive: bool,
 ) -> bool {
     if matches!(strategy, MatchStrategy::Regex) {
-        return regex::RegexBuilder::new(pattern)
-            .case_insensitive(!case_sensitive)
-            .build()
-            .is_ok_and(|regex| regex.is_match(value));
+        return regex_for(pattern, case_sensitive).is_some_and(|regex| regex.is_match(value));
     }
     let (value, pattern) = if case_sensitive {
         (value.to_string(), pattern.to_string())
@@ -140,8 +168,29 @@ mod tests {
             false
         ));
         assert!(
-            !text_matches("anything", "(unclosed", &Regex, false),
+            !text_matches("anything", "(unclosed", &Regex, false)
+                && !text_matches("anything", "(unclosed", &Regex, false),
             "a bad pattern matches nothing"
         );
+    }
+
+    #[test]
+    fn an_expression_that_is_kept_matches_as_one_made_anew() {
+        use MatchStrategy::Regex;
+        // The same pattern with and without regard to case: two
+        // expressions, kept apart, each the same every time it is asked.
+        for _ in 0..3 {
+            assert!(text_matches("REPORT-2026.txt", r"^report-\d{4}", &Regex, false));
+            assert!(!text_matches("REPORT-2026.txt", r"^report-\d{4}", &Regex, true));
+            assert!(text_matches("report-2026.txt", r"^report-\d{4}", &Regex, true));
+        }
+        // More patterns than are kept: the early ones still match.
+        for index in 0..1200 {
+            let pattern = format!("^window {index}$");
+            assert!(text_matches(&format!("window {index}"), &pattern, &Regex, true));
+            assert!(!text_matches(&format!("window {}", index + 1), &pattern, &Regex, true));
+        }
+        assert!(text_matches("window 0", "^window 0$", &Regex, true));
+        assert!(regex_for("(unclosed", true).is_none());
     }
 }

@@ -29,9 +29,8 @@ impl WindowRule {
             MatchStrategy::Contains => value.contains(&self.id),
             MatchStrategy::StartsWith => value.starts_with(&self.id),
             MatchStrategy::EndsWith => value.ends_with(&self.id),
-            MatchStrategy::Regex => regex::Regex::new(&self.id)
-                .map(|regex| regex.is_match(value))
-                .unwrap_or(false),
+            MatchStrategy::Regex => crate::matching::regex_for(&self.id, true)
+                .is_some_and(|regex| regex.is_match(value)),
         }
     }
 }
@@ -675,11 +674,8 @@ impl RuleEngine {
         case_sensitive: bool,
     ) -> bool {
         if matches!(strategy, MatchStrategy::Regex) {
-            return regex::RegexBuilder::new(expected)
-                .case_insensitive(!case_sensitive)
-                .build()
-                .map(|regex| regex.is_match(actual))
-                .unwrap_or(false);
+            return crate::matching::regex_for(expected, case_sensitive)
+                .is_some_and(|regex| regex.is_match(actual));
         }
 
         let (actual, expected) = if case_sensitive {
