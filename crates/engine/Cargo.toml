@@ -18,3 +18,9 @@ anyhow = { workspace = true }
 chrono = { workspace = true }
 log = { workspace = true }
 regex = { workspace = true }
+
+# What the engine does most, timed (`benches/engine.rs` says how).
+[[bench]]
+name = "engine"
+harness = false
+required-features = ["test-support"]

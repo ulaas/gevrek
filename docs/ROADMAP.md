@@ -325,11 +325,21 @@ nothing broken on the way. Nothing new is built in this pass.
       (window manager, shell) over five minutes; handles and GDI objects
       on Windows; the time from start to the first layout; the size of
       the programs.
-- [ ] **any** Benches (there are none yet) for what runs most: a layout
-      of 1, 10 and 50 windows in each layout; the state as it is
-      published and written to JSON; a reload of a configuration as
-      large as the person's (95 kB, 116 bindings); the rules held
-      against 50 windows; the overview's arrangement.
+- [x] **any** Benches for what the engine does most
+      (`crates/engine/benches/engine.rs`, no crate added for it):
+
+          cargo bench -p gevrek-engine --features test-support
+
+      A layout of 1, 10 and 50 windows in each layout; windows opened
+      and a workspace changed on the desktop without a windowing
+      system; 20 rules against 50 windows; the overview's arrangement;
+      the starting configuration (116 bindings) read, written, checked
+      and held against another for a reload. `GEVREK_BENCH_OUT=<file>`
+      writes the medians down. The first numbers are in the log
+      (2026-11-17, late evening).
+- [ ] **W, L** The same for the state as it is published and written to
+      JSON: it is put together in each backend, not in the engine, so
+      its bench belongs there.
 - [ ] **W** The time of a pass of the runtime (an event taken in to the
       windows placed) measured where it runs, at the log's debug level:
       the slowest passes are known by name before one is touched.
@@ -389,6 +399,18 @@ nothing broken on the way. Nothing new is built in this pass.
 **Step 2: speed and what it costs**
 
 By what step 0 measured; the order below is a guess until then.
+
+- [ ] **any** Found by the first benches: a rule that matches by a
+      regular expression has the expression made anew for every window
+      it is held against (`rules.rs:32` and `:678`, `matching.rs:17`).
+      20 rules, five of them such, against 50 windows: 10 ms, where all
+      else the engine does for a window is measured in millionths of a
+      second. Made once, when the rules are set. The rules are held
+      against every window after each reload and for every new window.
+- [ ] **any** Looked at after that, by the same numbers: a reload's
+      plan (0.5 ms: both configurations are written out to be held
+      against each other, part by part) and the checking of a
+      configuration (0.28 ms). Neither runs often; only if cheap.
 
 - [ ] **any** A still desktop does nothing: no pass, no state, no
       picture drawn while nothing happens. Every timer that fires by
@@ -640,3 +662,4 @@ wanted, strike it when it is not.
 | 2026-11-17, afternoon (7) | Windows 11 and WSL (Fedora 44) | More of the tutorial's first stage: the card's room kept free of tiles; the main key chosen in the welcome, with every binding following it. Windows: 1,096 tests pass. Not seen on a desktop. Not committed | Of stage 1: the ring, the welcome folding into the card, the lessons played by a check |
 | 2026-11-17, afternoon (8) | Windows 11 and WSL (Fedora 44) | The tutorial's ring on Windows: around the window with the keyboard, all the windows, or the panel, as four thin surfaces. Windows: 1,097 tests pass. Not seen on a desktop. Not committed | The ring on Linux and around the shell's own surfaces; the welcome folding into the card; the lessons played by a check |
 | 2026-11-17, evening | Windows 11 and WSL (Fedora 44) | Committed: the tree as it stood (`ac8f0c5`); gevrek starts with the person's look, without what belongs to one machine (`d08ca9a`); the studio's pages with a list of their own no longer scroll as well, and no page is wider than the window (`f6dc4c4`; looked at in pictures). CI seen for `91859eb`: Windows green to its end, Linux at the pictures only, the dependencies at `chrono`. The plan of the pass for faults and speed written (section 2d) | Section 2d, step 0 first. To push; `chrono` to decide; the studio's changes to be seen in its window |
+| 2026-11-17, late evening | Windows 11 | The first benches of the engine (section 2d, step 0), as medians on the person's machine, release build. A layout of 50 windows: 17 to 204 ns by layout (dwindle the slowest). 50 windows opened one after another on the desktop without a windowing system: 0.46 ms; one more beside 49, opened and closed: 19 µs; a workspace changed with 25 windows on each: 6.4 µs. 20 rules against 50 windows: 9.96 ms. The overview's arrangement of 30 windows: 18 µs. The starting configuration read 159 µs, written 70 µs, checked 284 µs; a reload's plan 0.52 ms with nothing changed, 0.64 ms with one setting. Found: the rules' regular expressions are made anew at every match | The rules' expressions made once (step 2). The bench of the published state in the backends; the time of a pass of the runtime; the numbers of a still desktop |
