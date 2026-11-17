@@ -210,12 +210,32 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_said_when_the_zones_are_not_on_shift() {
+    fn nothing_is_said_of_fancyzones_when_the_zones_are_not_on_shift() {
+        // Of FancyZones only: what else `notices` says is of the machine
+        // the test runs on. (Where the tests run as an administrator, as
+        // on a GitHub runner, that is said, and rightly.)
+        let of_fancyzones = |desktop: &DesktopConfig| {
+            notices(desktop)
+                .iter()
+                .any(|notice| notice.id == "fancyzones-shift-drag")
+        };
         let mut desktop = DesktopConfig::default();
         desktop.zones.behavior.enabled = false;
-        assert!(notices(&desktop).is_empty());
+        assert!(!of_fancyzones(&desktop));
         desktop.zones.behavior.enabled = true;
         desktop.zones.behavior.activation_modifier = Some(ZoneModifier::Alt);
-        assert!(notices(&desktop).is_empty());
+        assert!(!of_fancyzones(&desktop));
+    }
+
+    #[test]
+    fn what_is_said_of_the_machine_is_what_is_so_there() {
+        let mut desktop = DesktopConfig::default();
+        desktop.zones.behavior.enabled = false;
+        let said: Vec<String> = notices(&desktop).into_iter().map(|notice| notice.id).collect();
+        let expected: Vec<String> = administrator_notice(runs_as_administrator())
+            .into_iter()
+            .map(|notice| notice.id)
+            .collect();
+        assert_eq!(said, expected);
     }
 }

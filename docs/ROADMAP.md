@@ -59,11 +59,14 @@ checked from there.)
 
 Do these first. Until they are done, a fault can come in unseen.
 
-- [ ] **W** CI, the Windows job:
-      `conflicts::tests::nothing_is_said_when_the_zones_are_not_on_shift`
-      (`backend-win32`) fails on the runner and passes here. `notices`
-      says something there that it does not say on this machine. Find
-      what it reads of the machine and keep the test from it.
+- [ ] **W** CI, the Windows job: the test of `conflicts` that failed
+      on the runner and passed here. Found (2026-11-18): the runner is
+      an administrator, and `notices` says so, rightly; the test asked
+      for no notice at all. It asks now for none of FancyZones
+      (`nothing_is_said_of_fancyzones_when_the_zones_are_not_on_shift`),
+      and a second test holds what is said of the machine against what
+      is so there. To tick: the Windows job gets past it on a push. What
+      fails after it there, if anything, is not known yet.
 - [ ] **L** CI, the Linux job: the studio's
       `every_page_looks_as_its_picture` fails with every page 3 to 10 %
       off its picture. To find: what the runner draws otherwise (the
@@ -368,3 +371,4 @@ wanted, strike it when it is not.
 | 2026-11-17, night | Windows 11, two displays | What a change of workspace costs the graphics card (asked for). A border that only moves is not cut and painted anew at every frame. Two settings, both off, on the animations page: `workspace_slides_as_pictures` (the windows stay, unseen, and DWM pictures of them slide, as for a window coming in) and `workspace_slides_without_shadows` (shadow and glow left out while they slide) | 1068 tests pass (two new, of the pictures and of the windows moved themselves); clippy nothing new. Not measured, not seen on the desktop. The studio's picture of the animations page is to be drawn anew on Linux. Not committed |
 | 2026-11-17, late night | Windows 11, two displays | The studio set one thing in one place (asked for): where a card of the page's own sets something, the form below no longer does. The panel's modules (dragged), the keyboard's layouts, the zones' places (the drag editor has a zone's gap, a layout's name and a display's own layout now), the displays (each display's card has how it is turned, variable refresh and primary; displays written down and not attached are listed under it; the list of outputs is gone), the rules' order (dragged; no arrows in the list). The older list of scales by name is shown only where a file has something in it | 1068 tests pass; clippy nothing new. The studio's pictures of panel, zones, displays, input and rules are to be drawn anew on Linux. Not committed |
 | 2026-11-17, towards morning | Windows 11, two displays | Three things asked for. (1) A renamed workspace was on its tab only after a press elsewhere: the window manager published its state on window events and once a second, not after a configuration was applied or a command run, so the panel that asked at once got the old. Now it is published again at the end of every pass in which something was told or done, and before an Apply is answered; the shell asks for it on `Applied`. (2) The overview of the windows (`toggle_expose`) on Windows shows live pictures of the windows, small, over a dark backdrop with titles, mouse and keys (`dwm/overview.rs`, `expose::arrange`); the windows are not resized any more. (3) Hot corners (`desktop.hot_corners`, `engine/hot_corners.rs`, a card of its own in the studio); the first is the top left, for the overview. The installer registers, updates and removes `gevrek-elevated` (the day's earlier work). 1,078 tests and more pass. Not seen on the desktop. Not committed | Linux: the corners are not watched (needs a timer in the compositor's pointer path), the overview there still arranges the windows themselves, and the shell does not ask for the state on `Applied`; the studio's pictures of the gestures page |
+| 2026-11-18 | Windows 11, two displays | The roadmap is in the repository, with section 2c for the next time on Linux (`29f7ee5`); the installer and the overview, hot corners and state committed (`e25c950`, `d3cd849`). The Windows CI test: the runner is an administrator and `notices` says so; the test asks only for what it is about now. Passes here; not run as an administrator. Not committed | The Windows job on a push; the Linux job |
