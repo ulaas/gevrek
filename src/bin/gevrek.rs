@@ -2467,7 +2467,18 @@ fn elevated_helper(address: &str, action: &str) -> Result<()> {
                 helper.as_os_str(),
                 &format!("--instance \"{instance}\" --remove"),
             )?;
-            println!("The task \"{task}\" is asked to be removed.");
+            // (Until it is gone: what comes next, an uninstall, takes the
+            // helper's file away, which Windows holds while it runs.)
+            let gone = (0..40).any(|_| {
+                std::thread::sleep(Duration::from_millis(250));
+                !gevrek_win32::elevated::helper_task_is_registered(&instance)
+            });
+            anyhow::ensure!(
+                gone,
+                "the task \"{task}\" is still there after ten seconds: it was not removed"
+            );
+            std::thread::sleep(Duration::from_millis(500));
+            println!("The task \"{task}\" is removed.");
         }
         "status" => {
             let registered = gevrek_win32::elevated::helper_task_is_registered(&instance);

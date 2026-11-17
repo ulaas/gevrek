@@ -21,6 +21,21 @@ Then, in a new terminal:
 (The setup program of the same release, gevrek-windows-x64-setup.exe, does
 the same with a window to click through.)
 
+Windows of programs that run as an administrator are beyond the reach of a
+gevrek that does not. A helper, gevrek-elevated.exe, manages them for it.
+To have it started without a question each time, register it once (Windows
+asks for an administrator):
+
+    gevrek elevated install     or: install.ps1 -ElevatedHelper, or the
+                                setup program's checkbox
+    gevrek elevated status      whether it is registered and runs
+    gevrek elevated remove      take it away again
+
+A copy of the helper is then kept in %ProgramFiles%\gevrek, where only an
+administrator can write. install.ps1 and the setup program bring it to
+their version; after `gevrek update` it is the older one until
+`gevrek elevated install` is run again. Removing gevrek removes it.
+
 To update:
 
     gevrek update               get the newest release and install it

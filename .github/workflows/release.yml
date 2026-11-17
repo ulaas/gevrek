@@ -1,7 +1,9 @@
 # Builds gevrek for Windows and Linux when a version tag is pushed, and
 # publishes what was built as a GitHub release, with SHA-256 checksums:
 #
-#   gevrek-windows-x64-setup.exe   the setup program (Inno Setup)
+#   gevrek-windows-x64-setup.exe   the setup program (Inno Setup); it can
+#                                  also register gevrek-elevated, the helper
+#                                  for the windows of administrator programs
 #   gevrek-windows-x64.zip         the programs with install.ps1; an installed
 #                                  gevrek updates itself from this one
 #   gevrek-linux-x64.deb           Debian and Ubuntu (built on Ubuntu 24.04)
@@ -73,6 +75,40 @@ jobs:
       - name: The package installs, updates and is removed
         shell: pwsh
         run: packaging\windows\check.ps1 target\dist\gevrek-windows-x64
+
+      # The setup program itself, on this machine (which is thrown away):
+      # installed without a window, with the helper for administrator
+      # windows asked for, and removed again. The runner is an
+      # administrator whom Windows does not ask.
+      - name: The setup program installs, registers the helper, and removes both
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Said([string]$what, [bool]$so) {
+            if ($so) { Write-Host "ok: $what" } else { throw "not so: $what" }
+          }
+          $quiet = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
+          $task = 'gevrek elevated helper (main)'
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\gevrek'
+          $kept = Join-Path $env:ProgramFiles 'gevrek\gevrek-elevated.exe'
+          function Registered { & schtasks.exe /query /tn $task 2>$null | Out-Null; return ($LASTEXITCODE -eq 0) }
+
+          $done = Start-Process -Wait -PassThru 'target\dist\gevrek-windows-x64-setup.exe' -ArgumentList ($quiet + '/TASKS=elevated')
+          Said 'the setup program ends well' ($done.ExitCode -eq 0)
+          foreach ($program in 'gevrek.exe', 'gevrek-wm.exe', 'gevrek-elevated.exe', 'gevrek-studio.exe', 'gevrek-shell.exe', 'unins000.exe') {
+            Said "$program is installed" (Test-Path (Join-Path $app $program))
+          }
+          & (Join-Path $app 'gevrek.exe') --version
+          & (Join-Path $app 'gevrek.exe') elevated status
+          Said 'the helper''s task is registered' (Registered)
+          Said 'the helper is kept where only an administrator can write' (Test-Path $kept)
+
+          Start-Process -Wait (Join-Path $app 'unins000.exe') -ArgumentList $quiet
+          # (The uninstaller goes on as a copy of itself.)
+          foreach ($try in 1..60) { if (-not (Test-Path (Join-Path $app 'gevrek.exe'))) { break }; Start-Sleep -Seconds 1 }
+          Said 'the programs are gone' (-not (Test-Path (Join-Path $app 'gevrek.exe')))
+          Said 'the helper''s task is gone' (-not (Registered))
+          Said 'the kept helper is gone' (-not (Test-Path $kept))
 
       - uses: actions/upload-artifact@v4
         with:
@@ -186,7 +222,7 @@ jobs:
           cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
           | | |
           |---|---|
-          | Windows 10 and 11 | `gevrek-windows-x64-setup.exe`, or `gevrek-windows-x64.zip` with its `install.ps1`. An installed gevrek updates itself: `gevrek update`. |
+          | Windows 10 and 11 | `gevrek-windows-x64-setup.exe`, or `gevrek-windows-x64.zip` with its `install.ps1`. An installed gevrek updates itself: `gevrek update`. Both can register the helper for the windows of programs that run as administrator (the setup program's checkbox, or `gevrek elevated install`). |
           | Debian and Ubuntu (24.04 and later) | `sudo apt install ./gevrek-linux-x64.deb` |
           | Fedora (44 and later) | `sudo dnf install ./gevrek-linux-x64.rpm` |
           | Other Linux | `gevrek-linux-x64.tar.gz`: the same files, with a README |

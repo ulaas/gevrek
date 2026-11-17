@@ -169,7 +169,19 @@ pub fn install_helper_task(
         if let Some(folder) = kept.parent() {
             std::fs::create_dir_all(folder)?;
         }
-        std::fs::copy(&own, &kept)?;
+        // (The helper of the build before may still be ending, with the
+        // window manager it served: Windows holds its file that long.)
+        let mut tries = 0;
+        loop {
+            match std::fs::copy(&own, &kept) {
+                Ok(_) => break,
+                Err(error) if tries >= 20 => return Err(error.into()),
+                Err(_) => {
+                    tries += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                }
+            }
+        }
     }
     let arguments = format!(
         "--instance \"{instance}\" --wm \"{}\"",

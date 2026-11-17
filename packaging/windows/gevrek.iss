@@ -10,6 +10,14 @@
 ; gevrek that is running stopped for the update and started again. An
 ; install made by install.ps1 is taken over.
 ;
+; The helper for the windows of programs that run as an administrator
+; (gevrek-elevated.exe) is installed with the rest. Used without a
+; question from Windows it must be registered by an administrator, once:
+; that is a choice of the person's here, and the one place Windows asks
+; for an administrator. An update keeps what was chosen, and brings the
+; helper that is kept (in Program Files) to the new version; the
+; uninstaller takes the task and that copy away.
+;
 ; The uninstaller it leaves (unins000.exe) is also how a running gevrek
 ; knows that it was installed from the package and may update itself
 ; (crates/update).
@@ -52,6 +60,7 @@ CloseApplications=no
 
 [Tasks]
 Name: "autostart"; Description: "Start gevrek when I sign in"; Flags: unchecked
+Name: "elevated"; Description: "Also manage the windows of programs that run as administrator (Windows asks for an administrator, once)"; Flags: unchecked
 
 [Files]
 Source: "{#Source}\gevrek.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -70,6 +79,10 @@ Name: "{userprograms}\gevrek\gevrek (stop)"; Filename: "{app}\gevrek.exe"; Param
 
 [Run]
 Filename: "{app}\gevrek.exe"; Parameters: "enable-autostart"; Tasks: autostart; Flags: runhidden
+; The helper's task, and its copy where only an administrator can write:
+; where it is asked for, and where it is there already (the copy is then
+; the one of this version).
+Filename: "{app}\gevrek.exe"; Parameters: "elevated install"; StatusMsg: "Registering the helper for administrator windows..."; Flags: runhidden; Check: WantsHelper
 ; A gevrek that was running is started again whatever is asked (below);
 ; one that was not, if the person says so.
 Filename: "{app}\gevrek.exe"; Parameters: "start all"; Description: "Start gevrek now"; Flags: postinstall nowait skipifsilent runhidden; Check: not WasRunning
@@ -96,6 +109,22 @@ var
 function WasRunning: Boolean;
 begin
   Result := Running;
+end;
+
+{ Whether the task that starts the helper for administrator windows is
+  registered (of the instance every install has: main). }
+function HelperRegistered: Boolean;
+var
+  Code: Integer;
+begin
+  Result := Exec(ExpandConstant('{sys}\schtasks.exe'),
+    '/query /tn "gevrek elevated helper (main)"',
+    '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
+end;
+
+function WantsHelper: Boolean;
+begin
+  Result := WizardIsTaskSelected('elevated') or HelperRegistered;
 end;
 
 { Whether the installed gevrek says that its window manager runs. }
@@ -175,7 +204,19 @@ begin
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Code: Integer;
 begin
+  { Before anything is taken away: the helper's task and its copy in
+    Program Files, where they are there (Windows asks for an
+    administrator). gevrek is stopped first: a helper that runs holds
+    its file. }
+  if (CurUninstallStep = usUninstall) and HelperRegistered then
+  begin
+    Exec(ExpandConstant('{app}\gevrek.exe'), 'stop all', '', SW_HIDE, ewWaitUntilTerminated, Code);
+    Sleep(2000);
+    Exec(ExpandConstant('{app}\gevrek.exe'), 'elevated remove', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  end;
   if CurUninstallStep = usPostUninstall then
     RemoveFromPath(ExpandConstant('{app}'));
 end;

@@ -26,6 +26,13 @@ if ((-not $NoStop) -and (Test-Path $installed)) {
     try { & $installed disable-autostart | Out-Null } catch { Write-Host "The sign-in task was not removed: $_" }
     try { & $installed stop all | Out-Null } catch { Write-Host "gevrek was not stopped: $_" }
     Start-Sleep -Seconds 2
+    # The helper for administrator windows, where it is registered: its
+    # task and its copy in Program Files (Windows asks for an administrator).
+    $registered = $false
+    try { & schtasks.exe /query /tn 'gevrek elevated helper (main)' 2>$null | Out-Null; $registered = ($LASTEXITCODE -eq 0) } catch { }
+    if ($registered) {
+        try { & $installed elevated remove } catch { Write-Host "The helper's task was not removed: $_" }
+    }
 }
 
 $key = Join-Path $RegistryRoot 'Environment'

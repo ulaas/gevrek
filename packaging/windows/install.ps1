@@ -30,7 +30,11 @@ param(
     [switch]$NoUninstallEntry,
     # Leave a running gevrek alone (its programs are replaced under it and
     # it runs the old build until it is started again).
-    [switch]$NoStop
+    [switch]$NoStop,
+    # Also register the helper for the windows of programs that run as an
+    # administrator (Windows asks for one, once). Where it is registered
+    # already, it is brought to this version without this being said.
+    [switch]$ElevatedHelper
 )
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -147,6 +151,19 @@ if ($bySetup) {
     Set-ItemProperty -Path $key -Name 'UninstallString' -Value $remove
     Set-ItemProperty -Path $key -Name 'NoModify' -Value 1 -Type DWord
     Set-ItemProperty -Path $key -Name 'NoRepair' -Value 1 -Type DWord
+}
+
+# The helper for administrator windows: its task, and its copy where only
+# an administrator can write. (Not where this script is only tried.)
+if (-not $NoStop) {
+    $registered = $false
+    try { & schtasks.exe /query /tn 'gevrek elevated helper (main)' 2>$null | Out-Null; $registered = ($LASTEXITCODE -eq 0) } catch { }
+    if ($ElevatedHelper -or $registered) {
+        try {
+            & $installed elevated install
+            if ($LASTEXITCODE -ne 0) { throw "gevrek elevated install ended with $LASTEXITCODE" }
+        } catch { Write-Host "The helper for administrator windows was not registered: $_  (later: gevrek elevated install)" }
+    }
 }
 
 if ($wasRunning) {
