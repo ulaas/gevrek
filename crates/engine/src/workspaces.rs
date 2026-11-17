@@ -144,7 +144,8 @@ pub fn resolve_existing_workspace(
         }),
         WorkspaceSelector::Name(name) => workspaces
             .iter()
-            .position(|workspace| workspace.is_called(name))
+            .position(|workspace| workspace.name.trim().eq_ignore_ascii_case(name.trim()))
+            .or_else(|| workspaces.iter().position(|workspace| workspace.is_called(name)))
             .ok_or_else(|| WorkspaceError::NoWorkspaceNamed(name.trim().to_string())),
         WorkspaceSelector::Next => Ok((current + 1) % len),
         WorkspaceSelector::Previous => Ok((current + len - 1) % len),
@@ -395,8 +396,12 @@ pub struct Renamed {
     pub windows: Vec<WindowId>,
 }
 
-/// Rename workspace `index` of `output`. Names are unique per output
-/// (case-insensitive). Returns `None` when the name does not change.
+/// Rename workspace `index` of `output`: give it a title (what is shown of
+/// it). The name it is known by to what names it stays, so keys and rules
+/// go on meaning it. No two workspaces of an output are shown or named
+/// alike (case-insensitive). Its own name for a title is no title.
+/// Returns `None` when nothing changes; `old_name` is what it was shown
+/// by.
 pub fn rename_workspace(
     outputs: &mut Outputs,
     output: OutputId,
@@ -408,9 +413,10 @@ pub fn rename_workspace(
         return Err(WorkspaceError::EmptyName);
     }
     let duplicate = outputs.get_workspaces(output).is_some_and(|workspaces| {
-        workspaces.iter().enumerate().any(|(candidate, workspace)| {
-            candidate != index && workspace.name.eq_ignore_ascii_case(name)
-        })
+        workspaces
+            .iter()
+            .enumerate()
+            .any(|(candidate, workspace)| candidate != index && workspace.is_called(name))
     });
     if duplicate {
         return Err(WorkspaceError::DuplicateName(name.to_string()));
@@ -419,10 +425,14 @@ pub fn rename_workspace(
         .get_workspaces_mut(output)
         .and_then(|workspaces| workspaces.get_mut(index))
         .ok_or(WorkspaceError::WorkspaceNotAvailable(index))?;
-    if workspace.name == name {
+    if workspace.label() == name {
         return Ok(None);
     }
-    let old_name = std::mem::replace(&mut workspace.name, name.to_string());
+    let old_name = workspace.label().to_string();
+    workspace.title = (workspace.name.trim() != name).then(|| name.to_string());
+    // (One that was given a name by hand is not a workspace of the moment
+    // any more.)
+    workspace.persistent = true;
     Ok(Some(Renamed {
         workspace_id: workspace.id,
         old_name,

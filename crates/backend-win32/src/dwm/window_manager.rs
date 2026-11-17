@@ -6992,7 +6992,9 @@ mod exit_animation_tests {
         AnimationProfile {
             enabled: true,
             layout: AnimationChannelProfile::new(true, 60, AnimationCurve::Linear),
-            window: AnimationChannelProfile::new(true, 60, AnimationCurve::Linear),
+            // (Long enough that a test finds it under way on a machine
+            // that is busy with the other tests.)
+            window: AnimationChannelProfile::new(true, 400, AnimationCurve::Linear),
             window_enter_style: WindowTransitionStyle::Scale,
             ..AnimationProfile::default()
         }

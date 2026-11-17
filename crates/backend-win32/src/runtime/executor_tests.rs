@@ -638,9 +638,10 @@ mod manual_trigger_tests {
                 .get_workspaces(monitor)
                 .unwrap()
                 .get(1)
-                .unwrap()
-                .name,
-            "research"
+                .map(|workspace| (workspace.name.as_str(), workspace.label())),
+            // (What it is known by to keys and rules stays; it is shown
+            // by its title.)
+            Some(("web", "research"))
         );
         let events = events.lock().unwrap();
         assert!(matches!(
@@ -718,6 +719,13 @@ mod manual_trigger_tests {
         assert_eq!(workspace.container_padding.left, 17);
         assert_eq!(workspace.padding.left, 23);
 
+        // (One of the configuration's comes before one it does not have.)
+        let base = monitor_manager
+            .get_workspaces(monitor)
+            .unwrap()
+            .iter()
+            .position(|workspace| workspace.name == "Main")
+            .unwrap();
         monitor_manager.focus_workspace_at(monitor, notes);
         monitor_manager.focus_workspace_at(monitor, base);
         executor.prune_non_persistent_workspace(&mut monitor_manager, monitor, notes);
@@ -1287,7 +1295,7 @@ mod manual_trigger_tests {
             .unwrap();
         let workspaces = monitor_manager.get_workspaces(primary).unwrap();
         assert_eq!(workspaces.len(), 2);
-        assert_eq!(workspaces.get(1).unwrap().name, "Workspace 2");
+        assert_eq!(workspaces.get(1).unwrap().name, "2");
         // The view stays on the original workspace.
         assert_eq!(workspaces.focused_idx(), 0);
 
@@ -1367,8 +1375,8 @@ mod manual_trigger_tests {
             .unwrap();
         let workspaces = monitor_manager.get_workspaces(primary).unwrap();
         assert_eq!(workspaces.len(), 3);
-        assert_eq!(workspaces.get(1).unwrap().name, "Workspace 2");
-        assert_eq!(workspaces.get(2).unwrap().name, "Workspace 3");
+        assert_eq!(workspaces.get(1).unwrap().name, "2");
+        assert_eq!(workspaces.get(2).unwrap().name, "3");
         // The other monitor is untouched; rerunning is a no-op.
         assert_eq!(monitor_manager.get_workspaces(secondary).unwrap().len(), 1);
         executor

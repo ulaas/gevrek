@@ -112,8 +112,21 @@ without the number means each of them. The same selectors and actions are availa
 advanced bindings, gestures, and the editor Command Center.
 `move-to` is the silent variant: it keeps the current workspace visible.
 `move-to-and-follow` switches to the destination with the moved window.
-`workspace-rename` renames an existing selected workspace and immediately
-re-evaluates workspace-name rules.
+`workspace-rename` gives an existing selected workspace another title: what
+its tab, the overview and the settings show of it. The name it is known by to
+keys and rules stays, so nothing that names it has to follow; a workspace is
+found by either (`name:1` and `name:research` mean the same one after
+`workspace-rename name:1 research`). From the command line the title lasts
+while gevrek runs; given from a panel's tab or in gevrek-studio it is written
+into the configuration, for that display alone or for every display.
+
+Each display has workspaces of its own. A workspace written down for every
+display (`"monitor": "Any"`) is one on each of them. A display can have an
+entry of its own for the same `name`, with another `title`, another layout, or
+`enabled` off (it does not have it); on that display its own entry counts. A
+workspace that is opened while gevrek runs and is not written down takes the
+number of its place, is laid out as the display's others are, and goes when
+it is left empty.
 `float`/`tile` and `pin`/`unpin` are idempotent alternatives to the toggle
 commands. `center` promotes a tiled window to floating before centering it in
 the monitor work area; `raise` and `lower` adjust its Windows Z-order.

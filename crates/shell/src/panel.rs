@@ -23,10 +23,15 @@ use serde_json::Value;
 /// One workspace as the panel shows it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tab {
+    /// What the workspace is known by to the window manager (what a
+    /// command names it by). It stays when the workspace is renamed.
     pub name: String,
-    /// What stands on its button: the name, or its number where the name
-    /// is only a placeholder.
+    /// What stands on its button: its title, or its name where it has
+    /// none (its number where that is only a placeholder).
     pub label: String,
+    /// The configuration has it for this display (one it has not is
+    /// there for the moment, and goes when it is left empty).
+    pub configured: bool,
     /// It is the one the display shows.
     pub shown: bool,
     pub windows: usize,
@@ -197,6 +202,8 @@ pub struct View {
     pub title: String,
     /// The display has the keyboard's window.
     pub focused: bool,
+    /// The display, as the window manager and the configuration name it.
+    pub place: gevrek_model::settings::DisplayRef,
     /// The windows of the shown workspace, in the order the state has
     /// them (the taskbar's buttons).
     pub tasks: Vec<Task>,
@@ -244,10 +251,13 @@ pub fn name_of(monitor: &Value) -> Option<&str> {
 /// Read a display's part of the window manager's state. `None` when the
 /// display is not in it.
 pub fn view(state: &Value, output: &str) -> Option<View> {
-    let monitor = state["monitors"].as_array()?.iter().find(|monitor| {
-        monitor["connector"].as_str() == Some(output) || monitor["name"].as_str() == Some(output)
-    })?;
-    Some(view_of(monitor))
+    let (index, monitor) = state["monitors"].as_array()?.iter().enumerate().find(
+        |(_, monitor)| {
+            monitor["connector"].as_str() == Some(output)
+                || monitor["name"].as_str() == Some(output)
+        },
+    )?;
+    Some(view_at(monitor, Some(index)))
 }
 
 /// The keyboard layout in use, as the state tells it.
@@ -298,16 +308,67 @@ fn tasks_of(workspace: &Value, shown: bool) -> Vec<Task> {
         .collect()
 }
 
-/// The command that gives a workspace another name for as long as it is
-/// there (one the configuration does not have: one that it has is renamed
-/// in the configuration, `DesktopConfig::rename_workspace_on`).
-pub fn rename_workspace(old: &str, new: &str) -> String {
-    use gevrek_model::command::{DispatchCommand, WorkspaceSelector};
-    serde_json::to_string(&DispatchCommand::RenameWorkspace {
-        selector: WorkspaceSelector::Name(old.to_string()),
-        name: new.trim().to_string(),
-    })
-    .unwrap_or_default()
+/// What comes of a new name typed for a workspace of a display.
+#[derive(Debug, Clone)]
+pub enum Renaming {
+    /// It is shown by that already.
+    Nothing,
+    /// The configuration with the new title in it, to be given to the
+    /// window manager: it shows the workspace by it at once, and has it
+    /// again when it is started anew.
+    Apply(Box<gevrek_model::Config>),
+    /// It cannot be: why, in words for the person.
+    Refused(String),
+}
+
+/// Give the workspace `name` of a display the title `new`, in a copy of
+/// the configuration that runs. Only what is shown of the workspace
+/// changes, and only on this display: the keys and rules that name it
+/// mean it as before, and the workspaces of that name on the other
+/// displays keep what they are shown by. A workspace the configuration
+/// does not have for the display (one opened for the moment) is written
+/// down for it with the title, so that a name given to it lasts.
+pub fn renaming(
+    config: Option<&gevrek_model::Config>,
+    place: &gevrek_model::settings::DisplayRef,
+    name: &str,
+    new: &str,
+) -> Renaming {
+    use gevrek_model::settings::Titled;
+    let Some(config) = config else {
+        return Renaming::Refused(
+            "The configuration is not known yet. Try again in a moment.".to_string(),
+        );
+    };
+    if place.name().is_empty() {
+        return Renaming::Refused("This display has no name to write the title down for.".to_string());
+    }
+    let mut changed = config.clone();
+    let taken = || {
+        Renaming::Refused(format!(
+            "Another workspace of this display is called \u{201c}{}\u{201d} already.",
+            new.trim()
+        ))
+    };
+    match changed.desktop.title_workspace_on(place, name, new) {
+        Titled::Changed => Renaming::Apply(Box::new(changed)),
+        Titled::Same => Renaming::Nothing,
+        Titled::Taken => taken(),
+        Titled::Unknown => {
+            let shown = |profile: &&gevrek_model::settings::WorkspaceProfile| {
+                profile.label().eq_ignore_ascii_case(new.trim())
+                    || profile.name.trim().eq_ignore_ascii_case(new.trim())
+            };
+            if changed.desktop.workspaces_on(place).iter().any(shown) {
+                return taken();
+            }
+            if changed.desktop.keep_workspace_on(place, name, new) {
+                Renaming::Apply(Box::new(changed))
+            } else {
+                Renaming::Refused("This workspace could not be written down.".to_string())
+            }
+        }
+    }
 }
 
 /// How large the box is that asks for a workspace's new name.
@@ -358,9 +419,23 @@ pub fn rename_box(
 
 /// What the panel of this display of the state shows.
 pub fn view_of(monitor: &Value) -> View {
+    view_at(monitor, None)
+}
+
+/// A display of the state, as a configuration can name it: by the names
+/// the window manager knows it by, its place among the displays, and
+/// whether it is the primary one.
+pub fn place_of(monitor: &Value, index: Option<usize>) -> gevrek_model::settings::DisplayRef {
+    gevrek_model::settings::DisplayRef::of_state(monitor, index)
+}
+
+/// What the panel of this display of the state shows; `index` is the
+/// display's place among the state's displays.
+pub fn view_at(monitor: &Value, index: Option<usize>) -> View {
     let shown_id = &monitor["workspace"]["id"];
     let mut found = View {
         focused: monitor["is_focused"].as_bool().unwrap_or(false),
+        place: place_of(monitor, index),
         ..Default::default()
     };
     let workspaces = monitor["workspaces"].as_array().into_iter().flatten();
@@ -370,8 +445,16 @@ pub fn view_of(monitor: &Value) -> View {
         // Where only the number is told (a workspace that is not shown).
         let counted = workspace["total_windows"].as_u64().unwrap_or(0) as usize;
         let name = workspace["name"].as_str().unwrap_or("?").to_string();
+        // (What is shown of it: its title. A window manager that tells
+        // none tells the name.)
+        let title = workspace["title"]
+            .as_str()
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .unwrap_or(&name);
         found.tabs.push(Tab {
-            label: tab_label(&name, index),
+            label: tab_label(title, index),
+            configured: workspace["configured"].as_bool().unwrap_or(false),
             name,
             shown,
             windows: listed.max(counted),
@@ -895,6 +978,27 @@ impl<Surface: Copy> Hints<Surface> {
 /// The command that shows a workspace.
 pub fn show_workspace(name: &str) -> String {
     serde_json::json!({"command": "switch_workspace_selector", "selector": {"kind": "name", "value": name}}).to_string()
+}
+
+/// The command that shows the workspace of a tab on the tab's display:
+/// by the display's name and the workspace's, whichever display has the
+/// keyboard and whatever its place among the workspaces has become since
+/// the panel was drawn. None for a tab that is not there.
+pub fn show_tab(view: &View, index: usize) -> Option<String> {
+    use gevrek_model::command::{DispatchCommand, MonitorTarget, WorkspaceSelector};
+    let tab = view.tabs.get(index)?;
+    let display = view.place.name();
+    let command = if display.is_empty() {
+        DispatchCommand::SwitchWorkspaceSelector {
+            selector: WorkspaceSelector::Name(tab.name.clone()),
+        }
+    } else {
+        DispatchCommand::FocusMonitorWorkspace {
+            target: MonitorTarget::Name(display.to_string()),
+            workspace: WorkspaceSelector::Name(tab.name.clone()),
+        }
+    };
+    serde_json::to_string(&command).ok()
 }
 
 /// The command that shows a workspace of a display by its place among
@@ -3072,6 +3176,96 @@ mod tests {
         assert_eq!(corner(&bare, (380, 5000), 12), (408, 12, 380, 576));
         assert_eq!(corner(&bare, (5000, 100), 12).2, 776);
         assert!(rooms(&json!({"monitors": [{"name": "x"}]})).is_empty());
+    }
+
+    #[test]
+    fn a_tab_names_its_workspace_and_its_display_whatever_it_is_shown_by() {
+        use gevrek_model::command::{DispatchCommand, MonitorTarget, WorkspaceSelector};
+        let state = json!({"monitors": [
+            {"name": "Left", "connector": "DP-1", "is_primary": true, "workspace": {"id": 4}, "workspaces": [
+                {"id": 4, "name": "1", "title": "Mail", "configured": true},
+                {"id": 5, "name": "2", "title": "2", "configured": true},
+                {"id": 9, "name": "10", "title": "10"}
+            ]},
+            {"name": "Right", "connector": "DP-2", "workspace": {"id": 6}, "workspaces": [
+                {"id": 6, "name": "1", "title": "1", "configured": true},
+                // (A window manager that tells no title: the name.)
+                {"id": 7, "name": "Workspace 2"}
+            ]}
+        ]});
+        let left = view(&state, "DP-1").expect("the left display");
+        let right = view(&state, "DP-2").expect("the right display");
+        let labels = |view: &View| -> Vec<String> {
+            view.tabs.iter().map(|tab| tab.label.clone()).collect()
+        };
+        assert_eq!(labels(&left), ["Mail", "2", "10"]);
+        assert_eq!(labels(&right), ["1", "2"]);
+        assert_eq!(left.tabs[0].name, "1");
+        assert!(left.tabs[0].configured && !left.tabs[2].configured);
+        assert_eq!((left.place.name(), left.place.index, left.place.primary), ("DP-1", Some(0), true));
+        assert!(right.place.is_called("right") && right.place.index == Some(1));
+
+        // Shown by the display's name and the workspace's, not by a place
+        // among the tabs that may be another by now.
+        let shown: DispatchCommand =
+            serde_json::from_str(&show_tab(&left, 0).expect("a tab")).expect("a command");
+        assert_eq!(
+            shown,
+            DispatchCommand::FocusMonitorWorkspace {
+                target: MonitorTarget::Name("DP-1".to_string()),
+                workspace: WorkspaceSelector::Name("1".to_string()),
+            }
+        );
+        // A tab that is not there asks for nothing (and makes nothing).
+        assert!(show_tab(&left, 3).is_none());
+    }
+
+    #[test]
+    fn a_new_name_for_a_tab_is_a_title_on_its_display_alone() {
+        use gevrek_model::settings::DisplayRef;
+        let config = gevrek_model::examples::starting_configuration();
+        let (left, right) = (DisplayRef::named("DP-1"), DisplayRef::named("DP-2"));
+        let label = |config: &gevrek_model::Config, display: &DisplayRef, name: &str| {
+            config
+                .desktop
+                .workspace_on(display, name)
+                .map(|profile| profile.label().to_string())
+        };
+        let Renaming::Apply(first) = renaming(Some(&config), &left, "1", " Mail ") else {
+            panic!("a title is written down");
+        };
+        assert_eq!(label(&first, &left, "1").as_deref(), Some("Mail"));
+        assert_eq!(label(&first, &right, "1").as_deref(), Some("1"));
+        // As often as one likes, each on what the one before left.
+        let Renaming::Apply(second) = renaming(Some(&first), &left, "1", "Post") else {
+            panic!("a second title is written down");
+        };
+        assert_eq!(label(&second, &left, "1").as_deref(), Some("Post"));
+        assert_eq!(second.desktop.workspaces.len(), first.desktop.workspaces.len());
+        assert!(second.desktop.validate().is_empty());
+        // The keys are what they were.
+        assert_eq!(
+            serde_json::to_value(&second.desktop.bindings).unwrap(),
+            serde_json::to_value(&config.desktop.bindings).unwrap()
+        );
+
+        assert!(matches!(renaming(Some(&second), &left, "1", "Post"), Renaming::Nothing));
+        // What another workspace of the display is called: said, not done.
+        assert!(matches!(renaming(Some(&second), &left, "2", "post"), Renaming::Refused(_)));
+        assert!(matches!(renaming(Some(&second), &left, "2", "3"), Renaming::Refused(_)));
+        // On the other display the title is free.
+        assert!(matches!(renaming(Some(&second), &right, "2", "Post"), Renaming::Apply(_)));
+        assert!(matches!(renaming(None, &left, "1", "x"), Renaming::Refused(_)));
+
+        // A workspace of the moment is written down for its display, so
+        // that the name it was given lasts.
+        let Renaming::Apply(kept) = renaming(Some(&second), &left, "12", "Music") else {
+            panic!("a workspace of the moment is kept");
+        };
+        assert_eq!(label(&kept, &left, "12").as_deref(), Some("Music"));
+        assert_eq!(label(&kept, &right, "12"), None);
+        assert!(kept.desktop.validate().is_empty());
+        assert!(matches!(renaming(Some(&second), &left, "12", "Post"), Renaming::Refused(_)));
     }
 
     #[test]

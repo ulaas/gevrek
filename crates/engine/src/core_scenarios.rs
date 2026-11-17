@@ -1054,11 +1054,11 @@ fn a_rule_on_the_application_id_matches_on_any_backend() {
     assert!(!engine.should_ignore(&other));
 }
 
-/// A workspace that every display has is given another name on one of
+/// A workspace that every display has is given another title on one of
 /// them (as the panel does: an entry of that display's own, in the
-/// configuration, that takes the other's place there).
+/// configuration, for the same workspace).
 #[test]
-fn a_workspace_renamed_on_one_display_keeps_its_name_and_its_windows_elsewhere() {
+fn a_workspace_titled_on_one_display_keeps_its_name_and_its_windows() {
     use gevrek_model::settings::{AppearanceProfile, MonitorSelector, WorkspaceProfile};
     const SIDE: MonitorHandle = MonitorHandle(2);
     let (mut core, mut desktop) = setup(&[]);
@@ -1071,6 +1071,8 @@ fn a_workspace_renamed_on_one_display_keeps_its_name_and_its_windows_elsewhere()
     };
     let mut profiles = vec![profile("1"), profile("2")];
     let appearance = AppearanceProfile::default();
+    core.executor
+        .set_workspace_profiles(profiles.clone(), appearance.clone());
     core.apply_workspace_profile_set(&profiles, &appearance, |_| true, true);
     let names = |core: &WmCore, output: MonitorHandle| -> Vec<String> {
         core.monitor_manager
@@ -1078,49 +1080,198 @@ fn a_workspace_renamed_on_one_display_keeps_its_name_and_its_windows_elsewhere()
             .map(|workspaces| workspaces.iter().map(|w| w.name.clone()).collect())
             .unwrap_or_default()
     };
+    let labels = |core: &WmCore, output: MonitorHandle| -> Vec<String> {
+        core.monitor_manager
+            .get_workspaces(output)
+            .map(|workspaces| workspaces.iter().map(|w| w.label().to_string()).collect())
+            .unwrap_or_default()
+    };
     assert_eq!(names(&core, OUTPUT), ["1", "2"]);
     assert_eq!(names(&core, SIDE), ["1", "2"]);
     let window = open(&mut core, &mut desktop, "a window");
 
-    // The first display's workspace 1 is "web" from now on.
+    // The first display's workspace 1 is shown as "web" from now on, and
+    // then, titled a second time, as "mail".
     profiles.insert(
         1,
         WorkspaceProfile {
-            name: "web".to_string(),
+            title: Some("web".to_string()),
             monitor: MonitorSelector::Name("Primary".to_string()),
-            also_called: vec!["1".to_string()],
             ..profile("1")
         },
     );
-    core.executor
-        .set_workspace_profiles(profiles.clone(), appearance.clone());
-    core.apply_workspace_profile_set(&profiles, &appearance, |_| true, false);
-    // Renamed where it was, with its window; no second workspace "1"
-    // made beside it; the other display's as before.
-    assert_eq!(names(&core, OUTPUT), ["web", "2"]);
-    assert_eq!(names(&core, SIDE), ["1", "2"]);
-    assert_eq!(core.monitor_manager.find_window(window), Some((OUTPUT, 0)));
+    for title in ["web", "mail"] {
+        profiles[1].title = Some(title.to_string());
+        core.executor
+            .set_workspace_profiles(profiles.clone(), appearance.clone());
+        core.apply_workspace_profile_set(&profiles, &appearance, |_| true, false);
+        // Where it was, with its window, and by the name it had; no
+        // second workspace made beside it; the other display's as before.
+        assert_eq!(labels(&core, OUTPUT), [title, "2"]);
+        assert_eq!(names(&core, OUTPUT), ["1", "2"]);
+        assert_eq!(labels(&core, SIDE), ["1", "2"]);
+        assert_eq!(core.monitor_manager.find_window(window), Some((OUTPUT, 0)));
+    }
 
-    // The key for workspace 1, pressed on the first display, shows "web".
-    core.dispatch(
-        &mut desktop,
-        DispatchCommand::SwitchWorkspaceSelector {
-            selector: WorkspaceSelector::Name("2".to_string()),
-        },
-    )
-    .expect("to 2");
-    core.dispatch(
-        &mut desktop,
-        DispatchCommand::SwitchWorkspaceSelector {
-            selector: WorkspaceSelector::Name("1".to_string()),
-        },
-    )
-    .expect("to 1");
-    assert_eq!(
+    // The key for workspace 1, pressed on the first display, shows it;
+    // and so does asking for it by what it is shown as.
+    for asked in ["1", "mail"] {
+        core.dispatch(
+            &mut desktop,
+            DispatchCommand::SwitchWorkspaceSelector {
+                selector: WorkspaceSelector::Name("2".to_string()),
+            },
+        )
+        .expect("to 2");
+        core.dispatch(
+            &mut desktop,
+            DispatchCommand::SwitchWorkspaceSelector {
+                selector: WorkspaceSelector::Name(asked.to_string()),
+            },
+        )
+        .expect("to 1");
+        assert_eq!(
+            core.monitor_manager
+                .get_focused_workspace(OUTPUT)
+                .map(|workspace| workspace.label().to_string()),
+            Some("mail".to_string())
+        );
+        assert_eq!(names(&core, OUTPUT), ["1", "2"]);
+    }
+}
+
+/// What the configuration says of a display's workspaces is how they are
+/// after it is applied: one taken out is gone, another order is theirs.
+#[test]
+fn a_displays_workspaces_follow_the_configuration() {
+    use gevrek_model::settings::{AppearanceProfile, MonitorSelector, WorkspaceProfile};
+    let (mut core, mut desktop) = setup(&[]);
+    let profile = |name: &str| WorkspaceProfile {
+        name: name.to_string(),
+        monitor: MonitorSelector::Any,
+        persistent: true,
+        ..WorkspaceProfile::default()
+    };
+    let appearance = AppearanceProfile::default();
+    let apply = |core: &mut WmCore, profiles: &[WorkspaceProfile], first: bool| {
+        core.executor
+            .set_workspace_profiles(profiles.to_vec(), appearance.clone());
+        core.apply_workspace_profile_set(profiles, &appearance, |_| true, first);
+    };
+    let names = |core: &WmCore| -> Vec<String> {
+        core.monitor_manager
+            .get_workspaces(OUTPUT)
+            .map(|workspaces| workspaces.iter().map(|w| w.name.clone()).collect())
+            .unwrap_or_default()
+    };
+    let shown = |core: &WmCore| {
         core.monitor_manager
             .get_focused_workspace(OUTPUT)
-            .map(|workspace| workspace.name.clone()),
-        Some("web".to_string())
-    );
-    assert_eq!(names(&core, OUTPUT), ["web", "2"]);
+            .map(|workspace| workspace.name.clone())
+    };
+    let mut first = profile("1");
+    first.default = true;
+    apply(&mut core, &[first.clone(), profile("2"), profile("3"), profile("4")], true);
+    assert_eq!(names(&core), ["1", "2", "3", "4"]);
+    let window = open(&mut core, &mut desktop, "a window");
+    assert_eq!(shown(&core).as_deref(), Some("1"));
+
+    // 2 is taken out: empty and not shown, it goes.
+    apply(&mut core, &[first.clone(), profile("3"), profile("4")], false);
+    assert_eq!(names(&core), ["1", "3", "4"]);
+
+    // Another order: theirs too, and the one shown stays shown.
+    apply(&mut core, &[profile("4"), profile("3"), first.clone()], false);
+    assert_eq!(names(&core), ["4", "3", "1"]);
+    assert_eq!(shown(&core).as_deref(), Some("1"));
+
+    // The one that is shown and has a window is taken out: it stays, as a
+    // workspace of the moment, after the configuration's.
+    apply(&mut core, &[profile("4"), profile("3")], false);
+    assert_eq!(names(&core), ["4", "3", "1"]);
+    assert_eq!(core.monitor_manager.find_window(window), Some((OUTPUT, 2)));
+    let left = core
+        .monitor_manager
+        .get_workspaces(OUTPUT)
+        .and_then(|workspaces| workspaces.get(2))
+        .map(|workspace| (workspace.configured, workspace.persistent));
+    assert_eq!(left, Some((false, false)));
+    // Back in the configuration, it is one of its own again.
+    apply(&mut core, &[profile("4"), first, profile("3")], false);
+    assert_eq!(names(&core), ["4", "1", "3"]);
+    assert_eq!(core.monitor_manager.find_window(window), Some((OUTPUT, 1)));
+}
+
+/// A workspace nobody named is the next the configuration has for the
+/// display, and after those a number of its own; no two of a display are
+/// named alike; one of the moment goes when it is left empty.
+#[test]
+fn workspaces_of_the_moment_are_numbered_and_go_when_left_empty() {
+    use gevrek_model::settings::{AppearanceProfile, MonitorSelector, WorkspaceProfile};
+    let (mut core, mut desktop) = setup(&[]);
+    let profile = |name: &str, persistent: bool| WorkspaceProfile {
+        name: name.to_string(),
+        monitor: MonitorSelector::Any,
+        persistent,
+        gaps_out: 17,
+        ..WorkspaceProfile::default()
+    };
+    let profiles = vec![profile("1", true), profile("2", true), profile("3", false)];
+    let appearance = AppearanceProfile::default();
+    core.executor
+        .set_workspace_profiles(profiles.clone(), appearance.clone());
+    core.apply_workspace_profile_set(&profiles, &appearance, |_| true, true);
+    let names = |core: &WmCore| -> Vec<String> {
+        core.monitor_manager
+            .get_workspaces(OUTPUT)
+            .map(|workspaces| workspaces.iter().map(|w| w.name.clone()).collect())
+            .unwrap_or_default()
+    };
+    assert_eq!(names(&core), ["1", "2"]);
+    let new = |core: &mut WmCore, desktop: &mut FakeDesktop, name: Option<&str>| {
+        core.dispatch(
+            desktop,
+            DispatchCommand::NewWorkspace {
+                name: name.map(str::to_string),
+            },
+        )
+        .expect("a new workspace");
+    };
+    // The one the configuration has waiting, then a number of its own.
+    new(&mut core, &mut desktop, None);
+    assert_eq!(names(&core), ["1", "2", "3"]);
+    new(&mut core, &mut desktop, None);
+    assert_eq!(names(&core), ["1", "2", "3", "4"]);
+    // Asked for by a name that is there: no second one.
+    new(&mut core, &mut desktop, Some("4"));
+    new(&mut core, &mut desktop, Some(" 2 "));
+    assert_eq!(names(&core), ["1", "2", "3", "4"]);
+    // It is laid out as the display's others are, not as nothing says.
+    let made = core
+        .monitor_manager
+        .get_workspaces(OUTPUT)
+        .and_then(|workspaces| workspaces.get(3))
+        .map(|workspace| (workspace.padding.left, workspace.configured, workspace.persistent));
+    assert_eq!(made, Some((17, false, false)));
+
+    // Shown, and left empty: gone. With a window it stays.
+    let to = |core: &mut WmCore, desktop: &mut FakeDesktop, name: &str| {
+        core.dispatch(
+            desktop,
+            DispatchCommand::SwitchWorkspaceSelector {
+                selector: WorkspaceSelector::Name(name.to_string()),
+            },
+        )
+        .expect("shown");
+    };
+    to(&mut core, &mut desktop, "4");
+    to(&mut core, &mut desktop, "1");
+    assert_eq!(names(&core), ["1", "2", "3"]);
+    to(&mut core, &mut desktop, "7");
+    open(&mut core, &mut desktop, "a window");
+    to(&mut core, &mut desktop, "1");
+    assert_eq!(names(&core), ["1", "2", "3", "7"]);
+    // The next one has the number of its place.
+    new(&mut core, &mut desktop, None);
+    assert_eq!(names(&core), ["1", "2", "3", "7", "5"]);
 }

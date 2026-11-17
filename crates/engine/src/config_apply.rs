@@ -156,7 +156,10 @@ impl WmCore {
     /// existing workspaces of that name get the profile's settings,
     /// persistent and default ones are created if missing. With
     /// `focus_default` a default profile's workspace becomes the visible
-    /// one. Returns the workspaces that were created.
+    /// one (on a display that had no workspace yet it does anyway).
+    /// Afterwards each display's workspaces are as the configuration has
+    /// them (`settle_workspaces`). Returns the workspaces that were
+    /// created.
     pub fn apply_workspace_profile_set(
         &mut self,
         profiles: &[WorkspaceProfile],
@@ -169,65 +172,38 @@ impl WmCore {
         let appearance = &gevrek_model::theme::dressed(appearance, self.wallpaper_accent);
         let mut created_workspaces = Vec::new();
         let monitors = self.monitor_manager.get_all_monitors_ordered();
-        for profile in profiles
-            .iter()
-            .filter(|profile| profile.enabled && include(profile))
-        {
-            let targets = monitor_selector_targets(&profile.monitor, &monitors);
-            if targets.is_empty() {
+        for profile in profiles.iter().filter(|profile| profile.enabled) {
+            if monitor_selector_targets(&profile.monitor, &monitors).is_empty() {
                 log::warn!(
                     "Workspace profile '{}' did not match an attached monitor",
                     profile.name
                 );
             }
-            for monitor in targets {
-                // A display that has an entry of its own in this one's
-                // place (`also_called`) gets that one, and not this.
-                let taken_over = profiles.iter().any(|other| {
-                    other.enabled
-                        && !std::ptr::eq(other, profile)
-                        && other
-                            .also_called
-                            .iter()
-                            .any(|name| name.trim().eq_ignore_ascii_case(profile.name.trim()))
-                        && monitor_selector_targets(&other.monitor, &monitors).contains(&monitor)
-                });
-                if taken_over {
-                    continue;
-                }
-                let mut existing_index =
-                    self.monitor_manager
-                        .get_workspaces(monitor)
-                        .and_then(|workspaces| {
-                            workspaces
-                                .elements()
-                                .iter()
-                                .position(|workspace| {
-                                    workspace.name.eq_ignore_ascii_case(&profile.name)
-                                })
-                        });
-                // The workspace whose place it takes is there already
-                // (it was just given its own name on this display): that
-                // one is it, windows and all, under its new name.
-                if existing_index.is_none() && !profile.also_called.is_empty() {
-                    if let Some(workspaces) = self.monitor_manager.get_workspaces_mut(monitor) {
-                        let found = workspaces.elements().iter().position(|workspace| {
-                            profile
-                                .also_called
-                                .iter()
-                                .any(|name| workspace.name.eq_ignore_ascii_case(name.trim()))
-                        });
-                        if let Some(workspace) = found.and_then(|at| workspaces.get_mut(at)) {
-                            log::info!(
-                                "Workspace '{}' is '{}' on this display from now on",
-                                workspace.name,
-                                profile.name
-                            );
-                            workspace.name = profile.name.clone();
-                            existing_index = found;
-                        }
-                    }
-                }
+        }
+        for monitor in monitors.iter().map(|info| info.handle) {
+            // What this display has: for each workspace its own entry
+            // before the one for every display.
+            let there: Vec<WorkspaceProfile> =
+                gevrek_model::settings::workspaces_where(profiles, |selector| {
+                    monitor_selector_targets(selector, &monitors).contains(&monitor)
+                })
+                .into_iter()
+                .cloned()
+                .collect();
+            // (A display that had no workspace yet, one that was just
+            // attached, begins with the one it is to start with.)
+            let new_display = self
+                .monitor_manager
+                .get_workspaces(monitor)
+                .is_none_or(|workspaces| workspaces.is_empty());
+            for profile in there.iter().filter(|profile| include(profile)) {
+                let existing_index = self.monitor_manager.get_workspaces(monitor).and_then(
+                    |workspaces| {
+                        workspaces.iter().position(|workspace| {
+                            workspace.name.trim().eq_ignore_ascii_case(profile.name.trim())
+                        })
+                    },
+                );
                 // Persistent/default profiles are eagerly materialized.
                 // Other profiles remain declarative until a named selector
                 // visits them.
@@ -239,21 +215,32 @@ impl WmCore {
                     created = true;
                     self.monitor_manager.create_workspace(
                         monitor,
-                        profile.name.clone(),
+                        profile.name.trim().to_string(),
                         profile.layout,
                     )
                 });
                 let Some(index) = index else {
                     continue;
                 };
+                let mut shown_as = None;
                 if let Some(workspace) = self
                     .monitor_manager
                     .get_workspaces_mut(monitor)
                     .and_then(|workspaces| workspaces.get_mut(index))
                 {
+                    let before = workspace.label().to_string();
                     profile.apply_to_workspace(workspace, appearance);
+                    if !created && before != workspace.label() {
+                        shown_as = Some((workspace.id, before, workspace.label().to_string()));
+                    }
                 }
-                if profile.default && focus_default {
+                // (Whoever shows the workspaces hears of another title
+                // as of a renaming by hand.)
+                if let Some((id, before, now)) = shown_as {
+                    log::info!("Workspace '{before}' is shown as '{now}' on this display now");
+                    self.executor.emit_workspace_renamed(monitor, id, &before, &now);
+                }
+                if profile.default && (focus_default || new_display) {
                     self.monitor_manager.focus_workspace_at(monitor, index);
                 }
                 if created {
@@ -263,8 +250,64 @@ impl WmCore {
                     });
                 }
             }
+            self.settle_workspaces(monitor, &there);
         }
         created_workspaces
+    }
+
+    /// After a display's entries were applied: its workspaces are as the
+    /// configuration has them. One the configuration had for the display
+    /// and has no more is a workspace of the moment from now on (it goes
+    /// when it is empty and not shown; with windows it stays until it is
+    /// left empty); and the workspaces are in the configuration's order,
+    /// those it does not have after them.
+    fn settle_workspaces(&mut self, monitor: MonitorHandle, there: &[WorkspaceProfile]) {
+        let place = |name: &str| {
+            there
+                .iter()
+                .position(|profile| profile.name.trim().eq_ignore_ascii_case(name.trim()))
+        };
+        let mut dropped = Vec::new();
+        if let Some(workspaces) = self.monitor_manager.get_workspaces_mut(monitor) {
+            for workspace in workspaces.iter_mut() {
+                if workspace.configured && place(&workspace.name).is_none() {
+                    workspace.configured = false;
+                    workspace.persistent = false;
+                    dropped.push(workspace.id);
+                }
+            }
+        }
+        self.monitor_manager
+            .order_workspaces(monitor, |workspace| place(&workspace.name));
+        for id in dropped {
+            let Some((index, name)) =
+                self.monitor_manager
+                    .get_workspaces(monitor)
+                    .and_then(|workspaces| {
+                        workspaces
+                            .iter()
+                            .position(|workspace| workspace.id == id)
+                            .and_then(|index| Some((index, workspaces.get(index)?.name.clone())))
+                    })
+            else {
+                continue;
+            };
+            if self.executor.graph_creates_workspace(monitor, &name) {
+                continue;
+            }
+            if self
+                .monitor_manager
+                .remove_inactive_empty_workspace(monitor, index)
+            {
+                log::info!("Workspace '{name}' is not in the configuration any more: it is gone");
+                self.executor.emit_workspace_event(
+                    crate::executor::RuntimeEventKind::WorkspaceDestroyed,
+                    monitor,
+                    &name,
+                    false,
+                );
+            }
+        }
     }
 }
 

@@ -128,6 +128,9 @@ fn workspace_overlay_to_proto(
         tiling_enabled: workspace.tiling_enabled,
         float_override: workspace.float_override,
         window_container_behaviour: workspace.window_container_behaviour.clone(),
+        title: workspace.title.clone(),
+        configured: workspace.configured,
+        persistent: workspace.persistent,
     }
 }
 
@@ -201,6 +204,9 @@ fn overlay_state_to_proto(data: &gevrek_engine::overlay_data::OverlayData) -> St
                 tiling_enabled: workspace.tiling_enabled,
                 float_override: workspace.float_override,
                 window_container_behaviour: workspace.window_container_behaviour.clone(),
+                title: workspace.title.clone(),
+                configured: workspace.configured,
+                persistent: workspace.persistent,
             });
             windows.extend(workspace.detailed_windows.iter().map(|window| WindowInfo {
                 window_id: window.handle.0 as u64,
@@ -2675,6 +2681,9 @@ mod overlay_conversion_tests {
             tiling_enabled: true,
             float_override: false,
             window_container_behaviour: "Column".to_string(),
+            title: String::new(),
+            configured: false,
+            persistent: true,
             windows: Vec::new(),
             detailed_windows: Vec::new(),
         }

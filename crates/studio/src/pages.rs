@@ -164,7 +164,7 @@ impl Page {
         match self {
             Page::Overview => "The window manager this window talks to, and where to start.",
             Page::Displays => "Mode, place and scale of each display. A new mode is on trial for 15 seconds.",
-            Page::Workspaces => "The workspaces of each display, their layouts and the space kept free.",
+            Page::Workspaces => "The workspaces each display has: what they are called, how they are laid out, and which stay when they are empty.",
             Page::Appearance => "Borders, opacity, and the drawn effects around windows.",
             Page::Animations => "How windows and workspaces move.",
             Page::Wallpaper => "The picture, or the colour, behind the windows. A display can have its own.",
@@ -318,11 +318,13 @@ impl Page {
                 "/desktop/work_area_offset",
                 Show::AllBut(&[]),
             ),
+            // (Room kept free at one display's edges, and its place
+            // among the displays: of a display, not of its workspaces.)
+            card("Space kept free, display by display", "/desktop/monitors", Show::Place),
         ];
-        const WORKSPACES: &[Card] = &[
-            card("Workspaces", "/desktop/workspaces", Show::Place),
-            card("Per display", "/desktop/monitors", Show::Place),
-        ];
+        // (Drawn by the page of its own, `crate::workspaces`.)
+        const WORKSPACES: &[Card] =
+            &[card("Workspaces", "/desktop/workspaces", Show::Place)];
         const ANIMATIONS: &[Card] = &[card("Animations", "/desktop/animations", Show::AllBut(&[]))];
         const BAR: &[Card] = &[
             card("Panel", "/desktop/shell/panel", Show::AllBut(&[])),

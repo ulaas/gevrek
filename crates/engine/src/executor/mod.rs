@@ -381,7 +381,10 @@ pub struct Executor {
     pub scratchpads: Scratchpads,
     /// Enabled named workspace profiles used to materialize non-persistent
     /// workspaces only when a selector first visits them.
-    workspace_profiles: HashMap<String, WorkspaceProfile>,
+    /// The configuration's workspace entries, as they are written (those
+    /// that are switched off too: a display's own entry that is off
+    /// means the display does not have the workspace).
+    workspace_profiles: Vec<WorkspaceProfile>,
     workspace_appearance: AppearanceProfile,
     /// The wallpaper's colour, for a theme that takes its accent from it
     /// (kept current by `WmCore::apply_workspace_appearance`).
@@ -478,7 +481,7 @@ impl Executor {
             tiling_suspended: false,
             resize_delta: 50,
             scratchpads: Scratchpads::new(),
-            workspace_profiles: HashMap::new(),
+            workspace_profiles: Vec::new(),
             workspace_appearance: AppearanceProfile::default(),
             wallpaper_accent: None,
             expose_workspaces: HashSet::new(),
@@ -496,11 +499,7 @@ impl Executor {
         profiles: Vec<WorkspaceProfile>,
         appearance: AppearanceProfile,
     ) {
-        self.workspace_profiles = profiles
-            .into_iter()
-            .filter(|profile| profile.enabled)
-            .map(|profile| (profile.name.trim().to_ascii_lowercase(), profile))
-            .collect();
+        self.workspace_profiles = profiles;
         self.workspace_appearance = appearance;
     }
 

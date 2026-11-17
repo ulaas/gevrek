@@ -407,6 +407,9 @@ impl WmCore {
             new_window_placement: format!("{:?}", workspace.new_window_placement),
             tiling_enabled: workspace.tiling_enabled,
             float_override: workspace.float_override,
+            title: workspace.label().to_string(),
+            configured: workspace.configured,
+            persistent: workspace.persistent,
             window_container_behaviour: workspace
                 .window_container_behaviour
                 .display_name()

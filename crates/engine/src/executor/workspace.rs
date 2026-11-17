@@ -33,7 +33,7 @@ pub struct WorkspaceBeside {
 }
 
 impl Executor {
-    pub(super) fn emit_workspace_event(
+    pub(crate) fn emit_workspace_event(
         &self,
         kind: RuntimeEventKind,
         monitor: MonitorHandle,
@@ -60,7 +60,7 @@ impl Executor {
         }));
     }
 
-    pub(super) fn emit_workspace_renamed(
+    pub(crate) fn emit_workspace_renamed(
         &self,
         monitor: MonitorHandle,
         workspace_id: usize,
@@ -96,29 +96,39 @@ impl Executor {
         fallback_layout: crate::layouts::LayoutType,
         run_created_empty: bool,
     ) -> Result<usize> {
-        let profile = self
-            .workspace_profiles
-            .get(&name.trim().to_ascii_lowercase())
-            .cloned();
+        // A display has one workspace of a name: the one that is there is
+        // it.
+        if let Some(index) = monitor_manager.get_workspaces(monitor).and_then(|workspaces| {
+            crate::workspace::Workspace::position_called(workspaces.elements(), &name)
+        }) {
+            return Ok(index);
+        }
+        let profile = self.profile_on(monitor_manager, monitor, &name);
+        // One the configuration does not have is a workspace of the
+        // moment: laid out and dressed as the display's others are (as
+        // the one it starts with), and gone when it is left empty.
+        let like = profile
+            .clone()
+            .or_else(|| self.profile_of_the_moment(monitor_manager, monitor, name.trim()));
         let layout = profile
             .as_ref()
             .map(|profile| profile.layout)
             .unwrap_or(fallback_layout);
         let workspace_name = profile
             .as_ref()
-            .map(|profile| profile.name.clone())
-            .unwrap_or(name);
+            .map(|profile| profile.name.trim().to_string())
+            .unwrap_or_else(|| name.trim().to_string());
         let index = monitor_manager
             .create_workspace(monitor, workspace_name.clone(), layout)
             .ok_or_else(|| {
                 anyhow::anyhow!("Could not create named workspace '{workspace_name}'")
             })?;
-        if let Some(profile) = &profile {
-            if let Some(workspace) = monitor_manager
-                .get_workspaces_mut(monitor)
-                .and_then(|workspaces| workspaces.get_mut(index))
-            {
-                profile.apply_to_workspace(
+        if let Some(workspace) = monitor_manager
+            .get_workspaces_mut(monitor)
+            .and_then(|workspaces| workspaces.get_mut(index))
+        {
+            if let Some(like) = &like {
+                like.apply_to_workspace(
                     workspace,
                     &gevrek_model::theme::dressed(
                         &self.workspace_appearance,
@@ -126,6 +136,14 @@ impl Executor {
                     ),
                 );
             }
+            if profile.is_none() {
+                workspace.layout = layout;
+                workspace.title = None;
+                workspace.configured = false;
+                workspace.persistent = false;
+            }
+        }
+        if let Some(profile) = &profile {
             if run_created_empty {
                 if let Some(launch) = &profile.on_created_empty {
                     // Started at the next layout flush, where the desktop
@@ -141,6 +159,29 @@ impl Executor {
             &workspace_name,
             profile.as_ref().is_some_and(|profile| profile.persistent),
         );
+        // One of the configuration's has its place among the display's
+        // workspaces, wherever it was made.
+        let made = monitor_manager
+            .get_workspaces(monitor)
+            .and_then(|workspaces| workspaces.get(index))
+            .map(|workspace| workspace.id);
+        if profile.is_some() {
+            let there = self.profiles_on(monitor_manager, monitor);
+            monitor_manager.order_workspaces(monitor, |workspace| {
+                if !workspace.configured {
+                    return None;
+                }
+                there.iter().position(|profile| {
+                    profile.name.trim().eq_ignore_ascii_case(workspace.name.trim())
+                })
+            });
+        }
+        let index = monitor_manager
+            .get_workspaces(monitor)
+            .and_then(|workspaces| {
+                workspaces.iter().position(|workspace| Some(workspace.id) == made)
+            })
+            .unwrap_or(index);
         Ok(index)
     }
 
@@ -154,8 +195,105 @@ impl Executor {
     }
 
     pub fn has_workspace_profile(&self, name: &str) -> bool {
-        self.workspace_profiles
-            .contains_key(&name.trim().to_ascii_lowercase())
+        self.workspace_profiles.iter().any(|profile| {
+            profile.enabled && profile.name.trim().eq_ignore_ascii_case(name.trim())
+        })
+    }
+
+    /// The workspaces the configuration gives a display, in their order
+    /// (`DesktopConfig::workspaces_where`).
+    pub fn profiles_on(
+        &self,
+        monitor_manager: &MonitorManager,
+        monitor: MonitorHandle,
+    ) -> Vec<WorkspaceProfile> {
+        let monitors = monitor_manager.get_all_monitors_ordered();
+        gevrek_model::settings::workspaces_where(&self.workspace_profiles, |selector| {
+            crate::config_apply::monitor_selector_targets(selector, &monitors).contains(&monitor)
+        })
+        .into_iter()
+        .cloned()
+        .collect()
+    }
+
+    /// The entry the configuration has for a workspace on a display: the
+    /// one of that name, or else the one shown by it.
+    pub fn profile_on(
+        &self,
+        monitor_manager: &MonitorManager,
+        monitor: MonitorHandle,
+        name: &str,
+    ) -> Option<WorkspaceProfile> {
+        let name = name.trim();
+        let there = self.profiles_on(monitor_manager, monitor);
+        there
+            .iter()
+            .find(|profile| profile.name.trim().eq_ignore_ascii_case(name))
+            .or_else(|| {
+                there
+                    .iter()
+                    .find(|profile| profile.label().eq_ignore_ascii_case(name))
+            })
+            .cloned()
+    }
+
+    /// What a workspace of the moment is laid out and dressed as: the
+    /// workspace the display starts with (or its first), under the new
+    /// name. None where the configuration gives the display no workspace
+    /// (a graph makes them there, with its own settings).
+    fn profile_of_the_moment(
+        &self,
+        monitor_manager: &MonitorManager,
+        monitor: MonitorHandle,
+        name: &str,
+    ) -> Option<WorkspaceProfile> {
+        let there = self.profiles_on(monitor_manager, monitor);
+        let mut like = there
+            .iter()
+            .find(|profile| profile.default)
+            .or(there.first())?
+            .clone();
+        like.name = name.to_string();
+        like.title = None;
+        like.default = false;
+        like.persistent = false;
+        like.on_created_empty = None;
+        Some(like)
+    }
+
+    /// The name of the workspace a display gets next, when none is asked
+    /// for by name: the first one the configuration gives it that is not
+    /// there yet, or else a number: the place it will have among the
+    /// display's workspaces, or the next one after that which no workspace
+    /// of the display is named or shown by.
+    pub fn next_workspace_name(
+        &self,
+        monitor_manager: &MonitorManager,
+        monitor: MonitorHandle,
+    ) -> String {
+        let there: Vec<&crate::workspace::Workspace> = monitor_manager
+            .get_workspaces(monitor)
+            .map(|workspaces| workspaces.iter().collect())
+            .unwrap_or_default();
+        let profiles = self.profiles_on(monitor_manager, monitor);
+        if let Some(waiting) = profiles.iter().find(|profile| {
+            !there
+                .iter()
+                .any(|workspace| workspace.name.trim().eq_ignore_ascii_case(profile.name.trim()))
+        }) {
+            return waiting.name.trim().to_string();
+        }
+        (there.len() + 1..)
+            .find(|number| {
+                let text = number.to_string();
+                !there.iter().any(|workspace| {
+                    workspace.is_called(&text) || workspace.number() == Some(*number)
+                }) && !profiles.iter().any(|profile| {
+                    profile.name.trim() == text || profile.label() == text
+                })
+            })
+            .map(|number| number.to_string())
+            .unwrap_or_default()
     }
 
     pub(super) fn hide_workspace_window(
@@ -721,17 +859,23 @@ impl Executor {
                     .map(|workspaces| workspaces.len() <= *index)
                     .unwrap_or(false)
                 {
-                    let number = monitor_manager
+                    let before = monitor_manager
                         .get_workspaces(monitor)
-                        .map(|workspaces| workspaces.len() + 1)
-                        .unwrap_or(1);
+                        .map_or(0, |workspaces| workspaces.len());
+                    let name = self.next_workspace_name(monitor_manager, monitor);
                     self.create_workspace_for_selector(
                         monitor_manager,
                         monitor,
-                        format!("Workspace {number}"),
+                        name,
                         crate::layouts::LayoutType::BSP,
                         run_created_empty,
                     )?;
+                    let after = monitor_manager
+                        .get_workspaces(monitor)
+                        .map_or(0, |workspaces| workspaces.len());
+                    if after <= before {
+                        anyhow::bail!("No workspace could be made at index {index}");
+                    }
                 }
                 *index
             }
@@ -740,24 +884,18 @@ impl Executor {
                     monitor_manager
                         .get_workspaces(monitor)
                         .and_then(|workspaces| {
-                            workspaces
-                                .elements()
-                                .iter()
-                                .position(|workspace| workspace.is_called(name))
+                            crate::workspace::Workspace::position_called(
+                                workspaces.elements(),
+                                name,
+                            )
                         })
                 {
                     index
                 } else {
-                    // (On a display where the workspace of this name has
-                    // an entry of its own under another name, that one
-                    // is made.)
-                    let name = self
-                        .name_on_output(monitor_manager, monitor, name)
-                        .unwrap_or_else(|| name.clone());
                     self.create_workspace_for_selector(
                         monitor_manager,
                         monitor,
-                        name,
+                        name.clone(),
                         crate::layouts::LayoutType::BSP,
                         run_created_empty,
                     )?
@@ -796,11 +934,11 @@ impl Executor {
                 {
                     index
                 } else {
-                    let number = len + 1;
+                    let name = self.next_workspace_name(monitor_manager, monitor);
                     self.create_workspace_for_selector(
                         monitor_manager,
                         monitor,
-                        format!("Workspace {number}"),
+                        name,
                         crate::layouts::LayoutType::BSP,
                         run_created_empty,
                     )?
@@ -999,18 +1137,8 @@ impl Executor {
                 // is made when it is first asked for), is made here: it is
                 // not looked for on the monitor that happens to have made
                 // its own of that name already.
-                let ordered = monitor_manager.get_all_monitors_ordered();
                 let own_by_profile = |monitor: MonitorHandle| {
-                    self.workspace_profiles
-                        .get(&name.trim().to_ascii_lowercase())
-                        .is_some_and(|profile| {
-                            profile.enabled
-                                && crate::config_apply::monitor_selector_targets(
-                                    &profile.monitor,
-                                    &ordered,
-                                )
-                                .contains(&monitor)
-                        })
+                    self.profile_on(monitor_manager, monitor, name).is_some()
                 };
                 self.active_monitor(window_manager, monitor_manager)
                     .filter(|active| !has(*active) && !own_by_profile(*active))
@@ -1184,9 +1312,7 @@ impl Executor {
                             let at = monitor_manager
                                 .get_workspaces(other.handle)?
                                 .iter()
-                                .position(|workspace| {
-                                    workspace.name.eq_ignore_ascii_case(wanted.trim())
-                                })?;
+                                .position(|workspace| workspace.is_called(wanted))?;
                             Some((other.handle, at))
                         })
                         .ok_or(error)?
@@ -1204,38 +1330,16 @@ impl Executor {
             self.reevaluate_dynamic_rules(window_manager, monitor_manager, window)?;
         }
         self.emit_workspace_renamed(monitor, workspace_id, &old_name, name);
-        // (The workspaces of that name on the other displays keep theirs.)
+        // (The workspaces of that name on the other displays keep theirs.
+        // What it is known by to keys and rules is as it was: it has
+        // another title.)
         log::info!(
-            "Renamed workspace '{}' to '{}' using selector '{}'",
+            "Workspace '{}' is shown as '{}' now (selector '{}')",
             old_name,
             name,
             selector.expression()
         );
         Ok(())
-    }
-
-    /// The name the workspace meant by `name` has on an output, where the
-    /// configuration gives that output an entry of its own for it under
-    /// another name (`WorkspaceProfile::also_called`).
-    fn name_on_output(
-        &self,
-        monitor_manager: &MonitorManager,
-        monitor: MonitorHandle,
-        name: &str,
-    ) -> Option<String> {
-        let monitors = monitor_manager.get_all_monitors_ordered();
-        self.workspace_profiles
-            .values()
-            .find(|profile| {
-                profile.enabled
-                    && profile
-                        .also_called
-                        .iter()
-                        .any(|other| other.trim().eq_ignore_ascii_case(name.trim()))
-                    && crate::config_apply::monitor_selector_targets(&profile.monitor, &monitors)
-                        .contains(&monitor)
-            })
-            .map(|profile| profile.name.clone())
     }
 
     pub fn prune_non_persistent_workspace(
@@ -1248,11 +1352,10 @@ impl Executor {
             .get_workspaces(monitor)
             .and_then(|workspaces| workspaces.get(index))
             .and_then(|workspace| {
-                let profile = self
-                    .workspace_profiles
-                    .get(&workspace.name.trim().to_ascii_lowercase())?;
-                (!profile.persistent && workspace.all_windows().is_empty())
-                    .then_some(workspace.name.clone())
+                (!workspace.persistent
+                    && workspace.all_windows().is_empty()
+                    && !self.graph_creates_workspace(monitor, &workspace.name))
+                .then_some(workspace.name.clone())
             });
         let Some(name) = removable else {
             return;
@@ -1284,13 +1387,7 @@ impl Executor {
                 }
                 trimmed.to_string()
             }
-            None => {
-                let number = monitor_manager
-                    .get_workspaces(monitor)
-                    .map(|workspaces| workspaces.len() + 1)
-                    .unwrap_or(1);
-                format!("Workspace {number}")
-            }
+            None => self.next_workspace_name(monitor_manager, monitor),
         };
         let index = self.create_workspace_for_selector(
             monitor_manager,
@@ -1316,8 +1413,7 @@ impl Executor {
             .ok_or_else(|| anyhow::anyhow!("Could not determine the active monitor"))?;
         let closed = workspaces::close_focused_workspace(monitor_manager, monitor)?;
         let persistent = self
-            .workspace_profiles
-            .get(&closed.trim().to_ascii_lowercase())
+            .profile_on(monitor_manager, monitor, &closed)
             .is_some_and(|profile| profile.persistent);
         self.emit_workspace_event(
             RuntimeEventKind::WorkspaceDestroyed,
@@ -1356,17 +1452,21 @@ impl Executor {
             .unwrap_or(0)
             < count
         {
-            let number = monitor_manager
-                .get_workspaces(monitor)
-                .map(|workspaces| workspaces.len() + 1)
-                .unwrap_or(1);
-            self.create_workspace_for_selector(
+            let name = self.next_workspace_name(monitor_manager, monitor);
+            let index = self.create_workspace_for_selector(
                 monitor_manager,
                 monitor,
-                format!("Workspace {number}"),
+                name,
                 crate::layouts::LayoutType::BSP,
                 true,
             )?;
+            // (Asked for by their number: they stay.)
+            if let Some(workspace) = monitor_manager
+                .get_workspaces_mut(monitor)
+                .and_then(|workspaces| workspaces.get_mut(index))
+            {
+                workspace.persistent = true;
+            }
             created += 1;
         }
         log::info!(
@@ -1398,11 +1498,7 @@ impl Executor {
         let monitor = Self::resolve_monitor_target_from(monitor_manager, current, &target)?;
         let exists = monitor_manager
             .get_workspaces(monitor)
-            .is_some_and(|workspaces| {
-                workspaces
-                    .iter()
-                    .any(|workspace| workspace.name.eq_ignore_ascii_case(name))
-            });
+            .is_some_and(|workspaces| workspaces.iter().any(|workspace| workspace.is_called(name)));
         if exists {
             log::info!(
                 "Workspace '{}' already exists on monitor {:?}",
@@ -1414,9 +1510,7 @@ impl Executor {
                 let changed = monitor_manager
                     .get_workspaces_mut(monitor)
                     .and_then(|workspaces| {
-                        workspaces
-                            .iter_mut()
-                            .find(|workspace| workspace.name.eq_ignore_ascii_case(name))
+                        workspaces.iter_mut().find(|workspace| workspace.is_called(name))
                     })
                     .is_some_and(|workspace| {
                         let changed = workspace.layout != layout;

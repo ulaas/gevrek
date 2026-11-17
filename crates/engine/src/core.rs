@@ -110,7 +110,7 @@ impl WmCore {
             );
             if let Some(index) = self.monitor_manager.create_workspace(
                 monitor.handle,
-                "Workspace 1".to_string(),
+                "1".to_string(),
                 crate::layouts::LayoutType::BSP,
             ) {
                 log::info!(

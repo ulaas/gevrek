@@ -56,7 +56,50 @@ const STEPS: &[(u32, Step)] = &[
             to_24(desktop);
         }
     }),
+    // 25: a workspace has a name (what names it) and a title (what is
+    // shown of it). A display's own entry "in the place of" a workspace
+    // that every display has (`also_called`) is an entry for that
+    // workspace, by its name, with what it was called as its title.
+    (25, |config| {
+        if let Some(desktop) = config.get_mut("desktop").and_then(Value::as_object_mut) {
+            to_25(desktop);
+        }
+    }),
 ];
+
+/// 24 -> 25: `also_called` is gone. An entry that had it took the place,
+/// on its display, of the workspace it named there: it is that
+/// workspace's entry for the display now (the same `name`), and the name
+/// it had is its `title`.
+fn to_25(desktop: &mut serde_json::Map<String, Value>) {
+    let Some(workspaces) = desktop.get_mut("workspaces").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for workspace in workspaces.iter_mut().filter_map(Value::as_object_mut) {
+        let Some(also) = workspace.remove("also_called") else {
+            continue;
+        };
+        let stands_for = also
+            .as_array()
+            .and_then(|names| names.iter().filter_map(Value::as_str).next())
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string);
+        let Some(stands_for) = stands_for else {
+            continue;
+        };
+        let shown = workspace
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_string();
+        workspace.insert("name".to_string(), Value::from(stands_for.clone()));
+        if !shown.is_empty() && shown != stands_for && !workspace.contains_key("title") {
+            workspace.insert("title".to_string(), Value::from(shown));
+        }
+    }
+}
 
 fn to_24(desktop: &mut serde_json::Map<String, Value>) {
     let Some(appearance) = desktop.get_mut("appearance") else {

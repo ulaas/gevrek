@@ -716,6 +716,14 @@ message WorkspaceState {
   bool float_override = 12;
   // Per-workspace window container behaviour: "Column" or "Append".
   string window_container_behaviour = 13;
+  // What is shown of it: its title, or its name where it has none. (`name`
+  // is what it is known by to keys, rules and commands, and does not
+  // change when it is renamed.)
+  string title = 14;
+  // The configuration has an entry for it on its display.
+  bool configured = 15;
+  // It stays when it is left empty.
+  bool persistent = 16;
 }
 
 message WindowInfo {
@@ -960,6 +968,14 @@ message WorkspaceOverlayData {
   bool float_override = 13;
   // Per-workspace window container behaviour: "Column" or "Append".
   string window_container_behaviour = 14;
+  // What is shown of it: its title, or its name where it has none. (`name`
+  // is what it is known by to keys, rules and commands, and does not
+  // change when it is renamed.)
+  string title = 15;
+  // The configuration has an entry for it on its display.
+  bool configured = 16;
+  // It stays when it is left empty.
+  bool persistent = 17;
 }
 
 message DetailedWindowInfo {

@@ -1,7 +1,7 @@
 {
   "version": "0.6.0",
   "desktop": {
-    "schema_version": 24,
+    "schema_version": 25,
     "focus": {
       "history_size": 20,
       "focus_follows_mouse": false,

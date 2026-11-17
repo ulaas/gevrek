@@ -9,7 +9,7 @@ use crate::zones::{presets as zone_presets, ZoneConfig, ZoneLayout};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
-pub const DESKTOP_CONFIG_SCHEMA_VERSION: u32 = 24;
+pub const DESKTOP_CONFIG_SCHEMA_VERSION: u32 = 25;
 
 /// What is wrong with the pattern in a command's window selector, where
 /// it has one that cannot be read (`re:` and what follows is a regular
@@ -693,73 +693,576 @@ impl PanelProfile {
     }
 }
 
-impl DesktopConfig {
-    /// Give the workspace `old` of one display the name `new`, and leave
-    /// the workspaces of that name on the other displays as they are.
-    ///
-    /// A workspace that is written down for this display alone is simply
-    /// renamed. One that is written down for several displays keeps its
-    /// entry, and this display gets an entry of its own, a copy with the
-    /// new name that takes the other's place here (`also_called`). The
-    /// keys that name the workspace are not changed: on this display they
-    /// mean the renamed one, on the others the one that kept its name.
-    ///
-    /// `display` is the display as the window manager names it. Returns
-    /// whether anything changed (nothing does where no workspace is
-    /// written down by the old name, the new name is empty, or another
-    /// workspace has it already).
-    pub fn rename_workspace_on(&mut self, display: &str, old: &str, new: &str) -> bool {
-        let (old, new) = (old.trim(), new.trim());
-        if new.is_empty() || old == new || display.trim().is_empty() {
-            return false;
+impl MonitorSelector {
+    /// How closely it names a display: a display's own name before its
+    /// place among the displays, that before "the primary one", that
+    /// before "every display". Of two entries for one workspace that both
+    /// mean a display, the closer one counts there.
+    pub fn closeness(&self) -> u8 {
+        match self {
+            Self::Name(_) => 3,
+            Self::Index(_) => 2,
+            Self::Primary => 1,
+            Self::Any => 0,
         }
-        let is = |name: &str, wanted: &str| name.trim().eq_ignore_ascii_case(wanted);
-        let taken = !old.eq_ignore_ascii_case(new)
-            && self.workspaces.iter().any(|profile| is(&profile.name, new));
-        if taken {
-            return false;
+    }
+}
+
+/// A display, as far as a configuration can name one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DisplayRef {
+    /// Every name it answers to (its name, its connector, its device).
+    pub names: Vec<String>,
+    /// Its place among the displays, from 0, where that is known.
+    pub index: Option<usize>,
+    pub primary: bool,
+}
+
+impl DisplayRef {
+    /// A display known by its name alone.
+    pub fn named(name: &str) -> Self {
+        Self {
+            names: vec![name.trim().to_string()],
+            index: None,
+            primary: false,
         }
-        let own = |profile: &WorkspaceProfile| {
-            matches!(&profile.monitor, MonitorSelector::Name(name) if is(name, display))
-        };
-        // The entry this display has for it: its own, or the one it
-        // shares with the others.
-        let Some(at) = self
-            .workspaces
-            .iter()
-            .position(|profile| is(&profile.name, old) && own(profile))
-            .or_else(|| self.workspaces.iter().position(|profile| is(&profile.name, old)))
-        else {
-            return false;
-        };
-        if own(&self.workspaces[at]) {
-            let takes_anothers_place = !self.workspaces[at].also_called.is_empty();
-            self.workspaces[at].name = new.to_string();
-            // (One that was only ever this display's is named by its own
-            // name in the keys: they follow it.)
-            if !takes_anothers_place {
-                for binding in &mut self.bindings {
-                    binding.command.follow_workspace_rename(old, new);
-                }
-                for gesture in &mut self.gestures.profiles {
-                    gesture.command.follow_workspace_rename(old, new);
+    }
+
+    /// A display of the window manager's state (one of its `monitors`),
+    /// with its place among them where that is known. Its names, the one
+    /// a configuration writes for it first: its connector (on Windows the
+    /// device's path, which no two displays share), then its name.
+    pub fn of_state(monitor: &serde_json::Value, index: Option<usize>) -> Self {
+        let mut names: Vec<String> = Vec::new();
+        for name in [monitor["connector"].as_str(), monitor["name"].as_str()]
+            .into_iter()
+            .flatten()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        {
+            if !names.iter().any(|known| known.eq_ignore_ascii_case(name)) {
+                names.push(name.to_string());
+            }
+        }
+        Self {
+            names,
+            index,
+            primary: monitor["is_primary"].as_bool().unwrap_or(false),
+        }
+    }
+
+    /// The name a configuration writes for it: the first it has.
+    pub fn name(&self) -> &str {
+        self.names.first().map_or("", String::as_str)
+    }
+
+    pub fn is_called(&self, wanted: &str) -> bool {
+        let wanted = wanted.trim();
+        !wanted.is_empty()
+            && self
+                .names
+                .iter()
+                .any(|name| name.trim().eq_ignore_ascii_case(wanted))
+    }
+
+    /// Whether a selector means this display.
+    pub fn is_meant_by(&self, selector: &MonitorSelector) -> bool {
+        match selector {
+            MonitorSelector::Any => true,
+            MonitorSelector::Primary => self.primary,
+            MonitorSelector::Index(index) => self.index == Some(*index),
+            MonitorSelector::Name(name) => self.is_called(name),
+        }
+    }
+}
+
+/// What came of giving a workspace a title.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Titled {
+    /// It has the title now.
+    Changed,
+    /// It had it already.
+    Same,
+    /// No workspace of that name is written down for the display.
+    Unknown,
+    /// Another workspace of the display is shown by that title, or named
+    /// so.
+    Taken,
+}
+
+impl Titled {
+    pub fn changed(self) -> bool {
+        self == Self::Changed
+    }
+}
+
+fn same_name(one: &str, other: &str) -> bool {
+    one.trim().eq_ignore_ascii_case(other.trim())
+}
+
+/// Of a list of workspace entries, the ones a display has
+/// (`DesktopConfig::workspaces_where`).
+pub fn workspaces_where(
+    profiles: &[WorkspaceProfile],
+    means: impl Fn(&MonitorSelector) -> bool,
+) -> Vec<&WorkspaceProfile> {
+    let mut chosen: Vec<&WorkspaceProfile> = Vec::new();
+    for profile in profiles.iter().filter(|profile| means(&profile.monitor)) {
+        match chosen
+            .iter_mut()
+            .find(|there| same_name(&there.name, &profile.name))
+        {
+            Some(there) => {
+                if profile.monitor.closeness() > there.monitor.closeness() {
+                    *there = profile;
                 }
             }
-            return true;
+            None => chosen.push(profile),
         }
-        let mut own_entry = self.workspaces[at].clone();
-        own_entry.name = new.to_string();
-        own_entry.monitor = MonitorSelector::Name(display.trim().to_string());
-        own_entry.also_called = vec![old.to_string()];
-        // (Right after the one whose place it takes: the workspaces of a
-        // display are made in the order they are written in.)
-        self.workspaces.insert(at + 1, own_entry);
+    }
+    chosen.retain(|profile| profile.enabled && !profile.name.trim().is_empty());
+    chosen
+}
+
+impl WorkspaceProfile {
+    /// What is shown of it: its title, or its name where it has none.
+    pub fn label(&self) -> &str {
+        match self.title.as_deref().map(str::trim) {
+            Some(title) if !title.is_empty() => title,
+            _ => self.name.trim(),
+        }
+    }
+
+    /// The title to write down for what a person typed: none for nothing
+    /// and for the workspace's own name.
+    pub fn title_for(&self, typed: &str) -> Option<String> {
+        let typed = typed.trim();
+        (!typed.is_empty() && typed != self.name.trim()).then(|| typed.to_string())
+    }
+}
+
+impl DesktopConfig {
+    /// The workspaces a display has, in the order they are written in:
+    /// for each name the entry that names the display most closely (its
+    /// own before the one for every display), and of those only the ones
+    /// that are switched on. `means` says whether a selector means the
+    /// display (`DisplayRef::is_meant_by`, or the window manager's own
+    /// knowledge of its displays).
+    pub fn workspaces_where(
+        &self,
+        means: impl Fn(&MonitorSelector) -> bool,
+    ) -> Vec<&WorkspaceProfile> {
+        workspaces_where(&self.workspaces, means)
+    }
+
+    /// The workspaces of a display (`workspaces_where`).
+    pub fn workspaces_on(&self, display: &DisplayRef) -> Vec<&WorkspaceProfile> {
+        self.workspaces_where(|selector| display.is_meant_by(selector))
+    }
+
+    /// The entry a display has for the workspace `name`.
+    pub fn workspace_on(&self, display: &DisplayRef, name: &str) -> Option<&WorkspaceProfile> {
+        self.workspaces_on(display)
+            .into_iter()
+            .find(|profile| same_name(&profile.name, name))
+    }
+
+    /// Give the workspace `name` of one display the title `title` (what
+    /// is shown of it), and leave the workspaces of that name on the other
+    /// displays as they are. Nothing that names the workspace changes: a
+    /// title is only what is shown.
+    ///
+    /// A workspace that is written down for this display by its name is
+    /// given the title. One that it has from an entry for several
+    /// displays keeps that entry, and the display gets one of its own, a
+    /// copy with the title, right after it. An entry of the display's own
+    /// that says nothing else than the one it stands for is taken away
+    /// again (the title given back).
+    ///
+    /// An empty title, or the workspace's name, is no title: the
+    /// workspace is shown by its name.
+    pub fn title_workspace_on(&mut self, display: &DisplayRef, name: &str, title: &str) -> Titled {
+        if display.name().is_empty() {
+            return Titled::Unknown;
+        }
+        let Some(current) = self.workspace_on(display, name) else {
+            return Titled::Unknown;
+        };
+        let wanted = current.title_for(title);
+        if current.title_for(current.label()) == wanted {
+            return Titled::Same;
+        }
+        let shown = wanted
+            .clone()
+            .unwrap_or_else(|| current.name.trim().to_string());
+        let taken = self.workspaces_on(display).into_iter().any(|other| {
+            !same_name(&other.name, name)
+                && (same_name(other.label(), &shown) || same_name(&other.name, &shown))
+        });
+        if taken {
+            return Titled::Taken;
+        }
+        let own = |profile: &WorkspaceProfile| {
+            matches!(&profile.monitor, MonitorSelector::Name(named) if display.is_called(named))
+                && same_name(&profile.name, name)
+        };
+        let at = match self.workspaces.iter().position(own) {
+            Some(at) => at,
+            None => {
+                // (Right after the one it stands for: a display's
+                // workspaces are in the order they are written in.)
+                let Some(shared) = self.workspaces.iter().position(|profile| {
+                    same_name(&profile.name, name) && display.is_meant_by(&profile.monitor)
+                }) else {
+                    return Titled::Unknown;
+                };
+                let mut entry = self.workspaces[shared].clone();
+                entry.monitor = MonitorSelector::Name(display.name().to_string());
+                self.workspaces.insert(shared + 1, entry);
+                shared + 1
+            }
+        };
+        self.workspaces[at].title = wanted;
+        self.drop_needless_entry(display, at);
+        Titled::Changed
+    }
+
+    /// An entry of a display's own that says exactly what the display
+    /// would have without it is taken out.
+    fn drop_needless_entry(&mut self, display: &DisplayRef, at: usize) {
+        let own = self.workspaces[at].clone();
+        let without = self
+            .workspaces
+            .iter()
+            .enumerate()
+            .filter(|(index, profile)| {
+                *index != at
+                    && same_name(&profile.name, &own.name)
+                    && display.is_meant_by(&profile.monitor)
+            })
+            .max_by_key(|(_, profile)| profile.monitor.closeness())
+            .map(|(_, profile)| profile.clone());
+        let Some(mut without) = without else {
+            return;
+        };
+        without.monitor = own.monitor.clone();
+        if serde_json::to_value(&without).ok() == serde_json::to_value(&own).ok() {
+            self.workspaces.remove(at);
+        }
+    }
+
+    /// Give the workspace `name` the title `title` on every display: in
+    /// every entry that is written down for it.
+    pub fn title_workspace(&mut self, name: &str, title: &str) -> Titled {
+        if !self.workspaces.iter().any(|profile| same_name(&profile.name, name)) {
+            return Titled::Unknown;
+        }
+        let typed = title.trim();
+        let taken = !typed.is_empty()
+            && self.workspaces.iter().any(|other| {
+                !same_name(&other.name, name)
+                    && other.enabled
+                    && (same_name(other.label(), typed) || same_name(&other.name, typed))
+            });
+        if taken {
+            return Titled::Taken;
+        }
+        let mut changed = false;
+        for profile in &mut self.workspaces {
+            if same_name(&profile.name, name) {
+                let wanted = profile.title_for(typed);
+                changed |= profile.title != wanted;
+                profile.title = wanted;
+            }
+        }
+        // (Entries of single displays that only had another title say
+        // nothing of their own now.)
+        let mut at = 0;
+        while at < self.workspaces.len() {
+            let before = self.workspaces.len();
+            if let MonitorSelector::Name(display) = self.workspaces[at].monitor.clone() {
+                if same_name(&self.workspaces[at].name, name) {
+                    self.drop_needless_entry(&DisplayRef::named(&display), at);
+                }
+            }
+            if self.workspaces.len() == before {
+                at += 1;
+            }
+        }
+        if changed {
+            Titled::Changed
+        } else {
+            Titled::Same
+        }
+    }
+
+    /// Write down a workspace that a display has only for now (one that
+    /// was opened while gevrek ran), so that it is there the next time
+    /// too: an entry of that display's own, after its others, with the
+    /// settings of the workspace the display starts with. Nothing happens
+    /// when the display has one of that name already. Returns whether it
+    /// was written down.
+    pub fn keep_workspace_on(&mut self, display: &DisplayRef, name: &str, title: &str) -> bool {
+        let name = name.trim();
+        if name.is_empty() || display.name().is_empty() {
+            return false;
+        }
+        if self
+            .workspaces
+            .iter()
+            .any(|profile| same_name(&profile.name, name) && display.is_meant_by(&profile.monitor))
+        {
+            return false;
+        }
+        let like = {
+            let there = self.workspaces_on(display);
+            there
+                .iter()
+                .find(|profile| profile.default)
+                .or(there.first())
+                .map(|profile| (*profile).clone())
+        };
+        let mut entry = like.unwrap_or_else(|| WorkspaceProfile {
+            // (No borders of its own: the look's.)
+            appearance_override: false,
+            ..WorkspaceProfile::default()
+        });
+        entry.name = name.to_string();
+        entry.title = None;
+        entry.title = entry.title_for(title);
+        entry.monitor = MonitorSelector::Name(display.name().to_string());
+        entry.default = false;
+        entry.persistent = true;
+        entry.enabled = true;
+        entry.on_created_empty = None;
+        self.workspaces.push(entry);
         true
     }
 
-    /// Give the workspace `old` the name `new`, in everything that is
-    /// written down of it: its own entry, and the keys and gestures that
-    /// name it (they go on meaning the same workspace). Nothing happens
+    /// Change the workspace `name` for one display alone: in an entry of
+    /// that display's own, made from what the display has now where it
+    /// has none yet. What the workspace is named and which display the
+    /// entry is for stay as they are, whatever `change` does. An entry of
+    /// the display's own that says nothing else than the one it stands
+    /// for is taken out again. Returns whether there is such a workspace.
+    pub fn edit_workspace_on(
+        &mut self,
+        display: &DisplayRef,
+        name: &str,
+        change: impl FnOnce(&mut WorkspaceProfile),
+    ) -> bool {
+        if display.name().is_empty() {
+            return false;
+        }
+        let own = |profile: &WorkspaceProfile| {
+            matches!(&profile.monitor, MonitorSelector::Name(named) if display.is_called(named))
+                && same_name(&profile.name, name)
+        };
+        let at = match self.workspaces.iter().position(own) {
+            Some(at) => at,
+            None => {
+                // (One that is switched off for every display can be had
+                // by one display: the entry it is made from need not be
+                // on.)
+                let Some(shared) = self
+                    .workspaces
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, profile)| {
+                        same_name(&profile.name, name) && display.is_meant_by(&profile.monitor)
+                    })
+                    .max_by_key(|(_, profile)| profile.monitor.closeness())
+                    .map(|(index, _)| index)
+                else {
+                    return false;
+                };
+                let mut entry = self.workspaces[shared].clone();
+                entry.monitor = MonitorSelector::Name(display.name().to_string());
+                self.workspaces.insert(shared + 1, entry);
+                shared + 1
+            }
+        };
+        let (key, monitor) = (
+            self.workspaces[at].name.clone(),
+            self.workspaces[at].monitor.clone(),
+        );
+        change(&mut self.workspaces[at]);
+        self.workspaces[at].name = key;
+        self.workspaces[at].monitor = monitor;
+        self.drop_needless_entry(display, at);
+        true
+    }
+
+    /// Change the workspace `name` on every display: in every entry that
+    /// is written down for it. Returns whether there is one.
+    pub fn edit_workspace(&mut self, name: &str, change: impl Fn(&mut WorkspaceProfile)) -> bool {
+        let mut found = false;
+        for profile in &mut self.workspaces {
+            if same_name(&profile.name, name) {
+                let (key, monitor) = (profile.name.clone(), profile.monitor.clone());
+                change(profile);
+                profile.name = key;
+                profile.monitor = monitor;
+                found = true;
+            }
+        }
+        found
+    }
+
+    /// The entry of a display's own for the workspace `name`, where it
+    /// has one.
+    pub fn own_workspace_entry(&self, display: &DisplayRef, name: &str) -> Option<usize> {
+        self.workspaces.iter().position(|profile| {
+            matches!(&profile.monitor, MonitorSelector::Name(named) if display.is_called(named))
+                && same_name(&profile.name, name)
+        })
+    }
+
+    /// A display has the workspace `name` as every display has it again:
+    /// its own entry for it is taken out. Returns whether it had one.
+    /// (A workspace that only this display has is left: taking its only
+    /// entry out would be taking the workspace away.)
+    pub fn share_workspace_on(&mut self, display: &DisplayRef, name: &str) -> bool {
+        let Some(at) = self.own_workspace_entry(display, name) else {
+            return false;
+        };
+        let has_another = self.workspaces.iter().enumerate().any(|(index, profile)| {
+            index != at && same_name(&profile.name, name) && display.is_meant_by(&profile.monitor)
+        });
+        if !has_another {
+            return false;
+        }
+        self.workspaces.remove(at);
+        true
+    }
+
+    /// The workspace `name` is the one a display starts with (`None`: every
+    /// display, in every entry). No other workspace is that there.
+    pub fn start_with_workspace(&mut self, display: Option<&DisplayRef>, name: &str) {
+        match display {
+            None => {
+                for profile in &mut self.workspaces {
+                    profile.default = same_name(&profile.name, name);
+                }
+            }
+            Some(display) => {
+                let there: Vec<String> = self
+                    .workspaces_on(display)
+                    .iter()
+                    .map(|profile| profile.name.clone())
+                    .collect();
+                for key in there {
+                    let wanted = same_name(&key, name);
+                    let is = self
+                        .workspace_on(display, &key)
+                        .is_some_and(|profile| profile.default);
+                    if is != wanted {
+                        self.edit_workspace_on(display, &key, |profile| profile.default = wanted);
+                    }
+                }
+            }
+        }
+    }
+
+    /// A name for a new workspace: the lowest number none is named or
+    /// shown by.
+    pub fn free_workspace_name(&self) -> String {
+        (1usize..)
+            .map(|number| number.to_string())
+            .find(|text| {
+                !self
+                    .workspaces
+                    .iter()
+                    .any(|profile| same_name(&profile.name, text) || same_name(profile.label(), text))
+            })
+            .unwrap_or_default()
+    }
+
+    /// Write down a new workspace, after the others: for one display, or
+    /// (`None`) for every display. It is laid out as the workspace that is
+    /// started with, takes its look from the appearance, and stays when it
+    /// is empty. Returns its name.
+    pub fn add_workspace(&mut self, display: Option<&DisplayRef>) -> String {
+        let like = self
+            .workspaces
+            .iter()
+            .find(|profile| profile.enabled && profile.default)
+            .or(self.workspaces.iter().find(|profile| profile.enabled))
+            .cloned();
+        let mut entry = like.unwrap_or_else(|| WorkspaceProfile {
+            appearance_override: false,
+            layout: crate::layout::LayoutType::Dwindle,
+            ..WorkspaceProfile::default()
+        });
+        entry.name = self.free_workspace_name();
+        entry.title = None;
+        entry.monitor = match display {
+            Some(display) if !display.name().is_empty() => {
+                MonitorSelector::Name(display.name().to_string())
+            }
+            _ => MonitorSelector::Any,
+        };
+        entry.default = self.workspaces.iter().all(|profile| !profile.enabled);
+        entry.persistent = true;
+        entry.enabled = true;
+        entry.on_created_empty = None;
+        let name = entry.name.clone();
+        self.workspaces.push(entry);
+        name
+    }
+
+    /// Take the workspace `name` out of the configuration: every entry
+    /// that is written down for it. (The keys that name it are left: they
+    /// open a workspace of the moment by that name.) Returns whether
+    /// there was one.
+    pub fn remove_workspace(&mut self, name: &str) -> bool {
+        let before = self.workspaces.len();
+        self.workspaces.retain(|profile| !same_name(&profile.name, name));
+        self.workspaces.len() != before
+    }
+
+    /// A display does not have the workspace `name` (`false`), or has it
+    /// again. One that only this display has is taken out for good.
+    pub fn have_workspace_on(&mut self, display: &DisplayRef, name: &str, have: bool) -> bool {
+        let Some(own) = self.own_workspace_entry(display, name) else {
+            return self.edit_workspace_on(display, name, |profile| profile.enabled = have);
+        };
+        let only_here = !self.workspaces.iter().enumerate().any(|(index, profile)| {
+            index != own && same_name(&profile.name, name) && display.is_meant_by(&profile.monitor)
+        });
+        if only_here && !have {
+            self.workspaces.remove(own);
+            return true;
+        }
+        self.edit_workspace_on(display, name, |profile| profile.enabled = have)
+    }
+
+    /// Put the workspace `name` before the workspace `before` (`None`: at
+    /// the end), with every entry it has. The order they are written in
+    /// is the order a display's workspaces are in. Returns whether
+    /// anything moved.
+    pub fn move_workspace(&mut self, name: &str, before: Option<&str>) -> bool {
+        if before.is_some_and(|before| same_name(before, name)) {
+            return false;
+        }
+        let was: Vec<String> = self.workspaces.iter().map(|p| p.name.clone()).collect();
+        let (moved, mut rest): (Vec<WorkspaceProfile>, Vec<WorkspaceProfile>) =
+            std::mem::take(&mut self.workspaces)
+                .into_iter()
+                .partition(|profile| same_name(&profile.name, name));
+        let at = before
+            .and_then(|before| rest.iter().position(|profile| same_name(&profile.name, before)))
+            .unwrap_or(rest.len());
+        rest.splice(at..at, moved);
+        self.workspaces = rest;
+        was != self.workspaces.iter().map(|p| p.name.clone()).collect::<Vec<_>>()
+    }
+
+    /// Give the workspace `old` the name `new` (the name it is known by
+    /// to what names it, not what is shown of it: `title_workspace`), in
+    /// everything that is written down of it: its entries, and the keys
+    /// and gestures that name it (they go on meaning the same workspace).
+    /// Nothing happens
     /// when no workspace is written down by the old name, when the new
     /// one is empty, or when another workspace already has it. Returns
     /// whether anything changed.
@@ -1018,10 +1521,31 @@ impl DesktopConfig {
                     "Workspace name cannot be empty",
                 ));
             }
-            if workspace.enabled && !workspace_names.insert(workspace.name.trim().to_lowercase()) {
+            // (One entry for a workspace and the same displays: a display
+            // may have one of its own beside the one for every display.)
+            let entry = (
+                workspace.name.trim().to_lowercase(),
+                serde_json::to_string(&workspace.monitor)
+                    .unwrap_or_default()
+                    .to_lowercase(),
+            );
+            if !workspace_names.insert(entry) {
                 issues.push(ConfigIssue::error(
                     format!("{path}.name"),
-                    format!("Duplicate workspace name '{}'", workspace.name),
+                    format!(
+                        "Workspace '{}' is written down twice for the same display",
+                        workspace.name
+                    ),
+                ));
+            }
+            if workspace
+                .title
+                .as_deref()
+                .is_some_and(|title| title.chars().count() > 64)
+            {
+                issues.push(ConfigIssue::error(
+                    format!("{path}.title"),
+                    "A workspace's title cannot be longer than 64 letters",
                 ));
             }
             // Room between and around the windows: nothing less than
@@ -2842,19 +3366,24 @@ impl Default for ScratchpadProfile {
 #[serde(default)]
 pub struct WorkspaceProfile {
     pub enabled: bool,
+    /// What the workspace is known by to everything that names it: the
+    /// keys that show it, window rules, the session that is restored. It
+    /// does not change when the workspace is given another title, so
+    /// nothing that names it has to follow.
     pub name: String,
-    /// Names it also answers to, on its display. A workspace that every
-    /// display has (`monitor: any`) can have another name on one display:
-    /// that display then has an entry of its own, which names here the
-    /// workspace whose place it takes. The entry for every display makes
-    /// no workspace there, and what names the workspace by the name the
-    /// others have (a key that shows workspace `1`) means this one on
-    /// this display.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub also_called: Vec<String>,
+    /// What is shown of it (its tab on the panel, the overview, the
+    /// studio), where that is something else than its name. A workspace
+    /// is renamed by giving it a title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     /// The display it is on. `Any`: every display has a workspace of its
     /// own by this name (the keys that show it show the one of the display
-    /// in use).
+    /// in use). A display can have an entry of its own for a workspace
+    /// that every display has (the same `name`, this display as
+    /// `monitor`): on that display the entry of its own counts, whole,
+    /// and the one for every display does not. So a display can call the
+    /// workspace something else, lay it out another way, or (with
+    /// `enabled` off) not have it.
     pub monitor: MonitorSelector,
     pub layout: LayoutType,
     pub default: bool,
@@ -2895,7 +3424,7 @@ impl Default for WorkspaceProfile {
     fn default() -> Self {
         Self {
             extra: Default::default(),
-            also_called: Vec::new(),
+            title: None,
             enabled: true,
             name: "Workspace".to_string(),
             // Every display has the workspace, each its own: a display
@@ -4440,41 +4969,288 @@ mod workspace_per_display_tests {
     use super::*;
     use crate::command::{DispatchCommand, WorkspaceSelector};
 
+    fn labels(desktop: &DesktopConfig, display: &str) -> Vec<String> {
+        desktop
+            .workspaces_on(&DisplayRef::named(display))
+            .iter()
+            .map(|profile| profile.label().to_string())
+            .collect()
+    }
+
     #[test]
-    fn a_workspace_renamed_on_one_display_keeps_its_name_on_the_others() {
+    fn a_workspace_titled_on_one_display_keeps_its_name_everywhere() {
         let mut desktop = crate::examples::starting_configuration().desktop;
         let before = desktop.workspaces.len();
         let bindings = serde_json::to_value(&desktop.bindings).unwrap();
-        assert!(desktop.rename_workspace_on("DP-1", "1", "web"));
+        let (one, two) = (DisplayRef::named("DP-1"), DisplayRef::named("DP-2"));
+        assert_eq!(desktop.title_workspace_on(&one, "1", "web"), Titled::Changed);
         // The entry for every display is as it was; this display has one
-        // of its own, right after it, that takes its place.
+        // of its own for the same workspace, right after it.
         assert_eq!(desktop.workspaces.len(), before + 1);
         let shared = desktop.workspaces.iter().position(|p| p.name == "1").unwrap();
         let own = &desktop.workspaces[shared + 1];
-        assert_eq!(own.name, "web");
+        assert_eq!((own.name.as_str(), own.title.as_deref()), ("1", Some("web")));
         assert_eq!(own.monitor, MonitorSelector::Name("DP-1".to_string()));
-        assert_eq!(own.also_called, vec!["1".to_string()]);
-        assert_eq!(desktop.workspaces[shared].monitor, MonitorSelector::Any);
-        // The keys are as they were: the one for workspace 1 means the
-        // renamed one on this display, by the name it also answers to.
+        assert_eq!(desktop.workspaces[shared].title, None);
+        // Nothing that names the workspace has changed, and nothing has to.
         assert_eq!(serde_json::to_value(&desktop.bindings).unwrap(), bindings);
         assert!(desktop.bindings.iter().any(|binding| matches!(
             &binding.command,
             DispatchCommand::SwitchWorkspaceSelector { selector: WorkspaceSelector::Name(name) } if name == "1"
         )));
+        assert_eq!(labels(&desktop, "DP-1")[0], "web");
+        assert_eq!(labels(&desktop, "DP-2")[0], "1");
+        assert_eq!(labels(&desktop, "DP-1").len(), labels(&desktop, "DP-2").len());
         assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
 
-        // Renamed again there: the same entry, still in the other's place.
-        assert!(desktop.rename_workspace_on("DP-1", "web", "mail"));
+        // Titled again there, as often as one likes: the same entry.
+        assert_eq!(desktop.title_workspace_on(&one, "1", "mail"), Titled::Changed);
+        assert_eq!(desktop.title_workspace_on(&one, "1", " mail "), Titled::Same);
         assert_eq!(desktop.workspaces.len(), before + 1);
-        assert_eq!(desktop.workspaces[shared + 1].name, "mail");
-        assert_eq!(desktop.workspaces[shared + 1].also_called, vec!["1".to_string()]);
-        // Another display renames its own.
-        assert!(desktop.rename_workspace_on("DP-2", "1", "chat"));
+        assert_eq!(labels(&desktop, "DP-1")[0], "mail");
+        // Another display has a title of its own for it.
+        assert_eq!(desktop.title_workspace_on(&two, "1", "chat"), Titled::Changed);
         assert_eq!(desktop.workspaces.len(), before + 2);
-        // A name that is taken, and one nobody has.
-        assert!(!desktop.rename_workspace_on("DP-2", "2", "mail"));
-        assert!(!desktop.rename_workspace_on("DP-2", "nothing", "x"));
+        assert_eq!((labels(&desktop, "DP-1")[0].as_str(), labels(&desktop, "DP-2")[0].as_str()), ("mail", "chat"));
+        // The same title on two displays is nobody's trouble.
+        assert_eq!(desktop.title_workspace_on(&two, "2", "mail"), Titled::Changed);
+        // What another workspace of the display is shown by or named,
+        // and a workspace nobody has.
+        assert_eq!(desktop.title_workspace_on(&one, "2", "mail"), Titled::Taken);
+        assert_eq!(desktop.title_workspace_on(&one, "2", "3"), Titled::Taken);
+        assert_eq!(desktop.title_workspace_on(&one, "nothing", "x"), Titled::Unknown);
         assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
+
+        // The title given back: the display's own entry says nothing of
+        // its own any more and is gone.
+        assert_eq!(desktop.title_workspace_on(&one, "1", ""), Titled::Changed);
+        assert_eq!(labels(&desktop, "DP-1")[0], "1");
+        assert_eq!(desktop.workspaces.len(), before + 2);
+        assert!(!desktop.workspaces.iter().any(|profile| {
+            profile.name == "1" && profile.monitor == MonitorSelector::Name("DP-1".to_string())
+        }));
+    }
+
+    #[test]
+    fn a_title_for_every_display_is_written_in_every_entry() {
+        let mut desktop = crate::examples::starting_configuration().desktop;
+        let before = desktop.workspaces.len();
+        let one = DisplayRef::named("DP-1");
+        assert!(desktop.title_workspace_on(&one, "1", "web").changed());
+        assert_eq!(desktop.title_workspace("1", "Mail"), Titled::Changed);
+        // (The display's own entry said only its title: it is not needed.)
+        assert_eq!(desktop.workspaces.len(), before);
+        assert_eq!(labels(&desktop, "DP-1")[0], "Mail");
+        assert_eq!(labels(&desktop, "DP-9")[0], "Mail");
+        assert_eq!(desktop.title_workspace("2", "mail"), Titled::Taken);
+        assert_eq!(desktop.title_workspace("nothing", "x"), Titled::Unknown);
+        assert_eq!(desktop.title_workspace("1", "Mail"), Titled::Same);
+    }
+
+    #[test]
+    fn a_display_has_its_own_entry_before_the_one_for_every_display() {
+        let mut desktop = crate::examples::starting_configuration().desktop;
+        let shared = desktop.workspaces.iter().position(|p| p.name == "2").unwrap();
+        // DP-1 lays workspace 2 out another way, and does not have 3.
+        let mut own = desktop.workspaces[shared].clone();
+        own.monitor = MonitorSelector::Name("dp-1".to_string());
+        own.layout = crate::layout::LayoutType::Monocle;
+        desktop.workspaces.push(own);
+        let mut off = desktop.workspaces.iter().find(|p| p.name == "3").unwrap().clone();
+        off.monitor = MonitorSelector::Name("DP-1".to_string());
+        off.enabled = false;
+        desktop.workspaces.push(off);
+        assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
+
+        let one = DisplayRef::named("DP-1");
+        let there: Vec<&str> =
+            desktop.workspaces_on(&one).iter().map(|profile| profile.name.as_str()).collect();
+        // In the order they are written in, the display's own in the
+        // place of the one it stands for.
+        assert_eq!(&there[..3], ["1", "2", "4"]);
+        assert_eq!(
+            desktop.workspace_on(&one, "2").unwrap().layout,
+            crate::layout::LayoutType::Monocle
+        );
+        let two = DisplayRef::named("DP-2");
+        assert_ne!(
+            desktop.workspace_on(&two, "2").unwrap().layout,
+            crate::layout::LayoutType::Monocle
+        );
+        assert!(desktop.workspace_on(&two, "3").is_some());
+
+        // Twice for the same display: told of.
+        let again = desktop.workspaces[shared].clone();
+        desktop.workspaces.push(again);
+        assert!(!desktop.validate().is_empty());
+    }
+
+    #[test]
+    fn a_workspace_of_the_moment_is_written_down_for_its_display() {
+        let mut desktop = crate::examples::starting_configuration().desktop;
+        let one = DisplayRef::named("DP-1");
+        assert!(desktop.keep_workspace_on(&one, "10", "music"));
+        let kept = desktop.workspace_on(&one, "10").unwrap();
+        assert_eq!(kept.label(), "music");
+        assert!(kept.persistent && !kept.default);
+        assert!(desktop.workspace_on(&DisplayRef::named("DP-2"), "10").is_none());
+        // It is the display's last, and one it has is not written twice.
+        assert_eq!(desktop.workspaces_on(&one).last().unwrap().name, "10");
+        assert!(!desktop.keep_workspace_on(&one, "10", "again"));
+        assert!(!desktop.keep_workspace_on(&one, "1", "again"));
+        assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
+    }
+
+    #[test]
+    fn a_workspace_is_changed_for_one_display_or_for_all() {
+        use crate::layout::LayoutType;
+        let mut desktop = crate::examples::starting_configuration().desktop;
+        let before = desktop.workspaces.len();
+        let (one, two) = (DisplayRef::named("DP-1"), DisplayRef::named("DP-2"));
+        let layout = |desktop: &DesktopConfig, display: &DisplayRef, name: &str| {
+            desktop.workspace_on(display, name).map(|profile| profile.layout)
+        };
+        let shared = layout(&desktop, &one, "2").unwrap();
+        let other = if shared == LayoutType::Monocle { LayoutType::BSP } else { LayoutType::Monocle };
+
+        // For one display: an entry of its own, and gone again when it
+        // says what every display has.
+        assert!(desktop.edit_workspace_on(&one, "2", |profile| profile.layout = other));
+        assert_eq!(desktop.workspaces.len(), before + 1);
+        assert_eq!(layout(&desktop, &one, "2"), Some(other));
+        assert_eq!(layout(&desktop, &two, "2"), Some(shared));
+        assert!(desktop.own_workspace_entry(&one, "2").is_some());
+        // (Its name and its display are not `change`'s to touch.)
+        assert!(desktop.edit_workspace_on(&one, "2", |profile| {
+            profile.name = "x".to_string();
+            profile.monitor = MonitorSelector::Any;
+        }));
+        assert_eq!(layout(&desktop, &one, "2"), Some(other));
+        assert!(desktop.edit_workspace_on(&one, "2", |profile| profile.layout = shared));
+        assert_eq!(desktop.workspaces.len(), before);
+        assert!(!desktop.edit_workspace_on(&one, "nothing", |_| {}));
+
+        // For every display: in every entry.
+        assert!(desktop.title_workspace_on(&one, "2", "mail").changed());
+        assert!(desktop.edit_workspace("2", |profile| profile.layout = other));
+        assert_eq!(layout(&desktop, &one, "2"), Some(other));
+        assert_eq!(layout(&desktop, &two, "2"), Some(other));
+        // As every display has it again.
+        assert!(desktop.share_workspace_on(&one, "2"));
+        assert_eq!(desktop.workspace_on(&one, "2").unwrap().label(), "2");
+        assert!(!desktop.share_workspace_on(&one, "2"));
+
+        // Not on this display, and back.
+        assert!(desktop.have_workspace_on(&one, "3", false));
+        assert!(desktop.workspace_on(&one, "3").is_none());
+        assert!(desktop.workspace_on(&two, "3").is_some());
+        assert!(desktop.have_workspace_on(&one, "3", true));
+        assert!(desktop.workspace_on(&one, "3").is_some());
+        assert_eq!(desktop.workspaces.len(), before);
+
+        // The one a display starts with: no other is that there.
+        desktop.start_with_workspace(Some(&one), "2");
+        let starts = |desktop: &DesktopConfig, display: &DisplayRef| -> Vec<String> {
+            desktop
+                .workspaces_on(display)
+                .iter()
+                .filter(|profile| profile.default)
+                .map(|profile| profile.name.clone())
+                .collect()
+        };
+        assert_eq!(starts(&desktop, &one), ["2"]);
+        assert_eq!(starts(&desktop, &two), ["1"]);
+        desktop.start_with_workspace(None, "4");
+        assert_eq!(starts(&desktop, &one), ["4"]);
+        assert_eq!(starts(&desktop, &two), ["4"]);
+        assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
+    }
+
+    #[test]
+    fn workspaces_are_added_taken_out_and_put_in_order() {
+        let mut desktop = crate::examples::starting_configuration().desktop;
+        let one = DisplayRef::named("DP-1");
+        let names = |desktop: &DesktopConfig, display: &str| -> Vec<String> {
+            desktop
+                .workspaces_on(&DisplayRef::named(display))
+                .iter()
+                .map(|profile| profile.name.clone())
+                .collect()
+        };
+        let before = names(&desktop, "DP-1");
+        assert_eq!(&before[..4], ["1", "2", "3", "4"]);
+
+        // A new one for every display, and one for a single display: the
+        // lowest numbers that are free, after the others.
+        let everywhere = desktop.add_workspace(None);
+        let here = desktop.add_workspace(Some(&one));
+        assert_eq!(everywhere, (before.len() + 1).to_string());
+        assert_eq!(here, (before.len() + 2).to_string());
+        assert_eq!(names(&desktop, "DP-1").len(), before.len() + 2);
+        assert_eq!(names(&desktop, "DP-2").len(), before.len() + 1);
+        let added = desktop.workspace_on(&one, &here).unwrap();
+        assert!(added.persistent && !added.default && added.title.is_none());
+        assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
+
+        // Put in another order, with every entry a workspace has.
+        assert!(desktop.title_workspace_on(&one, "3", "mail").changed());
+        assert!(desktop.move_workspace("3", Some("1")));
+        assert_eq!(&names(&desktop, "DP-1")[..4], ["3", "1", "2", "4"]);
+        assert_eq!(&names(&desktop, "DP-2")[..4], ["3", "1", "2", "4"]);
+        assert_eq!(desktop.workspace_on(&one, "3").unwrap().label(), "mail");
+        assert!(desktop.move_workspace("3", None));
+        assert_eq!(names(&desktop, "DP-1").last().map(String::as_str), Some("3"));
+        assert!(!desktop.move_workspace("3", None));
+        assert!(!desktop.move_workspace("3", Some("3")));
+
+        // Taken out: every entry.
+        assert!(desktop.remove_workspace("3"));
+        assert!(!names(&desktop, "DP-1").contains(&"3".to_string()));
+        assert!(!desktop.workspaces.iter().any(|profile| profile.name == "3"));
+        assert!(!desktop.remove_workspace("3"));
+        // One that only this display has, not wanted there: gone.
+        assert!(desktop.have_workspace_on(&one, &here, false));
+        assert!(!desktop.workspaces.iter().any(|profile| profile.name == here));
+        assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
+    }
+
+    #[test]
+    fn a_display_of_the_state_is_named_as_the_configuration_names_it() {
+        let monitor = serde_json::json!({
+            "name": "Monitor ACM2702", "connector": r"\\?\DISPLAY#ACM", "is_primary": true
+        });
+        let display = DisplayRef::of_state(&monitor, Some(1));
+        assert_eq!(display.name(), r"\\?\DISPLAY#ACM");
+        assert!(display.is_called("monitor acm2702"));
+        assert!(display.is_meant_by(&MonitorSelector::Primary));
+        assert!(display.is_meant_by(&MonitorSelector::Index(1)));
+        assert!(!display.is_meant_by(&MonitorSelector::Index(0)));
+        assert!(display.is_meant_by(&MonitorSelector::Name("Monitor ACM2702".to_string())));
+        let bare = DisplayRef::of_state(&serde_json::json!({"name": "eDP-1", "connector": ""}), None);
+        assert_eq!(bare.name(), "eDP-1");
+    }
+
+    #[test]
+    fn an_entry_in_the_place_of_another_becomes_that_workspaces_entry() {
+        // (As a panel's renaming wrote it before version 25.)
+        let config = crate::Config::from_json(
+            r#"{"desktop": {"schema_version": 24, "workspaces": [
+                {"name": "Saturn", "monitor": "Any"},
+                {"name": "1", "also_called": ["Saturn"], "monitor": {"Name": "DP-1"}},
+                {"name": "3", "monitor": "Any"}
+            ]}}"#,
+        )
+        .expect("a configuration");
+        let desktop = config.desktop;
+        assert_eq!(desktop.schema_version, DESKTOP_CONFIG_SCHEMA_VERSION);
+        assert_eq!(desktop.workspaces.len(), 3);
+        assert_eq!(labels(&desktop, "DP-1"), ["1", "3"]);
+        assert_eq!(labels(&desktop, "DP-2"), ["Saturn", "3"]);
+        let own = desktop.workspace_on(&DisplayRef::named("DP-1"), "saturn").unwrap();
+        assert_eq!((own.name.as_str(), own.title.as_deref()), ("Saturn", Some("1")));
+        assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
+        // Written again, nothing of the old way is left.
+        let text = serde_json::to_string(&desktop).unwrap();
+        assert!(!text.contains("also_called"));
     }
 }

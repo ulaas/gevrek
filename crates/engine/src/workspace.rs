@@ -115,11 +115,20 @@ impl ExposeState {
 /// Workspace holds containers and manages their layout
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Workspace {
-    /// Name of this workspace
+    /// What the workspace is known by to what names it (keys, rules, a
+    /// saved session). It is one of a kind on its display.
     pub name: String,
-    /// Names it also answers to (`WorkspaceProfile::also_called`): the
-    /// name the workspace in its place has on the other displays.
-    pub also_called: Vec<String>,
+    /// What is shown of it, where that is something else than its name
+    /// (`WorkspaceProfile::title`). Renaming a workspace gives it a title.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// The configuration has an entry for it on this display.
+    #[serde(default)]
+    pub configured: bool,
+    /// It stays when it is left empty. One that does not is taken away
+    /// when the display shows another and it has no window.
+    #[serde(default)]
+    pub persistent: bool,
 
     /// Containers for tiled windows
     pub containers: Ring<Container>,
@@ -336,22 +345,67 @@ pub struct BorderLook {
     pub floating: bool,
 }
 
+/// The number a name stands for: `3`, `Workspace 3`, and `Workspace` (1).
+pub fn number_of(name: &str) -> Option<usize> {
+    let name = name.trim();
+    let digits = match name.get(..9) {
+        Some(word) if word.eq_ignore_ascii_case("workspace") => name[9..].trim(),
+        _ => name,
+    };
+    if digits.is_empty() {
+        return (digits.len() != name.len()).then_some(1);
+    }
+    (digits.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| digits.parse().ok())
+        .flatten()
+        .filter(|number| *number > 0)
+}
+
 impl Workspace {
-    /// Whether the workspace is the one meant by a name: its own, or one
-    /// it also answers to.
+    /// Whether the workspace is the one meant by a name: its own, or what
+    /// it is shown by. (Among a display's workspaces the one of that name
+    /// comes before one that is only shown by it: `position_called`.)
     pub fn is_called(&self, name: &str) -> bool {
         let name = name.trim();
-        self.name.eq_ignore_ascii_case(name)
-            || self
-                .also_called
-                .iter()
-                .any(|other| other.trim().eq_ignore_ascii_case(name))
+        self.name.trim().eq_ignore_ascii_case(name) || self.label().eq_ignore_ascii_case(name)
+    }
+
+    /// What is shown of it: its title, or its name where it has none.
+    pub fn label(&self) -> &str {
+        match self.title.as_deref().map(str::trim) {
+            Some(title) if !title.is_empty() => title,
+            _ => self.name.trim(),
+        }
+    }
+
+    /// The number a workspace shows as, where it shows as one: `3`, and
+    /// the older `Workspace 3` and `Workspace` (the first).
+    pub fn number(&self) -> Option<usize> {
+        number_of(self.label()).or_else(|| number_of(&self.name))
+    }
+
+    /// Where among workspaces the one meant by `name` is: the one of that
+    /// name, or else the one shown by it.
+    pub fn position_called(workspaces: &[Workspace], name: &str) -> Option<usize> {
+        let name = name.trim();
+        workspaces
+            .iter()
+            .position(|workspace| workspace.name.trim().eq_ignore_ascii_case(name))
+            .or_else(|| {
+                workspaces
+                    .iter()
+                    .position(|workspace| workspace.label().eq_ignore_ascii_case(name))
+            })
     }
 
     pub fn new(id: usize, name: String) -> Self {
         Self {
             name,
-            also_called: Vec::new(),
+            title: None,
+            configured: false,
+            // (One made for the moment says so itself: see
+            // `Executor::create_workspace_for_selector`.)
+            persistent: true,
             containers: Ring::new(),
             floating_windows: Ring::new(),
             layout: LayoutType::BSP,

@@ -940,23 +940,28 @@ fn carry_out(choice: Choice) -> Result<(), String> {
 
 /// Ask for a workspace's new name, in a small box on the display of the
 /// panel whose tab was pressed. Enter gives the workspace of that display
-/// the name, and leaves the workspaces of the old name on the other
-/// displays as they are: it is written into the configuration as an entry
-/// of this display's own (`DesktopConfig::rename_workspace_on`), which the
-/// window manager takes in at once and has again when it is started anew.
+/// the name as its title, and leaves the workspaces of that name on the
+/// other displays as they are (`panel::renaming`): it is written into the
+/// configuration, which the window manager takes in at once and has again
+/// when it is started anew. A name that cannot be is said in the box,
+/// which stays.
+///
+/// `place` is the display as the window manager and the configuration
+/// name it, `name` what the workspace is known by there, `label` what it
+/// is shown by now.
 fn ask_workspace_name(
     state: &Rc<RefCell<State>>,
     control: &mut Control,
-    display: &str,
-    old: &str,
-    others: Vec<String>,
+    place: gevrek_model::settings::DisplayRef,
+    name: &str,
+    label: &str,
 ) {
     if let Some((id, ..)) = state.borrow_mut().rename.take() {
         if control.is_open(id) {
             control.close(id);
         }
     }
-    let place = Place {
+    let surface = Place {
         name: surface_name("gevrek-rename"),
         edge: Edge::Centre,
         level: Level::Overlay,
@@ -966,18 +971,17 @@ fn ask_workspace_name(
         keyboard: Keyboard::Exclusive,
         margin: 0,
         // (The display the pointer is on, which is the one of the panel
-        // whose tab was pressed. Not by `display`: that is the window
-        // manager's name for it, and a surface is put on a display by
-        // Windows' name; asked for by the other, no box was made at all.)
+        // whose tab was pressed. Not by the display's name: that is the
+        // window manager's name for it, and a surface is put on a display
+        // by Windows' name; asked for by the other, no box was made at
+        // all.)
         output: None,
     };
-    // (The display whose workspace is renamed, as the window manager
-    // names it: the workspaces of that name on the others keep theirs.)
-    let display = display.to_string();
+    let key = name.to_string();
     let shared = Rc::clone(state);
     let mut fonts = false;
     let mut had_keyboard = false;
-    let id = control.open(place, move |ui, _| {
+    let id = control.open(surface, move |ui, _| {
         let context = ui.ctx().clone();
         let mut state = shared.borrow_mut();
         let state = &mut *state;
@@ -989,45 +993,20 @@ fn ask_workspace_name(
             context.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
         let before = name.clone();
         match panel::rename_box(ui, &palette, &old, &mut name, &problem) {
-            Some(true) => {
-                let new = name.trim().to_string();
-                if others.iter().any(|other| other.eq_ignore_ascii_case(&new)) {
-                    problem = format!("Another workspace is called \u{201c}{new}\u{201d} already.");
-                } else {
-                    if !new.eq_ignore_ascii_case(&old) || new != old {
-                        // Written into the configuration, for this
-                        // display alone: the window manager gives the
-                        // workspace its name as it takes the configuration
-                        // in, and has it again when it is started anew.
-                        let written = state.config.clone().and_then(|mut changed| {
-                            changed
-                                .desktop
-                                .rename_workspace_on(&display, &old, &new)
-                                .then_some(changed)
-                        });
-                        match written {
-                            Some(changed) => state.link.send(Request::Apply {
-                                config: changed,
-                                base_revision: state.revision,
-                                client_id: "gevrek-shell".to_string(),
-                            }),
-                            // A workspace the configuration does not have
-                            // (made by hand, or by the graph): renamed for
-                            // as long as it is there.
-                            None => {
-                                log::info!(
-                                    "workspace {old:?} is renamed to {new:?} for now: the configuration has no workspace by that name to keep the new one"
-                                );
-                                state
-                                    .link
-                                    .send(Request::Dispatch(panel::rename_workspace(&old, &new)));
-                            }
-                        }
-                        state.link.send(Request::StateAfter(Duration::from_millis(120)));
-                    }
+            Some(true) => match panel::renaming(state.config.as_deref(), &place, &key, &name) {
+                panel::Renaming::Nothing => close = true,
+                panel::Renaming::Refused(why) => problem = why,
+                panel::Renaming::Apply(changed) => {
+                    log::info!(
+                        "workspace {key:?} of {} is shown as {:?} from now on",
+                        place.name(),
+                        name.trim()
+                    );
+                    apply_configuration(state, changed);
+                    state.link.send(Request::StateAfter(Duration::from_millis(120)));
                     close = true;
                 }
-            }
+            },
             Some(false) => close = true,
             None => {
                 if name != before {
@@ -1045,7 +1024,22 @@ fn ask_workspace_name(
         }
         Flow::Continue
     });
-    state.borrow_mut().rename = Some((id, old.to_string(), old.to_string(), String::new()));
+    state.borrow_mut().rename = Some((id, label.to_string(), label.to_string(), String::new()));
+}
+
+/// Give the window manager a configuration the shell changed (a
+/// workspace's title, what the taskbar shows). It is the shell's own from
+/// this moment, so that a second change made before the window manager
+/// has answered builds on the first; the revision it answers with is
+/// taken in `Event::Applied`, and a change it refuses is told and the
+/// running configuration fetched again.
+fn apply_configuration(state: &mut State, changed: Box<gevrek_model::Config>) {
+    state.link.send(Request::Apply {
+        config: changed.clone(),
+        base_revision: state.revision,
+        client_id: "gevrek-shell".to_string(),
+    });
+    state.config = Some(changed);
 }
 
 /// Open the power menu, or close it when it is open. It has the keyboard
@@ -2455,7 +2449,10 @@ fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
                     }
                     state.views = panel::displays(&wm)
                         .into_iter()
-                        .map(|(name, monitor)| (name, panel::view_of(monitor)))
+                        .enumerate()
+                        .map(|(index, (name, monitor))| {
+                            (name, panel::view_at(monitor, Some(index)))
+                        })
                         .collect();
                     // What every panel shows.
                     let notices = panel::notices(&wm);
@@ -2502,6 +2499,25 @@ fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
             }
             // The look follows the configuration.
             Event::Changed { .. } => state.borrow().link.send(Request::Fetch),
+            // What the shell itself changed is what runs, from this
+            // revision on.
+            Event::Applied(revision) => state.borrow_mut().revision = revision,
+            // A change of the shell's that was not taken: said, and what
+            // runs is fetched again.
+            Event::Conflict(why) | Event::ApplyFailed(why) => {
+                log::warn!("a change of the shell's was not kept: {why}");
+                state.borrow().link.send(Request::Fetch);
+                tell(state, "The change was not kept", &why, -1, control);
+            }
+            // A command of the shell's that the window manager could not
+            // carry out: said, not swallowed.
+            Event::Dispatched {
+                command,
+                error: Some(error),
+            } => {
+                log::warn!("the window manager did not carry out {command}: {error}");
+                tell(state, "That did not work", &error, -1, control);
+            }
             // No window manager: nobody keeps the panel's room, and there
             // is nothing to show. The panels are back when it is.
             Event::Disconnected(_) => {
@@ -2711,12 +2727,11 @@ fn draw_panel(
                 .to_string(),
         ));
     }
-    if let Some(index) = asked.show {
-        state.link.send(Request::Dispatch(panel::show_workspace_at(
-            display,
-            view.focused,
-            index,
-        )));
+    // By the display and the workspace's name, not by its place among
+    // the tabs: a place that is stale by the time the window manager
+    // hears of it would name another workspace, or make one.
+    if let Some(command) = asked.show.and_then(|index| panel::show_tab(&view, index)) {
+        state.link.send(Request::Dispatch(command));
     }
     // (Open as the host has it, too: a menu the host put away for a press
     // elsewhere or for Escape is closed before its drawing is let go of,
@@ -2739,23 +2754,13 @@ fn draw_panel(
         }
         if let Some(mut changed) = state.config.clone() {
             changed.desktop.shell.panel.tasks_of_all_workspaces = all;
-            state.link.send(Request::Apply {
-                config: changed,
-                base_revision: state.revision,
-                client_id: "gevrek-shell".to_string(),
-            });
+            apply_configuration(state, changed);
         }
         redraw_panels(state, control);
     }
     // A right-click on a workspace's tab: its new name is asked for.
     if let Some(tab) = asked.rename.and_then(|index| view.tabs.get(index)) {
-        let others: Vec<String> = view
-            .tabs
-            .iter()
-            .filter(|other| other.name != tab.name)
-            .map(|other| other.name.clone())
-            .collect();
-        ask_workspace_name(shared, control, display, &tab.name, others);
+        ask_workspace_name(shared, control, view.place.clone(), &tab.name, &tab.label);
     }
     if asked.sound.is_some() || asked.show.is_some() {
         log::debug!(
@@ -2832,7 +2837,7 @@ fn draw_panel(
             let first = (!view.focused)
                 .then(|| view.tabs.iter().position(|tab| tab.shown))
                 .flatten()
-                .map(|index| panel::show_workspace_at(display, false, index));
+                .and_then(|index| panel::show_tab(&view, index));
             let line = Rc::clone(shared);
             control.popup(surface, anchor, panel::layout_menu_size(), move |ui, _| {
                 let _held = &held;

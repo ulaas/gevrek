@@ -890,6 +890,48 @@ impl Outputs {
         true
     }
 
+    /// Put a monitor's workspaces in an order: those `place` gives a
+    /// place, by it; the others after them, as they were among each other.
+    /// The workspace that is shown stays the one shown, and the one that
+    /// was visited before stays that. Returns whether anything moved.
+    pub fn order_workspaces(
+        &mut self,
+        monitor: MonitorHandle,
+        place: impl Fn(&crate::workspace::Workspace) -> Option<usize>,
+    ) -> bool {
+        let Some(workspaces) = self.workspaces.get_mut(&monitor) else {
+            return false;
+        };
+        let before: Vec<usize> = workspaces.iter().map(|workspace| workspace.id).collect();
+        let shown = workspaces.focused().map(|workspace| workspace.id);
+        let previous = self
+            .previous_workspace
+            .get(&monitor)
+            .and_then(|index| before.get(*index).copied());
+        // (A stable sort: what has no place keeps its order, after the
+        // rest.)
+        workspaces
+            .elements_mut()
+            .sort_by_key(|workspace| place(workspace).map_or((1, 0), |place| (0, place)));
+        let after: Vec<usize> = workspaces.iter().map(|workspace| workspace.id).collect();
+        if after == before {
+            return false;
+        }
+        let at = |id: usize| after.iter().position(|other| *other == id);
+        if let Some(index) = shown.and_then(at) {
+            workspaces.focus_at(index);
+        }
+        match previous.and_then(at) {
+            Some(index) => {
+                self.previous_workspace.insert(monitor, index);
+            }
+            None => {
+                self.previous_workspace.remove(&monitor);
+            }
+        }
+        true
+    }
+
     /// Close the focused workspace when it is empty and another workspace
     /// remains on the monitor. Returns the
     /// closed workspace's name. Focus advances to the workspace that shifts

@@ -283,7 +283,14 @@ pub fn changes(
 #[derive(Debug, Clone)]
 pub struct WorkspaceData {
     pub id: usize,
+    /// What it is known by to what names it (keys, rules, commands).
     pub name: String,
+    /// What is shown of it: its title, or its name where it has none.
+    pub title: String,
+    /// The configuration has an entry for it on its display.
+    pub configured: bool,
+    /// It stays when it is left empty.
+    pub persistent: bool,
     pub layout_type: String,
     pub total_windows: usize,
     pub tiled_windows: usize,
@@ -343,6 +350,9 @@ mod change_tests {
         WorkspaceData {
             id,
             name: name.to_string(),
+            title: name.to_string(),
+            configured: false,
+            persistent: true,
             layout_type: layout.to_string(),
             total_windows: 0,
             tiled_windows: 0,

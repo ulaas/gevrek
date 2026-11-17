@@ -32,6 +32,7 @@ pub mod preview;
 pub mod rawtext;
 pub mod reorder;
 pub mod rules_live;
+pub mod workspaces;
 pub mod sample;
 pub mod sandbox;
 pub mod session;

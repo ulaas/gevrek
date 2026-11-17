@@ -2115,10 +2115,15 @@ impl Runtime {
         // against the new topology (reserved areas, index preferences).
         Self::configure_monitor_profiles(&mut self.core.monitor_manager, &self.config.desktop);
         if !changes.attached.is_empty() {
+            // The new display gets the workspaces the configuration has
+            // for it and shows the one it is to start with; the displays
+            // that were there go on showing what they show. (Only a
+            // display the configuration gives nothing gets one made up.)
+            self.apply_appearance_profile();
+            self.apply_workspace_profile_set(|_| true, false);
             if let Err(error) = self.ensure_default_workspaces() {
                 log::warn!("Could not create workspaces for a new monitor: {}", error);
             }
-            self.apply_workspace_profiles();
         }
         self.core.zone_manager =
             Self::build_zone_manager(&self.config.desktop.zones, &self.core.monitor_manager);

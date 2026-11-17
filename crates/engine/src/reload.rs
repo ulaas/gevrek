@@ -32,18 +32,46 @@ pub fn changed_profile_names(
     old: &[WorkspaceProfile],
     new: &[WorkspaceProfile],
 ) -> HashSet<String> {
-    let old_by_name: HashMap<String, &WorkspaceProfile> = old
+    // (A workspace can have several entries: one for every display and
+    // one of a display's own. All of them together are what is compared;
+    // one that is no longer written down has changed too.)
+    let grouped = |profiles: &[WorkspaceProfile]| {
+        let mut by_name: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
+        for profile in profiles {
+            by_name
+                .entry(profile_key(&profile.name))
+                .or_default()
+                .push(serde_json::to_value(profile).unwrap_or_default());
+        }
+        by_name
+    };
+    let (before, after) = (grouped(old), grouped(new));
+    let mut changed: HashSet<String> = after
         .iter()
-        .map(|profile| (profile_key(&profile.name), profile))
+        .filter(|(name, entries)| before.get(*name) != Some(*entries))
+        .map(|(name, _)| name.clone())
         .collect();
-    new.iter()
-        .filter(|profile| {
-            old_by_name
-                .get(&profile_key(&profile.name))
-                .is_none_or(|previous| !same(*previous, *profile))
-        })
-        .map(|profile| profile_key(&profile.name))
-        .collect()
+    changed.extend(before.keys().filter(|name| !after.contains_key(*name)).cloned());
+    // Written in another order: the displays' workspaces are put in it.
+    // Every one counts as changed then (nothing else says "the order").
+    let order = |profiles: &[WorkspaceProfile]| -> Vec<String> {
+        let mut seen = Vec::new();
+        for profile in profiles {
+            let name = profile_key(&profile.name);
+            if !seen.contains(&name) {
+                seen.push(name);
+            }
+        }
+        seen
+    };
+    let (was, is) = (order(old), order(new));
+    let kept = |names: &[String], other: &[String]| -> Vec<String> {
+        names.iter().filter(|name| other.contains(name)).cloned().collect()
+    };
+    if kept(&was, &is) != kept(&is, &was) {
+        changed.extend(is);
+    }
+    changed
 }
 
 /// Which parts of the configuration differ between the running one and a

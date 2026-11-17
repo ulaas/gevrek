@@ -22,7 +22,9 @@ impl WorkspaceProfileApply for WorkspaceProfile {
         workspace: &mut crate::workspace::Workspace,
         appearance: &AppearanceProfile,
     ) {
-        workspace.also_called = self.also_called.clone();
+        workspace.title = self.title_for(self.label());
+        workspace.configured = true;
+        workspace.persistent = self.persistent || self.default;
         workspace.layout = self.layout;
         workspace.padding = crate::container::Padding::uniform(self.gaps_out);
         workspace.container_padding = crate::container::Padding::uniform(self.gaps_in);

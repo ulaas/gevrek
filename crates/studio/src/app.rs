@@ -225,6 +225,8 @@ pub struct Studio {
     every_key_refused: bool,
     appearance_preview: crate::preview::AppearancePreview,
     layout_preview: crate::preview::LayoutPreview,
+    /// The workspaces of each display.
+    workspaces: crate::workspaces::Page,
     zones_edit: crate::zones_edit::ZonesEdit,
     /// This studio asked the window manager to have a window picked,
     /// and has not heard which yet.
@@ -341,6 +343,7 @@ impl Studio {
             every_key_refused: false,
             appearance_preview: Default::default(),
             layout_preview: Default::default(),
+            workspaces: Default::default(),
             zones_edit: Default::default(),
             picking: false,
             arrangement: Default::default(),
@@ -460,6 +463,9 @@ impl Studio {
                     }
                     self.applying = false;
                     self.line_down = reason;
+                    // (What it said of itself is of a window manager that
+                    // is gone: nothing is shown as if it still ran.)
+                    self.state = None;
                 }
                 Event::Configuration(config, revision) => {
                     self.fetch_problem = None;
@@ -1369,13 +1375,6 @@ impl Studio {
                         });
                     }
                 }
-                if page == Page::Workspaces {
-                    if let Some(config) = self.document.config().cloned() {
-                        widgets::card(ui, "Where the windows go", |ui| {
-                            self.layout_preview.show(ui, &config);
-                        });
-                    }
-                }
                 // Where the system keeps the idle times, its own are shown
                 // above the settings that are not kept there.
                 #[cfg(windows)]
@@ -1490,6 +1489,23 @@ impl Studio {
                         });
                         if let Some(command) = asked {
                             self.link.send(Request::Dispatch(command));
+                        }
+                        continue;
+                    }
+                    // The workspaces are each display's own: shown display
+                    // by display, with what runs of them now.
+                    if card.pointer == "/desktop/workspaces" {
+                        self.ask_state();
+                        let state = self.state.as_ref();
+                        widgets::card(ui, card.title, |ui| {
+                            self.workspaces.show(ui, &mut self.document, state);
+                        });
+                        // How a layout places so many windows, below the
+                        // list it is chosen in.
+                        if let Some(config) = self.document.config().cloned() {
+                            widgets::card(ui, "Where the windows go", |ui| {
+                                self.layout_preview.show(ui, &config);
+                            });
                         }
                         continue;
                     }
