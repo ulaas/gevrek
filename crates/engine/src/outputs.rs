@@ -239,10 +239,11 @@ pub struct Outputs {
     /// The place kept for gevrek's bar on every monitor, if it has one.
     bar: Option<gevrek_model::settings::PanelProfile>,
     /// The displays are measured in their own pixels (Windows), not in
-    /// pixels that already count the scale in (a compositor): the panel's
-    /// height and margin, which the configuration gives as they are seen,
-    /// are then so many more pixels on a display with a larger scale.
-    bar_in_display_pixels: bool,
+    /// pixels that already count the scale in (a compositor): the lengths
+    /// the configuration gives as they are seen - the panel's height and
+    /// margin, the gaps, the borders, the tab strip - are then so many
+    /// more pixels on a display with a larger scale.
+    lengths_in_display_pixels: bool,
     /// Until then the bar's place is kept although no bar is seen yet
     /// (the bar starts after the window manager).
     bar_expected_until: Option<std::time::Instant>,
@@ -431,21 +432,27 @@ impl Outputs {
     /// this display has none (`PanelOnDisplay::enabled`). No room is kept
     /// there then, and no panel has a place.
     /// The backend measures the displays in their own pixels: the panel
-    /// is as high as its display's scale makes it (see the field).
-    pub fn set_bar_in_display_pixels(&mut self, on: bool) {
-        self.bar_in_display_pixels = on;
+    /// is as high, and the gaps and borders of a layout as wide, as the
+    /// display's scale makes them (see the field).
+    pub fn set_lengths_in_display_pixels(&mut self, on: bool) {
+        self.lengths_in_display_pixels = on;
     }
 
     /// A length of the panel (its height, its margin), as the
     /// configuration gives it, in the pixels the display `monitor` is
     /// measured in.
     fn bar_pixels(&self, monitor: MonitorHandle, length: i32) -> i32 {
-        let scale = self
-            .get_monitor(monitor)
-            .filter(|_| self.bar_in_display_pixels)
+        (length as f32 * self.length_scale(monitor)).round() as i32
+    }
+
+    /// How many pixels of the display `monitor` one pixel of the
+    /// configuration is: the display's scale where the displays are
+    /// measured in their own pixels, 1 elsewhere.
+    pub fn length_scale(&self, monitor: MonitorHandle) -> f32 {
+        self.get_monitor(monitor)
+            .filter(|_| self.lengths_in_display_pixels)
             .map_or(1.0, |display| display.dpi_scale)
-            .clamp(0.5, 8.0);
-        (length as f32 * scale).round() as i32
+            .clamp(0.5, 8.0)
     }
 
     fn bar_on(&self, monitor: MonitorHandle) -> Option<&gevrek_model::settings::PanelProfile> {
@@ -526,7 +533,7 @@ impl Outputs {
             reserved_areas: HashMap::new(),
             details: HashMap::new(),
             bar: None,
-            bar_in_display_pixels: false,
+            lengths_in_display_pixels: false,
             bar_expected_until: None,
             panel_seen: false,
             global_work_area_offset: ReservedArea::default(),
@@ -681,7 +688,14 @@ impl Outputs {
 
     /// Get mutable workspaces for a monitor
     pub fn get_workspaces_mut(&mut self, monitor: MonitorHandle) -> Option<&mut Ring<Workspace>> {
-        self.workspaces.get_mut(&monitor)
+        // (Whoever lays a workspace out gets it here: it is told the
+        // scale of the display it is on now, see `Workspace::scale`.)
+        let scale = self.length_scale(monitor);
+        let workspaces = self.workspaces.get_mut(&monitor)?;
+        for workspace in workspaces.iter_mut() {
+            workspace.scale = scale;
+        }
+        Some(workspaces)
     }
 
     /// Get the focused workspace on a monitor
@@ -691,7 +705,7 @@ impl Outputs {
 
     /// Get mutable focused workspace on a monitor
     pub fn get_focused_workspace_mut(&mut self, monitor: MonitorHandle) -> Option<&mut Workspace> {
-        self.workspaces.get_mut(&monitor)?.focused_mut()
+        self.get_workspaces_mut(monitor)?.focused_mut()
     }
 
     /// Move the focused workspace from one monitor to another and focus it
@@ -1397,13 +1411,68 @@ mod tests {
         assert_eq!(room(&outputs, second), 40);
 
         // The displays' own pixels: by each display's scale.
-        outputs.set_bar_in_display_pixels(true);
+        outputs.set_lengths_in_display_pixels(true);
         assert_eq!(outputs.bar_rect(first).unwrap().height, 36);
         assert_eq!(room(&outputs, first), 40);
         let place = outputs.bar_rect(second).unwrap();
         assert_eq!(place.height, 54);
         assert_eq!((place.x, place.y), (1920 + 6, 6), "its margin too");
         assert_eq!(room(&outputs, second), 60);
+    }
+
+    /// The gaps, the border and the tab strip of a layout are as many
+    /// pixels as the scale of the display makes them, and follow the
+    /// scale when it is changed while the windows are there; what the
+    /// configuration says stays what it is.
+    #[test]
+    fn a_layout_is_laid_out_by_its_displays_scale() {
+        use crate::container::Padding;
+        use crate::layouts::LayoutType;
+        let mut outputs = Outputs::with_workspace_count(0);
+        let display = MonitorHandle(1);
+        outputs.add_test_monitor(display, "Monitor A");
+        outputs.set_lengths_in_display_pixels(true);
+        outputs
+            .create_workspace(display, "one".to_string(), LayoutType::Columns)
+            .expect("a workspace");
+        outputs.focus_workspace_at(display, 0);
+        let area = Rect::new(0, 0, 1920, 1040);
+        // The room at the left, between the two windows, and how wide the
+        // border and how high the tab strip are.
+        let laid_out = |outputs: &mut Outputs| {
+            let workspace = outputs.get_focused_workspace_mut(display).unwrap();
+            workspace.apply_layout(area);
+            let rects: Vec<Rect> = workspace.containers.iter().map(|c| c.rect).collect();
+            (
+                rects[0].x,
+                rects[1].x - (rects[0].x + rects[0].width),
+                workspace.border_look(false).width,
+                workspace.stackbar_seen().height,
+            )
+        };
+        {
+            let workspace = outputs.get_focused_workspace_mut(display).unwrap();
+            workspace.padding = Padding::uniform(10);
+            workspace.container_padding = Padding::uniform(8);
+            workspace.border_width = 2;
+            workspace.stackbar.height = 30;
+            workspace.add_window(gevrek_model::ids::WindowId(1), true);
+            workspace.add_window(gevrek_model::ids::WindowId(2), true);
+        }
+        assert_eq!(laid_out(&mut outputs), (14, 8, 2, 30));
+
+        // The display is given another scale while the windows are there.
+        let mut larger = outputs.get_monitor(display).cloned().unwrap();
+        larger.dpi_scale = 1.5;
+        assert!(outputs.reconcile_with(vec![larger]).geometry_changed);
+        assert_eq!(laid_out(&mut outputs), (21, 12, 3, 45));
+        let workspace = outputs.get_focused_workspace(display).unwrap();
+        assert_eq!(workspace.padding, Padding::uniform(10), "as configured");
+        assert_eq!(workspace.container_padding, Padding::uniform(8));
+
+        // Pixels that count the scale in already: as given.
+        outputs.set_lengths_in_display_pixels(false);
+        assert_eq!(laid_out(&mut outputs), (14, 8, 2, 30));
     }
 
     #[test]

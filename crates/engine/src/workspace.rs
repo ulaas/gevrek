@@ -183,6 +183,15 @@ pub struct Workspace {
     /// are still to be put in the middle of its display.
     pub arrivals: Vec<WindowHandle>,
 
+    /// How many pixels of its display one pixel of the configuration is:
+    /// the display's scale where displays are measured in their own
+    /// pixels (Windows), 1 elsewhere. The display says it
+    /// (`Outputs::get_workspaces_mut`); the gaps, the borders and the tab
+    /// strip are kept as the configuration gives them and are so many
+    /// pixels when they are laid out (`seen`).
+    #[serde(skip)]
+    pub scale: f32,
+
     /// ID for tracking
     pub id: usize,
 
@@ -421,6 +430,7 @@ impl Workspace {
             arrivals: Vec::new(),
             work_area_offset: gevrek_model::settings::ReservedArea::default(),
             invisible_borders: gevrek_model::settings::InvisibleBordersProfile::default(),
+            scale: 1.0,
             id,
             next_container_id: 0,
             // Default border configuration (disabled by default to avoid breaking changes)
@@ -460,6 +470,43 @@ impl Workspace {
         }
     }
 
+    /// A length of the configuration in the pixels of the display this
+    /// workspace is on (see `scale`).
+    pub fn seen(&self, length: i32) -> i32 {
+        // (A workspace read from a saved session has no scale yet.)
+        if self.scale <= 0.0 || self.scale == 1.0 {
+            return length;
+        }
+        (length as f32 * self.scale.clamp(0.5, 8.0)).round() as i32
+    }
+
+    fn seen_padding(&self, padding: Padding) -> Padding {
+        Padding::new(
+            self.seen(padding.left),
+            self.seen(padding.top),
+            self.seen(padding.right),
+            self.seen(padding.bottom),
+        )
+    }
+
+    /// The room left free round the windows, in the display's pixels.
+    pub fn outer_gaps(&self) -> Padding {
+        self.seen_padding(self.padding)
+    }
+
+    /// The room between the windows, in the display's pixels.
+    pub fn inner_gaps(&self) -> Padding {
+        self.seen_padding(self.container_padding)
+    }
+
+    /// The tab strip as it is drawn on this display: as high as the
+    /// display's scale makes it.
+    pub fn stackbar_seen(&self) -> StackbarProfile {
+        let mut stackbar = self.stackbar.clone();
+        stackbar.height = self.seen(stackbar.height);
+        stackbar
+    }
+
     /// Whether a window is in a column that is out of view (scrolling
     /// layout).
     pub fn out_of_view(&self, handle: WindowHandle) -> bool {
@@ -473,7 +520,7 @@ impl Workspace {
     fn strip_room(&self, work_area: Rect) -> i32 {
         self.work_area_offset
             .apply_to(work_area)
-            .with_padding(self.padding)
+            .with_padding(self.outer_gaps())
             .width
             .max(1)
     }
@@ -488,7 +535,7 @@ impl Workspace {
         work_area: Rect,
     ) -> bool {
         let room = self.strip_room(work_area);
-        let gaps = self.container_padding.left / 2 + self.container_padding.right / 2;
+        let gaps = self.inner_gaps().left / 2 + self.inner_gaps().right / 2;
         let (least, most) = crate::layouts::SCROLLING_WIDTH_RANGE;
         let share = ((window_width + gaps) as f32 / room as f32).clamp(least, most);
         let Some(container) = self.containers.get_mut(container_idx) else {
@@ -508,7 +555,7 @@ impl Workspace {
             return false;
         };
         let now = crate::layouts::scrolling_column_width(container.strip_width, room);
-        let gaps = self.container_padding.left / 2 + self.container_padding.right / 2;
+        let gaps = self.inner_gaps().left / 2 + self.inner_gaps().right / 2;
         self.set_column_width(container_idx, now + delta_px - gaps, work_area)
     }
 
@@ -526,7 +573,7 @@ impl Workspace {
         }
 
         // Calculate available width after workspace padding
-        let available_width = work_area_width - self.padding.left - self.padding.right;
+        let available_width = work_area_width - self.outer_gaps().left - self.outer_gaps().right;
         if available_width <= 0 {
             return;
         }
@@ -620,7 +667,7 @@ impl Workspace {
     ) -> bool {
         match self.layout {
             LayoutType::BSP => {
-                let padded = work_area.with_padding(self.padding);
+                let padded = work_area.with_padding(self.outer_gaps());
                 let active = self.active_container_indices();
                 let Some(position) = active.iter().position(|idx| *idx == container_idx) else {
                     return false;
@@ -701,7 +748,7 @@ impl Workspace {
     ) -> bool {
         match self.layout {
             LayoutType::BSP => {
-                let padded = work_area.with_padding(self.padding);
+                let padded = work_area.with_padding(self.outer_gaps());
                 let active = self.active_container_indices();
                 let Some(position) = active.iter().position(|idx| *idx == container_idx) else {
                     return false;
@@ -832,7 +879,7 @@ impl Workspace {
         if container_idx >= self.containers.len() {
             return false;
         }
-        let padded = work_area.with_padding(self.padding);
+        let padded = work_area.with_padding(self.outer_gaps());
         let extent = match axis {
             LayoutAxis::Vertical => padded.height,
             _ => padded.width,
@@ -863,7 +910,7 @@ impl Workspace {
         if count < 2 || container_idx >= count {
             return false;
         }
-        let padded = work_area.with_padding(self.padding);
+        let padded = work_area.with_padding(self.outer_gaps());
         let extent = match axis {
             LayoutAxis::Vertical => padded.height,
             _ => padded.width,
@@ -1083,8 +1130,8 @@ impl Workspace {
     pub fn border_look(&self, floating: bool) -> BorderLook {
         let tiled = BorderLook {
             enabled: self.border_enabled,
-            width: self.border_width,
-            offset: self.border_offset,
+            width: self.seen(self.border_width),
+            offset: self.seen(self.border_offset),
             style: self.border_style,
             active_color: self.active_border_color,
             inactive_color: self.inactive_border_color,
@@ -1100,8 +1147,8 @@ impl Workspace {
             // A workspace without borders has none on its floating
             // windows either.
             enabled: tiled.enabled && look.border_enabled,
-            width: look.border_width,
-            offset: look.border_offset,
+            width: self.seen(look.border_width),
+            offset: self.seen(look.border_offset),
             style: tiled.style,
             active_color: look.active_border_color.unwrap_or(tiled.active_color),
             inactive_color: look.inactive_border_color.unwrap_or(tiled.inactive_color),
@@ -1339,7 +1386,7 @@ impl Workspace {
             container.offscreen = false;
         }
         if self.layout == LayoutType::Scrolling {
-            let room = work_area.with_padding(self.padding).width.max(1);
+            let room = work_area.with_padding(self.outer_gaps()).width.max(1);
             let widths: Vec<i32> = active_containers
                 .iter()
                 .map(|container| {
@@ -1385,7 +1432,7 @@ impl Workspace {
             self.layout,
             work_area,
             &mut active_containers,
-            self.padding,
+            self.outer_gaps(),
             &self.split_ratios,
             config,
         );
@@ -1414,17 +1461,14 @@ impl Workspace {
         // Use full gap value on each side - the workspace padding already handles outer edges,
         // and the layout algorithm places containers edge-to-edge, so each container needs
         // the full half-gap on each side to produce consistent gaps between adjacent windows.
-        if self.container_padding.left > 0
-            || self.container_padding.top > 0
-            || self.container_padding.right > 0
-            || self.container_padding.bottom > 0
-        {
+        let inner = self.inner_gaps();
+        if inner.left > 0 || inner.top > 0 || inner.right > 0 || inner.bottom > 0 {
             // Each edge uses its own gap; `right`/`bottom` used to be ignored
             // (left/top were applied to both sides).
-            let gap_left = self.container_padding.left / 2;
-            let gap_right = self.container_padding.right / 2;
-            let gap_top = self.container_padding.top / 2;
-            let gap_bottom = self.container_padding.bottom / 2;
+            let gap_left = inner.left / 2;
+            let gap_right = inner.right / 2;
+            let gap_top = inner.top / 2;
+            let gap_bottom = inner.bottom / 2;
 
             for container in active_containers.iter_mut() {
                 let rect = container.rect;
@@ -1510,7 +1554,7 @@ impl Workspace {
         if self.layout != LayoutType::Scrolling || self.scroll_whole_columns {
             return false;
         }
-        let room = work_area.with_padding(self.padding).width.max(1);
+        let room = work_area.with_padding(self.outer_gaps()).width.max(1);
         let active: Vec<usize> = (0..self.containers.len())
             .filter(|index| {
                 self.containers

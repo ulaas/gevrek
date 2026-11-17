@@ -137,7 +137,7 @@ impl Executor {
         // the container's windows get the layout rect minus
         // the bar height.
         let stackbar_height = if workspace.stackbar.enabled {
-            workspace.stackbar.height
+            workspace.stackbar_seen().height
         } else {
             0
         };
@@ -169,7 +169,7 @@ impl Executor {
             let rect = if workspace.invisible_borders.enabled {
                 let (x, y, width, height) = crate::decoration::invisible_border_content_rect(
                     (rect.x, rect.y, rect.width, rect.height),
-                    workspace.invisible_borders.size,
+                    workspace.seen(workspace.invisible_borders.size),
                 );
                 Rect::new(x, y, width, height)
             } else {
@@ -276,7 +276,7 @@ impl Executor {
                 focused_tab: bar.focused_tab,
             })
             .collect();
-        window_manager.sync_stackbars(&desired, &workspace.stackbar)
+        window_manager.sync_stackbars(&desired, &workspace.stackbar_seen())
     }
 
     /// Refresh stackbar tab text after a window's metadata (title) changed.

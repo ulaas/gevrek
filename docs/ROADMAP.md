@@ -484,6 +484,19 @@ nothing broken on the way. Nothing new is built in this pass.
       (`the_panel_is_as_high_as_its_displays_scale_makes_it`). To tick:
       seen at 100 %, 125 % and 150 %, and with the scale changed while
       the panel is up.
+- [ ] **person, W** Asked by the person (2026-11-18): the layouts
+      follow a display's scale as it is changed. The windows were laid
+      out again already; the lengths of a layout were pixels whatever
+      the scale. Now the gaps (round the windows and between them), the
+      border (its width and its offset), the tab strip of a group and
+      the room of the borders that are not seen are as many pixels as
+      the display's scale makes them, on Windows; a workspace is told
+      its display's scale each time it is laid out, and what the
+      configuration and the commands say stays what it is
+      (`a_layout_is_laid_out_by_its_displays_scale`). Not changed: the
+      edges kept free for other programs and a workspace's offset
+      (they are pixels of the display). To tick: seen at 100 % and
+      150 %, with the scale changed while windows are tiled.
 - [ ] **any** The studio's top bar at the smallest window (760 wide):
       the file and the state lie under the search.
 - [ ] **person, W** Reported by the person (2026-11-17): the toggles
@@ -798,3 +811,4 @@ wanted, strike it when it is not.
 | 2026-11-17, night (8) | Windows 11 | Looked into: the scale toggles of the studio's Displays page write the configuration, and the Windows backend does not apply a scale (by design so far); a decision for the person. The notes of the kind TODO: there are none (the count was of a variable's name) | The person decides about the scale on Windows; the other files from outside |
 | 2026-11-17, night (9) | Windows 11 and WSL (Fedora 44) | A display's scale is set on Windows as the Settings window sets it (decided by the person), and the studio shows the scale a display has. Asked on this machine without setting anything: the three displays answer rightly. Windows: every test passes; Linux: the studio's pass | The person tries the toggles on the Displays page; the other files from outside |
 | 2026-11-17, night (10) | Windows 11 and WSL (Fedora 44) | The panel is as high as its display's scale makes it (reported: at another scale what it shows was cut off). Windows and Linux: every test passes (the studio's not run on Linux this time) | The person sees the panel at several scales, and tries the scale toggles |
+| 2026-11-18 | Windows 11 and WSL (Fedora 44) | The person: the scale changes work. Asked for: the layouts follow the scale. The gaps, the border, the tab strip and the unseen borders' room are as many pixels as the display's scale makes them (Windows). Windows and Linux: every test passes (the studio's not run on Linux) | The person sees a layout at two scales and through a change of scale |
