@@ -243,6 +243,150 @@ fn overlay_state_to_proto(data: &gevrek_engine::overlay_data::OverlayData) -> St
     )
 }
 
+/// The state as it is answered to those who ask for it (`GetOverlayData`):
+/// what the runtime published, in the protocol's message. `appearance`
+/// and `shadow`: of the configuration that runs.
+pub fn overlay_response(
+    data: &gevrek_engine::overlay_data::OverlayData,
+    appearance: &gevrek_model::settings::AppearanceProfile,
+    shadow: impl std::fmt::Debug,
+) -> OverlayDataResponse {
+    // Convert core OverlayData to proto OverlayDataResponse
+    let timestamp_ms = data
+        .timestamp
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+
+    let monitors = data
+        .monitors
+        .iter()
+        .map(|m| MonitorOverlayData {
+            name: m.name.clone(),
+            output_id: m.handle.0 as u64,
+            connector: m.connector.clone(),
+            is_primary: m.is_primary,
+            position: Some(Position {
+                x: m.x as f32,
+                y: m.y as f32,
+            }),
+            size: Some(Size {
+                width: m.width,
+                height: m.height,
+            }),
+            work_position: Some(Position {
+                x: m.work_x as f32,
+                y: m.work_y as f32,
+            }),
+            work_size: Some(Size {
+                width: m.work_width,
+                height: m.work_height,
+            }),
+            reserved_left: m.reserved_left,
+            reserved_top: m.reserved_top,
+            reserved_right: m.reserved_right,
+            reserved_bottom: m.reserved_bottom,
+            workspace: Some(workspace_overlay_to_proto(&m.workspace)),
+            workspaces: m
+                .workspaces
+                .iter()
+                .map(workspace_overlay_to_proto)
+                .collect(),
+            active_workspace_id: m.workspace.id as u32,
+            is_focused: m.is_focused,
+            bar_position: m.bar.map(|(x, y, _, _)| Position {
+                x: x as f32,
+                y: y as f32,
+            }),
+            bar_size: m.bar.map(|(_, _, width, height)| Size { width, height }),
+            scale: m.scale,
+            refresh_millihertz: m.detail.refresh_millihertz,
+            modes: m
+                .detail
+                .modes
+                .iter()
+                .map(|mode| gevrek_protocol::proto::OutputModeInfo {
+                    width: mode.width,
+                    height: mode.height,
+                    refresh_millihertz: mode.refresh_millihertz,
+                    preferred: mode.preferred,
+                    current: mode.current,
+                })
+                .collect(),
+        })
+        .collect();
+
+    OverlayDataResponse {
+        timestamp_ms,
+        monitors,
+        graph_node_count: data.graph_node_count as u32,
+        total_windows: data.total_windows as u32,
+        event_loop_fps: data.event_loop_fps,
+        last_event: data.last_event.clone(),
+        scratchpads: data
+            .scratchpad_states
+            .iter()
+            .map(|scratchpad| gevrek_protocol::proto::ScratchpadState {
+                id: scratchpad.id.clone(),
+                enabled: scratchpad.enabled,
+                window_id: scratchpad.handle.map(|handle| handle.0 as u64),
+                visible: scratchpad.visible,
+                pending_spawn: scratchpad.pending_spawn,
+            })
+            .collect(),
+        active_binding_submap: data.active_binding_submap.clone(),
+        dim_inactive: appearance.dim_inactive,
+        inactive_window_opacity: appearance.inactive_window_opacity as u32,
+        dim_fullscreen: appearance.dim_fullscreen,
+        shadow_policy: format!("{:?}", shadow),
+        startup: data
+            .startup_states
+            .iter()
+            .map(|state| gevrek_protocol::proto::StartupState {
+                id: state.id.clone(),
+                name: state.name.clone(),
+                enabled: state.enabled,
+                status: state.status.clone(),
+                pid: state.pid,
+                restart_count: state.restart_count,
+                last_exit_code: state.last_exit_code,
+                last_error: state.last_error.clone(),
+            })
+            .collect(),
+        gesture: Some(gesture_state_to_proto(&data.gesture)),
+        notices: data
+            .notices
+            .iter()
+            .map(|notice| gevrek_protocol::proto::Notice {
+                id: notice.id.clone(),
+                title: notice.title.clone(),
+                text: notice.text.clone(),
+            })
+            .collect(),
+        accent_rgb: data.accent.map(|(red, green, blue)| {
+            (u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)
+        }),
+        keyboard_layout: data.keyboard_layout.as_ref().map(|layout| {
+            gevrek_protocol::proto::KeyboardLayoutState {
+                short: layout.short.clone(),
+                name: layout.name.clone(),
+                index: layout.index,
+                count: layout.count,
+            }
+        }),
+        frames: data
+            .frames
+            .iter()
+            .map(|frames| gevrek_protocol::proto::DisplayFrames {
+                output: frames.output.clone(),
+                direct: frames.direct,
+                composed: frames.composed,
+                direct_now: frames.direct_now,
+            })
+            .collect(),
+    }
+}
+
 /// The gRPC server implementation for the Window Manager
 pub struct WMServer {
     /// The running configuration, as published by its owner, the runtime.
@@ -2196,140 +2340,7 @@ impl WMService for WMServer {
         let shadow = self.running_config().desktop.platform.windows.shadow;
 
         if let Some(data) = overlay_data.as_ref() {
-            // Convert core OverlayData to proto OverlayDataResponse
-            let timestamp_ms = data
-                .timestamp
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as i64;
-
-            let monitors = data
-                .monitors
-                .iter()
-                .map(|m| MonitorOverlayData {
-                    name: m.name.clone(),
-                    output_id: m.handle.0 as u64,
-                    connector: m.connector.clone(),
-                    is_primary: m.is_primary,
-                    position: Some(Position {
-                        x: m.x as f32,
-                        y: m.y as f32,
-                    }),
-                    size: Some(Size {
-                        width: m.width,
-                        height: m.height,
-                    }),
-                    work_position: Some(Position {
-                        x: m.work_x as f32,
-                        y: m.work_y as f32,
-                    }),
-                    work_size: Some(Size {
-                        width: m.work_width,
-                        height: m.work_height,
-                    }),
-                    reserved_left: m.reserved_left,
-                    reserved_top: m.reserved_top,
-                    reserved_right: m.reserved_right,
-                    reserved_bottom: m.reserved_bottom,
-                    workspace: Some(workspace_overlay_to_proto(&m.workspace)),
-                    workspaces: m
-                        .workspaces
-                        .iter()
-                        .map(workspace_overlay_to_proto)
-                        .collect(),
-                    active_workspace_id: m.workspace.id as u32,
-                    is_focused: m.is_focused,
-                    bar_position: m.bar.map(|(x, y, _, _)| Position {
-                        x: x as f32,
-                        y: y as f32,
-                    }),
-                    bar_size: m.bar.map(|(_, _, width, height)| Size { width, height }),
-                    scale: m.scale,
-                    refresh_millihertz: m.detail.refresh_millihertz,
-                    modes: m
-                        .detail
-                        .modes
-                        .iter()
-                        .map(|mode| gevrek_protocol::proto::OutputModeInfo {
-                            width: mode.width,
-                            height: mode.height,
-                            refresh_millihertz: mode.refresh_millihertz,
-                            preferred: mode.preferred,
-                            current: mode.current,
-                        })
-                        .collect(),
-                })
-                .collect();
-
-            Ok(Response::new(OverlayDataResponse {
-                timestamp_ms,
-                monitors,
-                graph_node_count: data.graph_node_count as u32,
-                total_windows: data.total_windows as u32,
-                event_loop_fps: data.event_loop_fps,
-                last_event: data.last_event.clone(),
-                scratchpads: data
-                    .scratchpad_states
-                    .iter()
-                    .map(|scratchpad| gevrek_protocol::proto::ScratchpadState {
-                        id: scratchpad.id.clone(),
-                        enabled: scratchpad.enabled,
-                        window_id: scratchpad.handle.map(|handle| handle.0 as u64),
-                        visible: scratchpad.visible,
-                        pending_spawn: scratchpad.pending_spawn,
-                    })
-                    .collect(),
-                active_binding_submap: data.active_binding_submap.clone(),
-                dim_inactive: appearance.dim_inactive,
-                inactive_window_opacity: appearance.inactive_window_opacity as u32,
-                dim_fullscreen: appearance.dim_fullscreen,
-                shadow_policy: format!("{:?}", shadow),
-                startup: data
-                    .startup_states
-                    .iter()
-                    .map(|state| gevrek_protocol::proto::StartupState {
-                        id: state.id.clone(),
-                        name: state.name.clone(),
-                        enabled: state.enabled,
-                        status: state.status.clone(),
-                        pid: state.pid,
-                        restart_count: state.restart_count,
-                        last_exit_code: state.last_exit_code,
-                        last_error: state.last_error.clone(),
-                    })
-                    .collect(),
-                gesture: Some(gesture_state_to_proto(&data.gesture)),
-                notices: data
-                    .notices
-                    .iter()
-                    .map(|notice| gevrek_protocol::proto::Notice {
-                        id: notice.id.clone(),
-                        title: notice.title.clone(),
-                        text: notice.text.clone(),
-                    })
-                    .collect(),
-                accent_rgb: data.accent.map(|(red, green, blue)| {
-                    (u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)
-                }),
-                keyboard_layout: data.keyboard_layout.as_ref().map(|layout| {
-                    gevrek_protocol::proto::KeyboardLayoutState {
-                        short: layout.short.clone(),
-                        name: layout.name.clone(),
-                        index: layout.index,
-                        count: layout.count,
-                    }
-                }),
-                frames: data
-                    .frames
-                    .iter()
-                    .map(|frames| gevrek_protocol::proto::DisplayFrames {
-                        output: frames.output.clone(),
-                        direct: frames.direct,
-                        composed: frames.composed,
-                        direct_now: frames.direct_now,
-                    })
-                    .collect(),
-            }))
+            Ok(Response::new(overlay_response(data, &appearance, shadow)))
         } else {
             // No data available yet
             Ok(Response::new(OverlayDataResponse {

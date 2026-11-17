@@ -23,3 +23,13 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
 chrono = { workspace = true }
+
+[dev-dependencies]
+# For the bench: a desktop without a windowing system, and the line's bytes.
+gevrek-engine = { path = "../engine", features = ["test-support"] }
+prost = { workspace = true }
+
+# The state on its way out, timed (`benches/state.rs` says how).
+[[bench]]
+name = "state"
+harness = false

@@ -344,9 +344,14 @@ nothing broken on the way. Nothing new is built in this pass.
       45 ns; copied, 7.7 µs. What it costs on Windows is what it asks
       the system for each window, which the time of a pass shows (the
       next item), not a bench.
-- [ ] **any** The state on its way out, not yet timed: made into the
-      protocol's message in the server and into JSON for those who ask
-      (`server/src/lib.rs`).
+- [x] **any** The state on its way out, timed
+      (`cargo bench -p gevrek-server`; the conversion is a function of
+      its own for it, `overlay_response`, moved as it was). For 30
+      windows, 9.5 kB on the line. In the server, for each one who
+      asks: copied 9 µs, made into the message 10 µs, written 5 µs. At
+      the other end: read 18 µs, made into JSON 145 µs. A quarter of a
+      thousandth of a second for a question and its answer, most of it
+      the JSON in the shell and the studio.
 - [ ] **person, W** The time of a pass of the runtime, measured where
       it runs (`runtime/pass_times.rs`, tested): a pass is timed in six
       parts (commands, looking around, events, layout and motion,
@@ -429,6 +434,10 @@ By what step 0 measured; the order below is a guess until then.
       each rule and window): every match that does not regard case
       writes both texts out in small letters first. Only if a number
       says it is worth it.
+- [ ] **any** The state made into JSON at the asking end (145 µs of the
+      190 a question costs): the shell and the studio read a few fields
+      of it. Worth it only if the time of a pass or a still desktop's
+      numbers show that the state is asked for often.
 - [ ] **any** Looked at after that, by the same numbers: a reload's
       plan (0.5 ms: both configurations are written out to be held
       against each other, part by part) and the checking of a
@@ -476,7 +485,9 @@ By what step 0 measured; the order below is a guess until then.
       are known in the shell), then CI refuses new ones.
 - [ ] **any** What the log says at each level read through once: a
       fault says what was being done and to which window; nothing is
-      said a hundred times a second.
+      said a hundred times a second. Known already: the server writes
+      a line at the info level for every question for the state
+      (`"GetOverlayData RPC called"`, `server/src/lib.rs`).
 
 **Done when** every item above is ticked or handed to the person with
 what to look at, the numbers are no worse anywhere and better where
@@ -687,3 +698,4 @@ wanted, strike it when it is not.
 | 2026-11-17, late evening | Windows 11 | The first benches of the engine (section 2d, step 0), as medians on the person's machine, release build. A layout of 50 windows: 17 to 204 ns by layout (dwindle the slowest). 50 windows opened one after another on the desktop without a windowing system: 0.46 ms; one more beside 49, opened and closed: 19 µs; a workspace changed with 25 windows on each: 6.4 µs. 20 rules against 50 windows: 9.96 ms. The overview's arrangement of 30 windows: 18 µs. The starting configuration read 159 µs, written 70 µs, checked 284 µs; a reload's plan 0.52 ms with nothing changed, 0.64 ms with one setting. Found: the rules' regular expressions are made anew at every match | The rules' expressions made once (step 2). The bench of the published state in the backends; the time of a pass of the runtime; the numbers of a still desktop |
 | 2026-11-17, night (2) | Windows 11 and WSL (Fedora 44) | The rules' regular expressions are made once and kept. 20 rules against 50 windows: 9.96 ms before, 0.95 ms after. Windows: every test passes; Linux: the engine, the compositor and the server pass | Step 0: the bench of the published state, the time of a pass, a still desktop's numbers |
 | 2026-11-17, night (3) | Windows 11 | Step 0 further: the published state is in the engine's bench (34 µs for 9 workspaces and 30 windows without a windowing system); a pass of the Windows runtime is timed in six parts and told at the log's debug level (`RUST_LOG=info,gevrek::passes=debug`). Windows: the backend's 207 tests pass. Not run on the desktop | The person runs gevrek with that for a while and brings the lines; the still desktop's numbers; the state's way out through the server |
+| 2026-11-17, night (4) | Windows 11 and WSL (Fedora 44) | The state's way out timed (`cargo bench -p gevrek-server`): 24 µs in the server and 163 µs at the asking end for 30 windows, most of it the JSON there. The harness of the benches is one file for both. Windows: every test passes; Linux: the engine and the server | Step 0 is done but for what wants the desktop (the passes' lines, a still desktop's numbers) and CI. Step 1 next: files from outside that are cut short or nonsense |

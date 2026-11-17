@@ -2071,6 +2071,7 @@ dependencies = [
  "gevrek-protocol",
  "gevrek-tutorial",
  "log",
+ "prost",
  "serde",
  "serde_json",
  "tokio",
