@@ -287,7 +287,7 @@ from. Four of them show the look:
 
 | Example | Look |
 |---|---|
-| Aurora | a gradient border that slowly turns, glow, soft shadows, windows that scale in; Dwindle |
+| Aurora | a gradient border that slowly turns, glow, soft shadows, windows and workspaces that fade; Dwindle |
 | Focus Stage | the windows that are not focused are veiled and stand back; Centered master; bar at the bottom |
 | Neon Grid | pink-to-yellow border, strong glow, sharp corners, quick animations; Grid |
 | Paper | hairline borders, large soft shadows, a light bar; Columns |

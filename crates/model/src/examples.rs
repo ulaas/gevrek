@@ -725,13 +725,14 @@ fn example_aurora() -> BuiltInExample {
     let mut config = showcase_base(LayoutType::Dwindle, 10, 16);
     animate(&mut config, 220, AnimationCurve::CubicOut);
     config.desktop.animations.window.curve = AnimationCurve::BackOut;
-    config.desktop.animations.window_enter_style = WindowTransitionStyle::Scale;
+    config.desktop.animations.window_enter_style = WindowTransitionStyle::Fade;
     config.desktop.animations.window_exit_style = WindowTransitionStyle::Fade;
+    config.desktop.animations.workspace_style = crate::settings::WorkspaceTransitionStyle::Fade;
     let appearance = &mut config.desktop.appearance;
     appearance.border_width = 3;
     appearance.border_offset = 0;
-    appearance.active_border_color = (64, 224, 208);
-    appearance.inactive_border_color = (44, 52, 72);
+    appearance.active_border_color = (181, 0, 125);
+    appearance.inactive_border_color = (57, 44, 72);
     appearance.inactive_border_alpha = 200;
     let effects = &mut appearance.effects;
     effects.corner_radius.0 = 12;
@@ -750,14 +751,18 @@ fn example_aurora() -> BuiltInExample {
     effects.shadow.inactive_opacity = 100;
     let bar = &mut config.desktop.shell.panel;
     bar.background = (14, 17, 26);
-    bar.opacity = 225;
-    bar.margin = 8;
-    bar.corner_radius = 12;
-    // (As the person has it, 2026-11-15, and so what gevrek starts with:
-    // the clock in the panel's middle, the open windows at its right
-    // before the icons; the colours of a palette where none is set by
-    // hand, with the accent the wallpaper's own; a night light that is
-    // less warm.)
+    bar.opacity = 235;
+    bar.margin = 0;
+    bar.corner_radius = 0;
+    bar.tasks_of_all_workspaces = true;
+    // (As the person has it, 2026-11-17, and so what gevrek starts with:
+    // a panel from edge to edge with the open windows of every
+    // workspace at its right before the icons and the clock last; a
+    // border from magenta to violet; windows and workspaces that fade;
+    // the colours of a palette where none is set by hand, with the
+    // accent the wallpaper's own; a night light that is less warm. The
+    // person's own workspaces, displays and window rules are theirs and
+    // are not here.)
     {
         use crate::settings::PanelModule;
         bar.left = vec![
@@ -767,13 +772,14 @@ fn example_aurora() -> BuiltInExample {
             PanelModule::Title,
             PanelModule::Spacer,
         ];
-        bar.centre = vec![PanelModule::Clock];
+        bar.centre = Vec::new();
         bar.right = vec![
             PanelModule::Taskbar,
             PanelModule::Tray,
             PanelModule::Network,
             PanelModule::Sound,
             PanelModule::Battery,
+            PanelModule::Clock,
         ];
     }
     config.desktop.appearance.theme.palette = Some("Default Dark".to_string());
@@ -783,7 +789,7 @@ fn example_aurora() -> BuiltInExample {
         "aurora",
         "Aurora",
         "The full look: a gradient border that slowly turns around the focused window, a glow in its colour, \
-         soft shadows, generous gaps, windows that scale in and fade out. Dwindle tiling, four workspaces, \
+         soft shadows, generous gaps, windows and workspaces that fade in and out. Dwindle tiling, four workspaces, \
          the overview on Win+O (or Ctrl+Alt+E), the list of shortcuts on Win+F1 or Win+Shift+/.",
         config,
     )
