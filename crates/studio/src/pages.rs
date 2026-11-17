@@ -68,6 +68,13 @@ const fn card(title: &'static str, pointer: &'static str, show: Show) -> Card {
 }
 
 impl Page {
+    /// What is long on the page moves in a room of its own (the list of
+    /// the bindings, the events, the log, the text): the page itself is
+    /// as high as the window and does not move.
+    pub fn scrolls_by_itself(self) -> bool {
+        matches!(self, Page::Bindings | Page::Events | Page::Log | Page::Raw)
+    }
+
     pub const ALL: [Page; 26] = [
         Page::Overview,
         Page::Displays,

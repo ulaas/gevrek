@@ -1876,7 +1876,7 @@ impl Studio {
                     );
                     ui.label(RichText::new(title).strong());
                     for window in listed {
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             let focused = window["is_focused"].as_bool().unwrap_or(false);
                             widgets::dot(
                                 ui,
@@ -2002,7 +2002,7 @@ impl Studio {
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
                     for row in &shown {
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label(
                                 RichText::new(clock(row.time_ms))
                                     .monospace()
@@ -2078,7 +2078,7 @@ impl Studio {
                             Level::Info => palette.text,
                             Level::Debug => palette.muted,
                         };
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label(
                                 RichText::new(clock(row.time_ms))
                                     .monospace()
@@ -2873,11 +2873,26 @@ impl Studio {
                     self.page_body(ui, &palette);
                     return;
                 }
+                if self.page.scrolls_by_itself() {
+                    // The page is as high as the window leaves and no
+                    // higher: what is long on it (a list, the text)
+                    // moves in its own room. A page that moved as well
+                    // would show two bars side by side.
+                    let mut room = ui.available_rect_before_wrap();
+                    room.max.x = room.max.x.min(room.min.x + 980.0);
+                    room.max.y -= 10.0;
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(room), |ui| {
+                        self.page_body(ui, &palette);
+                    });
+                    return;
+                }
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .id_salt(self.page.key())
                     .show(ui, |ui| {
-                        ui.set_max_width(980.0);
+                        // (No wider than the window leaves: what is
+                        // long in a line goes on in the next.)
+                        ui.set_max_width(ui.available_width().min(980.0));
                         self.page_body(ui, &palette);
                         ui.add_space(24.0);
                     });

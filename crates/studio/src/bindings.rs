@@ -217,11 +217,13 @@ impl BindingsPage {
             // As high as the window leaves: down to its lower edge where
             // no binding is open under the list, and the upper part of
             // that room where one is (its own card stands below).
-            let room = ui.clip_rect().bottom() - ui.cursor().top();
+            // (The page does not move: the list does, and under it the
+            // card of the binding that is open, each in its own room.)
+            let room = ui.available_height();
             let high = if self.chosen.is_some() {
-                (room - 440.0).max(200.0)
+                (room - 440.0).clamp(120.0, (room * 0.5).max(120.0))
             } else {
-                (room - 76.0).max(330.0)
+                (room - 44.0).max(120.0)
             };
             egui::ScrollArea::vertical()
                 .max_height(high)
@@ -307,6 +309,10 @@ impl BindingsPage {
         };
         let mut remove = false;
         let mut copy = false;
+        egui::ScrollArea::vertical()
+            .id_salt("the binding that is open")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
         widgets::card(ui, binding["name"].as_str().unwrap_or("Binding"), |ui| {
             if let Some(others) = clashes.get(&index) {
                 let names: Vec<&str> = others
@@ -427,6 +433,7 @@ impl BindingsPage {
                 }
             });
         });
+            });
         if copy {
             let mut twin = binding.clone();
             twin["name"] =
