@@ -374,8 +374,14 @@ nothing broken on the way. Nothing new is built in this pass.
 - [ ] **person, W** The two that were reported and mended without being
       seen: borders around nothing; a window dragged to the other
       display (section 2c). Not closed until seen for a day.
-- [ ] **any** The 64 notes of the kind TODO and FIXME in the code read,
-      each one: done, made an item here, or taken out as no longer so.
+- [x] **any** The notes of the kind TODO and FIXME in the code: there
+      are none. The 64 that were counted are a variable called `todo`
+      (what the tutorial is to do next) and one `XXX` in the words for a
+      display's name; no `todo!()` and no `unimplemented!()` either
+      (2026-11-17, looked for). One field is never filled:
+      `OverlayData::metrics` ("can be added later",
+      `runtime/mod.rs`): the time of a pass could go there, or the
+      field could go.
 - [ ] **W** The `unsafe` of the Windows backend read through (most of
       the 507 in the tree are there): every handle closed once and by
       whoever owns it, nothing used after its window is gone, a line
@@ -468,11 +474,24 @@ nothing broken on the way. Nothing new is built in this pass.
       written, and without a test (section 2b).
 - [ ] **any** The studio's top bar at the smallest window (760 wide):
       the file and the state lie under the search.
-- [ ] **any** Reported by the person (2026-11-17): the toggles for a
-      display's scale on the studio's Displays page do not work. To
-      find out first what they do not do (nothing is written to the
-      configuration, or it is written and not applied), then mended
-      with a test.
+- [ ] **person, W** Reported by the person (2026-11-17): the toggles
+      for a display's scale on the studio's Displays page do not work.
+      Found: the studio writes the scale to the configuration
+      (`desktop.outputs[].scale`, tested), and the compositor on Linux
+      applies it; the Windows backend never did, on purpose
+      (`display_settings.rs`: "the scale is the system's here"). So on
+      Windows the toggle changes the file and nothing else. Also: it
+      shows what the configuration says (1× where it says nothing),
+      not the scale the display has. To decide, one of:
+      - gevrek sets the scale on Windows as the Settings window does.
+        Windows has no documented way for a program to do that; the
+        one the Settings window itself uses (the display
+        configuration's DPI value) is known and works on Windows 10
+        and 11, and may change without notice.
+      - On Windows the page shows the scale the display has, does not
+        offer to change it, and has a button that opens the system's
+        display settings there.
+      Either way the page shows the scale the display has.
 
 **Step 2: speed and what it costs**
 
@@ -760,3 +779,4 @@ wanted, strike it when it is not.
 | 2026-11-17, night (5) | Windows 11 and WSL (Fedora 44) | Step 1 begun: configurations and saved sessions spoilt by the thousand and taken through the engine; one fault found and mended (a number of the graph as large as numbers get was counted past). Windows: every test passes; Linux: the model, the engine, the server and the compositor | The other files read from outside; the engine driven by random commands |
 | 2026-11-17, night (6) | Windows 11 and WSL (Fedora 44) | The engine driven by runs of chance, 7,200 of them clean in the end. One fault found and mended: Toggle floating put a window that is on a workspace not shown on the shown one as well. One thing found for the person to decide: tiles of no size where many windows dwindle. Windows: every test passes; Linux: the model, the engine, the server and the compositor | The runs with two displays, groups and scratchpads; the other files from outside; the notes of the kind TODO |
 | 2026-11-17, night (7) | Windows 11 and WSL (Fedora 44) | The runs of chance with two displays, the rules and the scratchpads, and with nothing of a workspace that is not shown in sight. Two more faults found and mended: a layout command brought a hidden workspace's window into sight; move-and-follow changed the wrong display. Noted for later: the scale toggles on the studio's Displays page (reported). Windows and Linux: every test passes (the studio's not run on Linux this time) | The person sees the two on the desktop; the other files from outside; the notes of the kind TODO; the scale toggles |
+| 2026-11-17, night (8) | Windows 11 | Looked into: the scale toggles of the studio's Displays page write the configuration, and the Windows backend does not apply a scale (by design so far); a decision for the person. The notes of the kind TODO: there are none (the count was of a variable's name) | The person decides about the scale on Windows; the other files from outside |
