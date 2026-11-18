@@ -39,6 +39,8 @@ pub struct Playing {
     pub title: String,
     pub artist: String,
     pub playing: bool,
+    /// The piece's picture, where the player names a file of it.
+    pub art: Option<crate::control::Art>,
 }
 
 impl Playing {
@@ -125,12 +127,39 @@ pub fn playing() -> Option<Playing> {
         .and_then(|value| Vec::<String>::try_from(value).ok())
         .map(|names| names.join(", "))
         .unwrap_or_default();
+    // (The piece's picture, where it is a file on this machine: one on
+    // the net is not fetched.)
+    let art = facts
+        .get("mpris:artUrl")
+        .and_then(|value| <&str>::try_from(value).ok())
+        .and_then(file_of)
+        .and_then(|file| std::fs::read(file).ok())
+        .and_then(|bytes| crate::control::Art::of_file(&bytes));
     Some(Playing {
         player: player.trim_start_matches(PREFIX).to_string(),
         title,
         artist,
         playing,
+        art,
     })
+}
+
+/// The file an address of the `file://` kind names (`%20` and the like
+/// read as what they stand for); nothing of any other address.
+fn file_of(address: &str) -> Option<std::path::PathBuf> {
+    let path = address.strip_prefix("file://")?;
+    let mut bytes = Vec::with_capacity(path.len());
+    let mut rest = path.bytes();
+    while let Some(byte) = rest.next() {
+        if byte == b'%' {
+            let pair = [rest.next()?, rest.next()?];
+            bytes.push(u8::from_str_radix(std::str::from_utf8(&pair).ok()?, 16).ok()?);
+        } else {
+            bytes.push(byte);
+        }
+    }
+    let path = String::from_utf8(bytes).ok()?;
+    path.starts_with('/').then(|| path.into())
 }
 
 /// Pass a key on to a player. Returns the name of the player that was
@@ -155,8 +184,18 @@ mod tests {
             title: "A Song".to_string(),
             artist: "Somebody".to_string(),
             playing: true,
+            art: None,
         };
         assert_eq!(on.line(), "A Song  ·  Somebody");
+        // The piece's picture is a file named by its address; one on the
+        // net is none.
+        assert_eq!(
+            file_of("file:///home/ada/My%20Music/cover.png"),
+            Some("/home/ada/My Music/cover.png".into())
+        );
+        for no_file in ["https://i.scdn.co/image/ab67", "file://relative", "file:///a%2", ""] {
+            assert_eq!(file_of(no_file), None, "{no_file}");
+        }
         assert_eq!(
             Playing {
                 artist: String::new(),

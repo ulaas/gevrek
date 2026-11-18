@@ -17,6 +17,9 @@ gevrek-ui = { path = "../ui" }
 gevrek-build = { path = "../build" }
 gevrek-shellkit = { path = "../shellkit" }
 gevrek-system = { path = "../system" }
+# The picture of what is playing, and on Linux the wallpaper for the
+# frosted surfaces: whatever kind it is.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 gevrek-tutorial = { path = "../tutorial" }
 gevrek-schema = { path = "../schema" }
 gevrek-model = { path = "../model" }
@@ -52,8 +55,6 @@ libc = "0.2"
 # Screen sharing without a copy: the stream's buffers made in the
 # graphics card's memory.
 gbm = { version = "0.18", default-features = false, features = ["drm-support"] }
-# (The wallpaper too, for the frosted surfaces: whatever kind it is.)
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 
 [build-dependencies]
 embed-resource = "3"

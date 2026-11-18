@@ -35,6 +35,9 @@ windows = { workspace = true, features = [
     "Devices_Enumeration",
     "Foundation",
     "Foundation_Collections",
+    # (What is playing: the sessions players have with the system.)
+    "Media_Control",
+    "Storage_Streams",
     "Win32_System_IO",
     # (The names of the devices to play on.)
     "Win32_System_Com_StructuredStorage",

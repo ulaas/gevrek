@@ -14,6 +14,71 @@ use gevrek_ui::theme::{self, icons};
 /// How wide the control centre is, in points.
 pub const WIDTH: u32 = 380;
 
+/// A piece's picture, small and square: made once of the file a player
+/// gave, and known again by what that file was.
+#[derive(Clone)]
+pub struct Art {
+    of: u64,
+    /// Its side, in pixels.
+    pub side: usize,
+    /// Its pixels, four bytes each.
+    pub rgba: std::sync::Arc<Vec<u8>>,
+}
+
+impl Art {
+    /// The side a picture is kept at: twice what it is drawn at.
+    const SIDE: u32 = 136;
+
+    /// The picture of a file (a PNG, a JPEG, a WebP); nothing of what is
+    /// none of these.
+    pub fn of_file(bytes: &[u8]) -> Option<Self> {
+        use std::hash::{Hash, Hasher};
+        let picture = image::load_from_memory(bytes).ok()?;
+        let small = picture
+            .resize_to_fill(Self::SIDE, Self::SIDE, image::imageops::FilterType::Triangle)
+            .to_rgba8();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        bytes.hash(&mut hasher);
+        Some(Self {
+            of: hasher.finish(),
+            side: Self::SIDE as usize,
+            rgba: std::sync::Arc::new(small.into_raw()),
+        })
+    }
+}
+
+impl PartialEq for Art {
+    fn eq(&self, other: &Self) -> bool {
+        self.of == other.of
+    }
+}
+
+impl Eq for Art {}
+
+impl std::fmt::Debug for Art {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Art({:016x}, {} wide)", self.of, self.side)
+    }
+}
+
+/// Open gevrek studio, the program the desktop is set up with, on one
+/// of its pages (the one beside this program, by its whole name: it need
+/// not be on the path).
+pub fn open_studio(page: &str) {
+    let name = format!("gevrek-studio{}", std::env::consts::EXE_SUFFIX);
+    let studio = std::env::current_exe()
+        .ok()
+        .and_then(|own| Some(own.parent()?.join(&name)))
+        .filter(|studio| studio.is_file())
+        .unwrap_or_else(|| name.into());
+    if let Err(error) = std::process::Command::new(studio)
+        .args(["--page", page])
+        .spawn()
+    {
+        log::warn!("gevrek studio could not be opened: {error}");
+    }
+}
+
 /// What the control centre shows.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Facts {
@@ -76,6 +141,8 @@ pub enum Ask {
     Record,
     Lock,
     PowerMenu,
+    /// Open gevrek studio, where the desktop is set up.
+    Settings,
     /// Make this the machine's power profile.
     Profile(String),
     /// Switch bluetooth's radio on, or off.
@@ -636,6 +703,351 @@ fn devices(
     picked
 }
 
+/// What was done to a [`pill`].
+struct PillMoved {
+    /// Its sign was pressed (mute, where the sign means that).
+    sign: bool,
+    slider: egui::Response,
+}
+
+/// How high a pill is, and how wide the part its sign stands in.
+const PILL: f32 = 40.0;
+const PILL_SIGN: f32 = 44.0;
+
+/// A level as one broad bar: filled as far as the level goes, its sign
+/// at the left end on the filled part (pressed by itself, where that
+/// means something), the level in words at the right end. Held anywhere
+/// and drawn along, it sets the level.
+#[allow(clippy::too_many_arguments)]
+fn pill(
+    ui: &mut egui::Ui,
+    palette: &theme::Palette,
+    icon: &str,
+    tip: &str,
+    value: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+    said: &str,
+    dim: bool,
+) -> PillMoved {
+    let (rect, mut slider) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), PILL),
+        egui::Sense::click_and_drag(),
+    );
+    let sign_at = egui::Rect::from_min_size(rect.min, egui::vec2(PILL_SIGN, PILL));
+    let sign = ui
+        .interact(sign_at, slider.id.with("sign"), egui::Sense::click())
+        .on_hover_text(tip);
+    let (low, high) = (*range.start(), *range.end());
+    let along = egui::Rangef::new(rect.left() + PILL_SIGN, rect.right() - 6.0);
+    if let Some(at) = slider.interact_pointer_pos() {
+        if slider.dragged() || slider.clicked() {
+            let part = ((at.x - along.min) / along.span()).clamp(0.0, 1.0);
+            let now = (low + part * (high - low)).round();
+            if now != *value {
+                *value = now;
+                slider.mark_changed();
+            }
+        }
+    }
+    if slider.has_focus() {
+        let (left, right) = ui.input(|input| {
+            (
+                input.key_pressed(egui::Key::ArrowLeft),
+                input.key_pressed(egui::Key::ArrowRight),
+            )
+        });
+        if left || right {
+            let by = (high - low) / 20.0;
+            *value = (*value + if right { by } else { -by }).clamp(low, high).round();
+            slider.mark_changed();
+        }
+    }
+    slider.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), f64::from(*value), tip));
+    let part = ((*value - low) / (high - low).max(f32::EPSILON)).clamp(0.0, 1.0);
+    let hot = ui.ctx().animate_bool_responsive(
+        slider.id.with("hot"),
+        slider.hovered() || slider.dragged() || slider.has_focus() || sign.hovered(),
+    );
+    let painter = ui.painter();
+    painter.rect(
+        rect,
+        13.0,
+        theme::mix(palette.control, palette.text, 0.03 * hot),
+        egui::Stroke::new(1.0, palette.border),
+        egui::StrokeKind::Inside,
+    );
+    let filled = egui::Rect::from_min_max(
+        rect.min,
+        egui::pos2(egui::lerp(along.min..=along.max, part) + 6.0 * part, rect.bottom()),
+    );
+    let fill = if dim {
+        theme::mix(palette.control_active(), palette.text, 0.10)
+    } else {
+        theme::mix(palette.control, palette.accent, 0.80 + 0.12 * hot)
+    };
+    painter.rect_filled(filled, 13.0, fill);
+    let on_fill = if dim { palette.muted } else { palette.on_accent() };
+    painter.text(
+        sign_at.center(),
+        egui::Align2::CENTER_CENTER,
+        icon,
+        egui::FontId::proportional(18.0),
+        on_fill,
+    );
+    // (The words are on the filled part once it reaches them.)
+    let words_at = egui::pos2(rect.right() - 14.0, rect.center().y);
+    painter.text(
+        words_at,
+        egui::Align2::RIGHT_CENTER,
+        said,
+        egui::FontId::proportional(13.0),
+        if filled.right() > words_at.x - 34.0 {
+            on_fill
+        } else {
+            palette.muted
+        },
+    );
+    if slider.has_focus() {
+        painter.rect_stroke(
+            rect.expand(2.0),
+            15.0,
+            egui::Stroke::new(2.0, palette.accent.gamma_multiply(0.5)),
+            egui::StrokeKind::Outside,
+        );
+    }
+    PillMoved {
+        sign: sign.clicked(),
+        slider,
+    }
+}
+
+/// A round button of the card of what is playing: its sign, on a disc
+/// of the accent's where it is the one that matters most.
+fn round_button(
+    ui: &mut egui::Ui,
+    palette: &theme::Palette,
+    centre: egui::Pos2,
+    radius: f32,
+    sign: &str,
+    hint: &str,
+    filled: bool,
+) -> bool {
+    let rect = egui::Rect::from_center_size(centre, egui::Vec2::splat(radius * 2.0));
+    let pressed = ui
+        .interact(rect, ui.scope_id().with(("playing", hint)), egui::Sense::click())
+        .on_hover_text(hint);
+    let hot = ui
+        .ctx()
+        .animate_bool_responsive(pressed.id.with("hot"), pressed.hovered());
+    let painter = ui.painter();
+    if filled {
+        painter.circle_filled(
+            centre,
+            radius + hot,
+            theme::mix(palette.accent, palette.text, 0.10 * hot),
+        );
+    } else if hot > 0.0 {
+        painter.circle_filled(centre, radius, palette.text.gamma_multiply(0.10 * hot));
+    }
+    painter.text(
+        centre,
+        egui::Align2::CENTER_CENTER,
+        sign,
+        egui::FontId::proportional(if filled { 17.0 } else { 16.0 }),
+        if filled { palette.on_accent() } else { palette.text },
+    );
+    pressed.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, hint));
+    pressed.clicked()
+}
+
+/// What is playing, as a card: the piece's picture, its title and who it
+/// is by, the player's name, and the keys for it (the one in the middle
+/// says what a press does now: pause what plays, play what does not).
+/// Where nothing is known to play, one line that says so, with the keys
+/// all the same: a player that tells nobody what it has on hears them.
+fn now_playing(
+    ui: &mut egui::Ui,
+    palette: &theme::Palette,
+    playing: Option<&crate::media::Playing>,
+    asked: &mut Vec<Ask>,
+) {
+    use crate::media::Ask as Key;
+    use gevrek_ui::controls;
+    let playing = playing.filter(|playing| !playing.line().trim().is_empty());
+    let Some(playing) = playing else {
+        let (rect, _) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), PILL),
+            egui::Sense::hover(),
+        );
+        ui.painter().rect(
+            rect,
+            13.0,
+            palette.control,
+            egui::Stroke::new(1.0, palette.border),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().text(
+            egui::pos2(rect.left() + PILL_SIGN / 2.0, rect.center().y),
+            egui::Align2::CENTER_CENTER,
+            icons::MUSIC_NOTES,
+            egui::FontId::proportional(18.0),
+            palette.muted,
+        );
+        ui.painter().text(
+            egui::pos2(rect.left() + PILL_SIGN, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            "Nothing is playing",
+            egui::FontId::proportional(13.5),
+            palette.muted,
+        );
+        let mut x = rect.right() - 22.0;
+        for (sign, hint, key) in [
+            (icons::SKIP_FORWARD, "Next", Key::Next),
+            (icons::PLAY_PAUSE, "Play or pause", Key::PlayPause),
+            (icons::SKIP_BACK, "Previous", Key::Previous),
+        ] {
+            let centre = egui::pos2(x, rect.center().y);
+            if round_button(ui, palette, centre, 14.0, sign, hint, false) {
+                asked.push(Ask::Media(key));
+            }
+            x -= 32.0;
+        }
+        return;
+    };
+
+    const HIGH: f32 = 92.0;
+    const PICTURE: f32 = 68.0;
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), HIGH),
+        egui::Sense::hover(),
+    );
+    ui.painter().rect(
+        rect,
+        14.0,
+        theme::mix(palette.control, palette.accent, 0.10),
+        egui::Stroke::new(1.0, theme::mix(palette.border, palette.accent, 0.30)),
+        egui::StrokeKind::Inside,
+    );
+    // The piece's picture, or a sign where it has none.
+    let picture = egui::Rect::from_min_size(
+        rect.min + egui::Vec2::splat((HIGH - PICTURE) / 2.0),
+        egui::Vec2::splat(PICTURE),
+    );
+    let kept = egui::Id::unique("gevrek what is playing: its picture");
+    let texture = playing.art.as_ref().map(|art| {
+        let known = ui
+            .ctx()
+            .data(|data| data.get_temp::<(u64, egui::TextureHandle)>(kept))
+            .filter(|(of, _)| *of == art.of);
+        match known {
+            Some((_, texture)) => texture,
+            None => {
+                let image = egui::ColorImage::from_rgba_unmultiplied([art.side, art.side], &art.rgba);
+                let texture =
+                    ui.ctx()
+                        .load_texture("what is playing", image, egui::TextureOptions::LINEAR);
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(kept, (art.of, texture.clone())));
+                texture
+            }
+        }
+    });
+    match texture {
+        Some(texture) => {
+            egui::Image::new(&texture)
+                .corner_radius(10)
+                .paint_at(ui, picture);
+        }
+        None => {
+            ui.painter().rect_filled(
+                picture,
+                10.0,
+                theme::mix(palette.control_active(), palette.accent, 0.30),
+            );
+            ui.painter().text(
+                picture.center(),
+                egui::Align2::CENTER_CENTER,
+                icons::MUSIC_NOTES,
+                egui::FontId::proportional(28.0),
+                theme::mix(palette.text, palette.accent, 0.5),
+            );
+        }
+    }
+    ui.painter().rect_stroke(
+        picture,
+        10.0,
+        egui::Stroke::new(1.0, palette.text.gamma_multiply(0.10)),
+        egui::StrokeKind::Inside,
+    );
+
+    // Its title and who it is by.
+    let left = picture.right() + 12.0;
+    let room = rect.right() - 12.0 - left;
+    let title_words = if playing.title.trim().is_empty() {
+        playing.player.as_str()
+    } else {
+        playing.title.as_str()
+    };
+    let title = controls::one_line(
+        ui,
+        title_words,
+        egui::FontId::proportional(14.5),
+        palette.text,
+        room,
+    );
+    let by = controls::one_line(
+        ui,
+        playing.artist.trim(),
+        egui::FontId::proportional(12.5),
+        palette.muted,
+        room,
+    );
+    let top = rect.top() + 12.0;
+    ui.painter().galley(egui::pos2(left, top), title.clone(), palette.text);
+    ui.painter().galley(
+        egui::pos2(left, top + title.size().y + 1.0),
+        by,
+        palette.muted,
+    );
+
+    // The keys, under them; the player's name at the end of their line.
+    let line = rect.bottom() - 26.0;
+    let middle = if playing.playing {
+        (icons::PAUSE, "Pause")
+    } else {
+        (icons::PLAY, "Play")
+    };
+    let mut x = left + 14.0;
+    for (sign, hint, key, radius, filled) in [
+        (icons::SKIP_BACK, "Previous", Key::Previous, 14.0, false),
+        (middle.0, middle.1, Key::PlayPause, 16.0, true),
+        (icons::SKIP_FORWARD, "Next", Key::Next, 14.0, false),
+    ] {
+        if filled {
+            x += 4.0;
+        }
+        if round_button(ui, palette, egui::pos2(x, line), radius, sign, hint, filled) {
+            asked.push(Ask::Media(key));
+        }
+        x += if filled { 40.0 } else { 36.0 };
+    }
+    let name_room = rect.right() - 12.0 - x + 14.0;
+    if name_room > 30.0 && !playing.title.trim().is_empty() {
+        let name = controls::one_line(
+            ui,
+            &playing.player.to_uppercase(),
+            egui::FontId::proportional(10.5),
+            palette.faint,
+            name_room,
+        );
+        ui.painter().galley(
+            egui::pos2(rect.right() - 12.0 - name.size().x, line - name.size().y / 2.0),
+            name,
+            palette.faint,
+        );
+    }
+}
+
 /// Draw the control centre. What was asked for in this frame.
 ///
 /// From the top: its name and the way out; what is on or off, as tiles
@@ -683,6 +1095,11 @@ pub fn draw(
                         .clicked()
                         {
                             asked.push(Ask::Close);
+                        }
+                        if widgets::icon_button(ui, icons::GEAR_SIX, "Set the desktop up: gevrek studio")
+                            .clicked()
+                        {
+                            asked.push(Ask::Settings);
                         }
                     });
                 });
@@ -782,9 +1199,40 @@ pub fn draw(
                         }
                         detail(ui, palette, facts, held, &mut asked);
 
+                        // What is playing.
+                        now_playing(ui, palette, facts.playing.as_ref(), &mut asked);
+
+                        // The brightness, on a machine that has one to set.
+                        if let Some(percent) = facts.brightness {
+                            let percent = held.brightness_asked.level(percent, now);
+                            if held.brightness_asked.waiting() {
+                                ui.ctx()
+                                    .request_repaint_after(std::time::Duration::from_millis(100));
+                            }
+                            let mut value = held.brightness.unwrap_or(percent as f32);
+                            let said = format!("{} %", value.round() as u32);
+                            let moved = pill(
+                                ui,
+                                palette,
+                                icons::SUN,
+                                "How bright the display is",
+                                &mut value,
+                                1.0..=100.0,
+                                &said,
+                                false,
+                            );
+                            if moved.slider.dragged() {
+                                held.brightness = Some(value);
+                            } else if moved.slider.drag_stopped() || moved.slider.changed() {
+                                held.brightness = None;
+                                if let Some(step) = step_to(percent, value) {
+                                    held.brightness_asked.ask(value.round() as u32, now);
+                                    asked.push(Ask::Brightness(step));
+                                }
+                            }
+                        }
+
                         // The sound.
-                        ui.add_space(2.0);
-                        widgets::caption(ui, "Sound");
                         match facts.volume {
                             Some((percent, muted)) => {
                                 // (Where it was put, until the system has it there.)
@@ -796,14 +1244,15 @@ pub fn draw(
                                 }
                                 let mut value = held.volume.unwrap_or(percent as f32);
                                 let said = format!("{} %", value.round() as u32);
-                                let moved = controls::level(
+                                let moved = pill(
                                     ui,
+                                    palette,
                                     crate::panel::sound_icon(percent, muted),
                                     if muted { "Let it be heard" } else { "Mute" },
-                                    None,
                                     &mut value,
                                     0.0..=100.0,
-                                    Some(&said),
+                                    &said,
+                                    muted,
                                 );
                                 if moved.sign {
                                     asked.push(Ask::Mute);
@@ -905,87 +1354,6 @@ pub fn draw(
                             }
                         }
 
-                        // The brightness, on a machine that has one to set.
-                        if let Some(percent) = facts.brightness {
-                            ui.add_space(2.0);
-                            widgets::caption(ui, "Display");
-                            let percent = held.brightness_asked.level(percent, now);
-                            if held.brightness_asked.waiting() {
-                                ui.ctx()
-                                    .request_repaint_after(std::time::Duration::from_millis(100));
-                            }
-                            let mut value = held.brightness.unwrap_or(percent as f32);
-                            let said = format!("{} %", value.round() as u32);
-                            let moved = controls::level(
-                                ui,
-                                icons::SUN,
-                                "How bright the display is",
-                                None,
-                                &mut value,
-                                1.0..=100.0,
-                                Some(&said),
-                            );
-                            if moved.slider.dragged() {
-                                held.brightness = Some(value);
-                            } else if moved.slider.drag_stopped() || moved.slider.changed() {
-                                held.brightness = None;
-                                if let Some(step) = step_to(percent, value) {
-                                    held.brightness_asked.ask(value.round() as u32, now);
-                                    asked.push(Ask::Brightness(step));
-                                }
-                            }
-                        }
-
-                        // What is playing: the piece by its name where a
-                        // player says it, and the player's keys.
-                        ui.add_space(2.0);
-                        widgets::caption(ui, "Playing");
-                        let on = facts
-                            .playing
-                            .as_ref()
-                            .map(|playing| playing.line())
-                            .filter(|line| !line.is_empty());
-                        // (The keys from the right end, whatever room they
-                        // take; the piece's name has what is left.)
-                        let line = egui::vec2(ui.available_width(), 30.0);
-                        let from_right = egui::Layout::right_to_left(egui::Align::Center);
-                        ui.allocate_ui_with_layout(line, from_right, |ui| {
-                            ui.spacing_mut().item_spacing.x = 2.0;
-                            for (sign, hint, ask) in [
-                                (icons::SKIP_FORWARD, "Next", crate::media::Ask::Next),
-                                (
-                                    icons::PLAY_PAUSE,
-                                    "Play or pause",
-                                    crate::media::Ask::PlayPause,
-                                ),
-                                (icons::SKIP_BACK, "Previous", crate::media::Ask::Previous),
-                            ] {
-                                if widgets::icon_button(ui, sign, hint).clicked() {
-                                    asked.push(Ask::Media(ask));
-                                }
-                            }
-                            let (rect, _) = ui.allocate_exact_size(
-                                egui::vec2((ui.available_width() - 6.0).max(40.0), 30.0),
-                                egui::Sense::hover(),
-                            );
-                            let colour = if on.is_some() {
-                                palette.text
-                            } else {
-                                palette.muted
-                            };
-                            let words = controls::one_line(
-                                ui,
-                                on.as_deref().unwrap_or("Nothing is playing"),
-                                egui::FontId::proportional(13.5),
-                                colour,
-                                rect.width(),
-                            );
-                            ui.painter().galley(
-                                egui::pos2(rect.left(), rect.center().y - words.size().y / 2.0),
-                                words,
-                                colour,
-                            );
-                        });
                     });
                 });
 
@@ -1104,6 +1472,7 @@ mod tests {
                 title: "So What".to_string(),
                 artist: "Miles Davis".to_string(),
                 playing: true,
+                art: None,
             }),
             bluetooth: Some(gevrek_system::bluetooth::Bluetooth {
                 powered: true,
@@ -1170,7 +1539,27 @@ mod tests {
                 outputs: busy().outputs.into_iter().take(1).collect(),
                 ..Facts::default()
             },
-            _ => busy(),
+            // (Nothing known to play.)
+            Some("quiet") => Facts {
+                playing: None,
+                ..busy()
+            },
+            _ => {
+                // With a picture of the piece: one made here.
+                let mut picture = image::RgbaImage::new(96, 96);
+                for (x, y, pixel) in picture.enumerate_pixels_mut() {
+                    *pixel = image::Rgba([20 + 2 * x as u8, 60 + y as u8, 190 - x as u8, 255]);
+                }
+                let mut file = std::io::Cursor::new(Vec::new());
+                picture
+                    .write_to(&mut file, image::ImageFormat::Png)
+                    .expect("a picture");
+                let mut facts = busy();
+                if let Some(playing) = facts.playing.as_mut() {
+                    playing.art = Art::of_file(file.get_ref());
+                }
+                facts
+            }
         };
         let mut painter = gevrek_ui::picture::Painter::sized(size)
             .expect("a graphics device that computes on the processor");
@@ -1400,6 +1789,7 @@ mod tests {
                     title: "A Song".to_string(),
                     artist: "Somebody".to_string(),
                     playing: true,
+                    art: None,
                 }),
                 wifi: Some(gevrek_system::wifi::Wifi {
                     enabled: true,

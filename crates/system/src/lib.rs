@@ -20,6 +20,7 @@ pub mod icons;
 pub mod idle;
 pub mod look;
 pub mod pictures;
+pub mod playing;
 pub mod power_profile;
 pub mod session;
 pub mod sound;

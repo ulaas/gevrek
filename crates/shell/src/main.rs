@@ -3751,6 +3751,10 @@ mod linux {
                         close = true;
                         toggle_power(&shared, control);
                     }
+                    Ask::Settings => {
+                        close = true;
+                        crate::control::open_studio("bar");
+                    }
                     Ask::Wifi(on) => {
                         if let Some(sender) = shared.borrow().verdicts.clone() {
                             std::thread::spawn(move || {

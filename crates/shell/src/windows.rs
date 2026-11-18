@@ -123,6 +123,8 @@ enum Message {
     WifiLooking(bool),
     /// How bluetooth stands.
     Bluetooth(Option<gevrek_system::bluetooth::Bluetooth>),
+    /// What is playing is another piece, or plays, or no longer.
+    Playing(Option<crate::media::Playing>),
 }
 
 /// The pixels an application's icon is asked for at: twice what it is
@@ -244,6 +246,9 @@ struct State {
         crate::control::Held,
         gevrek_system::sound::Mixer,
     )>,
+    /// What is playing, as the system last said (asked while the control
+    /// centre is open).
+    playing: Option<crate::media::Playing>,
     /// The night light is switched on (as the configuration last said).
     night_light: bool,
     /// The tutorial, while it is taken: its card's surface, how far it
@@ -383,6 +388,7 @@ pub fn run() -> anyhow::Result<()> {
         shortcuts: None,
         keys: None,
         control_centre: None,
+        playing: None,
         night_light: false,
         ring: None,
         tutorial: None,
@@ -490,6 +496,13 @@ pub fn run() -> anyhow::Result<()> {
         Message::Bluetooth(bluetooth) => {
             let mut state = state.borrow_mut();
             state.bluetooth = bluetooth;
+            if let Some((id, ..)) = &state.control_centre {
+                control.redraw(*id);
+            }
+        }
+        Message::Playing(playing) => {
+            let mut state = state.borrow_mut();
+            state.playing = playing;
             if let Some((id, ..)) = &state.control_centre {
                 control.redraw(*id);
             }
@@ -1500,7 +1513,28 @@ fn toggle_control(state: &Rc<RefCell<State>>, control: &mut Control) {
     let shared = Rc::clone(state);
     let mut fonts = false;
     let mut read_at = Instant::now();
+    // What is playing is asked beside the shell, once a second for as
+    // long as the control centre is open (its drawing holds `open`; when
+    // it is put away, nobody does, and the asking ends).
+    let open = std::sync::Arc::new(());
+    {
+        let (still_open, sender) = (std::sync::Arc::downgrade(&open), state.borrow().sender.clone());
+        let mut said = state.borrow().playing.clone();
+        std::thread::spawn(move || {
+            let mut first = true;
+            while still_open.upgrade().is_some() {
+                let now = crate::media::playing(said.as_ref());
+                if first || now != said {
+                    said = now.clone();
+                    sender.send(Message::Playing(now));
+                }
+                first = false;
+                std::thread::sleep(Duration::from_millis(1000));
+            }
+        });
+    }
     let id = control.open(place, move |ui, control| {
+        let _open = &open;
         let context = ui.ctx().clone();
         // (Not while a slider is held: the list must not move under it.)
         if read_at.elapsed() >= Duration::from_secs(3) {
@@ -1534,7 +1568,7 @@ fn toggle_control(state: &Rc<RefCell<State>>, control: &mut Control) {
                 recording: false,
                 profiles: None,
                 network: state.system.network.clone(),
-                playing: None,
+                playing: state.playing.clone(),
                 bluetooth: state.bluetooth.clone(),
                 wifi: state.wifi.clone(),
                 joining: state.wifi_joining.clone(),
@@ -1624,7 +1658,21 @@ fn toggle_control(state: &Rc<RefCell<State>>, control: &mut Control) {
                     let command = serde_json::json!({"command": "shell", "action": "night_light"});
                     state.link.send(Request::Dispatch(command.to_string()));
                 }
-                Ask::Media(what) => crate::media::tell(what),
+                Ask::Media(what) => {
+                    crate::media::tell(what);
+                    // (Shown at once; the system says the same when it
+                    // has followed.)
+                    if what == crate::media::Ask::PlayPause {
+                        let mut state = shared.borrow_mut();
+                        if let Some(playing) = state.playing.as_mut() {
+                            playing.playing = !playing.playing;
+                        }
+                    }
+                }
+                Ask::Settings => {
+                    close = true;
+                    crate::control::open_studio("bar");
+                }
                 Ask::Lock => {
                     close = true;
                     then = Some("lock");
