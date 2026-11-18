@@ -75,9 +75,37 @@ fn fallback() -> PathBuf {
     std::env::temp_dir()
 }
 
+/// Whether a program of this name is one of cargo's tests: cargo gives
+/// those the crate's name with sixteen digits of its own after a dash
+/// (`gevrek_model-8374d5e8108a6726`), wherever it builds them. No
+/// program that is installed or run by its name has such a one.
+fn is_a_test(program: &std::path::Path) -> bool {
+    program
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.rsplit_once('-'))
+        .is_some_and(|(crate_name, digits)| {
+            !crate_name.is_empty()
+                && digits.len() == 16
+                && digits.chars().all(|digit| digit.is_ascii_hexdigit())
+        })
+}
+
+/// Where a test keeps what a program keeps in the person's own folders:
+/// a folder of the tests' own, under the system's temporary one. (The
+/// tests wrote into the folders of the gevrek in use: two hundred copies
+/// of test files among its backups in a day.) A folder set outright
+/// (`GEVREK_STATE_DIR` and the like) still counts first.
+fn under_test(kind: &str) -> Option<PathBuf> {
+    static TEST: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    TEST.get_or_init(|| std::env::current_exe().is_ok_and(|program| is_a_test(&program)))
+        .then(|| std::env::temp_dir().join("gevrek-under-test").join(kind))
+}
+
 /// The folder of the configuration.
 pub fn config_dir() -> PathBuf {
     overridden("GEVREK_CONFIG_DIR")
+        .or_else(|| under_test("config"))
         .unwrap_or_else(|| scoped(dirs::config_dir().unwrap_or_else(fallback), &instance()))
 }
 
@@ -89,7 +117,7 @@ pub fn config_file() -> PathBuf {
 /// What should outlive a restart and is not configuration: backups of the
 /// configuration, history, the saved session.
 pub fn state_dir() -> PathBuf {
-    overridden("GEVREK_STATE_DIR").unwrap_or_else(|| {
+    overridden("GEVREK_STATE_DIR").or_else(|| under_test("state")).unwrap_or_else(|| {
         // `dirs::state_dir` is Linux only; elsewhere a folder beside the
         // local data.
         match dirs::state_dir() {
@@ -103,7 +131,7 @@ pub fn state_dir() -> PathBuf {
 
 /// What can be made again: icons, scaled pictures.
 pub fn cache_dir() -> PathBuf {
-    overridden("GEVREK_CACHE_DIR").unwrap_or_else(|| {
+    overridden("GEVREK_CACHE_DIR").or_else(|| under_test("cache")).unwrap_or_else(|| {
         if cfg!(windows) {
             scoped(dirs::data_local_dir().unwrap_or_else(fallback), &instance()).join("cache")
         } else {
@@ -115,7 +143,7 @@ pub fn cache_dir() -> PathBuf {
 /// What lives only while the session does: sockets, pid files. All
 /// instances share it; their files carry the instance's name.
 pub fn runtime_dir() -> PathBuf {
-    overridden("GEVREK_RUNTIME_DIR").unwrap_or_else(|| match dirs::runtime_dir() {
+    overridden("GEVREK_RUNTIME_DIR").or_else(|| under_test("run")).unwrap_or_else(|| match dirs::runtime_dir() {
         Some(base) => base.join("gevrek"),
         None => dirs::data_local_dir()
             .unwrap_or_else(fallback)
@@ -274,5 +302,43 @@ mod tests {
             scoped(base, "dev"),
             PathBuf::from("/base/gevrek/instances/dev")
         );
+    }
+
+    #[test]
+    fn a_test_keeps_its_files_out_of_the_persons_folders() {
+        for test in [
+            "gevrek_model-0123456789abcdef.exe",
+            "/home/ada/gevrek/target/debug/deps/gevrek_model-0123456789abcdef",
+            "/home/ada/target/debug/build/gevrek-model/8374d5e8108a6726/out/gevrek_model-8374d5e8108a6726",
+            "grpc_integration_tests-00ff00ff00ff00ff",
+        ] {
+            assert!(is_a_test(std::path::Path::new(test)), "{test}");
+        }
+        for no_test in [
+            "/usr/bin/gevrek-wm",
+            "/home/ada/gevrek/target/debug/gevrek-wm",
+            "/home/ada/gevrek/target/debug/deps/gevrek-wm",
+            "gevrek-shell.exe",
+            "gevrek-0123456789abcdeg",
+            "gevrek-0123456789abcde",
+            "-0123456789abcdef",
+            "gevrek",
+            "",
+        ] {
+            assert!(!is_a_test(std::path::Path::new(no_test)), "{no_test}");
+        }
+        // This is one: what it would keep is under the tests' own folder
+        // (where no folder is set outright for the whole run).
+        let own = std::env::temp_dir().join("gevrek-under-test");
+        for (variable, folder) in [
+            ("GEVREK_STATE_DIR", state_dir()),
+            ("GEVREK_CACHE_DIR", cache_dir()),
+            ("GEVREK_CONFIG_DIR", config_dir()),
+            ("GEVREK_RUNTIME_DIR", runtime_dir()),
+        ] {
+            if std::env::var_os(variable).is_none() {
+                assert!(folder.starts_with(&own), "{}", folder.display());
+            }
+        }
     }
 }
