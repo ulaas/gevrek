@@ -359,11 +359,6 @@ pub fn recover_orphans(path: PathBuf) -> usize {
     orphans.len()
 }
 
-/// (What spoils a file from outside: the engine's, taken in as it is.)
-#[cfg(test)]
-#[path = "../../../engine/src/spoil.rs"]
-mod spoil;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,7 +369,7 @@ mod tests {
     /// for none.
     #[test]
     fn no_journal_from_outside_ends_the_program() {
-        use super::spoil::{harder, lived, places, spoil, Chance};
+        use crate::spoil::{harder, lived, places, spoil, Chance};
         let dir =
             std::env::temp_dir().join(format!("gevrek-journal-outside-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

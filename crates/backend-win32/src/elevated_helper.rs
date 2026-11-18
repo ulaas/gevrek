@@ -1086,11 +1086,6 @@ pub mod client {
     }
 }
 
-/// (What spoils what is read from outside: the engine's, taken in as it is.)
-#[cfg(test)]
-#[path = "../../engine/src/spoil.rs"]
-mod spoil;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1459,7 +1454,7 @@ mod tests {
     /// may do.
     #[test]
     fn no_asking_from_outside_ends_the_helper_or_takes_it_further() {
-        use super::spoil::{harder, lived, places, spoil, Chance};
+        use crate::spoil::{harder, lived, places, spoil, Chance};
         let whole: Vec<serde_json::Value> = one_of_each()
             .iter()
             .map(|ask| serde_json::to_value(ask).unwrap())
