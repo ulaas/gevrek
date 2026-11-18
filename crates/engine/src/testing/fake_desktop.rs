@@ -43,6 +43,9 @@ pub struct FakeDesktop {
     pub focused: Option<WindowHandle>,
     /// Every effect applied, in order.
     pub applied: Vec<Effect>,
+    /// Where the windows of a workspace that came were to come to, for
+    /// each time one came (`begin_workspace_transition`).
+    pub came: Vec<Vec<(WindowHandle, Rect)>>,
     /// Programs asked to launch.
     pub launched: Vec<String>,
     next_window: isize,
@@ -58,6 +61,7 @@ impl FakeDesktop {
             windows: BTreeMap::new(),
             focused: None,
             applied: Vec::new(),
+            came: Vec::new(),
             launched: Vec::new(),
             next_window: 100,
         }
@@ -388,10 +392,11 @@ impl Desktop for FakeDesktop {
 
     fn begin_workspace_transition(
         &mut self,
-        _operations: &[(WindowHandle, Rect)],
+        operations: &[(WindowHandle, Rect)],
         _offset_x: i32,
         _offset_y: i32,
     ) -> anyhow::Result<bool> {
+        self.came.push(operations.to_vec());
         Ok(false)
     }
 

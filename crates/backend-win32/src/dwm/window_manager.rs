@@ -2024,9 +2024,15 @@ impl WindowManager {
                 // A workspace's window that may go out first stays shown
                 // for now (`workspace_gives_way`); all else about hiding
                 // it is done at once.
+                // (Not one that is minimized: where it "is" then is
+                // where its mark is kept, far off every display and as
+                // small as a title. Put back there when it had gone out,
+                // that became where the window is when it is brought
+                // back: very small, and out of sight.)
                 let kept = self.going_out.expected
                     && self.is_window_visible(handle)
-                    && !IsZoomed(hwnd).as_bool();
+                    && !IsZoomed(hwnd).as_bool()
+                    && !IsIconic(hwnd).as_bool();
                 let home = kept
                     .then(|| {
                         self.animation_scheduler
@@ -3572,6 +3578,15 @@ impl WindowManager {
         // (`workspace_gives_way`): those that come back in at once are no
         // longer going.
         self.going_out.expected = false;
+        // (A window that is minimized comes nowhere and is moved by
+        // nothing: see `hide_window`.)
+        let coming: Vec<(WindowHandle, crate::dwm::container::Rect)> = operations
+            .iter()
+            .copied()
+            // SAFETY: a plain question about a window that may be gone.
+            .filter(|(handle, _)| !unsafe { IsIconic(handle.to_hwnd()) }.as_bool())
+            .collect();
+        let operations = coming.as_slice();
         // (A window still coming in is moved as a workspace's window now.)
         let taken_over: Vec<WindowHandle> = operations
             .iter()
@@ -7659,6 +7674,75 @@ mod exit_animation_tests {
     fn is_shown(window: WindowHandle) -> bool {
         use windows::Win32::UI::WindowsAndMessaging::IsWindowVisible;
         unsafe { IsWindowVisible(HWND(window.0 as _)).as_bool() }
+    }
+
+    /// A window that is minimized "is" where the system keeps its mark:
+    /// far off every display, as small as a title. Going out with its
+    /// workspace and coming with it, it is moved by nothing. (Taken as
+    /// the place it has, that was where it was put: brought back while
+    /// its workspace came, or after it had gone, it was very small and
+    /// out of sight, whatever had been put right before.)
+    #[test]
+    fn a_minimized_window_is_not_moved_when_its_workspace_goes_and_comes() {
+        // (It hides a window, which the process's journal of hidden
+        // windows then names: no test that shows what the journal names
+        // may run meanwhile.)
+        let _alone = crate::runtime::test_support::alone_with_the_journal();
+        use windows::Win32::UI::WindowsAndMessaging::{
+            DestroyWindow, IsIconic, ShowWindow, SW_MINIMIZE, SW_RESTORE, SW_SHOWNA,
+        };
+        let home = Rect::new(-30000, -30000, 600, 400);
+        let settle = |window_manager: &mut WindowManager| {
+            let deadline = Instant::now() + Duration::from_millis(1200);
+            while Instant::now() < deadline {
+                window_manager.tick_runtime_animations().unwrap();
+                messages_are_heard();
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+        for (pictures, comes) in [(false, false), (false, true), (true, false), (true, true)] {
+            let mut window_manager = WindowManager::new();
+            window_manager.set_animation_profile(workspace_slide_profile(pictures, false));
+            let window = shown_window_out_of_sight();
+            let hwnd = HWND(window.0 as _);
+            window_manager.batch_move_resize(&[(window, home)]).unwrap();
+            unsafe {
+                let _ = ShowWindow(hwnd, SW_MINIMIZE);
+            }
+            messages_are_heard();
+            assert!(unsafe { IsIconic(hwnd) }.as_bool());
+            if comes {
+                // Its workspace comes, with the place the system says
+                // the window is at; and the window is brought back (as
+                // one that is given the keyboard is).
+                let said = window_manager.get_window_rect(window).unwrap();
+                assert_ne!(said, home);
+                let _ = window_manager.begin_workspace_transition(&[(window, said)], 800, 0);
+                unsafe {
+                    let _ = ShowWindow(hwnd, SW_RESTORE);
+                }
+                settle(&mut window_manager);
+            } else {
+                // Its workspace goes; later the window is brought back.
+                window_manager.workspace_gives_way();
+                window_manager.hide_window(window).unwrap();
+                let _ = window_manager.begin_workspace_transition(&[], 800, 0);
+                settle(&mut window_manager);
+                unsafe {
+                    let _ = ShowWindow(hwnd, SW_SHOWNA);
+                    let _ = ShowWindow(hwnd, SW_RESTORE);
+                }
+                settle(&mut window_manager);
+            }
+            assert_eq!(
+                window_manager.get_window_rect(window).unwrap(),
+                home,
+                "pictures: {pictures}, comes: {comes}"
+            );
+            unsafe {
+                let _ = DestroyWindow(hwnd);
+            }
+        }
     }
 
     #[test]

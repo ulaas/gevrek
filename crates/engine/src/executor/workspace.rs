@@ -1212,6 +1212,27 @@ impl Executor {
         let work_area = monitor_manager
             .get_adjusted_work_area(monitor, window_manager)
             .ok_or_else(|| anyhow::anyhow!("Could not determine the monitor work area"))?;
+        // (Every display's room: a window that reaches into none of them
+        // is seen nowhere.)
+        let displays: Vec<gevrek_model::geometry::Rect> = monitor_manager
+            .get_all_monitors()
+            .iter()
+            .map(|display| gevrek_model::geometry::Rect {
+                x: display.x,
+                y: display.y,
+                width: display.width,
+                height: display.height,
+            })
+            .collect();
+        // (Whether enough of a window lies on a display to take hold of.)
+        let reaches = |display: &gevrek_model::geometry::Rect,
+                       window: &gevrek_model::geometry::Rect| {
+            let wide = (window.x + window.width).min(display.x + display.width)
+                - window.x.max(display.x);
+            let high = (window.y + window.height).min(display.y + display.height)
+                - window.y.max(display.y);
+            wide >= 32 && high >= 16
+        };
         let transition_rects = {
             let workspace = monitor_manager
                 .get_focused_workspace_mut(monitor)
@@ -1226,15 +1247,54 @@ impl Executor {
             }
             let mut transition_rects = Vec::new();
             for window in workspace.floating_windows.iter().copied() {
-                if let Ok(rect) = queries(window_manager)
+                // A window that is minimized comes nowhere: what the
+                // system says of where it is, is where its mark is kept
+                // (far off every display, as small as a title). Given as
+                // the place to come to, that was written down as where
+                // the window is when it is brought back: it came back
+                // very small and out of sight, however it had been put
+                // right before.
+                if queries(window_manager).is_minimized(window) {
+                    continue;
+                }
+                let Ok(rect) = queries(window_manager)
                     .rect(window)
                     .map_err(anyhow::Error::msg)
-                {
-                    transition_rects.push((window, rect));
-                }
+                else {
+                    continue;
+                };
+                // One that is on no display at all (left so by the
+                // above) comes to the middle of this one, at a size that
+                // can be seen.
+                let rect = if displays.iter().any(|display| reaches(display, &rect)) {
+                    rect
+                } else {
+                    let width = rect.width.clamp(work_area.width / 3, work_area.width.max(1));
+                    let height = rect.height.clamp(work_area.height / 3, work_area.height.max(1));
+                    let found = gevrek_model::geometry::Rect {
+                        x: work_area.x + (work_area.width - width) / 2,
+                        y: work_area.y + (work_area.height - height) / 2,
+                        width,
+                        height,
+                    };
+                    log::info!("Window {window:?} was on no display ({rect:?}): it is put at {found:?}");
+                    let _ = effect(
+                        window_manager,
+                        Effect::Configure {
+                            id: window,
+                            rect: found,
+                            states: WindowStates::default(),
+                        },
+                    );
+                    found
+                };
+                transition_rects.push((window, rect));
             }
             for container in workspace.containers.iter() {
-                if let Some(window) = container.focused_window() {
+                if let Some(window) = container
+                    .focused_window()
+                    .filter(|window| !queries(window_manager).is_minimized(*window))
+                {
                     transition_rects.push((window, container.rect));
                 }
             }

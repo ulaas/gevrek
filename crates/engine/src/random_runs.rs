@@ -1173,6 +1173,87 @@ fn a_window_comes_to_the_middle_and_goes_back_as_it_was() {
     assert_eq!(broken(&core, &desktop), None);
 }
 
+/// A window that is minimized is where the system keeps its mark: far
+/// off every display, as small as a title. A workspace that comes hands
+/// it no place to come to (that place was written down as the window's
+/// own, and it came back very small and out of sight, however it had
+/// been put right before); and a floating window that is on no display
+/// at all comes to the middle of its own, at a size that can be seen.
+#[test]
+fn a_minimized_window_is_given_no_place_and_a_lost_one_is_found() {
+    let show = |name: &str| {
+        serde_json::json!({"command": "switch_workspace_selector", "selector": {"kind": "name", "value": name}})
+    };
+    for told in [false, true] {
+        let (mut core, mut desktop, _) = desk(false);
+        asked(&mut core, &mut desktop, show("2"));
+        let _ = core.dispatch(
+            &mut desktop,
+            DispatchCommand::SetLayout {
+                layout: LayoutType::Floating,
+            },
+        );
+        let floats = desktop.open("Terminal 1", "wt.exe");
+        let other = desktop.open("Notes 2", "notes.exe");
+        for window in [floats, other] {
+            core.handle_window_event(&mut desktop, WindowEvent::Created(window))
+                .expect("opened");
+        }
+        let _ = core.flush_pending_layouts(&mut desktop);
+        assert!(core.monitor_manager.is_window_floating(floats));
+        let before = desktop.window(other).rect;
+
+        // It is minimized (by the person, or by the system while its
+        // workspace is away), and its workspace comes.
+        asked(&mut core, &mut desktop, show("1"));
+        {
+            let it = desktop.windows.get_mut(&floats).expect("it");
+            it.minimized = true;
+            it.rect = Rect::new(-32000, -32000, 160, 28);
+        }
+        if told {
+            let _ = core.handle_window_event(&mut desktop, WindowEvent::Minimized(floats));
+            let _ = core.flush_pending_layouts(&mut desktop);
+        }
+        desktop.came.clear();
+        asked(&mut core, &mut desktop, show("2"));
+        let came: Vec<(WindowHandle, Rect)> = desktop.came.concat();
+        assert!(
+            came.iter().all(|(window, _)| *window != floats),
+            "told: {told}; {came:?}"
+        );
+        assert!(came.contains(&(other, before)), "{came:?}");
+
+        // Brought back by the system where it was left written down: on
+        // no display. It is found when its workspace comes.
+        asked(&mut core, &mut desktop, show("1"));
+        {
+            let it = desktop.windows.get_mut(&floats).expect("it");
+            it.minimized = false;
+            it.rect = Rect::new(-32000, -32000, 480, 99);
+        }
+        desktop.came.clear();
+        asked(&mut core, &mut desktop, show("2"));
+        let now = desktop.window(floats).rect;
+        let area = core
+            .monitor_manager
+            .get_adjusted_work_area(OUTPUT, &desktop)
+            .expect("the display's room");
+        assert!(
+            now.x >= area.x
+                && now.y >= area.y
+                && now.x + now.width <= area.x + area.width
+                && now.y + now.height <= area.y + area.height,
+            "{now:?} in {area:?}"
+        );
+        assert!(now.width >= area.width / 3 && now.height >= area.height / 3, "{now:?}");
+        assert!(desktop.came.concat().contains(&(floats, now)));
+        // (And one that is in sight stays where it is.)
+        assert_eq!(desktop.window(other).rect, before);
+        assert_eq!(broken(&core, &desktop), None);
+    }
+}
+
 #[test]
 fn long_runs_of_chance_leave_the_desktop_whole() {
     let times = std::env::var("GEVREK_RUNS")

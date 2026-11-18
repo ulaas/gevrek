@@ -15,7 +15,7 @@ mod held;
 mod pass_times;
 mod reload;
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 mod wait;
 
 use crate::config::Config;
