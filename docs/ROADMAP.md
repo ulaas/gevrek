@@ -405,10 +405,36 @@ nothing broken on the way. Nothing new is built in this pass.
       were tried so, 2026-11-17). Found and mended: a pin or a counter
       of the graph as large as numbers get was counted past (it ended
       a debug build and began again at nought in a release).
-- [ ] **any** The same for what else is read from outside: the hidden
-      journal and the elevated helper's messages (Windows backend), the
-      panel's and the shell's own files, the display manager's wire,
-      a command as JSON (`gevrek dispatch`).
+- [x] **any** The same for a command as JSON (`gevrek dispatch`, the
+      panel, a script): one of nearly every command (found by asking
+      the reader what is missing, so one that is added is there too)
+      and those of the examples, cut short at every letter and spoilt,
+      carried out twice with windows on the desktop
+      (`no_command_from_outside_ends_the_program`; 40 times as many
+      tried, 2026-11-18). Found and mended: a window moved or resized
+      by, and gaps, padding and the master count changed by, a number
+      as large as numbers get were counted past in fifteen sums (a
+      debug build ended; a release put the window at the other end of
+      the numbers). The spoiling is a file of its own now
+      (`engine/src/spoil.rs`) that another crate's tests take in.
+- [x] **W** The same for the journal of hidden windows, read before
+      anything else at the start
+      (`no_journal_from_outside_ends_the_program`): nothing found.
+- [x] **any** The shell's own files: how often an application was
+      started, as large as numbers get, was counted past; and a note
+      written down with such an age ended the shell at its start. Both
+      mended, with the nonsense a file may hold tried
+      (`counts_from_outside_are_lived_with`,
+      `what_was_written_down_by_another_is_lived_with`).
+- [ ] **any** Left of what is read from outside: the elevated helper's
+      messages (Windows) and the display manager's wire. What follows
+      the reading there acts on the real desktop (a window closed,
+      keys made up, a login): only the reading itself can be spoilt in
+      a test, and that is derived and has no sums of its own. To do:
+      what follows, behind something that stands in for the system.
+      And the shell's smaller files (the clipboard's, the tray's
+      choice, the tutorial's, the wallpaper's own): lists of words,
+      looked at and not spoilt.
 - [x] **any** The engine driven by long runs of chance
       (`engine/src/random_runs.rs`): the commands the examples bind
       keys to, more with numbers beyond their edges, and windows that
@@ -812,3 +838,4 @@ wanted, strike it when it is not.
 | 2026-11-17, night (9) | Windows 11 and WSL (Fedora 44) | A display's scale is set on Windows as the Settings window sets it (decided by the person), and the studio shows the scale a display has. Asked on this machine without setting anything: the three displays answer rightly. Windows: every test passes; Linux: the studio's pass | The person tries the toggles on the Displays page; the other files from outside |
 | 2026-11-17, night (10) | Windows 11 and WSL (Fedora 44) | The panel is as high as its display's scale makes it (reported: at another scale what it shows was cut off). Windows and Linux: every test passes (the studio's not run on Linux this time) | The person sees the panel at several scales, and tries the scale toggles |
 | 2026-11-18 | Windows 11 and WSL (Fedora 44) | The person: the scale changes work. Asked for: the layouts follow the scale. The gaps, the border, the tab strip and the unseen borders' room are as many pixels as the display's scale makes them (Windows). Windows and Linux: every test passes (the studio's not run on Linux) | The person sees a layout at two scales and through a change of scale |
+| 2026-11-18 (2) | Windows 11 and WSL (Fedora 44) | Commands as JSON, the journal of hidden windows and two of the shell's files spoilt: seventeen sums that were counted past mended (fifteen in the commands, two in the shell). Windows and Linux: every test passes (the studio's not run on Linux) | The helper and the display manager behind a stand-in; the runs of chance with selectors and a reload |

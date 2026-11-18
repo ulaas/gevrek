@@ -25,8 +25,8 @@ impl Executor {
                     Effect::Configure {
                         id: active,
                         rect: gevrek_model::geometry::Rect {
-                            x: rect.x + delta_x,
-                            y: rect.y + delta_y,
+                            x: rect.x.saturating_add(delta_x),
+                            y: rect.y.saturating_add(delta_y),
                             width: rect.width,
                             height: rect.height,
                         },
@@ -58,8 +58,8 @@ impl Executor {
                         rect: gevrek_model::geometry::Rect {
                             x: rect.x,
                             y: rect.y,
-                            width: (rect.width + delta_width).max(100),
-                            height: (rect.height + delta_height).max(100),
+                            width: rect.width.saturating_add(delta_width).max(100),
+                            height: rect.height.saturating_add(delta_height).max(100),
                         },
                         states: WindowStates::default(),
                     },

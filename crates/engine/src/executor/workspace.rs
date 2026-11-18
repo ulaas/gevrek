@@ -584,8 +584,8 @@ impl Executor {
                     Effect::Configure {
                         id: *window,
                         rect: gevrek_model::geometry::Rect {
-                            x: rect.x + delta_x,
-                            y: rect.y + delta_y,
+                            x: rect.x.saturating_add(delta_x),
+                            y: rect.y.saturating_add(delta_y),
                             width: rect.width,
                             height: rect.height,
                         },

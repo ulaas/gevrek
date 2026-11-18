@@ -359,9 +359,65 @@ pub fn recover_orphans(path: PathBuf) -> usize {
     orphans.len()
 }
 
+/// (What spoils a file from outside: the engine's, taken in as it is.)
+#[cfg(test)]
+#[path = "../../../engine/src/spoil.rs"]
+mod spoil;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The journal is a file anyone may have written, and it is read
+    /// before anything else at the start: cut short or with nonsense
+    /// where a value belongs, it is taken for what can be read of it, or
+    /// for none.
+    #[test]
+    fn no_journal_from_outside_ends_the_program() {
+        use super::spoil::{harder, lived, places, spoil, Chance};
+        let dir =
+            std::env::temp_dir().join(format!("gevrek-journal-outside-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("hidden.json");
+        let mut entries = BTreeMap::new();
+        entries.insert(42, entry(7, "Chrome_WidgetWin_1", true));
+        entries.insert(-5, entry(8, "Notepad", false));
+        entries.insert(isize::MAX, entry(u32::MAX, "", false));
+        write_file(&path, &entries).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let whole: serde_json::Value = serde_json::from_str(&text).unwrap();
+
+        // Read as at the start, and asked which of its windows are there
+        // still (every one is said to be: none is touched).
+        let taken = |text: &str, path: &Path| {
+            std::fs::write(path, text).unwrap();
+            let read = read_file(path);
+            let _ = live_orphans(&read, |_| Some((7, "Chrome_WidgetWin_1".to_string())));
+        };
+
+        let (times, seed) = harder();
+        let mut chance = Chance(0x1f83_d9ab_fb41_bd6b ^ seed.rotate_left(7) | 1);
+        let mut ended: Vec<String> = Vec::new();
+        for end in 0..text.len() {
+            let (part, path) = (text[..end].to_string(), path.clone());
+            if let Err(panic) = lived(move || taken(&part, &path)) {
+                ended.push(format!("cut at {end}: {panic}"));
+            }
+        }
+        let mut all = Vec::new();
+        places(&whole, &mut Vec::new(), &mut all);
+        for _ in 0..300 * times {
+            let mut document = whole.clone();
+            let done = spoil(&mut document, &all, &mut chance);
+            let (spoilt, path) = (document.to_string(), path.clone());
+            if let Err(panic) = lived(move || taken(&spoilt, &path)) {
+                ended.push(format!("with {done}: {panic}"));
+            }
+        }
+        let _ = std::fs::remove_dir_all(dir);
+        assert!(ended.is_empty(), "{}", ended.join("
+"));
+    }
 
     #[test]
     fn restoring_a_window_of_an_unresponsive_thread_does_not_block() {

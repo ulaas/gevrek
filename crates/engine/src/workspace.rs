@@ -556,7 +556,7 @@ impl Workspace {
         };
         let now = crate::layouts::scrolling_column_width(container.strip_width, room);
         let gaps = self.inner_gaps().left / 2 + self.inner_gaps().right / 2;
-        self.set_column_width(container_idx, now + delta_px - gaps, work_area)
+        self.set_column_width(container_idx, now.saturating_add(delta_px).saturating_sub(gaps), work_area)
     }
 
     /// Update split ratios based on a window being resized

@@ -70,7 +70,7 @@ impl Executor {
                     .rect(target)
                     .map_err(anyhow::Error::msg)?;
                 let (x, y) = if *relative {
-                    (rect.x + x, rect.y + y)
+                    (rect.x.saturating_add(*x), rect.y.saturating_add(*y))
                 } else {
                     (*x, *y)
                 };
@@ -107,7 +107,7 @@ impl Executor {
                     .rect(target)
                     .map_err(anyhow::Error::msg)?;
                 let (width, height) = if *relative {
-                    (rect.width + width, rect.height + height)
+                    (rect.width.saturating_add(*width), rect.height.saturating_add(*height))
                 } else {
                     (*width, *height)
                 };
