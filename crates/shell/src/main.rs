@@ -1474,7 +1474,9 @@ mod linux {
             Some(PanelModule::Launcher) => toggle_launcher(shared, control),
             Some(PanelModule::Notifications) => toggle_centre(shared, control),
             Some(PanelModule::Power) => toggle_power(shared, control),
-            Some(PanelModule::Network) => toggle_control(shared, control),
+            Some(PanelModule::Network | PanelModule::ControlCentre) => {
+                toggle_control(shared, control)
+            }
             _ => {}
         }
         // Another workspace is asked for: the menu was for this one.

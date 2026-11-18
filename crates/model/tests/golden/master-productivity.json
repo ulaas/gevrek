@@ -657,6 +657,7 @@
           "network",
           "sound",
           "battery",
+          "control_centre",
           "clock"
         ],
         "title_width": 260,

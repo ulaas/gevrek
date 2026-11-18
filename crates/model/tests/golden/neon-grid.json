@@ -2888,6 +2888,7 @@
           "network",
           "sound",
           "battery",
+          "control_centre",
           "stats",
           "clock"
         ],

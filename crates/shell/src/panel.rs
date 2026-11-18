@@ -2319,6 +2319,18 @@ fn draw_module(
                 asked.pressed = Some(PanelModule::Power);
             }
         }
+        PanelModule::ControlCentre => {
+            let sign = egui::RichText::new(icons::SLIDERS_HORIZONTAL)
+                .size(16.0)
+                .color(text);
+            if ui
+                .add(egui::Button::new(sign).frame(false))
+                .hint("Control centre")
+                .clicked()
+            {
+                asked.pressed = Some(PanelModule::ControlCentre);
+            }
+        }
         PanelModule::Tray => {
             let from_right = ui.layout().main_dir() == egui::Direction::RightToLeft;
             draw_tray(ui, shown, ink, asked, from_right);

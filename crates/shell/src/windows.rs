@@ -2933,6 +2933,7 @@ fn draw_panel(
         Some(PanelModule::Launcher) => toggle_launcher(shared, control),
         Some(PanelModule::Notifications) => toggle_centre(shared, control),
         Some(PanelModule::Power) => toggle_power(shared, control),
+        Some(PanelModule::ControlCentre) => toggle_control(shared, control),
         _ => {}
     }
     let wanted = asked

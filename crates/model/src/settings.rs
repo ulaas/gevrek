@@ -431,6 +431,9 @@ pub enum PanelModule {
     /// `desktop.input.keyboard.layouts`, the other button to the one
     /// before.
     Keyboard,
+    /// A button that opens the control centre: what is set often (the
+    /// sound, the brightness, the radios, what is playing), in one place.
+    ControlCentre,
     /// A gap between two modules.
     Spacer,
     /// A module this version does not know, by its name: kept in its
@@ -459,6 +462,7 @@ impl PanelModule {
             Self::Taskbar,
             Self::Brightness,
             Self::Keyboard,
+            Self::ControlCentre,
             Self::Spacer,
         ]
     }
@@ -603,6 +607,7 @@ impl Default for PanelProfile {
                 PanelModule::Network,
                 PanelModule::Sound,
                 PanelModule::Battery,
+                PanelModule::ControlCentre,
                 PanelModule::Clock,
             ],
             title_width: 260,
