@@ -342,7 +342,18 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
     // The keys the graph that is read waits for.
     let mut keys: Vec<crate::input::HotkeyEvent> = Vec::new();
     let mut trail: Vec<String> = Vec::new();
+    // (Every other pair of runs begins with a graph nobody drew.)
+    if (seed >> 2) & 1 == 1 {
+        core.executor.set_graph(graph_of_chance(&mut chance));
+        keys = keys_of(core.executor.get_graph());
+        let _ = core
+            .executor
+            .execute_startup(&mut desktop, &mut core.monitor_manager);
+        trail.push("a graph of chance from the start".to_string());
+    }
     let mut opened = 0;
+    // Every window the engine was told of and not yet told gone.
+    let mut known: BTreeSet<WindowHandle> = BTreeSet::new();
     // What a window may be: some are what the examples' rules are about.
     const TITLES: [&str; 5] = ["window", "Picture in picture", "Slack", "Terminal", "Notes"];
     const PROGRAMS: [&str; 4] = ["app.exe", "kitty", "wt.exe", "slack.exe"];
@@ -355,6 +366,7 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
                 opened += 1;
                 let title = format!("{} {opened}", TITLES[chance.below(TITLES.len())]);
                 let id = desktop.open(&title, PROGRAMS[chance.below(PROGRAMS.len())]);
+                known.insert(id);
                 // (On the second display, now and then.)
                 let on_second = second_there && chance.below(3) == 0;
                 if on_second {
@@ -440,31 +452,12 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
                     config.desktop.appearance.clone(),
                 );
                 core.executor.set_graph(config.node_graph.clone());
-                keys = config
-                    .node_graph
-                    .nodes
-                    .values()
-                    .filter_map(|node| match &node.node_type {
-                        gevrek_model::graph::NodeType::OnKeyPress {
-                            key,
-                            ctrl,
-                            alt,
-                            shift,
-                            win,
-                        } => Some(crate::input::HotkeyEvent {
-                            registration_ids: Vec::new(),
-                            key: key.clone(),
-                            ctrl: *ctrl,
-                            alt: *alt,
-                            shift: *shift,
-                            win: *win,
-                            device: Default::default(),
-                            trigger: Default::default(),
-                            held_ms: 0,
-                        }),
-                        _ => None,
-                    })
-                    .collect();
+                // (Every other time with a graph nobody drew.)
+                let of_chance = chance.below(2) == 0;
+                if of_chance {
+                    core.executor.set_graph(graph_of_chance(&mut chance));
+                }
+                keys = keys_of(core.executor.get_graph());
                 crate::config_apply::configure_monitor_profiles(
                     &mut core.monitor_manager,
                     &config.desktop,
@@ -478,7 +471,11 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
                 let _ = core
                     .executor
                     .rerun_startup_for_reload(&mut desktop, &mut core.monitor_manager);
-                format!("the configuration {} is read", example.id)
+                format!(
+                    "the configuration {} is read{}",
+                    example.id,
+                    if of_chance { ", with a graph of chance" } else { "" }
+                )
             }
             // A key the graph waits for is pressed.
             10 | 11 if !keys.is_empty() => {
@@ -504,11 +501,19 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
                 command.to_string()
             }
         };
-        // A window that a command closed is told of as gone, as the
-        // system tells of it.
-        for id in &windows {
-            if !desktop.exists_window(*id) && !said.ends_with("closes") {
-                let _ = core.handle_window_event(&mut desktop, WindowEvent::Destroyed(*id));
+        // A window that a command or a graph closed is told of as gone,
+        // as the system tells of it (one that was closed as it opened
+        // too).
+        known.extend(desktop.windows.keys().copied());
+        let gone: Vec<WindowHandle> = known
+            .iter()
+            .copied()
+            .filter(|id| !desktop.exists_window(*id))
+            .collect();
+        for id in gone {
+            known.remove(&id);
+            if said != format!("{id:?} closes") {
+                let _ = core.handle_window_event(&mut desktop, WindowEvent::Destroyed(id));
             }
         }
         let _ = core.flush_pending_layouts(&mut desktop);
@@ -568,6 +573,161 @@ fn pressed(key: &str, ctrl: bool, alt: bool, shift: bool, win: bool) -> crate::i
         trigger: Default::default(),
         held_ms: 0,
     }
+}
+
+/// The keys a graph waits for.
+fn keys_of(graph: &NodeGraph) -> Vec<crate::input::HotkeyEvent> {
+    let mut keys: Vec<(usize, crate::input::HotkeyEvent)> = graph
+        .nodes
+        .iter()
+        .filter_map(|(id, node)| match &node.node_type {
+            gevrek_model::graph::NodeType::OnKeyPress {
+                key,
+                ctrl,
+                alt,
+                shift,
+                win,
+            } => Some((*id, pressed(key, *ctrl, *alt, *shift, *win))),
+            _ => None,
+        })
+        .collect();
+    // (In the order of the nodes: the same in every run.)
+    keys.sort_by_key(|(id, _)| *id);
+    keys.into_iter().map(|(_, key)| key).collect()
+}
+
+/// A graph nobody drew. Behind each of eight keys, and behind what
+/// windows do and the start, a row of nodes of any kind; what a node
+/// wants handed to it comes from any node that has such a thing, round
+/// in a circle too; and now and then what is written in the nodes is
+/// spoilt as a file from outside may be.
+fn graph_of_chance(chance: &mut Chance) -> NodeGraph {
+    use gevrek_model::graph::{node_catalog, pin_takes, Connection, NodeType, PinType};
+    let kinds: Vec<NodeType> = node_catalog()
+        .into_iter()
+        .flat_map(|(_, kinds)| kinds)
+        .filter(|kind| kind.category() != "Events")
+        .collect();
+    let mut graph = NodeGraph::new();
+    let mut heads = vec![
+        NodeType::OnStartup,
+        NodeType::OnStartupCompleted,
+        NodeType::OnWindowCreated,
+        NodeType::OnWindowDestroyed,
+        NodeType::OnWindowFocused,
+        NodeType::OnWindowMoved,
+        NodeType::OnWindowResized,
+    ];
+    for index in 0..8 {
+        heads.push(NodeType::OnKeyPress {
+            key: format!("F{}", 13 + index),
+            ctrl: index & 1 == 1,
+            alt: index & 2 == 2,
+            shift: false,
+            win: index & 4 == 4,
+        });
+    }
+    // The pins of a node that say "now" (or those that carry a thing).
+    let pins = |graph: &NodeGraph, node: usize, out: bool, now: bool| -> Vec<usize> {
+        let node = &graph.nodes[&node];
+        let side = if out { &node.outputs } else { &node.inputs };
+        side.iter()
+            .filter(|pin| (pin.pin_type == PinType::Execution) == now)
+            .map(|pin| pin.id)
+            .collect()
+    };
+    for head in heads {
+        let mut last = graph.add_node(head, [0.0, 0.0]);
+        for _ in 0..1 + chance.below(6) {
+            let next = graph.add_node(kinds[chance.below(kinds.len())].clone(), [0.0, 0.0]);
+            let (outs, ins) = (pins(&graph, last, true, true), pins(&graph, next, false, true));
+            if outs.is_empty() || ins.is_empty() {
+                // (One that is not run, and has what others may want.)
+                continue;
+            }
+            graph.add_connection(Connection {
+                from_node: last,
+                from_pin: outs[chance.below(outs.len())],
+                to_node: next,
+                to_pin: ins[0],
+            });
+            if !pins(&graph, next, true, true).is_empty() {
+                last = next;
+            }
+        }
+    }
+    let mut ids: Vec<usize> = graph.nodes.keys().copied().collect();
+    ids.sort_unstable();
+    // Some rows lead into others, back into themselves too.
+    for _ in 0..chance.below(5) {
+        let (from, to) = (ids[chance.below(ids.len())], ids[chance.below(ids.len())]);
+        let (outs, ins) = (pins(&graph, from, true, true), pins(&graph, to, false, true));
+        if !outs.is_empty() && !ins.is_empty() {
+            graph.add_connection(Connection {
+                from_node: from,
+                from_pin: outs[chance.below(outs.len())],
+                to_node: to,
+                to_pin: ins[0],
+            });
+        }
+    }
+    // What a node wants handed to it, from any node that has it.
+    for to in &ids {
+        let kind = graph.nodes[to].node_type.clone();
+        let wanted: Vec<_> = graph.nodes[to]
+            .inputs
+            .iter()
+            .filter(|pin| pin.pin_type != PinType::Execution)
+            .cloned()
+            .collect();
+        for into in wanted {
+            if chance.below(4) == 0 {
+                continue;
+            }
+            let has: Vec<(usize, usize)> = ids
+                .iter()
+                .flat_map(|from| {
+                    graph.nodes[from]
+                        .outputs
+                        .iter()
+                        .filter(|out| {
+                            out.pin_type != PinType::Execution
+                                && pin_takes(&kind, &into.pin_type, &out.pin_type)
+                        })
+                        .map(|out| (*from, out.id))
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            if has.is_empty() {
+                continue;
+            }
+            let (from, out) = has[chance.below(has.len())];
+            graph.add_connection(Connection {
+                from_node: from,
+                from_pin: out,
+                to_node: *to,
+                to_pin: into.id,
+            });
+        }
+    }
+    // What is written in the nodes, spoilt.
+    if chance.below(2) == 0 {
+        if let Ok(mut document) = serde_json::to_value(&graph) {
+            let mut all = Vec::new();
+            crate::spoil::places(&document, &mut Vec::new(), &mut all);
+            all.retain(|place| place.len() > 3 && place[0] == "nodes" && place[2] == "node_type");
+            if !all.is_empty() {
+                for _ in 0..1 + chance.below(6) {
+                    crate::spoil::spoil(&mut document, &all, chance);
+                }
+            }
+            if let Ok(mut spoilt) = serde_json::from_value::<NodeGraph>(document) {
+                spoilt.rebuild_connection_indices();
+                graph = spoilt;
+            }
+        }
+    }
+    graph
 }
 
 /// A wire joins the first output of one node that fits to an input of
