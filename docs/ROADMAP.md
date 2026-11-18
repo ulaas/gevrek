@@ -28,18 +28,16 @@ system. The archive is not: git leaves it out through
 ## Where things stand (2026-11-18)
 
 - Version 0.6.0 is public, with installers for Windows and Linux and
-  updates on Windows. `main` is pushed up to `6cca5e2`; three commits
-  are ahead of it (`964fd2c`, `0cf012d`, `3131afc`), and after them the
-  runs of chance made wider and the studio's top bar in two rows are
-  written and not committed.
+  updates on Windows. `main` is pushed up to `6cca5e2`; what came
+  after it is committed and not pushed.
 - The work is section 2d: a pass for faults and for speed, in which
   nothing new is built and nothing that works may stop working. Done
   of it: the benches and the time of a pass; what is read from outside
   spoilt (configurations, saved sessions, commands, the journal, two
-  of the shell's files); the engine driven by runs of chance. What is
-  left there waits for the person at the desktop (the list is long:
-  every item marked **person, W** in sections 2 and 2d), or wants a
-  stand-in for the system (the elevated helper, the display manager).
+  of the shell's files, what the elevated helper and the display
+  manager's service are asked); the engine driven by runs of chance.
+  What is left there waits for the person at the desktop (the list
+  is long: every item marked **person, W** in sections 2 and 2d).
 - Tried by the person on Windows on 2026-11-18: a display's scale set
   from the studio works. The panel and the layouts following the scale
   were written after that and are not seen yet.
@@ -436,15 +434,37 @@ nothing broken on the way. Nothing new is built in this pass.
       mended, with the nonsense a file may hold tried
       (`counts_from_outside_are_lived_with`,
       `what_was_written_down_by_another_is_lived_with`).
-- [ ] **any** Left of what is read from outside: the elevated helper's
-      messages (Windows) and the display manager's wire. What follows
-      the reading there acts on the real desktop (a window closed,
-      keys made up, a login): only the reading itself can be spoilt in
-      a test, and that is derived and has no sums of its own. To do:
-      what follows, behind something that stands in for the system.
-      And the shell's smaller files (the clipboard's, the tray's
-      choice, the tutorial's, the wallpaper's own): lists of words,
-      looked at and not spoilt.
+- [x] **W** What the elevated helper is asked. What it does to a
+      window is behind a desk that can be stood in for
+      (`elevated_helper::Desk`; the helper's own is `TheDesk`), and
+      with one that only writes down: of the flags of a placing only
+      those that place, of the ways to show only those that show and
+      hide, of a style only gevrek's bits, of what the compositor is
+      told only gevrek's seven, no window that may not be asked
+      about, no binding of a plain letter to the hooks; what was
+      hidden is shown again when the asker goes; and what is asked,
+      spoilt and cut short, is answered line for line and takes the
+      helper no further
+      (`no_asking_from_outside_ends_the_helper_or_takes_it_further`).
+      Nothing found.
+- [x] **L** The same for the display manager's service, which runs as
+      root and reads what the login's program writes
+      (`service::Machine`, `TheMachine`): a login is a person's
+      session on the session's console with the session's command
+      and nothing added, one at a time; the machine is not switched
+      off under a session; who is not let in may try again; when the
+      session is over the login's console is shown and the
+      session's let go; a line longer than a name and a password is
+      not understood
+      (`no_asking_from_outside_ends_the_service_or_takes_it_further`).
+      Nothing found.
+- [ ] **any** Left of what is read from outside, looked at and not
+      spoilt: the session's worker (it reads its order from the
+      service, which is root as it is, and what follows is PAM); what
+      the helper tells the window manager (the reader has fewer
+      rights than the writer); the shell's smaller files (the
+      clipboard's, the tray's choice, the tutorial's, the wallpaper's
+      own), which are lists of words.
 - [x] **any** The engine driven by long runs of chance
       (`engine/src/random_runs.rs`): the commands the examples bind
       keys to, more with numbers beyond their edges, and windows that
@@ -868,3 +888,4 @@ wanted, strike it when it is not.
 | 2026-11-18 (2) | Windows 11 and WSL (Fedora 44) | Commands as JSON, the journal of hidden windows and two of the shell's files spoilt: seventeen sums that were counted past mended (fifteen in the commands, two in the shell). Windows and Linux: every test passes (the studio's not run on Linux) | The helper and the display manager behind a stand-in; the runs of chance with selectors and a reload |
 | 2026-11-18 (3) | Windows 11 and WSL (Fedora 44) | The runs of chance with nearly every command, the configuration read anew and the graph's keys: 1,440 runs clean, nothing found. Windows and Linux: every test passes (the studio's not run on Linux) | The studio's top bar at 760 wide; "Where things stand" brought up to date |
 | 2026-11-18 (4) | Windows 11 and WSL (Fedora 44) | The studio's top bar has two rows in a narrow window. Windows: every test passes; Linux: the studio's pass, its pictures as they were | Nothing that does not want the desktop or a decision: the helper and the display manager behind a stand-in is the next piece of work of that kind |
+| 2026-11-18 (5) | Windows 11 and WSL (Fedora 44) | The elevated helper and the display manager's service behind stand-ins for the system, and what they are asked spoilt: nothing found. Windows and Linux: every test passes | Nothing that does not want the desktop or a decision |

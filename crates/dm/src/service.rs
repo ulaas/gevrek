@@ -473,9 +473,282 @@ pub fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// (What spoils what is read from outside: the engine's, taken in as it is.)
+#[cfg(test)]
+#[path = "../../engine/src/spoil.rs"]
+mod spoil;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc::{channel, Receiver, Sender};
+    use std::sync::Mutex;
+
+    /// What a machine was asked to do.
+    #[derive(Debug, Clone, PartialEq)]
+    enum Did {
+        Open(Order),
+        Veil,
+        Show(u32),
+        Release(u32),
+        Go,
+        Over,
+        Power(bool),
+        Shown,
+    }
+
+    /// A machine that does nothing and writes down what it was asked.
+    struct Written {
+        did: Mutex<Vec<Did>>,
+        /// Whether the worker lets a person in.
+        lets_in: bool,
+        /// A session is over when a word comes here, or nobody is left
+        /// to say one.
+        over: Mutex<Receiver<()>>,
+    }
+
+    impl Written {
+        fn new(lets_in: bool) -> (Arc<Self>, Sender<()>) {
+            let (end, over) = channel();
+            let machine = Self {
+                did: Mutex::new(Vec::new()),
+                lets_in,
+                over: Mutex::new(over),
+            };
+            (Arc::new(machine), end)
+        }
+
+        fn note(&self, did: Did) {
+            self.did.lock().unwrap().push(did);
+        }
+
+        fn did(&self) -> Vec<Did> {
+            self.did.lock().unwrap().clone()
+        }
+    }
+
+    impl Machine for Written {
+        type Session = ();
+
+        fn open(&self, order: &Order) -> anyhow::Result<((), Answer)> {
+            self.note(Did::Open(order.clone()));
+            Ok(if self.lets_in {
+                ((), Answer::yes())
+            } else {
+                ((), Answer::no("The name or the password is not right."))
+            })
+        }
+
+        fn veil(&self) {
+            self.note(Did::Veil);
+        }
+
+        fn show(&self, console: u32) {
+            self.note(Did::Show(console));
+        }
+
+        fn release(&self, console: u32) {
+            self.note(Did::Release(console));
+        }
+
+        fn go(&self, _: &mut ()) {
+            self.note(Did::Go);
+        }
+
+        fn wait(&self, _: (), _: &str) {
+            let _ = self.over.lock().unwrap().recv();
+            self.note(Did::Over);
+        }
+
+        fn power(&self, restart: bool) -> bool {
+            self.note(Did::Power(restart));
+            true
+        }
+
+        fn shown(&self) {
+            self.note(Did::Shown);
+        }
+    }
+
+    /// Until no session runs (the session's end is another thread's).
+    fn until_over(running: &AtomicBool) {
+        for _ in 0..2000 {
+            if !running.load(Ordering::SeqCst) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        panic!("the session never was over");
+    }
+
+    const LOGIN: &str = r#"{"ask": "login", "user": "ada", "password": "s3cret"}"#;
+
+    #[test]
+    fn a_login_is_a_persons_session_on_its_console_until_it_is_over() {
+        let (machine, end) = Written::new(true);
+        let running = Arc::new(AtomicBool::new(false));
+        assert_eq!(answer_to(&machine, LOGIN, &running), Answer::yes());
+        let order = Order {
+            kind: Kind::User,
+            user: "ada".to_string(),
+            password: "s3cret".to_string(),
+            console: SESSION_CONSOLE,
+            command: session_command(),
+            environment: Vec::new(),
+        };
+        let first = [
+            Did::Open(order),
+            Did::Veil,
+            Did::Show(SESSION_CONSOLE),
+            Did::Go,
+        ];
+        assert_eq!(machine.did(), first);
+
+        // While it runs: no second session, and the machine stays on.
+        assert!(!answer_to(&machine, LOGIN, &running).ok);
+        assert!(!answer_to(&machine, r#"{"ask": "power", "restart": false}"#, &running).ok);
+        assert_eq!(machine.did(), first);
+
+        // It is over: the login's console again, and the session's let go.
+        end.send(()).unwrap();
+        until_over(&running);
+        assert_eq!(
+            machine.did()[first.len()..],
+            [
+                Did::Over,
+                Did::Show(GREETER_CONSOLE),
+                Did::Release(SESSION_CONSOLE)
+            ]
+        );
+        assert!(answer_to(&machine, r#"{"ask": "power", "restart": true}"#, &running).ok);
+        assert_eq!(machine.did().last(), Some(&Did::Power(true)));
+    }
+
+    #[test]
+    fn who_is_not_let_in_has_no_session_and_may_try_again() {
+        let (machine, _end) = Written::new(false);
+        let running = Arc::new(AtomicBool::new(false));
+        for _ in 0..2 {
+            let answer = answer_to(&machine, LOGIN, &running);
+            assert!(!answer.ok);
+            assert!(!running.load(Ordering::SeqCst));
+        }
+        assert!(machine
+            .did()
+            .iter()
+            .all(|did| matches!(did, Did::Open(_))));
+        assert_eq!(machine.did().len(), 2);
+    }
+
+    #[test]
+    fn a_line_longer_than_a_name_and_a_password_is_not_understood() {
+        let (machine, _end) = Written::new(true);
+        let running = Arc::new(AtomicBool::new(false));
+        let long = format!(
+            r#"{{"ask": "login", "user": "ada", "password": "{}"}}"#,
+            "x".repeat(9000)
+        );
+        let line = line_of(long.as_bytes()).expect("what was read of it");
+        assert!(line.len() <= 8192);
+        assert!(!answer_to(&machine, &line, &running).ok);
+        assert!(machine.did().is_empty());
+        // (What is no text is no line.)
+        assert_eq!(line_of(&[0xff, 0xfe, b'\n'][..]), None);
+        assert_eq!(line_of(&b""[..]).as_deref(), Some(""));
+    }
+
+    /// The service runs as root and reads what the login's program
+    /// writes: whatever is written, the service comes to its end with an
+    /// answer, opens nothing but a person's session on the session's
+    /// console, one at a time, and does not switch off under a session.
+    #[test]
+    fn no_asking_from_outside_ends_the_service_or_takes_it_further() {
+        use super::spoil::{harder, lived, places, spoil, Chance};
+        let whole = serde_json::json!([
+            {"ask": "login", "user": "ada", "password": "s3cret"},
+            {"ask": "power", "restart": false},
+            {"ask": "shown"},
+            {"ask": "login", "user": "root", "password": ""},
+            {"ask": "power", "restart": true},
+        ]);
+        let mut all = Vec::new();
+        places(&whole, &mut Vec::new(), &mut all);
+
+        let (times, seed) = harder();
+        let mut chance = Chance(0x3c6e_f372_fe94_f82b ^ seed.rotate_left(5) | 1);
+        let mut wrong: Vec<String> = Vec::new();
+        for round in 0..600 * times {
+            let mut document = whole.clone();
+            let mut done = Vec::new();
+            for _ in 0..chance.below(4) {
+                done.push(spoil(&mut document, &all, &mut chance));
+            }
+            let mut lines: Vec<String> = match &document {
+                serde_json::Value::Array(asks) => asks.iter().map(|ask| ask.to_string()).collect(),
+                other => vec![other.to_string()],
+            };
+            // (Sometimes cut short.)
+            if chance.below(6) == 0 {
+                if let Some(last) = lines.last_mut() {
+                    let mut end = chance.below(last.len() + 1);
+                    while !last.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    last.truncate(end);
+                }
+            }
+            // A session that ends at once, one that ends at the end, and
+            // a worker that lets nobody in.
+            let (machine, end) = Written::new(round % 3 != 2);
+            let stays = round % 3 == 0;
+            let mut end = Some(end);
+            if !stays {
+                end = None;
+            }
+            let running = Arc::new(AtomicBool::new(false));
+            let (told, flag) = (Arc::clone(&machine), Arc::clone(&running));
+            let run = lived(move || {
+                for line in &lines {
+                    let Some(line) = line_of(line.as_bytes()) else {
+                        continue;
+                    };
+                    let answer = answer_to(&told, &line, &flag);
+                    assert!(!serde_json::to_string(&answer).unwrap().contains('\n'));
+                }
+            });
+            drop(end);
+            until_over(&running);
+            let mut open = false;
+            let mut beyond = None;
+            for did in machine.did() {
+                match &did {
+                    Did::Open(order) => {
+                        let as_it_must = order.kind == Kind::User
+                            && order.console == SESSION_CONSOLE
+                            && order.command == session_command()
+                            && order.environment.is_empty();
+                        if open || !as_it_must {
+                            beyond = Some(format!("{did:?}"));
+                        }
+                        open = machine.lets_in;
+                    }
+                    Did::Over => open = false,
+                    Did::Power(_) if open => beyond = Some("off under a session".to_string()),
+                    Did::Show(console) | Did::Release(console)
+                        if ![GREETER_CONSOLE, SESSION_CONSOLE].contains(console) =>
+                    {
+                        beyond = Some(format!("{did:?}"));
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(why) = run.err().or(beyond) {
+                wrong.push(format!("with {}: {why}", done.join(", ")));
+            }
+        }
+        wrong.truncate(20);
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    }
 
     #[test]
     fn the_greeter_types_on_the_systems_keyboard_layout() {
