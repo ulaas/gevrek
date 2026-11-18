@@ -265,7 +265,16 @@ impl Executor {
             }
 
             NodeType::SetWindowArrangement { mode } => {
-                if let Some(Value::WindowHandle(handle)) = self.get_input_value(node_id, 1) {
+                // (A window that has gone is arranged nowhere: a graph
+                // may hand on the window that closed, and it was given a
+                // place for good.)
+                if let Some(Value::WindowHandle(handle)) = self
+                    .get_input_value(node_id, 1)
+                    .filter(|value| match value {
+                        Value::WindowHandle(handle) => queries(window_manager).exists(*handle),
+                        _ => true,
+                    })
+                {
                     if self.is_startup_phase
                         && matches!(mode, gevrek_model::graph::WindowMode::Auto)
                     {

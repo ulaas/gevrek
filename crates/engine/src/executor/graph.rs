@@ -796,6 +796,7 @@ impl Executor {
         _focus_manager: &mut FocusManager,
         hotkey: &crate::input::HotkeyEvent,
     ) -> Result<()> {
+        self.release_placed_scratchpads(monitor_manager);
         // Find all OnKeyPress nodes that match this hotkey (collect first to avoid borrow issues)
         let matching_nodes: Vec<NodeId> = self
             .graph

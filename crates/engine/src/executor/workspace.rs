@@ -467,6 +467,12 @@ impl Executor {
         target_workspace: usize,
         floating: bool,
     ) -> Result<()> {
+        // A window that has gone is put nowhere. (A graph is handed the
+        // window that closed, by `On Window Destroyed`: moved to a
+        // workspace, it was kept there for good.)
+        if !queries(window_manager).exists(handle) {
+            anyhow::bail!("Window {handle:?} has gone");
+        }
         let target_exists = monitor_manager
             .get_workspaces(target_monitor)
             .map(|workspaces| target_workspace < workspaces.len())

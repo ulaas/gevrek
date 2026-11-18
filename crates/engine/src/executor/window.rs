@@ -621,7 +621,11 @@ impl Executor {
         window: WindowHandle,
         just_opened: bool,
     ) -> Result<bool> {
+        // (A scratchpad's window is on no workspace and stays on none:
+        // hidden, then restored from being minimized, it was taken for
+        // a window nobody had and given a tile.)
         if monitor_manager.find_window(window).is_some()
+            || self.scratchpads.is_scratchpad_window(window)
             || self.window_state.get(window).session_unmanaged
             || queries(window_manager).ignored_by_rules(window)
             || queries(window_manager).is_decoration(window)

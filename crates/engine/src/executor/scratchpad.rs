@@ -34,6 +34,18 @@ impl Executor {
         }
     }
 
+    /// A scratchpad's window is on no workspace: it floats over them.
+    /// One that was given a place on a workspace since (made to float or
+    /// to tile there, moved to one, taken back among the managed) is an
+    /// ordinary window from then on, and the scratchpad looks for
+    /// another when it is asked for. (It stayed the scratchpad's, and
+    /// was shown from another workspace later: in sight, and on one that
+    /// was not.)
+    pub(super) fn release_placed_scratchpads(&mut self, monitor_manager: &MonitorManager) {
+        self.scratchpads
+            .retain_existing(|window| monitor_manager.find_window(window).is_none());
+    }
+
     pub fn reassert_scratchpads(
         &mut self,
         window_manager: &mut dyn Desktop,
@@ -182,6 +194,7 @@ impl Executor {
         monitor_manager: &mut MonitorManager,
         id: &str,
     ) -> Result<()> {
+        self.release_placed_scratchpads(monitor_manager);
         let toggle = self
             .scratchpads
             .toggle(id, |handle| queries(window_manager).exists(handle))?;
@@ -255,6 +268,7 @@ impl Executor {
         monitor_manager: &mut MonitorManager,
         id: &str,
     ) -> Result<()> {
+        self.release_placed_scratchpads(monitor_manager);
         if self
             .scratchpads
             .window(id)

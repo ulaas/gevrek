@@ -79,6 +79,13 @@ impl Executor {
         monitor_manager: &mut MonitorManager,
         handle: WindowHandle,
     ) -> Result<()> {
+        // A scratchpad's window is on no workspace and stays on none.
+        // (One that was minimized when the scratchpad took it was put
+        // back on the workspace it had left, and was the scratchpad's
+        // still.)
+        if self.scratchpads.is_scratchpad_window(handle) {
+            return Ok(());
+        }
         let fallback = monitor_of(window_manager, monitor_manager, handle)
             .map(|monitor| monitor.handle)
             .or_else(|| self.active_monitor(window_manager, monitor_manager));
@@ -505,12 +512,26 @@ impl Executor {
         focus_manager: &mut FocusManager,
         event: WindowEvent,
     ) -> Result<()> {
+        self.release_placed_scratchpads(monitor_manager);
         match event {
             WindowEvent::Created(handle) => {
                 self.on_window_created(window_manager, monitor_manager, focus_manager, handle)
             }
             WindowEvent::Destroyed(handle) => {
-                self.on_window_destroyed(window_manager, monitor_manager, zone_manager, handle)
+                let result =
+                    self.on_window_destroyed(window_manager, monitor_manager, zone_manager, handle);
+                // What the graph was told of the window is not kept: a
+                // key pressed next would hand a window that has gone to
+                // the nodes behind it.
+                self.pin_values.retain(|_, value| match value {
+                    Value::WindowHandle(window) => *window != handle,
+                    Value::WindowList(windows) => {
+                        windows.retain(|window| *window != handle);
+                        true
+                    }
+                    _ => true,
+                });
+                result
             }
             WindowEvent::Focused(handle) => {
                 self.on_window_focused(window_manager, monitor_manager, focus_manager, handle)

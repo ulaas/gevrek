@@ -703,6 +703,177 @@ fn a_node_that_is_asked_for_its_own_value_is_not_followed_for_ever() {
     }
 }
 
+/// A desk with a graph, a key of which (F13) asks for the scratchpad
+/// that takes a window called Notes.
+fn desk_with_a_scratchpad() -> (WmCore, FakeDesktop) {
+    use gevrek_model::graph::{node_catalog, NodeType};
+    let mut pad = node_catalog()
+        .into_iter()
+        .flat_map(|(_, kinds)| kinds)
+        .find(|kind| matches!(kind, NodeType::ToggleScratchpad { .. }))
+        .expect("the node");
+    if let NodeType::ToggleScratchpad { pattern, .. } = &mut pad {
+        *pattern = "Notes".to_string();
+    }
+    let mut graph = NodeGraph::new();
+    let on_key = graph.add_node(
+        NodeType::OnKeyPress {
+            key: "F13".to_string(),
+            ctrl: false,
+            alt: false,
+            shift: false,
+            win: false,
+        },
+        [0.0, 0.0],
+    );
+    let pad = graph.add_node(pad, [0.0, 0.0]);
+    assert!(wire(&mut graph, on_key, pad, 0));
+    let (mut core, desktop, _) = desk(false);
+    core.executor.set_graph(graph);
+    (core, desktop)
+}
+
+fn press_f13(core: &mut WmCore, desktop: &mut FakeDesktop) {
+    core.executor
+        .execute_hotkey(
+            desktop,
+            &mut core.monitor_manager,
+            &mut core.focus_manager,
+            &pressed("F13", false, false, false, false),
+        )
+        .expect("the key");
+    let _ = core.flush_pending_layouts(desktop);
+}
+
+fn asked(core: &mut WmCore, desktop: &mut FakeDesktop, command: serde_json::Value) {
+    let command: DispatchCommand = serde_json::from_value(command).expect("a command");
+    let _ = core.dispatch(desktop, command);
+    let _ = core.flush_pending_layouts(desktop);
+}
+
+/// A scratchpad's window floats over the workspaces and is on none. One
+/// that the person gives a place on a workspace (here: made to tile) is
+/// an ordinary window from then on. It stayed the scratchpad's too, and
+/// asked for from another workspace it was shown there: in sight, and
+/// on a workspace that was not.
+#[test]
+fn a_scratchpads_window_given_a_place_is_the_scratchpads_no_longer() {
+    let (mut core, mut desktop) = desk_with_a_scratchpad();
+    let notes = desktop.open("Notes 1", "notes.exe");
+    core.handle_window_event(&mut desktop, WindowEvent::Created(notes))
+        .expect("opened");
+    press_f13(&mut core, &mut desktop);
+    assert!(core.monitor_manager.find_window(notes).is_none(), "the scratchpad has it");
+    assert_eq!(desktop.focused, Some(notes));
+
+    asked(&mut core, &mut desktop, serde_json::json!({"command": "toggle_floating"}));
+    assert!(
+        core.monitor_manager.find_window(notes).is_some(),
+        "it has a place on a workspace"
+    );
+    asked(
+        &mut core,
+        &mut desktop,
+        serde_json::json!({"command": "switch_workspace_selector", "selector": {"kind": "name", "value": "3"}}),
+    );
+    assert!(desktop.window(notes).hidden_by_wm, "it went with its workspace");
+
+    // Asked for again, the scratchpad takes it as it takes any window
+    // that is its kind: off its workspace, and shown.
+    press_f13(&mut core, &mut desktop);
+    assert_eq!(broken(&core, &desktop), None);
+    assert!(core.monitor_manager.find_window(notes).is_none());
+    assert!(!desktop.window(notes).hidden_by_wm);
+}
+
+/// A scratchpad's window that is hidden, and that the system tells of as
+/// restored from being minimized, is given no tile: it is the
+/// scratchpad's, and comes when the scratchpad is asked for.
+#[test]
+fn a_scratchpads_window_that_is_restored_is_given_no_tile() {
+    let (mut core, mut desktop) = desk_with_a_scratchpad();
+    let notes = desktop.open("Notes 1", "notes.exe");
+    core.handle_window_event(&mut desktop, WindowEvent::Created(notes))
+        .expect("opened");
+    // (Minimized, which takes it off its workspace, and taken by the
+    // scratchpad as it is.)
+    desktop.windows.get_mut(&notes).expect("it").minimized = true;
+    core.handle_window_event(&mut desktop, WindowEvent::Minimized(notes))
+        .expect("minimized");
+    press_f13(&mut core, &mut desktop);
+    assert!(core.monitor_manager.find_window(notes).is_none());
+    press_f13(&mut core, &mut desktop);
+    assert!(desktop.window(notes).hidden_by_wm, "the scratchpad is put away");
+
+    desktop.windows.get_mut(&notes).expect("it").minimized = false;
+    core.handle_window_event(&mut desktop, WindowEvent::Restored(notes))
+        .expect("restored");
+    let _ = core.flush_pending_layouts(&mut desktop);
+    assert!(core.monitor_manager.find_window(notes).is_none(), "on no workspace");
+    assert!(desktop.window(notes).hidden_by_wm, "and put away still");
+    press_f13(&mut core, &mut desktop);
+    assert!(!desktop.window(notes).hidden_by_wm, "it comes when it is asked for");
+    assert_eq!(broken(&core, &desktop), None);
+}
+
+/// A graph is handed the window that closed (`On Window Destroyed`), and
+/// may hand it on: moved to a workspace or arranged, at once or by a key
+/// pressed afterwards, a window that has gone is given no place. (It was,
+/// and stayed there for good.)
+#[test]
+fn a_window_that_has_gone_is_given_no_place_by_a_graph() {
+    use gevrek_model::graph::{NodeType, WindowMode};
+    let mut graph = NodeGraph::new();
+    let closed = graph.add_node(NodeType::OnWindowDestroyed, [0.0, 0.0]);
+    let moved = graph.add_node(
+        NodeType::MoveWindowToWorkspace { workspace_index: 1 },
+        [0.0, 0.0],
+    );
+    assert!(wire(&mut graph, closed, moved, 0));
+    assert!(wire(&mut graph, closed, moved, 1));
+    let on_key = graph.add_node(
+        NodeType::OnKeyPress {
+            key: "F13".to_string(),
+            ctrl: false,
+            alt: false,
+            shift: false,
+            win: false,
+        },
+        [0.0, 0.0],
+    );
+    for mode in [WindowMode::Tiled, WindowMode::Floating, WindowMode::Auto] {
+        let arranged = graph.add_node(NodeType::SetWindowArrangement { mode }, [0.0, 0.0]);
+        assert!(wire(&mut graph, on_key, arranged, 0));
+        assert!(wire(&mut graph, closed, arranged, 1));
+    }
+    let again = graph.add_node(
+        NodeType::MoveWindowToWorkspace { workspace_index: 2 },
+        [0.0, 0.0],
+    );
+    assert!(wire(&mut graph, on_key, again, 0));
+    assert!(wire(&mut graph, closed, again, 1));
+
+    let (mut core, mut desktop, _) = desk(false);
+    core.executor.set_graph(graph);
+    let stays = desktop.open("window 1", "app.exe");
+    let goes = desktop.open("window 2", "app.exe");
+    for window in [stays, goes] {
+        core.handle_window_event(&mut desktop, WindowEvent::Created(window))
+            .expect("opened");
+    }
+    desktop.close(goes);
+    core.handle_window_event(&mut desktop, WindowEvent::Destroyed(goes))
+        .expect("closed");
+    let _ = core.flush_pending_layouts(&mut desktop);
+    assert_eq!(broken(&core, &desktop), None);
+    assert!(core.monitor_manager.find_window(goes).is_none());
+
+    press_f13(&mut core, &mut desktop);
+    assert_eq!(broken(&core, &desktop), None);
+    assert!(core.monitor_manager.find_window(goes).is_none());
+    assert!(core.monitor_manager.find_window(stays).is_some());
+}
+
 #[test]
 fn long_runs_of_chance_leave_the_desktop_whole() {
     let times = std::env::var("GEVREK_RUNS")

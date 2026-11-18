@@ -307,6 +307,7 @@ impl Executor {
         command: DispatchCommand,
     ) -> Result<()> {
         log::info!("Dispatching {}", command.display_name());
+        self.release_placed_scratchpads(monitor_manager);
         let focus_before = queries(window_manager).active_window();
         // Pick the family by the command's kind, then hand the command over.
         #[derive(Clone, Copy)]
