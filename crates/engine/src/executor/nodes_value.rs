@@ -247,6 +247,9 @@ impl Executor {
 
                     // For each window in the list
                     for (index, window_handle) in windows.iter().enumerate() {
+                        if self.nodes_spent() {
+                            break;
+                        }
                         log::info!(
                             "🔄 ForEach (node {}): Iteration {}/{} - window {:?}",
                             node_id,
@@ -310,6 +313,9 @@ impl Executor {
 
                     // For each monitor in the list
                     for (index, monitor_handle) in monitors.iter().enumerate() {
+                        if self.nodes_spent() {
+                            break;
+                        }
                         // Set current monitor and index outputs
                         self.set_output_value(node_id, 1, Value::Monitor(*monitor_handle));
                         self.set_output_value(node_id, 2, Value::Number(index as f64));
@@ -398,6 +404,9 @@ impl Executor {
                     while (step_val > 0 && current <= end_val)
                         || (step_val < 0 && current >= end_val)
                     {
+                        if self.nodes_spent() {
+                            break;
+                        }
                         if iteration_count >= MAX_ITERATIONS {
                             log::error!(
                                 "ForLoop: Maximum iteration limit reached ({}), stopping loop",
@@ -427,8 +436,13 @@ impl Executor {
                             log::warn!("ForLoop iteration {} failed: {:?} - continuing with next iteration", current, e);
                         }
 
-                        current += step_val;
                         iteration_count += 1;
+                        // (Past the largest number there is, there is no
+                        // next one: the loop is over.)
+                        let Some(next) = current.checked_add(step_val) else {
+                            break;
+                        };
+                        current = next;
                     }
 
                     log::info!("ForLoop: Completed {} iterations", iteration_count);

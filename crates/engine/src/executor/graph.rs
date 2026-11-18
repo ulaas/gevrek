@@ -3,6 +3,17 @@
 
 use super::*;
 
+/// How many value nodes are asked one behind the other, at the most.
+/// (The longest row in gevrek's own graphs is six nodes; a row is cut
+/// where a debug build on a thread of the smallest kind still has room.)
+const DEEPEST_VALUE: usize = 32;
+/// How many nodes are run one after the other in one row, at the most.
+const DEEPEST_ROW: usize = 64;
+/// How many nodes are run for one thing that happened, at the most (a
+/// loop runs what is behind it ten thousand times; loops that run each
+/// other would not come to an end).
+const MOST_NODES: usize = 250_000;
+
 impl Executor {
     /// Swap in a new automation graph. The executor keeps every piece of
     /// per-window and per-workspace state; only graph-derived values reset.
@@ -211,6 +222,54 @@ impl Executor {
             return Ok(());
         };
 
+        // A graph is a file anyone may have written. A row longer than
+        // anybody draws is not run to its end (each node run is room
+        // that is not given back until the row ends; and a loop begins
+        // its row anew, so two loops that run each other have no end of
+        // their own); neither are more nodes than any graph needs.
+        if self.running_deep == 0 {
+            self.nodes_run = 0;
+        }
+        if self.nodes_run >= MOST_NODES {
+            if self.nodes_run == MOST_NODES {
+                log::warn!("More than {MOST_NODES} nodes were run for one event: no more are");
+                self.nodes_run += 1;
+            }
+            return Ok(());
+        }
+        // (One that is not run for being too deep is counted all the
+        // same: a loop down there turns for nothing otherwise.)
+        self.nodes_run += 1;
+        if self.running_deep >= DEEPEST_ROW {
+            log::warn!("A row of more than {DEEPEST_ROW} nodes is not run further");
+            return Ok(());
+        }
+        self.running_deep += 1;
+        let result = self.execute_node_counted(
+            window_manager,
+            monitor_manager,
+            node_id,
+            node_type,
+            visited,
+        );
+        self.running_deep -= 1;
+        result
+    }
+
+    /// Whether as many nodes were run for what happened as are run at
+    /// the most: a loop turns no further then.
+    pub(super) fn nodes_spent(&self) -> bool {
+        self.nodes_run >= MOST_NODES
+    }
+
+    fn execute_node_counted(
+        &mut self,
+        window_manager: &mut dyn Desktop,
+        monitor_manager: &mut MonitorManager,
+        node_id: NodeId,
+        node_type: NodeType,
+        visited: &mut HashSet<NodeId>,
+    ) -> Result<()> {
         let started = Instant::now();
         let timestamp_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -532,7 +591,19 @@ impl Executor {
         if is_pure_data_node {
             // Always re-evaluate pure data nodes to ensure they reflect current input values
             // This is important for nodes like ToString that depend on values that change during loops
-            self.evaluate_data_node(from_node_id);
+            // (Not one that is being worked out already, where the wires
+            // go round, and not behind more nodes than anybody draws: a
+            // graph is a file anyone may have written, and each node
+            // asked is room that is not given back until it answers.
+            // What such a node said last stands.)
+            if self.evaluating.len() >= DEEPEST_VALUE {
+                log::warn!("A value behind more than {DEEPEST_VALUE} nodes is not worked out");
+            } else if self.evaluating.insert(from_node_id) {
+                self.evaluate_data_node(from_node_id);
+                self.evaluating.remove(&from_node_id);
+            } else {
+                log::warn!("Node {from_node_id} is asked for its own value: the wires go round");
+            }
             return self.pin_values.get(&(from_node_id, from_pin_id)).cloned();
         }
 

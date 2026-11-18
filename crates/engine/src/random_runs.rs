@@ -555,6 +555,154 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
     Ok(())
 }
 
+/// A key that a graph waits for, as it is pressed.
+fn pressed(key: &str, ctrl: bool, alt: bool, shift: bool, win: bool) -> crate::input::HotkeyEvent {
+    crate::input::HotkeyEvent {
+        registration_ids: Vec::new(),
+        key: key.to_string(),
+        ctrl,
+        alt,
+        shift,
+        win,
+        device: Default::default(),
+        trigger: Default::default(),
+        held_ms: 0,
+    }
+}
+
+/// A wire joins the first output of one node that fits to an input of
+/// another.
+fn wire(graph: &mut NodeGraph, from: usize, to: usize, input: usize) -> bool {
+    use gevrek_model::graph::{pin_takes, Connection};
+    let into = graph.nodes[&to].inputs[input].clone();
+    let fits = graph.nodes[&from]
+        .outputs
+        .iter()
+        .find(|out| pin_takes(&graph.nodes[&to].node_type, &into.pin_type, &out.pin_type))
+        .map(|out| out.id);
+    fits.is_some_and(|out| {
+        graph.add_connection(Connection {
+            from_node: from,
+            from_pin: out,
+            to_node: to,
+            to_pin: into.id,
+        })
+    })
+}
+
+/// A graph is a file anyone may have written, and its wires may go
+/// round: a sum that is one of its own two numbers, or two nodes that
+/// each want the other's word first, are not followed for ever (they
+/// were, until the program had no room left and ended).
+#[test]
+fn a_node_that_is_asked_for_its_own_value_is_not_followed_for_ever() {
+    use gevrek_model::graph::NodeType;
+    let key = || NodeType::OnKeyPress {
+        key: "F13".to_string(),
+        ctrl: false,
+        alt: false,
+        shift: false,
+        win: false,
+    };
+    let said = || NodeType::LogMessage {
+        message: "sum ".to_string(),
+        level: gevrek_model::graph::LogLevel::Info,
+    };
+
+    // A sum that is its own first number.
+    let mut own = NodeGraph::new();
+    let (on_key, log) = (own.add_node(key(), [0.0, 0.0]), own.add_node(said(), [0.0, 0.0]));
+    let (text, sum) = (
+        own.add_node(NodeType::ToString, [0.0, 0.0]),
+        own.add_node(NodeType::Add, [0.0, 0.0]),
+    );
+    assert!(wire(&mut own, on_key, log, 0));
+    assert!(wire(&mut own, text, log, 1));
+    assert!(wire(&mut own, sum, text, 0));
+    assert!(wire(&mut own, sum, sum, 0), "a wire that goes round is one a file may have");
+
+    // Two that each want the other's first.
+    let mut two = NodeGraph::new();
+    let (on_key, log) = (two.add_node(key(), [0.0, 0.0]), two.add_node(said(), [0.0, 0.0]));
+    let (text, sum, product) = (
+        two.add_node(NodeType::ToString, [0.0, 0.0]),
+        two.add_node(NodeType::Add, [0.0, 0.0]),
+        two.add_node(NodeType::Multiply, [0.0, 0.0]),
+    );
+    assert!(wire(&mut two, on_key, log, 0));
+    assert!(wire(&mut two, text, log, 1));
+    assert!(wire(&mut two, sum, text, 0));
+    assert!(wire(&mut two, product, sum, 1));
+    assert!(wire(&mut two, sum, product, 0));
+
+    // A row of sums longer than anybody draws: followed to its end, or
+    // given up; the program lives.
+    let mut long = NodeGraph::new();
+    let (on_key, log) = (long.add_node(key(), [0.0, 0.0]), long.add_node(said(), [0.0, 0.0]));
+    let text = long.add_node(NodeType::ToString, [0.0, 0.0]);
+    assert!(wire(&mut long, on_key, log, 0));
+    assert!(wire(&mut long, text, log, 1));
+    let mut last = text;
+    for _ in 0..20_000 {
+        let sum = long.add_node(NodeType::Add, [0.0, 0.0]);
+        assert!(wire(&mut long, sum, last, 0));
+        last = sum;
+    }
+
+    // And a row of nodes that are run, as long, each of which wants
+    // the word of such a row of sums.
+    let mut row = NodeGraph::new();
+    let text = row.add_node(NodeType::ToString, [0.0, 0.0]);
+    let mut last = text;
+    for _ in 0..20_000 {
+        let sum = row.add_node(NodeType::Add, [0.0, 0.0]);
+        assert!(wire(&mut row, sum, last, 0));
+        last = sum;
+    }
+    let mut last = row.add_node(key(), [0.0, 0.0]);
+    for _ in 0..20_000 {
+        let log = row.add_node(said(), [0.0, 0.0]);
+        assert!(wire(&mut row, last, log, 0));
+        assert!(wire(&mut row, text, log, 1));
+        last = log;
+    }
+
+    // Two loops that run each other: each begins its row anew, so
+    // neither comes to an end of its own.
+    let turns = |start, end, step| NodeType::ForLoop { start, end, step };
+    let mut loops = NodeGraph::new();
+    let on_key = loops.add_node(key(), [0.0, 0.0]);
+    let (first, second) = (
+        loops.add_node(turns(0, 9_999, 1), [0.0, 0.0]),
+        loops.add_node(turns(0, 9_999, 1), [0.0, 0.0]),
+    );
+    assert!(wire(&mut loops, on_key, first, 0));
+    assert!(wire(&mut loops, first, second, 0));
+    assert!(wire(&mut loops, second, first, 0));
+
+    // A loop that counts to the largest number there is, by such steps.
+    let mut far = NodeGraph::new();
+    let on_key = far.add_node(key(), [0.0, 0.0]);
+    let (up, down) = (
+        far.add_node(turns(i32::MAX - 1, i32::MAX, i32::MAX), [0.0, 0.0]),
+        far.add_node(turns(i32::MIN + 1, i32::MIN, i32::MIN), [0.0, 0.0]),
+    );
+    assert!(wire(&mut far, on_key, up, 0));
+    assert!(wire(&mut far, on_key, down, 0));
+
+    for graph in [own, two, long, row, loops, far] {
+        let (mut core, mut desktop, _) = desk(false);
+        core.executor.set_graph(graph);
+        let _ = core.executor.execute_hotkey(
+            &mut desktop,
+            &mut core.monitor_manager,
+            &mut core.focus_manager,
+            &pressed("F13", false, false, false, false),
+        );
+        assert_eq!(broken(&core, &desktop), None);
+    }
+}
+
 #[test]
 fn long_runs_of_chance_leave_the_desktop_whole() {
     let times = std::env::var("GEVREK_RUNS")

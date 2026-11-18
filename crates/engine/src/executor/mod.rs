@@ -325,6 +325,13 @@ pub type NodeEventBroadcast = Arc<dyn Fn(NodeExecutionEvent) + Send + Sync>;
 pub struct Executor {
     graph: NodeGraph,
     pin_values: HashMap<(NodeId, PinId), Value>,
+    /// The value nodes that are being worked out now, each for one that
+    /// wants its word (`get_input_value`).
+    evaluating: HashSet<NodeId>,
+    /// How many nodes are being run now, one for the other, and how
+    /// many were run since the first of them began (`execute_node`).
+    running_deep: usize,
+    nodes_run: usize,
     log_entries: Arc<Mutex<Vec<LogEntry>>>,
     /// Callback to broadcast log messages to connected clients (editors)
     log_broadcast: Option<LogBroadcast>,
@@ -490,6 +497,9 @@ impl Executor {
         Self {
             graph,
             pin_values: HashMap::new(),
+            evaluating: HashSet::new(),
+            running_deep: 0,
+            nodes_run: 0,
             log_entries,
             log_broadcast,
             node_event_broadcast,
