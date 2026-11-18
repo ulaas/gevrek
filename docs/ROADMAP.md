@@ -41,7 +41,8 @@ system. The archive is not: git leaves it out through
 - Tried by the person on Windows on 2026-11-18: a display's scale set
   from the studio works. The panel and the layouts following the scale
   were written after that and are not seen yet.
-- For the person to decide: how small a tile may get (section 2d).
+- Nothing is left for the person to decide; what is left is to be
+  seen on a desktop.
 - Everything since 2026-11-17 was written on Windows. What it left to
   do on Linux is gathered in section 2c: start there.
 - The window manager, the shell, the studio, the lock screen and the
@@ -496,13 +497,26 @@ nothing broken on the way. Nothing new is built in this pass.
       window that has the keyboard and is on a workspace that is not
       shown, put it on the shown one as well, and it was on two from
       then on (`a_window_on_another_workspace_floats_where_it_is`).
-- [ ] **person** Found by the same runs, to be decided: the layouts
-      that give each new window a share of the last one's room
-      (dwindle, and the like) come down to tiles of a few pixels, one
-      and none with many windows (nine windows, split one way, at 0.7:
-      the last are 3, 1 and 0 wide). Either a tile is never smaller
-      than some size and the rest share what is left, or it stays as
-      it is. It changes where windows go, so it is not done unasked.
+- [x] **any** Found by the same runs: the layouts that give each new
+      window a share of the last one's room (BSP, dwindle, the
+      spiral) came down to tiles of a few pixels, one and none with
+      many windows (nine windows, split one way, at 0.7: the last
+      were 3, 1 and 0 wide). Decided by the person (2026-11-18): a
+      tile is not made smaller than 120 pixels
+      (`layouts::SMALLEST_TILE`). A room that can be shared no
+      further (one of the two would be smaller, or the rest would
+      not hold the windows still to come) is shared in equal parts,
+      in rows, by the window that has it and all after it. With few
+      windows nothing is other than it was; on 1920 by 1080, halves,
+      the first four tiles of twelve windows are where they were and
+      the other eight are a grid in the last room
+      (`a_tile_is_not_made_smaller_than_the_smallest`,
+      `few_windows_are_laid_out_as_they_were`). With more windows
+      than a display holds at that size the tiles are smaller, and
+      equal. Dragging an edge between tiles of such a grid moves
+      nothing.
+- [ ] **person** The same seen on a desktop: ten windows and more on
+      one workspace in dwindle, BSP and the spiral.
 - [x] **any** The runs of chance with more in them: every other run
       has two displays, the second coming and going, windows opening on
       either; the rules and the scratchpads of the examples; and one
@@ -569,11 +583,17 @@ nothing broken on the way. Nothing new is built in this pass.
         afterwards: it was kept there for good. A window that has
         gone is given no place, and what the graph was told of it is
         not kept (`a_window_that_has_gone_is_given_no_place_by_a_graph`).
-- [ ] **person** To be looked at, since it changes what a key does:
-      with a scratchpad shown and the keyboard in it, "toggle
+- [x] **person** Decided (2026-11-18), since it changes what a key
+      does: with a scratchpad shown and the keyboard in it, "toggle
       floating" (or a move to a workspace) makes its window an
       ordinary one; the scratchpad's key then takes a window of its
-      kind again, this one if there is no other.
+      kind again, this one if there is no other. It stays so.
+- [x] **any** Several nodes that wait for the same key, or for the
+      same thing a window does, were run in the order a table of
+      that run happened to give them: a graph did one thing first
+      today and another tomorrow, and a run of chance was not the
+      same twice. They are run in the order they have in the graph
+      (`the_nodes_of_one_key_are_run_in_their_order`).
 - [ ] **person, W** Both of these on the desktop with two displays:
       they may be part of what was reported there (windows not where
       they belong after a move to the other display; borders around
@@ -951,3 +971,4 @@ wanted, strike it when it is not.
 | 2026-11-18 (5) | Windows 11 and WSL (Fedora 44) | The elevated helper and the display manager's service behind stand-ins for the system, and what they are asked spoilt: nothing found. Windows and Linux: every test passes | Nothing that does not want the desktop or a decision |
 | 2026-11-18 (6) | Windows 11 and WSL (Fedora 44) | `chrono` gives way to `jiff`; the check of the dependencies passes. Windows and Linux: every test passes, the studio's too | The clocks and the night light seen on a desktop; CI on what is pushed |
 | 2026-11-18 (7) | Windows 11 and WSL (Fedora 44) | The runs of chance with a graph nobody drew: a node asked for its own value and loops that run each other ended the program, a loop counted past the largest number, a scratchpad's window given a place stayed the scratchpad's, one that was restored was tiled, a window that had gone was given a place by a graph; all mended, 2,400 runs clean. The shell's smaller files spoilt: nothing found. Windows and Linux: every test passes (the studio's not run on Linux) | What a scratchpad's window is after "toggle floating", looked at by the person |
+| 2026-11-18 (8) | Windows 11 and WSL (Fedora 44) | Decided by the person and done: a tile is not made smaller than 120 pixels in BSP, dwindle and the spiral (the rest share the last room in rows); the nodes of one key are run in their order; a scratchpad's window given a place stays an ordinary one. Windows and Linux: every test passes (the studio's not run on Linux), 480 runs of chance clean | Ten windows and more seen on a desktop |
