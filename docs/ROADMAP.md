@@ -25,24 +25,34 @@ system. The archive is not: git leaves it out through
 - Sections 1 to 4 are agreed work. Section 5 is proposals: nothing there
   is decided until it is moved up.
 
-## Where things stand (2026-11-17)
+## Where things stand (2026-11-18)
 
 - Version 0.6.0 is public, with installers for Windows and Linux and
-  updates on Windows. `main` is pushed up to `91859eb` and three
-  commits ahead of it (`ac8f0c5`, `d08ca9a`, `f6dc4c4`); nothing is
-  left uncommitted but this file. The person is building and trying
-  it on Windows.
-- What comes next is section 2d: a pass for faults and for speed, in
-  which nothing new is built and nothing that works may stop working.
+  updates on Windows. `main` is pushed up to `6cca5e2`; three commits
+  are ahead of it (`964fd2c`, `0cf012d`, `3131afc`), and after them the
+  runs of chance made wider and the studio's top bar in two rows are
+  written and not committed.
+- The work is section 2d: a pass for faults and for speed, in which
+  nothing new is built and nothing that works may stop working. Done
+  of it: the benches and the time of a pass; what is read from outside
+  spoilt (configurations, saved sessions, commands, the journal, two
+  of the shell's files); the engine driven by runs of chance. What is
+  left there waits for the person at the desktop (the list is long:
+  every item marked **person, W** in sections 2 and 2d), or wants a
+  stand-in for the system (the elevated helper, the display manager).
+- Tried by the person on Windows on 2026-11-18: a display's scale set
+  from the studio works. The panel and the layouts following the scale
+  were written after that and are not seen yet.
+- For the person to decide: `chrono` (section 1) and how small a tile
+  may get (section 2d).
 - Everything since 2026-11-17 was written on Windows. What it left to
   do on Linux is gathered in section 2c: start there.
 - The window manager, the shell, the studio, the lock screen and the
   display manager work on both systems. Linux was last tested by the
   person on 2026-11-17: all of it passes.
-- CI on `91859eb` (run 44074103140): the Windows job is green to its
-  end, tests and clippy. The Linux job fails at the studio's picture
-  test alone (its remedy is committed in `ac8f0c5`, not pushed). The check of
-  the dependencies fails since that day on `chrono` (section 1).
+- CI on `6cca5e2` (run 44189370729): the Windows job and both Linux
+  jobs are green. Only the check of the dependencies fails, on
+  `chrono` being unmaintained (section 1).
 - The check scripts (`tests/desktop`, `tests/nested`, `tests/vm`,
   `tests/wayland`) are not in this repository: the public one leaves
   them out. On this machine only the crates' own tests can be run.
@@ -472,6 +482,18 @@ nothing broken on the way. Nothing new is built in this pass.
         other display (its desktop pressed on, a workspace sent there),
         that display changed to whatever it had at the same place and
         the window was left out of sight. Its own display follows now.
+- [x] **any** The runs of chance wider still: one of nearly every
+      command there is (131 of them were given in four runs looked at),
+      those that choose a window, a workspace or a display among them;
+      the configuration read anew in the middle of a run (another
+      example's rules, scratchpads, workspaces and graph, and its
+      startup run again); the keys the graph waits for pressed; and
+      one more thing held: the display that is worked on is one that
+      is there. 1,440 runs clean (2026-11-18): nothing found. Left out
+      on purpose: "restore windows" (it shows every window wherever it
+      is, for when something went wrong), and the tiles' size is not
+      looked at while the tiling is held. Thin: only one example's
+      graph waits for a key, so a key of the graph is pressed seldom.
 - [ ] **person, W** Both of these on the desktop with two displays:
       they may be part of what was reported there (windows not where
       they belong after a move to the other display; borders around
@@ -523,8 +545,13 @@ nothing broken on the way. Nothing new is built in this pass.
       edges kept free for other programs and a workspace's offset
       (they are pixels of the display). To tick: seen at 100 % and
       150 %, with the scale changed while windows are tiled.
-- [ ] **any** The studio's top bar at the smallest window (760 wide):
-      the file and the state lie under the search.
+- [x] **any** The studio's top bar at the smallest window (760 wide):
+      the file and the state lay under the search. Narrower than
+      1200, the bar has two rows now: the name, the state and the
+      window's buttons, and under them what is done with the document
+      (search, undo, apply, the sandbox). Looked at in a picture at
+      760 wide with a file open; with a window manager connected and
+      a draft (the most there is in the row) it is not looked at.
 - [ ] **person, W** Reported by the person (2026-11-17): the toggles
       for a display's scale on the studio's Displays page did nothing
       on Windows. The studio wrote the scale to the configuration, and
@@ -839,3 +866,5 @@ wanted, strike it when it is not.
 | 2026-11-17, night (10) | Windows 11 and WSL (Fedora 44) | The panel is as high as its display's scale makes it (reported: at another scale what it shows was cut off). Windows and Linux: every test passes (the studio's not run on Linux this time) | The person sees the panel at several scales, and tries the scale toggles |
 | 2026-11-18 | Windows 11 and WSL (Fedora 44) | The person: the scale changes work. Asked for: the layouts follow the scale. The gaps, the border, the tab strip and the unseen borders' room are as many pixels as the display's scale makes them (Windows). Windows and Linux: every test passes (the studio's not run on Linux) | The person sees a layout at two scales and through a change of scale |
 | 2026-11-18 (2) | Windows 11 and WSL (Fedora 44) | Commands as JSON, the journal of hidden windows and two of the shell's files spoilt: seventeen sums that were counted past mended (fifteen in the commands, two in the shell). Windows and Linux: every test passes (the studio's not run on Linux) | The helper and the display manager behind a stand-in; the runs of chance with selectors and a reload |
+| 2026-11-18 (3) | Windows 11 and WSL (Fedora 44) | The runs of chance with nearly every command, the configuration read anew and the graph's keys: 1,440 runs clean, nothing found. Windows and Linux: every test passes (the studio's not run on Linux) | The studio's top bar at 760 wide; "Where things stand" brought up to date |
+| 2026-11-18 (4) | Windows 11 and WSL (Fedora 44) | The studio's top bar has two rows in a narrow window. Windows: every test passes; Linux: the studio's pass, its pictures as they were | Nothing that does not want the desktop or a decision: the helper and the display manager behind a stand-in is the next piece of work of that kind |

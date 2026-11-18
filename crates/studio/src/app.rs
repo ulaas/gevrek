@@ -894,6 +894,7 @@ impl Studio {
             context.send_viewport_cmd(egui::ViewportCommand::StartDrag);
             pointer_taken(&context);
         }
+        let two_rows = ui.available_width() < TOP_BAR_IN_ONE_ROW;
         ui.horizontal(|ui| {
             ui.add_space(4.0);
             // The mark, then the name (lowercase, as the brand writes it).
@@ -982,92 +983,116 @@ impl Studio {
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(2.0);
-                // The window's own buttons, at the bar's end.
-                use gevrek_ui::brand_icons::BrandIcon;
-                if widgets::brand_icon_button(ui, BrandIcon::Close, icons::X, "Close").clicked() {
-                    context.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-                let (sign, or, says) = if maximized {
-                    (BrandIcon::Restore, icons::CORNERS_IN, "As large as it was")
-                } else {
-                    (BrandIcon::Maximize, icons::CORNERS_OUT, "Fill the display")
-                };
-                if widgets::brand_icon_button(ui, sign, or, says).clicked() {
-                    context.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
-                }
-                if widgets::brand_icon_button(ui, BrandIcon::Minimize, icons::MINUS, "Put away")
-                    .clicked()
-                {
-                    context.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-                }
-                ui.add_space(6.0);
-                if widgets::icon_button(ui, icons::PAINT_BRUSH, "How this window looks").clicked() {
-                    self.appearance_open = !self.appearance_open;
-                }
-                self.sandbox_button(ui);
-                let label = if self.file.is_some() { "Save" } else { "Apply" };
-                if widgets::primary_button(ui, self.can_apply(), label)
-                    .on_hover_text(if self.reaches() {
-                        "Ctrl+S"
-                    } else {
-                        "The window manager is not running: there is nothing to apply this to. What you change stays here until it is back."
-                    })
-                    .clicked()
-                {
-                    self.apply();
-                }
-                if self.file.is_none() {
-                    if ui
-                        .add_enabled(
-                            self.can_apply() && self.try_out.is_none() && self.connected(),
-                            egui::Button::new("Try 15 s"),
-                        )
-                        .on_hover_text(
-                            "Apply it for 15 seconds. Unless you then keep it, what ran before comes back by itself: for a change that might take away the means to undo it.",
-                        )
-                        .clicked()
-                    {
-                        self.begin_trial();
-                    }
-                    if self.dirty()
-                        && ui
-                            .button("Discard")
-                            .on_hover_text("Back to what the window manager runs")
-                            .clicked()
-                    {
-                        self.discard();
-                    }
-                    let mut live = self.live;
-                    ui.label("Live")
-                        .on_hover_text("Send every change to the window manager as it is made");
-                    if widgets::switch(ui, &mut live).changed() {
-                        self.live = live && self.connected();
-                    }
-                }
-                ui.add_enabled_ui(self.document.can_redo(), |ui| {
-                    if widgets::icon_button(ui, icons::ARROW_CLOCKWISE, "Redo (Ctrl+Shift+Z)")
-                        .clicked()
-                    {
-                        self.document.redo();
-                    }
-                });
-                ui.add_enabled_ui(self.document.can_undo(), |ui| {
-                    if widgets::icon_button(ui, icons::ARROW_COUNTER_CLOCKWISE, "Undo (Ctrl+Z)")
-                        .clicked()
-                    {
-                        self.document.undo();
-                    }
-                });
-                if ui
-                    .button(format!("{}  Search   Ctrl+K", icons::MAGNIFYING_GLASS))
-                    .on_hover_text("Find a page or a setting")
-                    .clicked()
-                {
-                    self.search = Some(String::new());
+                self.window_buttons(ui, &context, maximized);
+                if !two_rows {
+                    ui.add_space(6.0);
+                    self.actions(ui);
                 }
             });
         });
+        // In a narrow window what is done with the document has a row
+        // of its own: beside the name and the state it lay over them.
+        if two_rows {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(2.0);
+                    self.actions(ui);
+                });
+            });
+        }
+    }
+
+    /// The window's own buttons, at the bar's end (from the right).
+    fn window_buttons(&mut self, ui: &mut Ui, context: &egui::Context, maximized: bool) {
+        ui.add_space(2.0);
+        // The window's own buttons, at the bar's end.
+        use gevrek_ui::brand_icons::BrandIcon;
+        if widgets::brand_icon_button(ui, BrandIcon::Close, icons::X, "Close").clicked() {
+            context.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        let (sign, or, says) = if maximized {
+            (BrandIcon::Restore, icons::CORNERS_IN, "As large as it was")
+        } else {
+            (BrandIcon::Maximize, icons::CORNERS_OUT, "Fill the display")
+        };
+        if widgets::brand_icon_button(ui, sign, or, says).clicked() {
+            context.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+        }
+        if widgets::brand_icon_button(ui, BrandIcon::Minimize, icons::MINUS, "Put away")
+            .clicked()
+        {
+            context.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+        }
+    }
+
+    /// What is done with the document, from the right: how the window
+    /// looks, the sandbox, apply, try, discard, live, redo, undo, search.
+    fn actions(&mut self, ui: &mut Ui) {
+        if widgets::icon_button(ui, icons::PAINT_BRUSH, "How this window looks").clicked() {
+            self.appearance_open = !self.appearance_open;
+        }
+        self.sandbox_button(ui);
+        let label = if self.file.is_some() { "Save" } else { "Apply" };
+        if widgets::primary_button(ui, self.can_apply(), label)
+            .on_hover_text(if self.reaches() {
+                "Ctrl+S"
+            } else {
+                "The window manager is not running: there is nothing to apply this to. What you change stays here until it is back."
+            })
+            .clicked()
+        {
+            self.apply();
+        }
+        if self.file.is_none() {
+            if ui
+                .add_enabled(
+                    self.can_apply() && self.try_out.is_none() && self.connected(),
+                    egui::Button::new("Try 15 s"),
+                )
+                .on_hover_text(
+                    "Apply it for 15 seconds. Unless you then keep it, what ran before comes back by itself: for a change that might take away the means to undo it.",
+                )
+                .clicked()
+            {
+                self.begin_trial();
+            }
+            if self.dirty()
+                && ui
+                    .button("Discard")
+                    .on_hover_text("Back to what the window manager runs")
+                    .clicked()
+            {
+                self.discard();
+            }
+            let mut live = self.live;
+            ui.label("Live")
+                .on_hover_text("Send every change to the window manager as it is made");
+            if widgets::switch(ui, &mut live).changed() {
+                self.live = live && self.connected();
+            }
+        }
+        ui.add_enabled_ui(self.document.can_redo(), |ui| {
+            if widgets::icon_button(ui, icons::ARROW_CLOCKWISE, "Redo (Ctrl+Shift+Z)")
+                .clicked()
+            {
+                self.document.redo();
+            }
+        });
+        ui.add_enabled_ui(self.document.can_undo(), |ui| {
+            if widgets::icon_button(ui, icons::ARROW_COUNTER_CLOCKWISE, "Undo (Ctrl+Z)")
+                .clicked()
+            {
+                self.document.undo();
+            }
+        });
+        if ui
+            .button(format!("{}  Search   Ctrl+K", icons::MAGNIFYING_GLASS))
+            .on_hover_text("Find a page or a setting")
+            .clicked()
+        {
+            self.search = Some(String::new());
+        }
     }
 
     /// Start or stop the nested gevrek that runs the draft.
@@ -2965,6 +2990,12 @@ fn pointer_of(path: &str) -> String {
     }
     pointer
 }
+
+/// Narrower than this, the top bar has two rows: the name and the state
+/// with the window's buttons, and under them what is done with the
+/// document. (All of it in one row is about this wide when a window
+/// manager is connected and there is a draft.)
+const TOP_BAR_IN_ONE_ROW: f32 = 1200.0;
 
 /// The field a live list is searched with.
 fn search_field(ui: &mut Ui, typed: &mut String, hint: &str) {
