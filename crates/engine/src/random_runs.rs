@@ -1034,6 +1034,48 @@ fn a_window_that_has_gone_is_given_no_place_by_a_graph() {
     assert!(core.monitor_manager.find_window(stays).is_some());
 }
 
+/// Several nodes that wait for the same key are run in the order they
+/// have in the graph, the same on every start. (They were run in the
+/// order a table of this run happened to give them: a graph did one
+/// thing first today and another tomorrow.)
+#[test]
+fn the_nodes_of_one_key_are_run_in_their_order() {
+    use gevrek_model::graph::{LogLevel, NodeType};
+    let mut graph = NodeGraph::new();
+    for index in 0..24 {
+        let on_key = graph.add_node(
+            NodeType::OnKeyPress {
+                key: "F13".to_string(),
+                ctrl: false,
+                alt: false,
+                shift: false,
+                win: false,
+            },
+            [0.0, 0.0],
+        );
+        let said = graph.add_node(
+            NodeType::LogMessage {
+                message: format!("{index:02}"),
+                level: LogLevel::Info,
+            },
+            [0.0, 0.0],
+        );
+        assert!(wire(&mut graph, on_key, said, 0));
+    }
+    let (mut core, mut desktop, rules) = desk(false);
+    let log = Arc::new(Mutex::new(Vec::new()));
+    core.executor = Executor::new(graph, log.clone(), rules);
+    press_f13(&mut core, &mut desktop);
+    let said: Vec<String> = log
+        .lock()
+        .expect("the log")
+        .iter()
+        .map(|entry| entry.message.clone())
+        .collect();
+    let in_order: Vec<String> = (0..24).map(|index| format!("{index:02}")).collect();
+    assert_eq!(said, in_order);
+}
+
 #[test]
 fn long_runs_of_chance_leave_the_desktop_whole() {
     let times = std::env::var("GEVREK_RUNS")

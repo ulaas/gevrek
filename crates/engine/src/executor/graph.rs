@@ -58,13 +58,15 @@ impl Executor {
         self.is_startup_phase = true;
 
         // Find all OnStartup event nodes
-        let startup_nodes: Vec<NodeId> = self
+        let mut startup_nodes: Vec<NodeId> = self
             .graph
             .nodes
             .iter()
             .filter(|(_, node)| matches!(node.node_type, NodeType::OnStartup))
             .map(|(id, _)| *id)
             .collect();
+        // (In the order of the nodes: the same on every start.)
+        startup_nodes.sort_unstable();
 
         for node_id in startup_nodes {
             let mut visited = HashSet::new();
@@ -94,13 +96,15 @@ impl Executor {
         self.is_startup_phase = true;
 
         // Find all OnStartup event nodes
-        let startup_nodes: Vec<NodeId> = self
+        let mut startup_nodes: Vec<NodeId> = self
             .graph
             .nodes
             .iter()
             .filter(|(_, node)| matches!(node.node_type, NodeType::OnStartup))
             .map(|(id, _)| *id)
             .collect();
+        // (In the order of the nodes: the same on every start.)
+        startup_nodes.sort_unstable();
 
         for node_id in startup_nodes {
             let mut visited = HashSet::new();
@@ -110,13 +114,15 @@ impl Executor {
         log::info!("✅ OnStartup nodes completed, triggering OnStartupCompleted nodes");
 
         // Find and execute all OnStartupCompleted event nodes
-        let startup_completed_nodes: Vec<NodeId> = self
+        let mut startup_completed_nodes: Vec<NodeId> = self
             .graph
             .nodes
             .iter()
             .filter(|(_, node)| matches!(node.node_type, NodeType::OnStartupCompleted))
             .map(|(id, _)| *id)
             .collect();
+        // (In the order of the nodes: the same on every start.)
+        startup_completed_nodes.sort_unstable();
 
         for node_id in startup_completed_nodes {
             let mut visited = HashSet::new();
@@ -798,7 +804,7 @@ impl Executor {
     ) -> Result<()> {
         self.release_placed_scratchpads(monitor_manager);
         // Find all OnKeyPress nodes that match this hotkey (collect first to avoid borrow issues)
-        let matching_nodes: Vec<NodeId> = self
+        let mut matching_nodes: Vec<NodeId> = self
             .graph
             .nodes
             .iter()
@@ -824,6 +830,8 @@ impl Executor {
                 None
             })
             .collect();
+        // (In the order of the nodes: the same on every start.)
+        matching_nodes.sort_unstable();
 
         // Execute matching nodes
         for node_id in matching_nodes {

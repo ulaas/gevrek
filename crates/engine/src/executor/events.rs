@@ -610,13 +610,15 @@ impl Executor {
         self.window_state.get_mut(handle).known = true;
 
         // Find all OnWindowCreated nodes and set their output values
-        let event_nodes: Vec<NodeId> = self
+        let mut event_nodes: Vec<NodeId> = self
             .graph
             .nodes
             .iter()
             .filter(|(_, node)| matches!(node.node_type, NodeType::OnWindowCreated))
             .map(|(id, _)| *id)
             .collect();
+        // (In the order of the nodes: the same on every start.)
+        event_nodes.sort_unstable();
 
         for node_id in event_nodes {
             // Set window handle output (output index 1)
@@ -766,13 +768,15 @@ impl Executor {
             }
         }
 
-        let event_nodes: Vec<NodeId> = self
+        let mut event_nodes: Vec<NodeId> = self
             .graph
             .nodes
             .iter()
             .filter(|(_, node)| matches!(node.node_type, NodeType::OnWindowDestroyed))
             .map(|(id, _)| *id)
             .collect();
+        // (In the order of the nodes: the same on every start.)
+        event_nodes.sort_unstable();
 
         for node_id in event_nodes {
             self.set_output_value(node_id, 1, Value::WindowHandle(handle));
@@ -949,13 +953,15 @@ impl Executor {
             }
         }
 
-        let event_nodes: Vec<NodeId> = self
+        let mut event_nodes: Vec<NodeId> = self
             .graph
             .nodes
             .iter()
             .filter(|(_, node)| matches!(node.node_type, NodeType::OnWindowFocused))
             .map(|(id, _)| *id)
             .collect();
+        // (In the order of the nodes: the same on every start.)
+        event_nodes.sort_unstable();
 
         for node_id in event_nodes {
             self.set_output_value(node_id, 1, Value::WindowHandle(handle));
@@ -1048,13 +1054,15 @@ impl Executor {
         // We no longer track drags based on move events (was too aggressive)
 
         // Execute any OnWindowMoved event nodes (if configured)
-        let event_nodes: Vec<NodeId> = self
+        let mut event_nodes: Vec<NodeId> = self
             .graph
             .nodes
             .iter()
             .filter(|(_, node)| matches!(node.node_type, NodeType::OnWindowMoved))
             .map(|(id, _)| *id)
             .collect();
+        // (In the order of the nodes: the same on every start.)
+        event_nodes.sort_unstable();
 
         for node_id in event_nodes {
             self.set_output_value(node_id, 1, Value::WindowHandle(handle));
@@ -1192,13 +1200,15 @@ impl Executor {
         );
 
         // Execute any OnWindowResized event nodes (if configured)
-        let event_nodes: Vec<NodeId> = self
+        let mut event_nodes: Vec<NodeId> = self
             .graph
             .nodes
             .iter()
             .filter(|(_, node)| matches!(node.node_type, NodeType::OnWindowResized))
             .map(|(id, _)| *id)
             .collect();
+        // (In the order of the nodes: the same on every start.)
+        event_nodes.sort_unstable();
 
         for node_id in event_nodes {
             self.set_output_value(node_id, 1, Value::WindowHandle(handle));
