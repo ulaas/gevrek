@@ -290,6 +290,9 @@ enum DispatchType {
   // Put the floating windows of the shown workspace out of the way, or
   // bring them back.
   DISPATCH_TYPE_TOGGLE_FLOATING_ASIDE = 143;
+  // A window to the middle of a display's shown workspace, floating;
+  // again for that window, back as it was.
+  DISPATCH_TYPE_TOGGLE_WINDOW_CENTERED = 144;
 }
 
 enum Direction {

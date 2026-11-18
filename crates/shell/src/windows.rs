@@ -2881,6 +2881,10 @@ fn draw_panel(
     if let Some(command) = asked.show.and_then(|index| panel::show_tab(&view, index)) {
         state.link.send(Request::Dispatch(command));
     }
+    // The other button on a window of the taskbar.
+    if let Some(command) = asked.centre.and_then(|window| panel::centre_window(&view, window)) {
+        state.link.send(Request::Dispatch(command));
+    }
     // (Open as the host has it, too: a menu the host put away for a press
     // elsewhere or for Escape is closed before its drawing is let go of,
     // and the next press on its button is to open it, not to close it.)

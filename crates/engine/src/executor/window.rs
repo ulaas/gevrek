@@ -743,6 +743,114 @@ impl Executor {
         Ok(())
     }
 
+    /// Bring a window to the workspace a display shows, floating and in
+    /// its middle; for a window that was brought so, put it back as it
+    /// was before: on its workspace, tiled or floating, at its place.
+    pub(super) fn toggle_window_centered(
+        &mut self,
+        window_manager: &mut dyn Desktop,
+        monitor_manager: &mut MonitorManager,
+        window: WindowHandle,
+        display: MonitorHandle,
+    ) -> Result<()> {
+        let (monitor, index) = monitor_manager
+            .find_window(window)
+            .ok_or_else(|| anyhow::anyhow!("The selected window is not managed by gevrek"))?;
+
+        if let Some(before) = self.window_state.get_mut(window).centered_from.take() {
+            // Back: to its workspace where that is there still, else it
+            // stays on the one it is on.
+            let home = monitor_manager
+                .get_all_monitors()
+                .into_iter()
+                .find_map(|monitor| {
+                    monitor_manager
+                        .get_workspaces(monitor.handle)?
+                        .elements()
+                        .iter()
+                        .position(|workspace| workspace.id == before.workspace)
+                        .map(|index| (monitor.handle, index))
+                })
+                .unwrap_or((monitor, index));
+            if home != (monitor, index) {
+                self.move_window_to_workspace(
+                    window_manager,
+                    monitor_manager,
+                    window,
+                    home.0,
+                    home.1,
+                    before.floating,
+                )?;
+            }
+            self.set_window_floating(window_manager, monitor_manager, window, before.floating)?;
+            if before.floating {
+                effect(
+                    window_manager,
+                    Effect::Configure {
+                        id: window,
+                        rect: before.rect,
+                        states: WindowStates::default(),
+                    },
+                )?;
+            } else if let Some(place) = before.place {
+                // Its place among the tiles (it came back as the last).
+                if let Some(workspace) = monitor_manager
+                    .get_workspaces_mut(home.0)
+                    .and_then(|workspaces| workspaces.get_mut(home.1))
+                {
+                    let alone = workspace.find_container(window).is_some_and(|now| {
+                        now != place
+                            && workspace
+                                .containers
+                                .elements()
+                                .get(now)
+                                .is_some_and(|container| container.windows.len() == 1)
+                    });
+                    if alone {
+                        workspace.remove_window(window);
+                        let place = place.min(workspace.containers.len());
+                        workspace.add_window_at(window, place);
+                    }
+                }
+            }
+            self.mark_layout_dirty(home.0);
+            return Ok(());
+        }
+
+        let before = {
+            let workspace = monitor_manager
+                .get_workspaces(monitor)
+                .and_then(|workspaces| workspaces.elements().get(index))
+                .ok_or_else(|| anyhow::anyhow!("The window's workspace is not there"))?;
+            crate::rule_state::BeforeCentered {
+                workspace: workspace.id,
+                floating: monitor_manager.is_window_floating(window),
+                rect: queries(window_manager)
+                    .rect(window)
+                    .map_err(anyhow::Error::msg)?,
+                place: workspace.find_container(window),
+            }
+        };
+        let shown = monitor_manager
+            .get_workspaces(display)
+            .map(|workspaces| workspaces.focused_idx())
+            .ok_or_else(|| anyhow::anyhow!("That display has no workspace"))?;
+        if (display, shown) != (monitor, index) {
+            self.move_window_to_workspace(
+                window_manager,
+                monitor_manager,
+                window,
+                display,
+                shown,
+                true,
+            )?;
+        }
+        // (Floats it, puts it in the middle, in front, with the keyboard.)
+        self.center_window(window_manager, monitor_manager, window)?;
+        self.window_state.get_mut(window).centered_from = Some(before);
+        Ok(())
+    }
+
     pub(super) fn center_window(
         &mut self,
         window_manager: &mut dyn Desktop,

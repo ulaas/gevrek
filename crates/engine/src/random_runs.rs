@@ -1076,6 +1076,103 @@ fn the_nodes_of_one_key_are_run_in_their_order() {
     assert_eq!(said, in_order);
 }
 
+/// The other button on a window in the panel's taskbar: the window comes
+/// to the workspace the display shows, floating and in its middle; the
+/// same again puts it back as it was, on its workspace, tiled at its
+/// place or floating where it floated.
+#[test]
+fn a_window_comes_to_the_middle_and_goes_back_as_it_was() {
+    let (mut core, mut desktop, _) = desk(false);
+    let open = |core: &mut WmCore, desktop: &mut FakeDesktop, title: &str| {
+        let id = desktop.open(title, "app.exe");
+        core.handle_window_event(desktop, WindowEvent::Created(id))
+            .expect("opened");
+        let _ = core.flush_pending_layouts(desktop);
+        id
+    };
+    let (first, second, third) = (
+        open(&mut core, &mut desktop, "window 1"),
+        open(&mut core, &mut desktop, "window 2"),
+        open(&mut core, &mut desktop, "window 3"),
+    );
+    let toggle = |id: WindowHandle| {
+        serde_json::json!({
+            "command": "toggle_window_centered",
+            "window": {"kind": "handle", "value": id.0},
+            "target": {"kind": "primary"},
+        })
+    };
+    let tiles = |core: &WmCore, workspace: usize| -> Vec<WindowHandle> {
+        core.monitor_manager.get_workspaces(OUTPUT).expect("workspaces").elements()[workspace]
+            .containers
+            .elements()
+            .iter()
+            .flat_map(|container| container.windows.elements().iter().copied())
+            .collect()
+    };
+    assert_eq!(tiles(&core, 0), [first, second, third]);
+    let was = desktop.window(second).rect;
+
+    // From another workspace: it comes there, floats, and is in the middle.
+    asked(
+        &mut core,
+        &mut desktop,
+        serde_json::json!({"command": "switch_workspace_selector", "selector": {"kind": "name", "value": "3"}}),
+    );
+    assert!(desktop.window(second).hidden_by_wm);
+    asked(&mut core, &mut desktop, toggle(second));
+    assert_eq!(broken(&core, &desktop), None);
+    assert_eq!(core.monitor_manager.find_window(second), Some((OUTPUT, 2)));
+    assert!(core.monitor_manager.is_window_floating(second));
+    assert!(!desktop.window(second).hidden_by_wm);
+    let area = core
+        .monitor_manager
+        .get_adjusted_work_area(OUTPUT, &desktop)
+        .expect("the display's room");
+    let now = desktop.window(second).rect;
+    assert!((now.x + now.width / 2 - (area.x + area.width / 2)).abs() <= 1, "{now:?} in {area:?}");
+    assert!((now.y + now.height / 2 - (area.y + area.height / 2)).abs() <= 1, "{now:?} in {area:?}");
+    assert_eq!(desktop.focused, Some(second));
+    assert_eq!(tiles(&core, 0), [first, third]);
+
+    // Again: back on its workspace, tiled, between the two it was between.
+    asked(&mut core, &mut desktop, toggle(second));
+    assert_eq!(broken(&core, &desktop), None);
+    assert_eq!(core.monitor_manager.find_window(second), Some((OUTPUT, 0)));
+    assert!(!core.monitor_manager.is_window_floating(second));
+    assert_eq!(tiles(&core, 0), [first, second, third]);
+    assert!(desktop.window(second).hidden_by_wm, "its workspace is not shown");
+    asked(
+        &mut core,
+        &mut desktop,
+        serde_json::json!({"command": "switch_workspace_selector", "selector": {"kind": "name", "value": "1"}}),
+    );
+    assert_eq!(desktop.window(second).rect, was, "where it was, as large as it was");
+
+    // One that floated: to the middle, and back to where it floated.
+    asked(
+        &mut core,
+        &mut desktop,
+        serde_json::json!({"command": "set_window_floating", "selector": {"kind": "handle", "value": third.0}, "enabled": true}),
+    );
+    asked(
+        &mut core,
+        &mut desktop,
+        serde_json::json!({"command": "move_window", "selector": {"kind": "handle", "value": third.0}, "x": 40, "y": 60, "relative": false}),
+    );
+    let floated = desktop.window(third).rect;
+    asked(&mut core, &mut desktop, toggle(third));
+    assert_ne!(desktop.window(third).rect, floated);
+    asked(&mut core, &mut desktop, toggle(third));
+    assert!(core.monitor_manager.is_window_floating(third));
+    assert_eq!(desktop.window(third).rect, floated);
+    assert_eq!(broken(&core, &desktop), None);
+
+    // A window that is not there: nothing, and nothing is broken.
+    asked(&mut core, &mut desktop, toggle(WindowHandle(9999)));
+    assert_eq!(broken(&core, &desktop), None);
+}
+
 #[test]
 fn long_runs_of_chance_leave_the_desktop_whole() {
     let times = std::env::var("GEVREK_RUNS")

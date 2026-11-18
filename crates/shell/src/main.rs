@@ -1425,6 +1425,13 @@ mod linux {
         let show = asked
             .show
             .and_then(|index| crate::panel::show_tab(&view, index));
+        // The other button on a window of the taskbar.
+        if let Some(command) = asked
+            .centre
+            .and_then(|window| crate::panel::centre_window(&view, window))
+        {
+            state.link.send(Request::Dispatch(command));
+        }
         // A right-click on a workspace's tab: its new name is asked for.
         let rename = asked
             .rename

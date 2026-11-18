@@ -256,6 +256,11 @@ pub fn dispatch_command_to_proto(
             request.argument = window.expression();
             request.secondary_argument = target.expression();
         }
+        DispatchCommand::ToggleWindowCentered { window, target } => {
+            request.command = proto::DispatchType::ToggleWindowCentered as i32;
+            request.argument = window.expression();
+            request.secondary_argument = target.expression();
+        }
         DispatchCommand::MoveWindowToMonitorAndFollow { window, target } => {
             request.command = proto::DispatchType::MoveWindowToMonitorAndFollow as i32;
             request.argument = window.expression();

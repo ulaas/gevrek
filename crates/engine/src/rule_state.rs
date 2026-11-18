@@ -323,6 +323,19 @@ pub struct DynamicRuleState {
     pub resolution: RuleResolution,
 }
 
+/// How a window was before it was brought to the middle of a display
+/// (`DispatchCommand::ToggleWindowCentered`): to be put back so.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BeforeCentered {
+    /// The workspace it was on, by its id.
+    pub workspace: usize,
+    pub floating: bool,
+    /// Where it was, and how large.
+    pub rect: Rect,
+    /// Its place among the tiles, where it was tiled.
+    pub place: Option<usize>,
+}
+
 /// Everything the WM tracks about one window beyond its place in the
 /// layout.
 #[derive(Debug, Clone, Default)]
@@ -340,6 +353,8 @@ pub struct WindowState {
     /// restore if that workspace is visible.
     pub minimized_origin: Option<usize>,
     pub drag: Option<DragState>,
+    /// It was brought to the middle of a display, and was so before.
+    pub centered_from: Option<BeforeCentered>,
 
     // ---- rules ----
     pub dynamic_rules: Option<DynamicRuleState>,

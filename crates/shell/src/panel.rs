@@ -984,6 +984,22 @@ pub fn show_workspace(name: &str) -> String {
 /// by the display's name and the workspace's, whichever display has the
 /// keyboard and whatever its place among the workspaces has become since
 /// the panel was drawn. None for a tab that is not there.
+/// The command that brings a window to the middle of this panel's
+/// display, floating, or puts it back as it was.
+pub fn centre_window(view: &View, window: u64) -> Option<String> {
+    use gevrek_model::command::{DispatchCommand, MonitorTarget, WindowSelector};
+    let display = view.place.name();
+    let command = DispatchCommand::ToggleWindowCentered {
+        window: WindowSelector::Handle(window as i64),
+        target: if display.is_empty() {
+            MonitorTarget::Primary
+        } else {
+            MonitorTarget::Name(display.to_string())
+        },
+    };
+    serde_json::to_string(&command).ok()
+}
+
 pub fn show_tab(view: &View, index: usize) -> Option<String> {
     use gevrek_model::command::{DispatchCommand, MonitorTarget, WorkspaceSelector};
     let tab = view.tabs.get(index)?;
@@ -1239,6 +1255,9 @@ pub struct Asked {
     pub show: Option<usize>,
     /// Go to this window (a button of the taskbar).
     pub go: Option<u64>,
+    /// Bring this window to the middle of this display, floating, or
+    /// put it back as it was (the other button on it in the taskbar).
+    pub centre: Option<u64>,
     /// Give this workspace (its place among the tabs) another name: its
     /// tab was right-clicked.
     pub rename: Option<usize>,
@@ -2589,6 +2608,11 @@ fn draw_module(
                 .hint(&task.title);
                 if response.clicked() && !has_keys {
                     asked.go = Some(task.id);
+                }
+                // The other button: the window to the middle of this
+                // display, floating; again, back as it was.
+                if response.secondary_clicked() {
+                    asked.centre = Some(task.id);
                 }
             }
         }

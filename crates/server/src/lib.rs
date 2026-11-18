@@ -958,6 +958,13 @@ fn dispatch_request_to_core(request: DispatchRequest) -> Result<DispatchCommand,
                 .parse::<MonitorTarget>()
                 .map_err(Status::invalid_argument)?,
         },
+        DispatchType::ToggleWindowCentered => DispatchCommand::ToggleWindowCentered {
+            window: window_selector()?,
+            target: request
+                .secondary_argument
+                .parse::<MonitorTarget>()
+                .map_err(Status::invalid_argument)?,
+        },
         DispatchType::MoveWindowToMonitorAndFollow => {
             DispatchCommand::MoveWindowToMonitorAndFollow {
                 window: window_selector()?,
@@ -1354,7 +1361,9 @@ fn dispatcher_argument_kind(command: DispatchType) -> &'static str {
         DispatchType::MoveSelectedToWorkspace | DispatchType::MoveSelectedToWorkspaceAndFollow => {
             "window_selector_and_workspace_selector"
         }
-        DispatchType::MoveWindowToMonitor | DispatchType::MoveWindowToMonitorAndFollow => {
+        DispatchType::MoveWindowToMonitor
+        | DispatchType::ToggleWindowCentered
+        | DispatchType::MoveWindowToMonitorAndFollow => {
             "window_selector_and_monitor_selector"
         }
         DispatchType::FocusMonitorWorkspace => "monitor_selector_and_workspace_selector",

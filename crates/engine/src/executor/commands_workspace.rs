@@ -87,6 +87,13 @@ impl Executor {
             DispatchCommand::SwapActiveWorkspaces { target } => {
                 self.swap_active_workspaces(window_manager, monitor_manager, zone_manager, target)
             }
+            DispatchCommand::ToggleWindowCentered { window, target } => {
+                let window =
+                    self.resolve_window_selector(window_manager, monitor_manager, &window)?;
+                let (_, display) =
+                    self.resolve_monitor_target(window_manager, monitor_manager, &target)?;
+                self.toggle_window_centered(window_manager, monitor_manager, window, display)
+            }
             DispatchCommand::MoveWindowToMonitor { window, target } => {
                 let window =
                     self.resolve_window_selector(window_manager, monitor_manager, &window)?;

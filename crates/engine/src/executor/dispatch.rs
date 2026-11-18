@@ -389,6 +389,7 @@ impl Executor {
             | DispatchCommand::MoveWorkspaceToMonitor { .. }
             | DispatchCommand::SwapActiveWorkspaces { .. }
             | DispatchCommand::MoveWindowToMonitor { .. }
+            | DispatchCommand::ToggleWindowCentered { .. }
             | DispatchCommand::MoveWindowToMonitorAndFollow { .. }
             | DispatchCommand::NewWorkspace { .. }
             | DispatchCommand::CloseWorkspace

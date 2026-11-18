@@ -479,6 +479,15 @@ pub enum DispatchCommand {
         window: WindowSelector,
         target: MonitorTarget,
     },
+    /// Bring a window to the workspace a display shows, floating and in
+    /// its middle; given again for that window, put it back as it was
+    /// before: on its workspace, tiled or floating, at its place. (What
+    /// the other button of the mouse does on a window in the panel's
+    /// taskbar.)
+    ToggleWindowCentered {
+        window: WindowSelector,
+        target: MonitorTarget,
+    },
     MoveWindowToMonitorAndFollow {
         window: WindowSelector,
         target: MonitorTarget,
@@ -881,6 +890,9 @@ impl DispatchCommand {
             Self::MoveWorkspaceToMonitor { .. } => "Move active workspace to monitor",
             Self::SwapActiveWorkspaces { .. } => "Swap active workspaces between monitors",
             Self::MoveWindowToMonitor { .. } => "Move selected window to monitor silently",
+            Self::ToggleWindowCentered { .. } => {
+                "Selected window to the middle of a monitor, or back"
+            }
             Self::MoveWindowToMonitorAndFollow { .. } => {
                 "Move selected window to monitor and follow"
             }
@@ -1158,6 +1170,10 @@ mod tests {
             DispatchCommand::MoveWindowToMonitor {
                 window: WindowSelector::Active,
                 target: MonitorTarget::Next,
+            },
+            DispatchCommand::ToggleWindowCentered {
+                window: WindowSelector::Handle(1234),
+                target: MonitorTarget::Primary,
             },
             DispatchCommand::MoveWindowToMonitorAndFollow {
                 window: WindowSelector::Handle(1234),
