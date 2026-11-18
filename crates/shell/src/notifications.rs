@@ -425,7 +425,11 @@ impl Stack {
             .take(REMEMBERED)
         {
             let text = |key: &str| note[key].as_str().unwrap_or_default().to_string();
-            let age = Duration::from_secs(note["age"].as_u64().unwrap_or(0) + since_saved);
+            // (An age as large as numbers get, as a file from outside
+            // may say, is as old as can be.)
+            let age = Duration::from_secs(
+                note["age"].as_u64().unwrap_or(0).saturating_add(since_saved),
+            );
             self.last_id = self.last_id.wrapping_add(1).max(1);
             self.history.push(Notification {
                 id: self.last_id,
@@ -1528,5 +1532,36 @@ mod tests {
         assert_eq!(stack.shown().len(), 2);
         assert_eq!(stack.waiting(), 2);
         assert_eq!(stack.next_expiry(), Some(start + Duration::from_secs(20)));
+    }
+
+    /// What was written down is a file anyone may have written: ages
+    /// as large as numbers get (they ended a debug build), and things
+    /// where a note or a text belongs, are lived with.
+    #[test]
+    fn what_was_written_down_by_another_is_lived_with() {
+        let now = Instant::now() + Duration::from_secs(10_000);
+        let wall = std::time::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let mut stack = Stack::default();
+        stack.remember(
+            r#"{"saved": 0, "notes": [{"age": 18446744073709551615, "app": "a", "summary": "s"}]}"#,
+            now,
+            wall,
+        );
+        assert_eq!(stack.history.len(), 1, "it is kept, as old as can be");
+
+        for written in [
+            r#"{"saved": 18446744073709551615, "notes": [{"age": 18446744073709551615}]}"#,
+            r#"{"saved": -1, "notes": [null, 1, "x", [], {"age": -5, "app": 7, "summary": []}]}"#,
+            r#"{"saved": 1e308, "notes": [{"age": 1e308}]}"#,
+            r#"{"notes": {}}"#,
+            r#"{"notes": [{"age": 1}"#,
+            "[]",
+            "null",
+            "",
+        ] {
+            let mut stack = Stack::default();
+            stack.remember(written, now, wall);
+            let _ = stack.remembered(now, wall);
+        }
     }
 }

@@ -98,7 +98,10 @@ impl Usage {
     /// One more start of `app`: counted, and the newest of those started
     /// last.
     pub fn started(&mut self, app: &str) {
-        *self.counts.entry(app.to_string()).or_insert(0) += 1;
+        // (A count as large as numbers get, as a file from outside may
+        // say, stays what it is.)
+        let count = self.counts.entry(app.to_string()).or_insert(0);
+        *count = count.saturating_add(1);
         self.recent.retain(|known| known != app);
         self.recent.insert(0, app.to_string());
         self.recent.truncate(REMEMBERED);
@@ -1357,5 +1360,38 @@ mod tests {
         assert_eq!(launcher.chosen, 0);
         launcher.step(1, 0);
         assert_eq!(launcher.chosen, 0);
+    }
+
+    /// The counts are a file anyone may have written: a count as large
+    /// as numbers get is not counted past (it ended a debug build, and
+    /// began again at nought otherwise), and what is no count is none.
+    #[test]
+    fn counts_from_outside_are_lived_with() {
+        let folder =
+            std::env::temp_dir().join(format!("gevrek-launcher-outside-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder");
+        let path = folder.join("usage.json");
+        std::fs::write(&path, r#"{"firefox": 4294967295}"#).expect("written");
+        let mut usage = Usage::load(&path);
+        usage.started("firefox");
+        assert_eq!(usage.count("firefox"), u32::MAX);
+
+        for nonsense in [
+            r#"{"firefox": -1}"#,
+            r#"{"firefox": 4294967296}"#,
+            r#"{"firefox": "often"}"#,
+            r#"["firefox"]"#,
+            "null",
+            "",
+            r#"{"firefox": 3"#,
+        ] {
+            std::fs::write(&path, nonsense).expect("written");
+            std::fs::write(recent_file(&path), nonsense).expect("written");
+            let mut usage = Usage::load(&path);
+            assert_eq!(usage.count("firefox"), 0, "{nonsense}");
+            usage.started("firefox");
+            assert_eq!(usage.recent(), ["firefox".to_string()]);
+        }
+        let _ = std::fs::remove_dir_all(folder);
     }
 }
