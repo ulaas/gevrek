@@ -1161,66 +1161,6 @@ pub enum SoundAsk {
     Mute,
 }
 
-/// The sign for how loud it is.
-/// A module's sign from the brand's own icons, with the words beside it
-/// (under it on a panel that stands upright); `or` is the icon font's
-/// sign, for where the brand's cannot be drawn. `pressed`: it is a
-/// button; else it only says something.
-#[allow(clippy::too_many_arguments)]
-fn signed(
-    ui: &mut egui::Ui,
-    icon: gevrek_ui::brand_icons::BrandIcon,
-    or: &str,
-    size: f32,
-    colour: egui::Color32,
-    words: Option<&str>,
-    upright: bool,
-    pressed: bool,
-) -> egui::Response {
-    let text = |said: String| egui::RichText::new(said).size(13.0).color(colour);
-    let Some(image) = gevrek_ui::brand_icons::image(ui.ctx(), icon, size, colour) else {
-        let joined = if upright { "\n" } else { " " };
-        let said = match words {
-            Some(words) => text(format!("{or}{joined}{words}")),
-            None => egui::RichText::new(or).size(size).color(colour),
-        };
-        return if pressed {
-            ui.add(egui::Button::new(said).frame(false))
-        } else {
-            ui.label(said)
-        };
-    };
-    match (words, pressed, upright) {
-        (None, true, _) => ui.add(egui::Button::image(image).frame(false)),
-        (None, false, _) => ui.add(image),
-        (Some(words), true, false) => {
-            ui.add(egui::Button::image_and_text(image, text(words.to_string())).frame(false))
-        }
-        (Some(words), _, _) => {
-            let sense = if pressed {
-                egui::Sense::click()
-            } else {
-                egui::Sense::hover()
-            };
-            let both = |ui: &mut egui::Ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(4.0, 1.0);
-                ui.add(image);
-                ui.add(egui::Label::new(text(words.to_string())).selectable(false));
-            };
-            let inner = if upright {
-                ui.vertical_centered(both).response
-            } else {
-                ui.horizontal(both).response
-            };
-            ui.interact(
-                inner.rect,
-                ui.scope_id().with(("signed", icon.name())),
-                sense,
-            )
-        }
-    }
-}
-
 /// The brand's sign for the sound, where it has one for how it is (it
 /// has none for "muted" and "no sound": those stay the icon font's).
 fn sound_sign(percent: u32, muted: bool) -> Option<gevrek_ui::brand_icons::BrandIcon> {
@@ -1365,12 +1305,17 @@ pub fn strip_of(whole: egui::Rect, length: f32, align: PanelAlign, upright: bool
 }
 
 /// The colours the modules are drawn in.
+#[derive(Clone, Copy)]
 struct Ink {
     text: egui::Color32,
     accent: egui::Color32,
     /// The panel goes down a side: what it shows stands under each
     /// other and is kept narrow (a word is a sign, or a few letters).
     upright: bool,
+    /// How far along the panel a module that takes what room there is
+    /// (the taskbar) may reach: where what stands at the panel's end
+    /// begins.
+    until: f32,
 }
 
 /// Draw a panel. `wheel` is what the wheel has turned over this panel and
@@ -1384,6 +1329,7 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
         text: rgb(bar.text),
         accent: bar.accent.map_or(shown.accent, rgb),
         upright: bar.edge.is_upright(),
+        until: f32::INFINITY,
     };
     let (red, green, blue) = bar.background;
     let background = egui::Color32::from_rgba_unmultiplied(red, green, blue, bar.opacity);
@@ -1466,6 +1412,7 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                          modules: &[PanelModule],
                          marks: bool,
                          reversed: bool,
+                         ink: &Ink,
                          asked: &mut Asked|
              -> Option<egui::Rect> {
                 if modules.is_empty() && !marks {
@@ -1477,17 +1424,17 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                         if reversed {
                             // The last one stands at the edge.
                             for module in modules.iter().rev() {
-                                draw_module(ui, module, shown, &ink, asked);
+                                draw_module(ui, module, shown, ink, asked);
                             }
                             if marks {
-                                draw_marks(ui, shown, &ink, asked);
+                                draw_marks(ui, shown, ink, asked);
                             }
                         } else {
                             if marks {
-                                draw_marks(ui, shown, &ink, asked);
+                                draw_marks(ui, shown, ink, asked);
                             }
                             for module in modules {
-                                draw_module(ui, module, shown, &ink, asked);
+                                draw_module(ui, module, shown, ink, asked);
                             }
                         }
                     })
@@ -1507,15 +1454,15 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                 let builder = egui::UiBuilder::new().max_rect(inner).layout(forward);
                 ui.scope_builder(builder, |ui| {
                     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
-                    groups[0] = group(ui, &bar.left, false, false, &mut asked);
+                    groups[0] = group(ui, &bar.left, false, false, &ink, &mut asked);
                     if groups[0].is_some() && !bar.centre.is_empty() {
                         ui.add_space(between);
                     }
-                    groups[1] = group(ui, &bar.centre, false, false, &mut asked);
+                    groups[1] = group(ui, &bar.centre, false, false, &ink, &mut asked);
                     if groups[0].is_some() || groups[1].is_some() {
                         ui.add_space(between);
                     }
-                    groups[2] = group(ui, &bar.right, true, false, &mut asked);
+                    groups[2] = group(ui, &bar.right, true, false, &ink, &mut asked);
                 });
                 let used = groups
                     .iter()
@@ -1530,14 +1477,50 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                     context.request_repaint();
                 }
             } else {
+                // What stands at the panel's end is as long as it was
+                // the last time: what stands at its start may reach up
+                // to there, and no further.
+                let end_id = egui::Id::unique(("panel-end", shown.output));
+                let end_before: f32 = context.data(|data| data.get_temp(end_id)).unwrap_or(0.0);
+                let last = if upright {
+                    inner.bottom()
+                } else {
+                    inner.right()
+                };
+                let start_ink = Ink {
+                    until: last - end_before - if end_before > 0.0 { spacing } else { 0.0 },
+                    ..ink
+                };
                 let builder = egui::UiBuilder::new().max_rect(inner).layout(forward);
                 ui.scope_builder(builder, |ui| {
                     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
-                    groups[0] = group(ui, &bar.left, false, false, &mut asked);
-                    ui.with_layout(backward, |ui| {
-                        groups[2] = group(ui, &bar.right, true, true, &mut asked);
-                    });
+                    groups[0] = group(ui, &bar.left, false, false, &start_ink, &mut asked);
+                    if !upright {
+                        ui.with_layout(backward, |ui| {
+                            groups[2] = group(ui, &bar.right, true, true, &ink, &mut asked);
+                        });
+                    }
                 });
+                if upright {
+                    // Down a side it is laid out from the top as the rest
+                    // is (from the bottom up, what a module shows under
+                    // each other came out the wrong way round), and put
+                    // at the end by how long it was the last time.
+                    let place = egui::Rect::from_min_max(
+                        egui::pos2(inner.left(), inner.bottom() - end_before.max(1.0)),
+                        inner.right_bottom(),
+                    );
+                    let builder = egui::UiBuilder::new().max_rect(place).layout(forward);
+                    ui.scope_builder(builder, |ui| {
+                        ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+                        groups[2] = group(ui, &bar.right, true, false, &ink, &mut asked);
+                    });
+                }
+                let end_now = groups[2].map_or(0.0, long);
+                if (end_now - end_before).abs() > 0.5 {
+                    context.data_mut(|data| data.insert_temp(end_id, end_now));
+                    context.request_repaint();
+                }
                 if !bar.centre.is_empty() {
                     // In the middle of the panel whatever stands at its
                     // ends: placed by how long it was the last time.
@@ -1554,7 +1537,7 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                     );
                     let builder = egui::UiBuilder::new().max_rect(place).layout(forward);
                     ui.scope_builder(builder, |ui| {
-                        groups[1] = group(ui, &bar.centre, false, false, &mut asked);
+                        groups[1] = group(ui, &bar.centre, false, false, &ink, &mut asked);
                     });
                     let used = groups[1].map_or(0.0, long);
                     if (used - before).abs() > 0.5 {
@@ -2127,6 +2110,156 @@ pub fn tray_menu(
     asked
 }
 
+/// What a cell of the panel shows before its words.
+#[derive(Clone, Copy)]
+enum Sign<'a> {
+    None,
+    /// A sign of the icon font.
+    Font(&'a str),
+    /// One of the brand's own, and the icon font's for where that cannot
+    /// be drawn.
+    Brand(BrandIcon, &'a str),
+}
+
+/// How a cell is drawn.
+struct Cell<'a> {
+    sign: Sign<'a>,
+    /// Its words: beside the sign, or under it (smaller) down a side.
+    words: Option<&'a str>,
+    colour: egui::Color32,
+    /// A ground it has always (one that is pressed lights up besides).
+    fill: Option<egui::Color32>,
+    /// It is a button.
+    pressed: bool,
+}
+
+/// How thick the modules of a panel are across it, by the panel's own
+/// thickness: a low panel has low modules.
+fn across_of(ui: &egui::Ui, upright: bool) -> f32 {
+    if upright {
+        (ui.max_rect().width() - 8.0).clamp(16.0, 64.0)
+    } else {
+        (ui.max_rect().height() - 10.0).clamp(14.0, 30.0)
+    }
+}
+
+/// One cell of the panel: a sign, words, or both, on a rounded ground
+/// that lights under the pointer where it is a button. Along a panel
+/// that lies, the words stand beside the sign; down a side they stand
+/// under it, smaller, and the cell is as wide as the panel.
+fn cell(ui: &mut egui::Ui, ink: &Ink, cell: &Cell) -> egui::Response {
+    let across = across_of(ui, ink.upright);
+    let font = egui::FontId::proportional(if ink.upright { 10.5 } else { 12.5 });
+    let words = cell
+        .words
+        .filter(|words| !words.is_empty())
+        .map(|words| ui.painter().layout_no_wrap(words.to_string(), font, cell.colour));
+    let has_sign = !matches!(cell.sign, Sign::None);
+    let size = if ink.upright {
+        let high = 5.0
+            + if has_sign { 17.0 } else { 0.0 }
+            + words.as_ref().map_or(0.0, |words| words.size().y + 1.0)
+            + 5.0;
+        egui::vec2(across, high.max(22.0))
+    } else {
+        let wide = match (&words, has_sign) {
+            (Some(words), true) => 8.0 + 16.0 + 5.0 + words.size().x + 8.0,
+            (Some(words), false) => 9.0 + words.size().x + 9.0,
+            (None, _) => across.max(26.0),
+        };
+        egui::vec2(wide, across)
+    };
+    let sense = if cell.pressed {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(size, sense);
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    let lit = cell.pressed && response.hovered();
+    if let Some(fill) = cell.fill {
+        ui.painter().rect_filled(rect, 8.0, fill);
+    }
+    if lit {
+        ui.painter()
+            .rect_filled(rect, 8.0, ink.text.gamma_multiply(0.10));
+    }
+    let sign_at = if ink.upright {
+        egui::pos2(
+            rect.center().x,
+            if words.is_some() {
+                rect.top() + 5.0 + 8.5
+            } else {
+                rect.center().y
+            },
+        )
+    } else if words.is_some() {
+        egui::pos2(rect.left() + 8.0 + 8.0, rect.center().y)
+    } else {
+        rect.center()
+    };
+    let font_sign = |ui: &egui::Ui, sign: &str| {
+        ui.painter().text(
+            sign_at,
+            egui::Align2::CENTER_CENTER,
+            sign,
+            egui::FontId::proportional(16.0),
+            cell.colour,
+        );
+    };
+    match cell.sign {
+        Sign::None => {}
+        Sign::Font(sign) => font_sign(ui, sign),
+        Sign::Brand(icon, or) => {
+            match gevrek_ui::brand_icons::image(ui.ctx(), icon, 15.0, cell.colour) {
+                Some(image) => image.paint_at(
+                    ui,
+                    egui::Rect::from_center_size(sign_at, egui::Vec2::splat(15.0)),
+                ),
+                None => font_sign(ui, or),
+            }
+        }
+    }
+    if let Some(words) = words {
+        let at = if ink.upright {
+            egui::pos2(
+                rect.center().x - words.size().x / 2.0,
+                if has_sign {
+                    rect.top() + 5.0 + 17.0 + 1.0
+                } else {
+                    rect.center().y - words.size().y / 2.0
+                },
+            )
+        } else {
+            egui::pos2(
+                rect.left() + if has_sign { 8.0 + 16.0 + 5.0 } else { 9.0 },
+                rect.center().y - words.size().y / 2.0,
+            )
+        };
+        ui.painter().galley(at, words, cell.colour);
+    }
+    response
+}
+
+/// A name in as few letters as a narrow place has room for: a number as
+/// it is, else its first two letters.
+fn short_name(name: &str) -> String {
+    let name = name.trim();
+    if name.chars().all(|letter| letter.is_ascii_digit()) {
+        return name.chars().take(3).collect();
+    }
+    let mut letters = name.chars().filter(|letter| !letter.is_whitespace());
+    match letters.next() {
+        Some(first) => first
+            .to_uppercase()
+            .chain(letters.next().into_iter().flat_map(char::to_lowercase))
+            .collect(),
+        None => String::new(),
+    }
+}
+
 /// One module, wherever it stands.
 fn draw_module(
     ui: &mut egui::Ui,
@@ -2139,32 +2272,61 @@ fn draw_module(
         return;
     }
     let (bar, view, text, accent) = (shown.bar, shown.view, ink.text, ink.accent);
-    // A low panel has low buttons.
-    let tall = (ui.max_rect().height() - 6.0).clamp(12.0, 22.0);
     let upright = ink.upright;
-    // (Down a side: a sign over its number, not beside it.)
-    let joined = if upright { "\n" } else { " " };
+    let across = across_of(ui, upright);
+    // (Along the panel, across it.)
+    let along = |long: f32| {
+        if upright {
+            egui::vec2(across, long)
+        } else {
+            egui::vec2(long, across)
+        }
+    };
+    let quiet = text.gamma_multiply(0.55);
+    // A cell that only says something, and one that is pressed.
+    fn says<'a>(sign: Sign<'a>, words: Option<&'a str>, colour: egui::Color32) -> Cell<'a> {
+        Cell {
+            sign,
+            words,
+            colour,
+            fill: None,
+            pressed: false,
+        }
+    }
     match module {
         PanelModule::Launcher => {
             // gevrek's mark is the launcher's button: the one for a dark
             // ground where the panel's words are light, and the other way
             // round. (Where the picture cannot be read: the glass.)
             let on_dark = theme::luminance(text) > 0.5;
-            let side = (ui.max_rect().height() - 10.0).clamp(12.0, 20.0);
+            let side = (across - 4.0).clamp(12.0, 22.0);
             let button = match gevrek_ui::brand::mark(ui.ctx(), on_dark, side) {
-                Some(mark) => ui.add(
-                    egui::Image::new((mark.id(), egui::vec2(side, side)))
-                        .sense(egui::Sense::click()),
-                ),
-                None => signed(
+                Some(mark) => {
+                    let (rect, response) =
+                        ui.allocate_exact_size(along(across.max(26.0)), egui::Sense::click());
+                    if response.hovered() {
+                        ui.painter()
+                            .rect_filled(rect, 8.0, text.gamma_multiply(0.10));
+                    }
+                    ui.painter().image(
+                        mark.id(),
+                        egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(side)),
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                    response
+                }
+                None => cell(
                     ui,
-                    BrandIcon::Launcher,
-                    icons::MAGNIFYING_GLASS,
-                    15.0,
-                    text,
-                    None,
-                    upright,
-                    true,
+                    ink,
+                    &Cell {
+                        pressed: true,
+                        ..says(
+                            Sign::Brand(BrandIcon::Launcher, icons::MAGNIFYING_GLASS),
+                            None,
+                            text,
+                        )
+                    },
                 ),
             };
             if button.hint("Launcher").clicked() {
@@ -2172,56 +2334,92 @@ fn draw_module(
             }
         }
         PanelModule::Workspaces => {
-            for (index, tab) in view.tabs.iter().enumerate() {
-                // The one that is shown stands out; one with
-                // windows reads stronger than an empty one.
-                let (fill, ink) = if tab.shown {
-                    (accent, theme::readable(egui::Color32::BLACK, accent, 4.5))
-                } else if tab.windows > 0 {
-                    (egui::Color32::TRANSPARENT, text)
-                } else {
-                    (egui::Color32::TRANSPARENT, text.gamma_multiply(0.45))
-                };
-                let label = egui::RichText::new(&tab.label).size(13.0).color(ink);
-                let button = egui::Button::new(label)
-                    .fill(fill)
-                    .corner_radius(10)
-                    .min_size(egui::vec2(30.0, tall));
-                let response = ui
-                    .add(button)
-                    .hint(format!("Workspace {}. Right-click to rename.", tab.name));
-                if response.clicked() && !tab.shown {
-                    asked.show = Some(index);
-                }
-                if response.secondary_clicked() {
-                    asked.rename = Some(index);
-                }
+            // The workspaces stand together on one ground, as the parts
+            // of one thing; the one that is shown is the accent's, one
+            // with windows reads stronger than an empty one and has a
+            // dot to say so.
+            let ground = ui.painter().add(egui::Shape::Noop);
+            let before = ui.spacing().item_spacing;
+            let all = ui
+                .scope(|ui| {
+                    ui.spacing_mut().item_spacing = egui::Vec2::splat(2.0);
+                    for (index, tab) in view.tabs.iter().enumerate() {
+                        let said = if upright {
+                            short_name(&tab.label)
+                        } else {
+                            tab.label.clone()
+                        };
+                        let colour = if tab.shown {
+                            theme::readable(egui::Color32::BLACK, accent, 4.5)
+                        } else if tab.windows > 0 {
+                            text
+                        } else {
+                            text.gamma_multiply(0.45)
+                        };
+                        let words = ui.painter().layout_no_wrap(
+                            said,
+                            egui::FontId::proportional(12.5),
+                            colour,
+                        );
+                        let size = if upright {
+                            egui::vec2(across, 26.0)
+                        } else {
+                            egui::vec2((words.size().x + 18.0).max(28.0), across)
+                        };
+                        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+                        if tab.shown {
+                            ui.painter().rect_filled(rect, 7.0, accent);
+                        } else if response.hovered() {
+                            ui.painter()
+                                .rect_filled(rect, 7.0, text.gamma_multiply(0.12));
+                        }
+                        ui.painter()
+                            .galley(rect.center() - words.size() / 2.0, words, colour);
+                        if tab.windows > 0 && !tab.shown {
+                            let dot = egui::pos2(rect.center().x, rect.bottom() - 3.0);
+                            ui.painter()
+                                .circle_filled(dot, 1.5, text.gamma_multiply(0.6));
+                        }
+                        let response = response
+                            .hint(format!("Workspace {}. Right-click to rename.", tab.name));
+                        if response.clicked() && !tab.shown {
+                            asked.show = Some(index);
+                        }
+                        if response.secondary_clicked() {
+                            asked.rename = Some(index);
+                        }
+                    }
+                })
+                .response
+                .rect;
+            ui.spacing_mut().item_spacing = before;
+            if !view.tabs.is_empty() {
+                ui.painter().set(
+                    ground,
+                    egui::Shape::rect_filled(all, 8.0, text.gamma_multiply(0.06)),
+                );
             }
         }
         PanelModule::Layout if !view.layout.is_empty() => {
-            // The layout, and a press on it the menu of them.
+            // The layout, and a press on it the menu of them. (Down a
+            // side: its sign, and the word as a hint.)
             let said = if view.floating {
                 "Floating".to_string()
             } else {
                 layout_label(&view.layout)
             };
-            // (Down a side: its first letters, and the whole word as a hint.)
-            let whole = said.clone();
-            let said = if upright {
-                said.chars().take(3).collect()
-            } else {
-                said
-            };
-            let label = egui::RichText::new(said).size(12.5).color(text);
-            let button = egui::Button::new(label)
-                .fill(text.gamma_multiply(0.10))
-                .corner_radius(10);
-            let response = ui.add(button);
-            let response = if upright {
-                response.hint(whole)
-            } else {
-                response
-            };
+            let response = cell(
+                ui,
+                ink,
+                &Cell {
+                    sign: Sign::Font(icons::SQUARES_FOUR),
+                    words: (!upright).then_some(said.as_str()),
+                    colour: text,
+                    fill: Some(text.gamma_multiply(0.07)),
+                    pressed: true,
+                },
+            )
+            .hint(format!("Layout: {said}. A press chooses another."));
             if response.clicked() {
                 asked.layout_menu = Some(response.rect);
             }
@@ -2231,7 +2429,7 @@ fn draw_module(
             let title: String = view.title.chars().take(200).collect();
             let words = egui::RichText::new(title)
                 .size(13.0)
-                .color(text.gamma_multiply(if view.focused { 1.0 } else { 0.6 }));
+                .color(text.gamma_multiply(if view.focused { 0.95 } else { 0.55 }));
             if bar.title_width == 0 {
                 ui.label(words);
             } else {
@@ -2239,8 +2437,13 @@ fn draw_module(
                 // changes (a count, a progress) moves nothing after it,
                 // and one that is too long ends in "…".
                 let wide = (bar.title_width as f32).min(ui.available_width().max(20.0));
+                // (Where there is room for a few letters only, a title
+                // would be its three dots and nothing else: left out.)
+                if wide < 48.0 {
+                    return;
+                }
                 ui.allocate_ui_with_layout(
-                    egui::vec2(wide, tall),
+                    egui::vec2(wide, across),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
                         ui.set_min_width(wide);
@@ -2259,12 +2462,47 @@ fn draw_module(
             };
             let said = clock_text(format, &now);
             if upright {
-                // Its parts under each other.
-                for part in said.split_whitespace() {
-                    ui.label(egui::RichText::new(part).size(12.0).color(text));
+                // Its parts under each other, in their order; the time
+                // itself (the part with a colon) larger, its hours over
+                // its minutes.
+                let parts: Vec<&str> = said.split_whitespace().collect();
+                let lines: Vec<(String, f32, egui::Color32)> = parts
+                    .iter()
+                    .flat_map(|part| {
+                        if part.contains(':') {
+                            part.split(':')
+                                .map(|piece| (piece.to_string(), 14.5, text))
+                                .collect::<Vec<_>>()
+                        } else {
+                            vec![(part.to_string(), 10.5, text.gamma_multiply(0.7))]
+                        }
+                    })
+                    .collect();
+                let laid: Vec<_> = lines
+                    .into_iter()
+                    .map(|(line, size, colour)| {
+                        (
+                            ui.painter().layout_no_wrap(
+                                line,
+                                egui::FontId::proportional(size),
+                                colour,
+                            ),
+                            colour,
+                        )
+                    })
+                    .collect();
+                let high: f32 = laid.iter().map(|(line, _)| line.size().y).sum::<f32>() + 8.0;
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::vec2(across, high), egui::Sense::hover());
+                let mut y = rect.top() + 4.0;
+                for (line, colour) in laid {
+                    let x = rect.center().x - line.size().x / 2.0;
+                    let down = line.size().y;
+                    ui.painter().galley(egui::pos2(x, y), line, colour);
+                    y += down;
                 }
             } else {
-                ui.label(egui::RichText::new(said).size(13.0).color(text));
+                cell(ui, ink, &says(Sign::None, Some(&said), text));
             }
             // Drawn again when the time it shows changes.
             let wait = if format.contains("%S") || format.contains("%T") {
@@ -2281,72 +2519,67 @@ fn draw_module(
                 .iter()
                 .find(|tab| tab.shown)
                 .map_or(0, |tab| tab.windows);
-            let said = if upright {
-                windows.to_string()
-            } else if windows == 1 {
-                "1 window".to_string()
+            let count = windows.to_string();
+            cell(
+                ui,
+                ink,
+                &says(Sign::Font(icons::APP_WINDOW), Some(&count), text.gamma_multiply(0.7)),
+            )
+            .hint(if windows == 1 {
+                "1 window on this workspace".to_string()
             } else {
-                format!("{windows} windows")
-            };
-            ui.label(
-                egui::RichText::new(said)
-                    .size(12.5)
-                    .color(text.gamma_multiply(0.7)),
-            );
+                format!("{windows} windows on this workspace")
+            });
         }
         PanelModule::Notifications => {
-            let (icon, hint) = if shown.quiet {
-                (icons::BELL_SLASH, "Notifications (do not disturb)")
-            } else {
-                (icons::BELL, "Notifications")
-            };
             // (The brand has one bell: while nothing is to disturb, it
             // is the icon font's bell with the stroke through it.)
-            let pressed = if shown.quiet {
-                let label = egui::RichText::new(icon).size(15.0).color(text);
-                ui.add(egui::Button::new(label).frame(false))
+            let (sign, hint) = if shown.quiet {
+                (
+                    Sign::Font(icons::BELL_SLASH),
+                    "Notifications (do not disturb)",
+                )
             } else {
-                signed(
-                    ui,
-                    BrandIcon::Notifications,
-                    icon,
-                    15.0,
-                    text,
-                    None,
-                    upright,
-                    true,
+                (
+                    Sign::Brand(BrandIcon::Notifications, icons::BELL),
+                    "Notifications",
                 )
             };
+            let pressed = cell(
+                ui,
+                ink,
+                &Cell {
+                    pressed: true,
+                    ..says(sign, None, text)
+                },
+            );
             if pressed.hint(hint).clicked() {
                 asked.pressed = Some(PanelModule::Notifications);
             }
         }
         PanelModule::Power => {
-            if signed(
+            let pressed = cell(
                 ui,
-                BrandIcon::Power,
-                icons::POWER,
-                15.0,
-                text,
-                None,
-                upright,
-                true,
-            )
-            .hint("Power")
-            .clicked()
-            {
+                ink,
+                &Cell {
+                    pressed: true,
+                    ..says(Sign::Brand(BrandIcon::Power, icons::POWER), None, text)
+                },
+            );
+            if pressed.hint("Power").clicked() {
                 asked.pressed = Some(PanelModule::Power);
             }
         }
         PanelModule::ControlCentre => {
-            let sign = egui::RichText::new(icons::SLIDERS_HORIZONTAL)
-                .size(16.0)
-                .color(text);
-            if ui
-                .add(egui::Button::new(sign).frame(false))
-                .hint("Control centre")
-                .clicked()
-            {
+            let pressed = cell(
+                ui,
+                ink,
+                &Cell {
+                    pressed: true,
+                    ..says(Sign::Font(icons::SLIDERS_HORIZONTAL), None, text)
+                },
+            );
+            if pressed.hint("Control centre").clicked() {
                 asked.pressed = Some(PanelModule::ControlCentre);
             }
         }
@@ -2356,31 +2589,32 @@ fn draw_module(
         }
         PanelModule::Sound => {
             if let Some((percent, muted)) = shown.system.volume {
-                let said = format!("{}{joined}{percent}%", sound_icon(percent, muted));
-                let colour = if muted {
-                    text.gamma_multiply(0.55)
+                // (Down a side there is no room for the sign of percent.)
+                let said = if upright {
+                    percent.to_string()
                 } else {
-                    text
+                    format!("{percent}%")
                 };
-                let label = egui::RichText::new(said).size(13.0).color(colour);
+                let colour = if muted { quiet } else { text };
                 let hint = if muted {
                     "Sound: muted. A press lets it be heard; the wheel makes it louder and quieter; right-click chooses the device."
                 } else {
                     "Sound. A press mutes it; the wheel makes it louder and quieter; right-click chooses the device."
                 };
-                let button = match sound_sign(percent, muted) {
-                    Some(sign) => signed(
-                        ui,
-                        sign,
-                        sound_icon(percent, muted),
-                        15.0,
-                        colour,
-                        Some(&format!("{percent}%")),
-                        upright,
-                        true,
-                    ),
-                    None => ui.add(egui::Button::new(label).frame(false)),
-                }
+                // (The brand's sign where it has one for how it is: it
+                // has none for "muted" and "no sound".)
+                let sign = match sound_sign(percent, muted) {
+                    Some(sign) => Sign::Brand(sign, sound_icon(percent, muted)),
+                    None => Sign::Font(sound_icon(percent, muted)),
+                };
+                let button = cell(
+                    ui,
+                    ink,
+                    &Cell {
+                        pressed: true,
+                        ..says(sign, Some(&said), colour)
+                    },
+                )
                 .hint(hint);
                 if button.clicked() {
                     asked.sound = Some(SoundAsk::Mute);
@@ -2396,11 +2630,12 @@ fn draw_module(
         }
         PanelModule::Brightness => {
             if let Some(percent) = shown.system.brightness {
-                let label = egui::RichText::new(format!("{}{joined}{percent}%", icons::SUN))
-                    .size(13.0)
-                    .color(text);
-                let response = ui
-                    .label(label)
+                let said = if upright {
+                    percent.to_string()
+                } else {
+                    format!("{percent}%")
+                };
+                let response = cell(ui, ink, &says(Sign::Font(icons::SUN), Some(&said), text))
                     .hint("Brightness. The wheel makes it brighter and darker.");
                 // (The wheel over it is its own, as over the sound.)
                 if response.contains_pointer() {
@@ -2410,7 +2645,11 @@ fn draw_module(
         }
         PanelModule::Battery => {
             if let Some(battery) = shown.system.battery {
-                let said = format!("{}{joined}{}%", battery_icon(battery), battery.percent);
+                let said = if upright {
+                    battery.percent.to_string()
+                } else {
+                    format!("{}%", battery.percent)
+                };
                 let low = !battery.charging && battery.percent < 15;
                 let colour = if low {
                     egui::Color32::from_rgb(240, 110, 90)
@@ -2419,21 +2658,12 @@ fn draw_module(
                 };
                 // (The brand's battery, but while it is charged: for
                 // that the pack has no sign.)
-                if battery.charging {
-                    ui.label(egui::RichText::new(said).size(13.0).color(colour))
+                let sign = if battery.charging {
+                    Sign::Font(battery_icon(battery))
                 } else {
-                    signed(
-                        ui,
-                        BrandIcon::Battery,
-                        battery_icon(battery),
-                        15.0,
-                        colour,
-                        Some(&format!("{}%", battery.percent)),
-                        upright,
-                        false,
-                    )
-                }
-                .hint(if battery.charging {
+                    Sign::Brand(BrandIcon::Battery, battery_icon(battery))
+                };
+                cell(ui, ink, &says(sign, Some(&said), colour)).hint(if battery.charging {
                     "Battery, on the mains"
                 } else {
                     "Battery"
@@ -2447,11 +2677,7 @@ fn draw_module(
                     (true, false) => (icons::PLUGS_CONNECTED, "Network by cable"),
                     (false, _) => (icons::WIFI_SLASH, "No network"),
                 };
-                let colour = if network.connected {
-                    text
-                } else {
-                    text.gamma_multiply(0.55)
-                };
+                let colour = if network.connected { text } else { quiet };
                 let hint = if network.name.is_empty() {
                     hint.to_string()
                 } else {
@@ -2461,21 +2687,19 @@ fn draw_module(
                 // named with the rest of what is set often.
                 // (The brand's sign is the wireless one: a cable and
                 // "none" stay the icon font's.)
-                let pressed = if network.connected && network.wireless {
-                    signed(
-                        ui,
-                        BrandIcon::Network,
-                        icon,
-                        15.0,
-                        colour,
-                        None,
-                        upright,
-                        true,
-                    )
+                let sign = if network.connected && network.wireless {
+                    Sign::Brand(BrandIcon::Network, icon)
                 } else {
-                    let label = egui::RichText::new(icon).size(15.0).color(colour);
-                    ui.add(egui::Button::new(label).frame(false))
+                    Sign::Font(icon)
                 };
+                let pressed = cell(
+                    ui,
+                    ink,
+                    &Cell {
+                        pressed: true,
+                        ..says(sign, None, colour)
+                    },
+                );
                 if pressed
                     .hint(format!("{hint}. A press opens the control centre."))
                     .clicked()
@@ -2489,123 +2713,163 @@ fn draw_module(
             // one's. Its own small button says which, and changes it.
             let all = bar.tasks_of_all_workspaces;
             let tasks = if all { &view.all_tasks } else { &view.tasks };
-            let sign = if all { icons::STACK } else { icons::SQUARE };
-            let scope = egui::Button::new(
-                egui::RichText::new(sign)
-                    .size(14.0)
-                    .color(if all { accent } else { text.gamma_multiply(0.6) }),
+            let scope = cell(
+                ui,
+                ink,
+                &Cell {
+                    pressed: true,
+                    ..says(
+                        Sign::Font(if all { icons::STACK } else { icons::SQUARE }),
+                        None,
+                        if all { accent } else { quiet },
+                    )
+                },
             )
-            .fill(egui::Color32::TRANSPARENT)
-            .corner_radius(8)
-            .min_size(egui::vec2(22.0, tall));
-            if ui
-                .add(scope)
-                .hint(if all {
-                    "The windows of every workspace. A press shows this workspace's only."
-                } else {
-                    "The windows of this workspace. A press shows every workspace's."
-                })
-                .clicked()
-            {
+            .hint(if all {
+                "The windows of every workspace. A press shows this workspace's only."
+            } else {
+                "The windows of this workspace. A press shows every workspace's."
+            });
+            if scope.clicked() {
                 asked.all_tasks = Some(!all);
             }
-            // As wide as the setting says, or narrower when the buttons
-            // of all the windows would not fit beside each other.
-            let task_wide = if bar.task_width == 0 || tasks.is_empty() {
-                0.0
+            let gap = if upright {
+                ui.spacing().item_spacing.y
             } else {
-                let count = tasks.len() as f32;
-                let room =
-                    (ui.available_width() - ui.spacing().item_spacing.x * (count - 1.0)) / count;
-                (bar.task_width as f32).min(room.max(36.0))
+                ui.spacing().item_spacing.x
             };
-            for task in tasks {
+            // The room the buttons have: up to where what stands at the
+            // panel's end begins (as long as it was the last time).
+            let from = if upright {
+                ui.cursor().top()
+            } else {
+                ui.cursor().left()
+            };
+            let room = (ink.until - from).max(0.0);
+            // Along a panel that lies: as wide as the setting says, or
+            // narrower when the buttons of all the windows would not fit
+            // beside each other. Down a side: a square each, and as many
+            // as there is room for.
+            let count = tasks.len();
+            let (task_long, fits) = if upright {
+                let each = 28.0;
+                let fit = |room: f32| ((room + gap) / (each + gap)).floor().max(0.0) as usize;
+                // (Where not all fit, the word that says how many more
+                // there are has its room too.)
+                let fits = if fit(room) >= count {
+                    count
+                } else {
+                    fit(room - 22.0 - gap)
+                };
+                (each, fits)
+            } else if bar.task_width == 0 || count == 0 {
+                (0.0, count)
+            } else {
+                let each = (room - gap * (count as f32 - 1.0)) / count as f32;
+                ((bar.task_width as f32).min(each.max(36.0)), count)
+            };
+            for task in tasks.iter().take(fits) {
                 // The one with the keyboard stands out, as the shown
                 // workspace does among the tabs, more quietly.
                 let has_keys = task.focused && task.shown && view.focused;
                 // (One on a workspace that is not shown reads fainter.)
                 let text = if task.shown { text } else { text.gamma_multiply(0.6) };
-                let (fill, ink) = if has_keys {
-                    (accent.gamma_multiply(0.28), text)
+                let ink_of_words = if has_keys {
+                    text
                 } else {
-                    (text.gamma_multiply(0.07), text.gamma_multiply(0.75))
+                    text.gamma_multiply(0.78)
                 };
-                // (Down a side: its first letter; the hint has the title.)
+                let label = task_label(task);
+                // (Down a side: its picture, or its first letter; the
+                // hint has the title.)
                 let said = if upright {
-                    task_label(task)
+                    label
                         .chars()
                         .next()
                         .map(|letter| letter.to_uppercase().to_string())
                         .unwrap_or_default()
                 } else {
-                    task_label(task)
+                    label
                 };
-                let label = egui::RichText::new(said).size(12.5).color(ink);
-                // The window's picture, where it has one: before its
-                // words, or in their place down a side.
                 let picture = task_picture(ui.ctx(), &task.icon);
-                let small = |picture: &egui::TextureHandle| {
-                    egui::Image::new((picture.id(), egui::vec2(16.0, 16.0)))
-                };
-                let button = match &picture {
-                    Some(picture) if upright => egui::Button::image(small(picture)),
-                    Some(picture) => egui::Button::image_and_text(small(picture), label),
-                    None => egui::Button::new(label),
-                }
-                .fill(fill)
-                .corner_radius(8)
-                .min_size(egui::vec2(0.0, tall));
-                let response = if upright || task_wide <= 0.0 {
-                    ui.add(button)
-                } else {
+                let before = if picture.is_some() && !upright { 22.0 } else { 0.0 };
+                let mut job = egui::text::LayoutJob::simple_singleline(
+                    said,
+                    egui::FontId::proportional(12.5),
+                    ink_of_words,
+                );
+                if task_long > 0.0 && !upright {
                     // Every button the same width, whatever its title
                     // says: a title that changes moves no button.
-                    // (Given its place and drawn there by hand: a button
-                    // put into a place of a set size stood lower than
-                    // the rest of the panel and was cut off below.)
-                    let (place, response) =
-                        ui.allocate_exact_size(egui::vec2(task_wide, tall), egui::Sense::click());
-                    let fill = match (response.hovered(), has_keys) {
-                        (true, true) => accent.gamma_multiply(0.38),
-                        (true, false) => text.gamma_multiply(0.14),
-                        (false, _) => fill,
-                    };
-                    ui.painter().rect_filled(place, 8.0, fill);
-                    let mut job = egui::text::LayoutJob::simple_singleline(
-                        task_label(task),
-                        egui::FontId::proportional(12.5),
-                        ink,
-                    );
-                    // (With a picture the words begin after it; without
-                    // one they stand in the middle, as they did.)
-                    let before = if picture.is_some() { 22.0 } else { 0.0 };
                     job.wrap = egui::text::TextWrapping::truncate_at_width(
-                        (task_wide - 16.0 - before).max(8.0),
+                        (task_long - 18.0 - before).max(8.0),
                     );
-                    let words = ui.fonts_mut(|fonts| fonts.layout_job(job));
-                    let at = match &picture {
-                        Some(picture) => {
-                            let spot = egui::Rect::from_center_size(
-                                egui::pos2(place.left() + 16.0, place.center().y),
-                                egui::vec2(16.0, 16.0),
-                            );
-                            let whole = egui::Rect::from_min_max(
-                                egui::pos2(0.0, 0.0),
-                                egui::pos2(1.0, 1.0),
-                            );
-                            ui.painter()
-                                .image(picture.id(), spot, whole, egui::Color32::WHITE);
-                            egui::pos2(
-                                place.left() + 8.0 + before,
-                                place.center().y - words.size().y / 2.0,
-                            )
-                        }
-                        None => place.center() - words.size() / 2.0,
-                    };
-                    ui.painter().galley(at, words, ink);
-                    response
                 }
-                .hint(&task.title);
+                let words = ui.fonts_mut(|fonts| fonts.layout_job(job));
+                let long = if task_long > 0.0 {
+                    task_long
+                } else {
+                    words.size().x + 18.0 + before
+                };
+                let (place, response) =
+                    ui.allocate_exact_size(along(long), egui::Sense::click());
+                let fill = match (response.hovered(), has_keys) {
+                    (true, true) => accent.gamma_multiply(0.36),
+                    (false, true) => accent.gamma_multiply(0.24),
+                    (true, false) => text.gamma_multiply(0.14),
+                    (false, false) => text.gamma_multiply(0.06),
+                };
+                ui.painter().rect_filled(place, 8.0, fill);
+                if has_keys {
+                    // A line of the accent's at its edge says it again.
+                    let line = if upright {
+                        egui::Rect::from_min_max(
+                            egui::pos2(place.left(), place.top() + 7.0),
+                            egui::pos2(place.left() + 2.0, place.bottom() - 7.0),
+                        )
+                    } else {
+                        egui::Rect::from_min_max(
+                            egui::pos2(place.left() + 10.0, place.bottom() - 2.0),
+                            egui::pos2(place.right() - 10.0, place.bottom()),
+                        )
+                    };
+                    ui.painter().rect_filled(line, 1.0, accent);
+                }
+                let whole = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                match (&picture, upright) {
+                    (Some(picture), true) => {
+                        ui.painter().image(
+                            picture.id(),
+                            egui::Rect::from_center_size(place.center(), egui::Vec2::splat(18.0)),
+                            whole,
+                            egui::Color32::WHITE,
+                        );
+                    }
+                    (Some(picture), false) => {
+                        ui.painter().image(
+                            picture.id(),
+                            egui::Rect::from_center_size(
+                                egui::pos2(place.left() + 17.0, place.center().y),
+                                egui::Vec2::splat(16.0),
+                            ),
+                            whole,
+                            egui::Color32::WHITE,
+                        );
+                        ui.painter().galley(
+                            egui::pos2(
+                                place.left() + 9.0 + before,
+                                place.center().y - words.size().y / 2.0,
+                            ),
+                            words,
+                            ink_of_words,
+                        );
+                    }
+                    (None, _) => {
+                        ui.painter()
+                            .galley(place.center() - words.size() / 2.0, words, ink_of_words);
+                    }
+                }
+                let response = response.hint(&task.title);
                 if response.clicked() && !has_keys {
                     asked.go = Some(task.id);
                 }
@@ -2615,18 +2879,18 @@ fn draw_module(
                     asked.centre = Some(task.id);
                 }
             }
+            // (Those there is no room for are said to be there.)
+            if fits < count {
+                let more = format!("+{}", count - fits);
+                cell(ui, ink, &says(Sign::None, Some(&more), quiet))
+                    .hint(format!("{} more windows", count - fits));
+            }
         }
         PanelModule::Keyboard => {
             if let Some(layout) = shown.keyboard {
                 // Its short word; the hint has the whole name and what a
                 // press does.
-                let label = egui::RichText::new(layout.short.to_uppercase())
-                    .size(12.5)
-                    .color(text);
-                let button = egui::Button::new(label)
-                    .fill(text.gamma_multiply(0.10))
-                    .corner_radius(8)
-                    .min_size(egui::vec2(28.0, tall));
+                let short = layout.short.to_uppercase();
                 let hint = if layout.count > 1 {
                     format!(
                         "Keyboard: {} ({} of {}). A press goes to the next layout.",
@@ -2640,7 +2904,18 @@ fn draw_module(
                         layout.name
                     )
                 };
-                let response = ui.add(button).hint(hint);
+                let response = cell(
+                    ui,
+                    ink,
+                    &Cell {
+                        sign: Sign::None,
+                        words: Some(&short),
+                        colour: text,
+                        fill: Some(text.gamma_multiply(0.07)),
+                        pressed: layout.count > 1,
+                    },
+                )
+                .hint(hint);
                 if layout.count > 1 {
                     if response.clicked() {
                         asked.keyboard = Some(true);
@@ -3679,5 +3954,268 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
         assert_eq!(at(50, false), icons::BATTERY_MEDIUM);
         assert_eq!(at(95, false), icons::BATTERY_FULL);
         assert_eq!(at(5, true), icons::BATTERY_CHARGING);
+    }
+
+    #[test]
+    fn a_name_is_made_short_for_a_narrow_place() {
+        for (name, short) in [
+            ("1", "1"),
+            ("12", "12"),
+            ("1234", "123"),
+            ("Web", "We"),
+            ("mail", "Ma"),
+            ("saturn w", "Sa"),
+            ("x", "X"),
+            (" 3 ", "3"),
+            ("çay", "Ça"),
+            ("", ""),
+        ] {
+            assert_eq!(short_name(name), short, "{name}");
+        }
+    }
+
+    /// Down a side, what stands at the panel's start and what stands at
+    /// its end do not lie on each other, however many windows the
+    /// taskbar has (they did: the taskbar went on under the clock); and
+    /// what is at the end is in its order from the top.
+    #[test]
+    fn down_a_side_the_ends_of_the_panel_keep_apart() {
+        use gevrek_model::settings::{PanelEdge, PanelStyle};
+        let bar = PanelProfile {
+            edge: PanelEdge::Left,
+            style: PanelStyle::Islands,
+            height: 40,
+            left: vec![
+                PanelModule::Launcher,
+                PanelModule::Workspaces,
+                PanelModule::Layout,
+                PanelModule::Taskbar,
+            ],
+            centre: Vec::new(),
+            right: vec![
+                PanelModule::Sound,
+                PanelModule::Battery,
+                PanelModule::Clock,
+                PanelModule::Power,
+            ],
+            ..Default::default()
+        };
+        let mut view = view(&windows_state(), "Monitor ACM2702 (1)").expect("the display");
+        view.tasks = (0..40)
+            .map(|id| Task {
+                id,
+                title: format!("window {id}"),
+                class: String::new(),
+                icon: String::new(),
+                focused: id == 3,
+                shown: true,
+            })
+            .collect();
+        let system = SystemView {
+            volume: Some((40, false)),
+            battery: Some(gevrek_system::status::Battery {
+                percent: 60,
+                charging: false,
+            }),
+            network: None,
+            brightness: None,
+        };
+        let context = egui::Context::default();
+        let mut reach = Vec::new();
+        // (Thrice: what is at the end is placed by how long it was.)
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(40.0, 700.0),
+                )),
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                reach = draw(
+                    ui,
+                    &Shown {
+                        bar: &bar,
+                        view: &view,
+                        accent: egui::Color32::from_rgb(64, 224, 208),
+                        quiet: false,
+                        notices: 0,
+                        mode: "",
+                        recording: false,
+                        sharing: false,
+                        output: "Monitor ACM2702 (1)",
+                        tray: &[],
+                        system: &system,
+                        keyboard: None,
+                    },
+                    None,
+                )
+                .reach;
+            });
+            output.textures_delta.clear();
+        }
+        assert_eq!(reach.len(), 2, "{reach:?}");
+        let (start, end) = (reach[0], reach[1]);
+        assert!(start.top() < end.top());
+        // (Each piece reaches as far beyond what stands on it as the
+        // panel's own edge is from its first module.)
+        let beyond = bar.padding as f32;
+        assert!(
+            start.bottom() - beyond <= end.top() + beyond + 0.5,
+            "{start:?} and {end:?}"
+        );
+        assert!(end.bottom() <= 700.5, "{end:?}");
+        assert!(start.height() > 200.0 && end.height() > 80.0);
+    }
+
+    /// A panel drawn into a picture, to be looked at while it is worked
+    /// on:
+    ///
+    ///     GEVREK_LOOK_OUT=panel.png cargo test -p gevrek-shell     ///         the_panel_is_drawn_to_be_looked_at -- --ignored
+    ///
+    /// `GEVREK_LOOK=left` (or `right`, `bottom`) for another edge,
+    /// `GEVREK_LOOK_STYLE=islands` (or `bare`), `GEVREK_LOOK_HEIGHT=44`
+    /// for how thick it is, `GEVREK_LOOK_SIZE=1600x900` for the display.
+    #[test]
+    #[ignore = "draws a picture to look at: GEVREK_LOOK_OUT=<file>"]
+    fn the_panel_is_drawn_to_be_looked_at() {
+        use gevrek_model::settings::{PanelEdge, PanelStyle};
+        let said = |name: &str| std::env::var(name).ok().filter(|text| !text.is_empty());
+        let out = std::path::PathBuf::from(said("GEVREK_LOOK_OUT").expect("GEVREK_LOOK_OUT: a file"));
+        let edge = match said("GEVREK_LOOK").as_deref() {
+            Some("left") => PanelEdge::Left,
+            Some("right") => PanelEdge::Right,
+            Some("bottom") => PanelEdge::Bottom,
+            _ => PanelEdge::Top,
+        };
+        let style = match said("GEVREK_LOOK_STYLE").as_deref() {
+            Some("islands") => PanelStyle::Islands,
+            Some("bare") => PanelStyle::Bare,
+            _ => PanelStyle::Bar,
+        };
+        let display = said("GEVREK_LOOK_SIZE")
+            .and_then(|text| {
+                let (wide, high) = text.split_once('x')?;
+                Some((wide.trim().parse::<u32>().ok()?, high.trim().parse::<u32>().ok()?))
+            })
+            .unwrap_or((1600, 900));
+        let mut bar = PanelProfile {
+            edge,
+            style,
+            left: vec![
+                PanelModule::Launcher,
+                PanelModule::Workspaces,
+                PanelModule::Layout,
+                PanelModule::Taskbar,
+            ],
+            centre: vec![PanelModule::Title],
+            right: vec![
+                PanelModule::Stats,
+                PanelModule::Keyboard,
+                PanelModule::Network,
+                PanelModule::Sound,
+                PanelModule::Brightness,
+                PanelModule::Battery,
+                PanelModule::Notifications,
+                PanelModule::ControlCentre,
+                PanelModule::Clock,
+                PanelModule::Power,
+            ],
+            ..Default::default()
+        };
+        if let Some(height) = said("GEVREK_LOOK_HEIGHT").and_then(|text| text.parse().ok()) {
+            bar.height = height;
+        }
+        let thick = bar.height.clamp(16, 200);
+        let size = if edge.is_upright() {
+            (thick, display.1)
+        } else {
+            (display.0, thick)
+        };
+        let tab = |name: &str, shown: bool, windows: usize| Tab {
+            name: name.to_string(),
+            label: name.to_string(),
+            configured: true,
+            shown,
+            windows,
+        };
+        let task = |id: u64, title: &str, focused: bool| Task {
+            id,
+            title: title.to_string(),
+            class: String::new(),
+            icon: String::new(),
+            focused,
+            shown: true,
+        };
+        let view = View {
+            tabs: vec![
+                tab("1", false, 2),
+                tab("Web", true, 3),
+                tab("3", false, 0),
+                tab("Mail", false, 1),
+            ],
+            layout: "dwindle".to_string(),
+            floating: false,
+            title: "panel.rs - gevrek - a title that goes on for a while".to_string(),
+            focused: true,
+            place: gevrek_model::settings::DisplayRef::named("DP-1"),
+            tasks: vec![
+                task(1, "Terminal", false),
+                task(2, "Firefox", true),
+                task(3, "Files", false),
+            ],
+            all_tasks: Vec::new(),
+        };
+        let system = SystemView {
+            volume: Some((62, false)),
+            battery: Some(gevrek_system::status::Battery {
+                percent: 78,
+                charging: false,
+            }),
+            network: Some(gevrek_system::status::Network {
+                connected: true,
+                wireless: true,
+                name: "Home".to_string(),
+            }),
+            brightness: Some(70),
+        };
+        let keyboard = KeyboardLayout {
+            short: "tr".to_string(),
+            name: "Turkish".to_string(),
+            index: 0,
+            count: 2,
+        };
+        let mut painter = gevrek_ui::picture::Painter::sized(size)
+            .expect("a graphics device that computes on the processor");
+        let context = egui::Context::default();
+        let settings = gevrek_ui::Settings::default();
+        theme::install_fonts(&context, false);
+        let palette = settings.resolve(egui::Theme::Dark, egui::Color32::from_rgb(64, 224, 208));
+        theme::apply(&context, &palette, &settings);
+        let mut pixels = Vec::new();
+        for step in 0..4 {
+            pixels = painter.frame_of(&context, 10.0 + f64::from(step) * 0.4, Vec::new(), |ui| {
+                draw(
+                    ui,
+                    &Shown {
+                        bar: &bar,
+                        view: &view,
+                        accent: egui::Color32::from_rgb(64, 224, 208),
+                        quiet: false,
+                        notices: 0,
+                        mode: "",
+                        recording: false,
+                        sharing: false,
+                        output: "DP-1",
+                        tray: &[],
+                        system: &system,
+                        keyboard: Some(&keyboard),
+                    },
+                    None,
+                );
+            });
+        }
+        painter.save(&pixels, &out).expect("the picture is written");
+        println!("drawn: {}", out.display());
     }
 }
