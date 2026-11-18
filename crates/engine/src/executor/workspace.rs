@@ -1233,6 +1233,7 @@ impl Executor {
                 - window.y.max(display.y);
             wide >= 32 && high >= 16
         };
+        let woken;
         let transition_rects = {
             let workspace = monitor_manager
                 .get_focused_workspace_mut(monitor)
@@ -1245,6 +1246,30 @@ impl Executor {
             {
                 log::warn!("The workspace was not laid out before it was shown: {error:#}");
             }
+            // Windows of the workspace that were minimized while it was
+            // away, by the system or by their program (gevrek heard of it
+            // and let it be: `lifecycle::minimized`), are brought back:
+            // the workspace comes as the person left it. (They kept their
+            // tiles, and nothing was seen in them.) One the person
+            // minimized stays so.
+            let asleep: Vec<WindowHandle> = workspace
+                .all_windows()
+                .into_iter()
+                .filter(|window| {
+                    queries(window_manager).is_minimized(*window)
+                        && !self.window_state.get(*window).minimized
+                })
+                .collect();
+            for window in &asleep {
+                let _ = effect(
+                    window_manager,
+                    Effect::State {
+                        id: *window,
+                        change: StateChange::Minimized(false),
+                    },
+                );
+            }
+            woken = !asleep.is_empty();
             let mut transition_rects = Vec::new();
             for window in workspace.floating_windows.iter().copied() {
                 // A window that is minimized comes nowhere: what the
@@ -1300,6 +1325,10 @@ impl Executor {
             }
             transition_rects
         };
+        // (Those brought back are given their tiles when they are there.)
+        if woken {
+            self.mark_layout_dirty(monitor);
+        }
         let direction = match &selector {
             WorkspaceSelector::Previous | WorkspaceSelector::Relative(i32::MIN..=-1) => -1,
             WorkspaceSelector::Next | WorkspaceSelector::Relative(1..) => 1,
