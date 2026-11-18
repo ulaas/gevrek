@@ -3,7 +3,7 @@
 //! whole-session state file lives is the host's business.
 
 use anyhow::Result;
-use chrono::Utc;
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -60,7 +60,7 @@ impl ResizeDimensionsState {
     pub fn new(resize_delta: i32) -> Self {
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            timestamp: Utc::now().to_rfc3339(),
+            timestamp: Timestamp::now().to_string(),
             resize_delta,
             workspaces: Vec::new(),
         }
@@ -170,7 +170,7 @@ impl WindowManagerState {
     pub fn new() -> Self {
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            timestamp: Utc::now().to_rfc3339(),
+            timestamp: Timestamp::now().to_string(),
             windows: Vec::new(),
             focused_workspaces: HashMap::new(),
             shown_workspaces: Vec::new(),

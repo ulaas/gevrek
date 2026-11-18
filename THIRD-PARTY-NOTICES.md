@@ -31,18 +31,18 @@ are gevrek's own and are published with it under the MIT licence.
 
 ## Every crate
 
-621 crates, as Cargo.lock has them. Not every one is in every program: some are
+620 crates, as Cargo.lock has them. Not every one is in every program: some are
 for one system only, some only build or test gevrek.
 
 | Licence | Crates |
 |---|---|
-| MIT OR Apache-2.0 | 281 |
+| MIT OR Apache-2.0 | 278 |
 | MIT | 173 |
 | Apache-2.0 OR MIT | 53 |
 | Apache-2.0 | 23 |
 | MIT/Apache-2.0 | 17 |
+| Unlicense OR MIT | 11 |
 | Zlib OR Apache-2.0 OR MIT | 10 |
-| Unlicense OR MIT | 9 |
 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | 9 |
 | MIT OR Apache-2.0 OR Zlib | 6 |
 | BSD-3-Clause | 4 |
@@ -152,7 +152,6 @@ for one system only, some only build or test gevrek.
 | cfg_aliases | 0.2.2 | MIT | <https://github.com/katharostech/cfg_aliases> |
 | cgl | 0.3.2 | MIT / Apache-2.0 | <https://github.com/servo/cgl-rs> |
 | cgmath | 0.18.0 | Apache-2.0 | <https://github.com/rustgd/cgmath> |
-| chrono | 0.4.45 | MIT OR Apache-2.0 | <https://github.com/chronotope/chrono> |
 | clang-sys | 1.9.1 | Apache-2.0 | <https://github.com/KyleMayes/clang-sys> |
 | clap | 4.6.7 | MIT OR Apache-2.0 | <https://github.com/clap-rs/clap> |
 | clap_builder | 4.6.7 | MIT OR Apache-2.0 | <https://github.com/clap-rs/clap> |
@@ -289,8 +288,6 @@ for one system only, some only build or test gevrek.
 | hyper | 1.12.0 | MIT | <https://github.com/hyperium/hyper> |
 | hyper-timeout | 0.5.2 | MIT OR Apache-2.0 | <https://github.com/hjr3/hyper-timeout> |
 | hyper-util | 0.1.21 | MIT | <https://github.com/hyperium/hyper-util> |
-| iana-time-zone | 0.1.65 | MIT OR Apache-2.0 | <https://github.com/strawlab/iana-time-zone> |
-| iana-time-zone-haiku | 0.1.2 | MIT OR Apache-2.0 | <https://github.com/strawlab/iana-time-zone> |
 | image | 0.25.10 | MIT OR Apache-2.0 | <https://github.com/image-rs/image> |
 | image-webp | 0.2.4 | MIT OR Apache-2.0 | <https://github.com/image-rs/image-webp> |
 | imagesize | 0.13.0 | MIT | <https://github.com/Roughsketch/imagesize> |
@@ -307,6 +304,8 @@ for one system only, some only build or test gevrek.
 | jiff | 0.2.43 | Unlicense OR MIT | <https://github.com/BurntSushi/jiff> |
 | jiff-core | 0.1.5 | Unlicense OR MIT | <https://github.com/BurntSushi/jiff> |
 | jiff-static | 0.2.43 | Unlicense OR MIT | <https://github.com/BurntSushi/jiff> |
+| jiff-tzdb | 0.1.9 | Unlicense OR MIT | <https://github.com/BurntSushi/jiff> |
+| jiff-tzdb-platform | 0.1.3 | Unlicense OR MIT | <https://github.com/BurntSushi/jiff> |
 | jni | 0.22.4 | MIT OR Apache-2.0 | <https://github.com/jni-rs/jni-rs> |
 | jni-macros | 0.22.4 | MIT OR Apache-2.0 | <https://github.com/jni-rs/jni-rs> |
 | jni-sys | 0.3.1 | MIT OR Apache-2.0 | <https://github.com/jni-rs/jni-sys> |

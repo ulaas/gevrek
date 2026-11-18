@@ -278,7 +278,7 @@ pub fn png(picture: &Picture) -> anyhow::Result<Vec<u8>> {
 pub fn save(picture: &Picture, folder: &std::path::Path) -> anyhow::Result<std::path::PathBuf> {
     let folder = folder.to_path_buf();
     std::fs::create_dir_all(&folder).with_context(|| format!("{}", folder.display()))?;
-    let stamp = chrono::Local::now().format("%Y-%m-%d %H-%M-%S");
+    let stamp = jiff::Zoned::now().strftime("%Y-%m-%d %H-%M-%S");
     let mut path = folder.join(format!("Screenshot {stamp}.png"));
     let mut number = 2;
     while path.exists() {

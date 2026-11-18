@@ -15,7 +15,7 @@ gevrek-model = { path = "../model" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
-chrono = { workspace = true }
+jiff = { workspace = true }
 log = { workspace = true }
 regex = { workspace = true }
 

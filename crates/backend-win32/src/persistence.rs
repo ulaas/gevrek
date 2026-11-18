@@ -2,8 +2,6 @@
 use crate::dwm::MonitorHandle;
 use crate::dwm::WindowHandle;
 use anyhow::Result;
-#[cfg(test)]
-use chrono::Utc;
 use std::path::{Path, PathBuf};
 
 pub use gevrek_engine::persistence::{
@@ -133,9 +131,6 @@ impl Default for PersistenceManager {
     }
 }
 
-// Note: chrono dependency needed for timestamps
-// Add to Cargo.toml: chrono = { version = "0.4", features = ["serde"] }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,7 +180,9 @@ mod tests {
         let folder = std::env::temp_dir().join(format!(
             "gevrek-legacy-state-{}-{}",
             std::process::id(),
-            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_nanos())
         ));
         std::fs::create_dir_all(&folder).unwrap();
         let (legacy, path) = (folder.join("old.json"), folder.join("window_state.json"));
@@ -216,7 +213,9 @@ mod tests {
         let path = std::env::temp_dir().join(format!(
             "gevrek-persistent-size-{}-{}.json",
             std::process::id(),
-            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_nanos())
         ));
         let manager = PersistenceManager::with_path(path.clone());
         let mut state = WindowManagerState::new();
@@ -242,7 +241,9 @@ mod tests {
         std::env::temp_dir().join(format!(
             "gevrek-{name}-{}-{}.json",
             std::process::id(),
-            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_nanos())
         ))
     }
 

@@ -79,7 +79,8 @@ thiserror = "1.0"
 log = "0.4"
 env_logger = "0.11"
 dirs = "5.0"
-chrono = { version = "0.4", features = ["serde"] }
+# The time of the day and the date, by the machine's clock and zone.
+jiff = "0.2"
 regex = "1.10"
 
 [package]
@@ -126,7 +127,6 @@ anyhow = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 dirs = { workspace = true }
-chrono = { workspace = true }
 thiserror = { workspace = true }
 clap = { workspace = true }
 ctrlc = { workspace = true }

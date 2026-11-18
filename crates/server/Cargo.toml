@@ -22,7 +22,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
-chrono = { workspace = true }
 
 [dev-dependencies]
 # For the bench: a desktop without a windowing system, and the line's bytes.

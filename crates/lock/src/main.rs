@@ -675,7 +675,7 @@ mod linux {
         let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
         theme::apply(&context, &palette, &state.settings);
         let accent = state.accent;
-        let now = chrono::Local::now();
+        let now = jiff::Zoned::now();
         // The clock moves on.
         context.request_repaint_after(Duration::from_secs(1));
         let mut submit = false;
@@ -742,12 +742,12 @@ mod linux {
                 ui.vertical_centered(|ui| {
                     ui.add_space((ui.available_height() * 0.15).max(16.0));
                     ui.label(
-                        egui::RichText::new(now.format("%H:%M").to_string())
+                        egui::RichText::new(now.strftime("%H:%M").to_string())
                             .size(104.0)
                             .color(palette.text),
                     );
                     ui.label(
-                        egui::RichText::new(now.format("%A, %-d %B").to_string())
+                        egui::RichText::new(now.strftime("%A, %-d %B").to_string())
                             .size(20.0)
                             .color(palette.text.gamma_multiply(0.72)),
                     );

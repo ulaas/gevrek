@@ -2232,19 +2232,13 @@ fn draw_module(
             }
         }
         PanelModule::Clock => {
-            let now = chrono::Local::now();
+            let now = jiff::Zoned::now();
             let format = if bar.clock_format.trim().is_empty() {
                 "%H:%M"
             } else {
                 bar.clock_format.as_str()
             };
-            // A format that is not one shows as it is written.
-            let mut said = String::new();
-            if std::fmt::Write::write_fmt(&mut said, format_args!("{}", now.format(format)))
-                .is_err()
-            {
-                said = format.to_string();
-            }
+            let said = clock_text(format, &now);
             if upright {
                 // Its parts under each other.
                 for part in said.split_whitespace() {
@@ -2255,9 +2249,9 @@ fn draw_module(
             }
             // Drawn again when the time it shows changes.
             let wait = if format.contains("%S") || format.contains("%T") {
-                1000 - u64::from(now.timestamp_subsec_millis()).min(999)
+                1000 - u64::from(now.millisecond().unsigned_abs()).min(999)
             } else {
-                (60 - u64::from(chrono::Timelike::second(&now)).min(59)) * 1000
+                (60 - u64::from(now.second().unsigned_abs()).min(59)) * 1000
             };
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(wait.max(50)));
@@ -2766,9 +2760,86 @@ pub fn notices_list(ui: &mut egui::Ui, palette: &theme::Palette, notices: &[Noti
         });
 }
 
+/// The time as a format of the `strftime` kind writes it. A format that
+/// is not one shows as it is written.
+fn clock_text(format: &str, now: &jiff::Zoned) -> String {
+    // The signs that stand for several others are written out, as the
+    // clock has always written them.
+    let mut whole = String::with_capacity(format.len());
+    let mut signs = format.chars();
+    while let Some(sign) = signs.next() {
+        if sign != '%' {
+            whole.push(sign);
+            continue;
+        }
+        match signs.next() {
+            Some('c') => whole.push_str("%a %b %e %H:%M:%S %Y"),
+            Some('x') => whole.push_str("%m/%d/%y"),
+            Some('X') => whole.push_str("%H:%M:%S"),
+            Some('v') => whole.push_str("%e-%b-%Y"),
+            Some('+') => whole.push_str("%Y-%m-%dT%H:%M:%S%:z"),
+            Some('Z') => whole.push_str("%:z"),
+            Some(other) => {
+                whole.push('%');
+                whole.push(other);
+            }
+            None => whole.push('%'),
+        }
+    }
+    let mut said = String::new();
+    if std::fmt::Write::write_fmt(&mut said, format_args!("{}", now.strftime(&whole))).is_err() {
+        said = format.to_string();
+    }
+    said
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What a person wrote as the clock's format reads as it did.
+    #[test]
+    fn the_clock_writes_the_time_as_its_format_says() {
+        let now = jiff::civil::date(2026, 11, 18)
+            .at(9, 5, 7, 0)
+            .in_tz("UTC")
+            .expect("a time");
+        for (format, said) in [
+            ("%a %d %b  %H:%M", "Wed 18 Nov  09:05"),
+            ("%H:%M", "09:05"),
+            ("%H:%M:%S", "09:05:07"),
+            ("%T", "09:05:07"),
+            ("%R", "09:05"),
+            ("%I:%M %p", "09:05 AM"),
+            ("%l:%M %P", " 9:05 am"),
+            ("%-H.%M", "9.05"),
+            ("%A, %-d %B %Y", "Wednesday, 18 November 2026"),
+            ("%e %h %y", "18 Nov 26"),
+            ("%F", "2026-11-18"),
+            ("%D", "11/18/26"),
+            ("%d.%m.%Y", "18.11.2026"),
+            ("%j", "322"),
+            ("%u %w", "3 3"),
+            ("%c", "Wed Nov 18 09:05:07 2026"),
+            ("%x", "11/18/26"),
+            ("%X", "09:05:07"),
+            ("%s", "1794992707"),
+            ("%v", "18-Nov-2026"),
+            ("%+", "2026-11-18T09:05:07+00:00"),
+            ("%Z", "+00:00"),
+            ("%H:%M:%S%.3f", "09:05:07.000"),
+            ("%U %W %V %G %C", "46 46 47 2026 20"),
+            ("%%c", "%c"),
+            ("%z", "+0000"),
+            ("%:z", "+00:00"),
+            ("100%%", "100%"),
+            ("now", "now"),
+            // What is no format shows as it is written.
+            ("%!", "%!"),
+        ] {
+            assert_eq!(clock_text(format, &now), said, "{format}");
+        }
+    }
 
     #[test]
     fn the_taskbar_has_the_windows_of_the_shown_workspace() {

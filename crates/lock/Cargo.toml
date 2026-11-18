@@ -23,7 +23,7 @@ gevrek-model = { path = "../model" }
 # What the login's greeter says to the display manager.
 gevrek-dm = { path = "../dm" }
 serde_json = { workspace = true }
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+jiff = { workspace = true }
 # The wallpaper behind the clock.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 # The system's own way of checking a password (needs the PAM development

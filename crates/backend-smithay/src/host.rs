@@ -834,9 +834,8 @@ impl State {
                     // turns warm yet, and that must not look like a key
                     // that does nothing.
                     let now = {
-                        use chrono::Timelike;
-                        let now = chrono::Local::now();
-                        now.hour() * 60 + now.minute()
+                        let now = jiff::Zoned::now();
+                        now.hour() as u32 * 60 + now.minute() as u32
                     };
                     let said = DispatchCommand::Osd {
                         text: self.config.desktop.night_light.said_when_switched(now),

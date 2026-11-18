@@ -41,16 +41,16 @@ system. The archive is not: git leaves it out through
 - Tried by the person on Windows on 2026-11-18: a display's scale set
   from the studio works. The panel and the layouts following the scale
   were written after that and are not seen yet.
-- For the person to decide: `chrono` (section 1) and how small a tile
-  may get (section 2d).
+- For the person to decide: how small a tile may get (section 2d).
 - Everything since 2026-11-17 was written on Windows. What it left to
   do on Linux is gathered in section 2c: start there.
 - The window manager, the shell, the studio, the lock screen and the
   display manager work on both systems. Linux was last tested by the
   person on 2026-11-17: all of it passes.
 - CI on `6cca5e2` (run 44189370729): the Windows job and both Linux
-  jobs are green. Only the check of the dependencies fails, on
-  `chrono` being unmaintained (section 1).
+  jobs are green. Only the check of the dependencies failed, on
+  `chrono` being unmaintained; `chrono` is out since (section 1), and
+  the check passes on this machine. Not run by CI yet.
 - The check scripts (`tests/desktop`, `tests/nested`, `tests/vm`,
   `tests/wayland`) are not in this repository: the public one leaves
   them out. On this machine only the crates' own tests can be run.
@@ -108,14 +108,25 @@ Do these first. Until they are done, a fault can come in unseen.
       otherwise, the next step is the driver named in the test itself.
 - [ ] **any** CI green once, to the end. Windows is (`91859eb`); the
       nested checks on Linux have never been reached.
-- [ ] **person, any** The check of the dependencies (cargo-deny) fails
-      since 2026-11-17, and passed the day before with the same
+- [x] **any** The check of the dependencies (cargo-deny) failed since
+      2026-11-17, and passed the day before with the same
       `Cargo.lock`: RUSTSEC-2026-0543 calls `chrono` unmaintained, in
       every version, and `deny.toml` lets a crate nobody maintains fail
-      where gevrek uses it directly (`gevrek`, `gevrek-engine` and
-      more). To decide: `chrono` gives way to `jiff` or `time` (the
-      advisory's two), or it is named under `ignore` in `deny.toml`
-      with the reason beside it until then.
+      where gevrek uses it directly. Decided by the person
+      (2026-11-18): it is replaced. `jiff` has its place (it was in
+      the tree already, under `env_logger`): the time of the day for
+      the night light, the clocks of the panel and the lock screen,
+      the names of screenshots and recordings, the time a saved
+      state is stamped with. `cargo deny check` passes. What reads
+      otherwise than before: the stamp of a saved state ends in `Z`
+      where it ended in `+00:00` (nothing reads it back but the
+      log), and a clock's format that ends in a lone `%` shows the
+      time with the `%` where it showed the format as written. The
+      clock's formats are held to what they wrote
+      (`the_clock_writes_the_time_as_its_format_says`).
+- [ ] **person, any** To be seen on both systems: the panel's clock
+      and the lock screen's show the machine's own time (its zone is
+      now read by `jiff`), and the night light turns at its hours.
 - [ ] **person** The check scripts brought back to this machine
       (`tests/desktop` above all), from wherever the private tree is.
       They stay out of the public repository; `.git/info/exclude` gets
@@ -326,7 +337,7 @@ nothing broken on the way. Nothing new is built in this pass.
 **Step 0: the net** (first; the rest leans on it)
 
 - [ ] **any** CI green to the end on both systems: the pictures pushed,
-      `chrono` decided (section 1). From then on a red run stops the
+      `chrono` replaced (section 1, done). From then on a red run stops the
       pass until it is green again.
 - [ ] **any** The numbers as they are now, written down in the log, on
       the person's machine: processor and memory of a still gevrek
@@ -889,3 +900,4 @@ wanted, strike it when it is not.
 | 2026-11-18 (3) | Windows 11 and WSL (Fedora 44) | The runs of chance with nearly every command, the configuration read anew and the graph's keys: 1,440 runs clean, nothing found. Windows and Linux: every test passes (the studio's not run on Linux) | The studio's top bar at 760 wide; "Where things stand" brought up to date |
 | 2026-11-18 (4) | Windows 11 and WSL (Fedora 44) | The studio's top bar has two rows in a narrow window. Windows: every test passes; Linux: the studio's pass, its pictures as they were | Nothing that does not want the desktop or a decision: the helper and the display manager behind a stand-in is the next piece of work of that kind |
 | 2026-11-18 (5) | Windows 11 and WSL (Fedora 44) | The elevated helper and the display manager's service behind stand-ins for the system, and what they are asked spoilt: nothing found. Windows and Linux: every test passes | Nothing that does not want the desktop or a decision |
+| 2026-11-18 (6) | Windows 11 and WSL (Fedora 44) | `chrono` gives way to `jiff`; the check of the dependencies passes. Windows and Linux: every test passes, the studio's too | The clocks and the night light seen on a desktop; CI on what is pushed |

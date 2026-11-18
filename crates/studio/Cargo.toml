@@ -33,7 +33,7 @@ clap = { workspace = true }
 env_logger = { workspace = true }
 dirs = { workspace = true }
 # The time of the day, marked on the night light's band.
-chrono = { workspace = true }
+jiff = { workspace = true }
 # The wallpaper's picture, read to be shown small on the wallpaper's page.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 

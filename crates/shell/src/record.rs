@@ -107,7 +107,7 @@ pub fn sound_can_be_recorded() -> bool {
 
 /// The file a recording begun now is written to, in `folder`.
 pub fn file_in(folder: &Path) -> PathBuf {
-    let stamp = chrono::Local::now().format("%Y-%m-%d %H-%M-%S");
+    let stamp = jiff::Zoned::now().strftime("%Y-%m-%d %H-%M-%S");
     let mut path = folder.join(format!("Recording {stamp}.webm"));
     let mut number = 2;
     while path.exists() {

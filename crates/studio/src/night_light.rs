@@ -318,9 +318,8 @@ impl Card {
 
 /// Minutes since midnight, by the machine's clock.
 fn minutes_now() -> u32 {
-    use chrono::Timelike;
-    let now = chrono::Local::now();
-    now.hour() * 60 + now.minute()
+    let now = jiff::Zoned::now();
+    now.hour() as u32 * 60 + now.minute() as u32
 }
 
 #[cfg(test)]

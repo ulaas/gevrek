@@ -672,7 +672,6 @@ fn scan_outputs(hardware: &mut Hardware, state: &mut State) {
 /// Looked at with every pass of the frame timer; something is done only
 /// when what is wanted, or the displays, are other than last time.
 fn night_light(hardware: &mut Hardware, state: &mut State) {
-    use chrono::Timelike;
     use gevrek_model::night_light::NEUTRAL;
     use smithay::reexports::drm::control::Device as _;
     // A temperature that is only shown to be looked at comes first, while
@@ -685,11 +684,12 @@ fn night_light(hardware: &mut Hardware, state: &mut State) {
         state.night_preview = None;
     }
     let config = &state.config.desktop.night_light;
-    let now = chrono::Local::now();
+    let now = jiff::Zoned::now();
+    let minutes = now.hour() as u32 * 60 + now.minute() as u32;
     let wanted = shown
         .filter(|kelvin| *kelvin != NEUTRAL)
         .or_else(|| {
-            (shown.is_none() && config.on_at(now.hour() * 60 + now.minute()))
+            (shown.is_none() && config.on_at(minutes))
                 .then(|| config.kelvin())
         });
     let displays = hardware.surfaces.len();

@@ -11,7 +11,7 @@ description = "The Wayland backend of gevrek: a Smithay compositor that implemen
 [dependencies]
 gevrek-model = { path = "../model" }
 # The time of the day, for the night light.
-chrono = { workspace = true }
+jiff = { workspace = true }
 gevrek-engine = { path = "../engine" }
 gevrek-host = { path = "../host" }
 gevrek-server = { path = "../server" }
