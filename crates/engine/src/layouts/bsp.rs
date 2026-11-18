@@ -183,6 +183,18 @@ impl Layout for BspLayout {
         for i in 1..n {
             let prev_rect = rects[i - 1];
             let ratio = bsp_split_ratio(ratios, i);
+            // A room that can be shared no further without a tile too
+            // small is shared equally by this window and all after it.
+            let shared = if bsp_split_is_horizontal(i) {
+                prev_rect.split_horizontal(ratio)
+            } else {
+                prev_rect.split_vertical(ratio)
+            };
+            if super::shared_no_further(&shared.0, &shared.1, bsp_split_is_horizontal(i), n - i) {
+                let parts = super::in_equal_parts(prev_rect, n - (i - 1));
+                rects[i - 1..].copy_from_slice(&parts);
+                break;
+            }
 
             if bsp_split_is_horizontal(i) {
                 // Horizontal split (left/right)

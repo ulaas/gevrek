@@ -120,6 +120,18 @@ impl Layout for DwindleLayout {
             } else {
                 last_rect.split_vertical(self.split_ratio)
             };
+            // A room that can be shared no further without a tile too
+            // small is shared equally by this window and all after it.
+            let (kept, rest) = if self.grow_forward {
+                (&first, &second)
+            } else {
+                (&second, &first)
+            };
+            if super::shared_no_further(kept, rest, split_h, n - i) {
+                rects.truncate(i - 1);
+                rects.extend(super::in_equal_parts(last_rect, n - (i - 1)));
+                break;
+            }
 
             if self.grow_forward {
                 // Previous window keeps first part, new window gets second

@@ -36,6 +36,77 @@ pub use spiral::{SpiralDirection, SpiralLayout, SpiralStart};
 use super::container::{Container, Padding, Rect};
 use serde::{Deserialize, Serialize};
 
+/// The smallest a tile is made by the layouts that give each new window
+/// a share of the last one's room (BSP, dwindle, the spiral), along the
+/// side that is shared. With many windows those tiles came down to a few
+/// pixels, one and none.
+pub const SMALLEST_TILE: i32 = 120;
+
+/// In how many rows so many windows share a room best (the smaller
+/// side of a tile as large as it can be), and that smaller side.
+fn best_rows(room: &Rect, windows: usize) -> (usize, i32) {
+    let windows = windows.max(1);
+    (1..=windows)
+        .map(|rows| {
+            let columns = windows.div_ceil(rows);
+            let side = (room.width / columns as i32).min(room.height / rows as i32);
+            (rows, side)
+        })
+        // (The first of the best: the fewest rows.)
+        .fold((1, i32::MIN), |best, now| if now.1 > best.1 { now } else { best })
+}
+
+/// Whether a room is shared no further: into `kept`, which one window
+/// has from then on, and `rest`, in which so many windows are still to
+/// find their place, side by side (or one above the other). It is not
+/// where one of the two would be smaller than a tile is made, nor where
+/// the rest would not hold those windows even in equal parts.
+pub(crate) fn shared_no_further(
+    kept: &Rect,
+    rest: &Rect,
+    side_by_side: bool,
+    still_to_come: usize,
+) -> bool {
+    let smaller = if side_by_side {
+        kept.width.min(rest.width)
+    } else {
+        kept.height.min(rest.height)
+    };
+    smaller < SMALLEST_TILE || best_rows(rest, still_to_come).1 < SMALLEST_TILE
+}
+
+/// A room in so many equal parts, in rows: what the window whose room
+/// can be shared no further and all that come after it get. (A row with
+/// fewer windows than another has wider ones; the last of a row and the
+/// last row take what the division leaves over.)
+pub(crate) fn in_equal_parts(room: Rect, parts: usize) -> Vec<Rect> {
+    let parts = parts.max(1);
+    let rows = best_rows(&room, parts).0;
+    let high = room.height / rows as i32;
+    let mut tiles = Vec::with_capacity(parts);
+    for row in 0..rows {
+        // (The windows over go to the first rows.)
+        let in_row = parts / rows + usize::from(row < parts % rows);
+        let y = room.y + high * row as i32;
+        let height = if row == rows - 1 {
+            room.y + room.height - y
+        } else {
+            high
+        };
+        let wide = room.width / in_row.max(1) as i32;
+        for column in 0..in_row {
+            let x = room.x + wide * column as i32;
+            let width = if column == in_row - 1 {
+                room.x + room.width - x
+            } else {
+                wide
+            };
+            tiles.push(Rect::new(x, y, width, height));
+        }
+    }
+    tiles
+}
+
 /// An edge of a window used by resize-edge operations. Mirrors the runtime `Direction` enum without
 /// coupling the layout engine to the runtime crate layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -287,5 +358,126 @@ mod tests {
             LayoutType::CenteredMaster
         );
         assert!("unknown".parse::<LayoutType>().is_err());
+    }
+
+    /// The layouts that give each new window a share of the last one's
+    /// room, with windows from one to forty on two displays.
+    fn shared(layout: &dyn Layout, area: Rect, windows: usize) -> Vec<Rect> {
+        let mut containers: Vec<Container> = (0..windows).map(Container::new).collect();
+        layout.calculate(area, &mut containers, Padding::default());
+        containers.iter().map(|container| container.rect).collect()
+    }
+
+    fn sharing_layouts() -> Vec<(&'static str, Box<dyn Layout>)> {
+        vec![
+            ("bsp", Box::new(BspLayout::new())),
+            ("dwindle", Box::new(DwindleLayout::new())),
+            (
+                "dwindle, one way, 0.7",
+                Box::new(DwindleLayout::configured(
+                    DwindleDirection::Horizontal,
+                    0.7,
+                    true,
+                    Vec::new(),
+                )),
+            ),
+            (
+                "dwindle, backwards",
+                Box::new(DwindleLayout::configured(
+                    DwindleDirection::Alternate,
+                    0.3,
+                    false,
+                    Vec::new(),
+                )),
+            ),
+            ("spiral", Box::new(SpiralLayout::new())),
+            (
+                "spiral, golden",
+                Box::new(SpiralLayout::configured(
+                    SpiralDirection::CounterClockwise,
+                    SpiralStart::TopLeft,
+                    true,
+                )),
+            ),
+        ]
+    }
+
+    /// With many windows the tiles came down to a few pixels, one and
+    /// none (nine windows, split one way, at 0.7: the last were 3, 1 and
+    /// 0 wide). A room that can be shared no further without a tile
+    /// smaller than `SMALLEST_TILE` is shared equally by the window that
+    /// has it and all that come after; every tile has a size, the tiles
+    /// fill the display and none lies on another.
+    #[test]
+    fn a_tile_is_not_made_smaller_than_the_smallest() {
+        for area in [Rect::new(0, 0, 1920, 1080), Rect::new(-2560, 40, 2560, 1400)] {
+            for (name, layout) in sharing_layouts() {
+                for windows in 1..=40 {
+                    let tiles = shared(layout.as_ref(), area, windows);
+                    let told = format!("{name}, {windows} windows on {area:?}: {tiles:?}");
+                    assert_eq!(tiles.len(), windows, "{told}");
+                    let mut covered: i64 = 0;
+                    for (index, tile) in tiles.iter().enumerate() {
+                        assert!(tile.width > 0 && tile.height > 0, "{told}");
+                        assert!(
+                            tile.x >= area.x
+                                && tile.y >= area.y
+                                && tile.x + tile.width <= area.x + area.width
+                                && tile.y + tile.height <= area.y + area.height,
+                            "{told}"
+                        );
+                        covered += i64::from(tile.width) * i64::from(tile.height);
+                        for other in &tiles[index + 1..] {
+                            let apart = tile.x + tile.width <= other.x
+                                || other.x + other.width <= tile.x
+                                || tile.y + tile.height <= other.y
+                                || other.y + other.height <= tile.y;
+                            assert!(apart, "{told}");
+                        }
+                    }
+                    assert_eq!(covered, i64::from(area.width) * i64::from(area.height), "{told}");
+                    // As many windows as a person has on one workspace:
+                    // none smaller than the smallest, either way.
+                    if windows <= 9 {
+                        assert!(
+                            tiles
+                                .iter()
+                                .all(|tile| tile.width.min(tile.height) >= SMALLEST_TILE),
+                            "{told}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Where every tile is large enough, nothing is other than it was.
+    #[test]
+    fn few_windows_are_laid_out_as_they_were() {
+        let area = Rect::new(0, 0, 1920, 1080);
+        let dwindle = shared(&DwindleLayout::new(), area, 5);
+        assert_eq!(
+            dwindle,
+            [
+                Rect::new(0, 0, 960, 1080),
+                Rect::new(960, 0, 960, 540),
+                Rect::new(960, 540, 480, 540),
+                Rect::new(1440, 540, 480, 270),
+                Rect::new(1440, 810, 480, 270),
+            ]
+        );
+        assert_eq!(shared(&BspLayout::new(), area, 5), dwindle);
+        // And the room that is shared equally is the last one's that
+        // could not be shared: the tiles before it stay where they were,
+        // and the rest are a grid in it.
+        let many = shared(&DwindleLayout::new(), area, 12);
+        assert_eq!(many[..4], dwindle[..4]);
+        assert_eq!(many[4], Rect::new(1440, 810, 120, 135));
+        assert_eq!(many[11], Rect::new(1800, 945, 120, 135));
+        assert_eq!(in_equal_parts(Rect::new(10, 20, 100, 301), 3), [
+            Rect::new(10, 20, 100, 100),
+            Rect::new(10, 120, 100, 100),
+            Rect::new(10, 220, 100, 101),
+        ]);
     }
 }

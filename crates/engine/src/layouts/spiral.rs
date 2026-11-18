@@ -199,6 +199,18 @@ impl Layout for SpiralLayout {
             } else {
                 prev_rect.split_vertical(ratio)
             };
+            // A room that can be shared no further without a tile too
+            // small is shared equally by this window and all after it.
+            let (kept, rest) = if take_first {
+                (&part2, &part1)
+            } else {
+                (&part1, &part2)
+            };
+            if super::shared_no_further(kept, rest, is_horizontal, n - i) {
+                let parts = super::in_equal_parts(prev_rect, n - (i - 1));
+                rects[i - 1..].copy_from_slice(&parts);
+                break;
+            }
 
             if take_first {
                 // New window takes first part, previous keeps second
