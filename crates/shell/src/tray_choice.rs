@@ -25,7 +25,12 @@ pub(crate) fn tray_choice_file() -> std::path::PathBuf {
 /// nothing was written yet (an icon is not on the panel until it is put
 /// there).
 pub(crate) fn read_tray_choice() -> HashSet<String> {
-    std::fs::read_to_string(tray_choice_file())
+    read_tray_choice_in(&tray_choice_file())
+}
+
+/// As `read_tray_choice`, from the file that is named.
+fn read_tray_choice_in(file: &std::path::Path) -> HashSet<String> {
+    std::fs::read_to_string(file)
         .ok()
         .and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
         .map(|names| names.into_iter().collect())
@@ -300,5 +305,40 @@ mod tests {
         // The list is as large as its icons, up to a point.
         assert!(tray_list_size(3).y < tray_list_size(9).y);
         assert_eq!(tray_list_size(40).y, tray_list_size(TRAY_ROWS).y);
+    }
+
+    /// Which icons stand on the panel is a file anyone may have written:
+    /// what is no list of names is no choice.
+    #[test]
+    fn a_choice_from_outside_is_lived_with() {
+        let folder =
+            std::env::temp_dir().join(format!("gevrek-tray-outside-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder");
+        let file = folder.join("tray-on-panel.json");
+        assert!(read_tray_choice_in(&file).is_empty(), "no file, no choice");
+        std::fs::write(&file, r#"["b", "a", "b", ""]"#).expect("written");
+        assert_eq!(read_tray_choice_in(&file).len(), 3);
+        let long = format!(r#"["{}"]"#, "x".repeat(1_000_000));
+        std::fs::write(&file, &long).expect("written");
+        assert_eq!(read_tray_choice_in(&file).len(), 1);
+        for nonsense in [
+            "",
+            "null",
+            "7",
+            "{}",
+            r#"{"a": true}"#,
+            r#"["a", 1]"#,
+            r#"["a", null]"#,
+            r#"[["a"]]"#,
+            r#"["a""#,
+            "[\"\\ud800\"]",
+            "\u{feff}[]x",
+        ] {
+            std::fs::write(&file, nonsense).expect("written");
+            assert!(read_tray_choice_in(&file).is_empty(), "{nonsense}");
+        }
+        std::fs::write(&file, [0xff, 0xfe, 0x00]).expect("written");
+        assert!(read_tray_choice_in(&file).is_empty());
+        let _ = std::fs::remove_dir_all(folder);
     }
 }

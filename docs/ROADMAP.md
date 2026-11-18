@@ -469,13 +469,20 @@ nothing broken on the way. Nothing new is built in this pass.
       not understood
       (`no_asking_from_outside_ends_the_service_or_takes_it_further`).
       Nothing found.
+- [x] **any** The shell's smaller files: the tutorial's memory spoilt
+      and cut short (a step no lesson has is the lesson's last), and
+      the tray's choice and the clipboard's texts with what is no
+      list of words, more texts than are kept and one longer than a
+      text may be (`a_memory_from_outside_is_lived_with`,
+      `a_choice_from_outside_is_lived_with`,
+      `texts_from_outside_are_lived_with`). Nothing found. (The
+      wallpaper has no file of its own: what it shows is in the
+      configuration.)
 - [ ] **any** Left of what is read from outside, looked at and not
       spoilt: the session's worker (it reads its order from the
-      service, which is root as it is, and what follows is PAM); what
-      the helper tells the window manager (the reader has fewer
-      rights than the writer); the shell's smaller files (the
-      clipboard's, the tray's choice, the tutorial's, the wallpaper's
-      own), which are lists of words.
+      service, which is root as it is, and what follows is PAM), and
+      what the helper tells the window manager (the reader has fewer
+      rights than the writer).
 - [x] **any** The engine driven by long runs of chance
       (`engine/src/random_runs.rs`): the commands the examples bind
       keys to, more with numbers beyond their edges, and windows that
@@ -524,7 +531,49 @@ nothing broken on the way. Nothing new is built in this pass.
       on purpose: "restore windows" (it shows every window wherever it
       is, for when something went wrong), and the tiles' size is not
       looked at while the tiling is held. Thin: only one example's
-      graph waits for a key, so a key of the graph is pressed seldom.
+      graph waits for a key, so a key of the graph is pressed seldom
+      (the next item).
+- [x] **any** The runs of chance with a graph nobody drew
+      (`graph_of_chance`): behind each of eight keys, behind what
+      windows do and behind the start a row of nodes of any kind;
+      what a node wants handed to it from any node that has it, round
+      in a circle too; and what is written in the nodes spoilt now
+      and then. Every other pair of runs begins with one, and every
+      other configuration read anew brings one. 2,400 runs clean in
+      the end (2026-11-18). Found and mended, each with a test that
+      failed before:
+      - A sum (or any node that only works a value out) that is one
+        of its own numbers was followed until the program had no
+        room left and ended; so were two loops that run each other,
+        which begin their row anew each time and so had no end. A
+        node that is being worked out is not asked again, a row is
+        64 nodes at the most and a value 32 behind each other (the
+        longest row in gevrek's own graphs is six), and no more than
+        250,000 nodes are run for one thing that happened
+        (`a_node_that_is_asked_for_its_own_value_is_not_followed_for_ever`).
+      - A loop that counts to the largest number there is, by large
+        steps, counted past it (the same test).
+      - A scratchpad's window that was given a place on a workspace
+        (made to tile or to float, moved, taken back among the
+        managed) stayed the scratchpad's: asked for from another
+        workspace it was in sight and on one that was not. It is an
+        ordinary window from then on, and the scratchpad takes
+        whichever window is its kind when it is asked for
+        (`a_scratchpads_window_given_a_place_is_the_scratchpads_no_longer`).
+        Reached by the command as well as by the node.
+      - A scratchpad's window that was put away and then told of as
+        restored from being minimized was given a tile
+        (`a_scratchpads_window_that_is_restored_is_given_no_tile`).
+      - A graph is handed the window that closed, and moved it to a
+        workspace or arranged it, at once or by a key pressed
+        afterwards: it was kept there for good. A window that has
+        gone is given no place, and what the graph was told of it is
+        not kept (`a_window_that_has_gone_is_given_no_place_by_a_graph`).
+- [ ] **person** To be looked at, since it changes what a key does:
+      with a scratchpad shown and the keyboard in it, "toggle
+      floating" (or a move to a workspace) makes its window an
+      ordinary one; the scratchpad's key then takes a window of its
+      kind again, this one if there is no other.
 - [ ] **person, W** Both of these on the desktop with two displays:
       they may be part of what was reported there (windows not where
       they belong after a move to the other display; borders around
@@ -901,3 +950,4 @@ wanted, strike it when it is not.
 | 2026-11-18 (4) | Windows 11 and WSL (Fedora 44) | The studio's top bar has two rows in a narrow window. Windows: every test passes; Linux: the studio's pass, its pictures as they were | Nothing that does not want the desktop or a decision: the helper and the display manager behind a stand-in is the next piece of work of that kind |
 | 2026-11-18 (5) | Windows 11 and WSL (Fedora 44) | The elevated helper and the display manager's service behind stand-ins for the system, and what they are asked spoilt: nothing found. Windows and Linux: every test passes | Nothing that does not want the desktop or a decision |
 | 2026-11-18 (6) | Windows 11 and WSL (Fedora 44) | `chrono` gives way to `jiff`; the check of the dependencies passes. Windows and Linux: every test passes, the studio's too | The clocks and the night light seen on a desktop; CI on what is pushed |
+| 2026-11-18 (7) | Windows 11 and WSL (Fedora 44) | The runs of chance with a graph nobody drew: a node asked for its own value and loops that run each other ended the program, a loop counted past the largest number, a scratchpad's window given a place stayed the scratchpad's, one that was restored was tiled, a window that had gone was given a place by a graph; all mended, 2,400 runs clean. The shell's smaller files spoilt: nothing found. Windows and Linux: every test passes (the studio's not run on Linux) | What a scratchpad's window is after "toggle floating", looked at by the person |

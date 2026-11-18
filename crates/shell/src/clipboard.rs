@@ -656,4 +656,50 @@ mod tests {
         assert!(History::read(&path).texts().is_empty());
         let _ = std::fs::remove_dir_all(&folder);
     }
+
+    /// What was copied is a file anyone may have written: no more texts
+    /// are taken from it than are kept, none longer than one may be, and
+    /// what is no list of texts is none.
+    #[test]
+    fn texts_from_outside_are_lived_with() {
+        let folder =
+            std::env::temp_dir().join(format!("gevrek-clipboard-outside-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("clipboard.json");
+
+        // More than are kept, one of them longer than a text may be,
+        // some of them the same, some of them nothing.
+        let mut many: Vec<String> = (0..REMEMBERED * 3).map(|index| format!("text {index}")).collect();
+        many.push("x".repeat(LONGEST + 1));
+        many.push("text 0".to_string());
+        many.push("  \n".to_string());
+        std::fs::write(&path, serde_json::to_string(&many).unwrap()).unwrap();
+        let read = History::read(&path);
+        assert_eq!(read.texts().len(), REMEMBERED);
+        assert!(read.texts().iter().all(|text| text.len() <= LONGEST && !text.trim().is_empty()));
+        assert_eq!(read.newest(), Some("text 0"));
+        let mut once = read.texts().to_vec();
+        once.sort();
+        once.dedup();
+        assert_eq!(once.len(), REMEMBERED, "each text once");
+
+        for nonsense in [
+            "",
+            "null",
+            "7",
+            "{}",
+            r#"{"0": "a"}"#,
+            r#"["a", 1]"#,
+            r#"["a", null]"#,
+            r#"[["a"]]"#,
+            r#"["a""#,
+            "[\"\\ud800\"]",
+        ] {
+            std::fs::write(&path, nonsense).unwrap();
+            assert!(History::read(&path).texts().is_empty(), "{nonsense}");
+        }
+        std::fs::write(&path, [0xff, 0xfe, 0x00]).unwrap();
+        assert!(History::read(&path).texts().is_empty());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
 }

@@ -140,6 +140,11 @@ impl Progress {
     }
 }
 
+/// (What spoils a file from outside: the engine's, taken in as it is.)
+#[cfg(test)]
+#[path = "../../engine/src/spoil.rs"]
+mod spoil;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,5 +198,76 @@ mod tests {
         progress.seen("0.7.0");
         assert!(progress.news("0.7.0").is_empty());
         assert!(progress.news("0.6.0").is_empty());
+    }
+
+    /// The tutorial's memory is a file anyone may have written: with
+    /// nonsense where a value belongs, or cut short, it is read as what
+    /// can be read of it or as nothing, and a lesson is begun from it
+    /// all the same (a step that no lesson has is the lesson's last).
+    #[test]
+    fn a_memory_from_outside_is_lived_with() {
+        use super::spoil::{harder, lived, places, spoil, Chance};
+        let mut whole = Progress {
+            welcomed: true,
+            left_at: Some(("focus".to_string(), 2)),
+            running: true,
+            version: "0.6.0".to_string(),
+            ..Progress::default()
+        };
+        for lesson in lessons() {
+            whole.finished.insert(lesson.id.to_string(), lesson.revision);
+        }
+        let whole = serde_json::to_value(&whole).expect("as json");
+        let text = whole.to_string();
+        let folder =
+            std::env::temp_dir().join(format!("gevrek-tutorial-outside-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder");
+        let path = folder.join("tutorial.json");
+
+        let taken = |text: &str, path: &Path| {
+            std::fs::write(path, text).expect("written");
+            let mut progress = Progress::load(path);
+            let _ = progress.count();
+            let _ = progress.news("0.7.0");
+            let _ = progress.first_launch(false);
+            if let Some((lesson, step)) = progress.next() {
+                let run = crate::run::Run::begin(lesson, step, std::time::Instant::now());
+                let _ = run.step();
+                progress.leave(lesson, step);
+                progress.finish(lesson);
+            }
+            progress.seen("0.7.0");
+            progress.save(path);
+            assert_eq!(Progress::load(path), progress, "what is kept is read back");
+        };
+
+        let (times, seed) = harder();
+        let mut chance = Chance(0xa54f_f53a_5f1d_36f1 ^ seed.rotate_left(3) | 1);
+        let mut ended: Vec<String> = Vec::new();
+        for end in 0..text.len() {
+            let (part, path) = (text[..end].to_string(), path.clone());
+            if let Err(panic) = lived(move || taken(&part, &path)) {
+                ended.push(format!("cut at {end}: {panic}"));
+            }
+        }
+        let mut all = Vec::new();
+        places(&whole, &mut Vec::new(), &mut all);
+        for _ in 0..400 * times {
+            let mut document = whole.clone();
+            let done = spoil(&mut document, &all, &mut chance);
+            let (spoilt, path) = (document.to_string(), path.clone());
+            if let Err(panic) = lived(move || taken(&spoilt, &path)) {
+                ended.push(format!("with {done}: {panic}"));
+            }
+        }
+        // A step as far as numbers go, in a lesson that is there.
+        let far = format!(r#"{{"left_at": ["focus", {}]}}"#, usize::MAX);
+        let far_path = path.clone();
+        if let Err(panic) = lived(move || taken(&far, &far_path)) {
+            ended.push(format!("the furthest step: {panic}"));
+        }
+        let _ = std::fs::remove_dir_all(folder);
+        ended.truncate(20);
+        assert!(ended.is_empty(), "{}", ended.join("\n"));
     }
 }
