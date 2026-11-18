@@ -229,7 +229,7 @@ fn command_names() -> Vec<String> {
 /// found by asking the reader what is missing or of the wrong kind,
 /// until it reads. (A command whose fields are not found so is left to
 /// the commands of the examples.)
-fn every_command() -> Vec<serde_json::Value> {
+pub(crate) fn every_command() -> Vec<serde_json::Value> {
     use gevrek_model::command::DispatchCommand;
     let between = |text: &str, from: &str| -> Option<String> {
         let rest = &text[text.find(from)? + from.len()..];

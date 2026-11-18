@@ -79,7 +79,10 @@ fn display_changed(core: &mut WmCore, desktop: &mut FakeDesktop, there: bool) {
 
 /// Commands that reach outside the engine (a file of the person's, a
 /// program started, the session ended): not for a run of chance.
-pub(crate) const LEFT_OUT: [&str; 19] = [
+pub(crate) const LEFT_OUT: [&str; 20] = [
+    // (Every window is shown, wherever it is: for when something went
+    // wrong, and not a state the desktop is kept in.)
+    "restore_windows",
     "exec",
     "shell",
     "notify",
@@ -115,6 +118,11 @@ pub(crate) fn commands() -> Vec<serde_json::Value> {
         "BSP", "Grid", "Columns", "Rows", "Monocle", "UltrawideVerticalStack", "MasterStack",
         "CenteredMaster", "Spiral", "Dwindle", "Scrolling", "Floating",
     ];
+    // One of nearly every command there is, those that choose a
+    // window, a workspace or a display among them.
+    for command in crate::outside_input::every_command() {
+        all.insert(command.to_string(), command);
+    }
     for layout in layouts {
         all.insert(
             format!("set_layout {layout}"),
@@ -170,7 +178,7 @@ pub(crate) fn commands() -> Vec<serde_json::Value> {
 
 /// A desktop with four workspaces, the rules and the scratchpads of the
 /// examples, and with `two` a second display beside the first.
-fn desk(two: bool) -> (WmCore, FakeDesktop) {
+fn desk(two: bool) -> (WmCore, FakeDesktop, Arc<Mutex<RuleEngine>>) {
     let examples = gevrek_model::examples::built_in_examples();
     let mut engine = RuleEngine::new();
     engine.set_declarative_rules(
@@ -180,7 +188,8 @@ fn desk(two: bool) -> (WmCore, FakeDesktop) {
             .collect(),
     );
     let rules = Arc::new(Mutex::new(engine));
-    let mut executor = Executor::new(NodeGraph::new(), Arc::new(Mutex::new(Vec::new())), rules);
+    let mut executor =
+        Executor::new(NodeGraph::new(), Arc::new(Mutex::new(Vec::new())), rules.clone());
     executor.set_scratchpad_profiles(
         examples
             .iter()
@@ -212,11 +221,17 @@ fn desk(two: bool) -> (WmCore, FakeDesktop) {
         }
         desktop.more_outputs.push((SECOND, SECOND_AT));
     }
-    (core, desktop)
+    (core, desktop, rules)
 }
 
 /// What must hold after every step. Returns what does not.
 fn broken(core: &WmCore, desktop: &FakeDesktop) -> Option<String> {
+    // The display that is worked on is one that is there.
+    if let Some(focused) = core.executor.focused_monitor() {
+        if core.monitor_manager.get_monitor(focused).is_none() {
+            return Some(format!("the display worked on ({focused:?}) is not there"));
+        }
+    }
     let mut seen: BTreeSet<WindowHandle> = BTreeSet::new();
     for monitor in core.monitor_manager.get_all_monitors() {
         let Some(ring) = core.monitor_manager.get_workspaces(monitor.handle) else {
@@ -278,7 +293,12 @@ fn broken(core: &WmCore, desktop: &FakeDesktop) -> Option<String> {
                 return Some(format!("a tile with no window on workspace {}", workspace.name));
             }
             // The tiles of the workspace that is shown have a size.
-            if shown && workspace.tiling_enabled && workspace.expose_state.is_none() {
+            // (Not while the tiling is held: nothing is laid out then.)
+            if shown
+                && workspace.tiling_enabled
+                && workspace.expose_state.is_none()
+                && !core.executor.tiling_suspended()
+            {
                 for container in workspace.containers.elements() {
                     let Rect { width, height, .. } = container.rect;
                     // (With many tiles the layouts that give each new
@@ -317,7 +337,10 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
     // (Every other run has two displays.)
     let two = (seed >> 1) & 1 == 1;
     let mut second_there = two;
-    let (mut core, mut desktop) = desk(two);
+    let (mut core, mut desktop, rules) = desk(two);
+    let examples = gevrek_model::examples::built_in_examples();
+    // The keys the graph that is read waits for.
+    let mut keys: Vec<crate::input::HotkeyEvent> = Vec::new();
     let mut trail: Vec<String> = Vec::new();
     let mut opened = 0;
     // What a window may be: some are what the examples' rules are about.
@@ -402,6 +425,72 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
                 }
                 None => "nothing".to_string(),
             },
+            // The configuration is read anew: another of the examples,
+            // its rules, its scratchpads, its workspaces and its graph.
+            9 if chance.below(5) == 0 => {
+                let example = &examples[chance.below(examples.len())];
+                let config = &example.config;
+                if let Ok(mut rules) = rules.lock() {
+                    rules.set_declarative_rules(config.desktop.window_rules.clone());
+                }
+                core.executor
+                    .set_scratchpad_profiles(config.desktop.scratchpads.clone());
+                core.executor.set_workspace_profiles(
+                    config.desktop.workspaces.clone(),
+                    config.desktop.appearance.clone(),
+                );
+                core.executor.set_graph(config.node_graph.clone());
+                keys = config
+                    .node_graph
+                    .nodes
+                    .values()
+                    .filter_map(|node| match &node.node_type {
+                        gevrek_model::graph::NodeType::OnKeyPress {
+                            key,
+                            ctrl,
+                            alt,
+                            shift,
+                            win,
+                        } => Some(crate::input::HotkeyEvent {
+                            registration_ids: Vec::new(),
+                            key: key.clone(),
+                            ctrl: *ctrl,
+                            alt: *alt,
+                            shift: *shift,
+                            win: *win,
+                            device: Default::default(),
+                            trigger: Default::default(),
+                            held_ms: 0,
+                        }),
+                        _ => None,
+                    })
+                    .collect();
+                crate::config_apply::configure_monitor_profiles(
+                    &mut core.monitor_manager,
+                    &config.desktop,
+                );
+                let _ = core.apply_workspace_profile_set(
+                    &config.desktop.workspaces,
+                    &config.desktop.appearance,
+                    |_| true,
+                    false,
+                );
+                let _ = core
+                    .executor
+                    .rerun_startup_for_reload(&mut desktop, &mut core.monitor_manager);
+                format!("the configuration {} is read", example.id)
+            }
+            // A key the graph waits for is pressed.
+            10 | 11 if !keys.is_empty() => {
+                let key = keys[chance.below(keys.len())].clone();
+                let _ = core.executor.execute_hotkey(
+                    &mut desktop,
+                    &mut core.monitor_manager,
+                    &mut core.focus_manager,
+                    &key,
+                );
+                format!("the graph's key {} is pressed", key.key)
+            }
             8 if two && chance.below(4) == 0 => {
                 second_there = !second_there;
                 display_changed(&mut core, &mut desktop, second_there);
@@ -507,6 +596,6 @@ fn long_runs_of_chance_leave_the_desktop_whole() {
         wrong.is_empty(),
         "{} of the runs went wrong; the first:\n{}",
         wrong.len(),
-        wrong.iter().take(3).cloned().collect::<Vec<_>>().join("\n\n")
+        wrong.iter().take(if std::env::var_os("GEVREK_ALL").is_some() { 1000 } else { 3 }).cloned().collect::<Vec<_>>().join("\n\n")
     );
 }
