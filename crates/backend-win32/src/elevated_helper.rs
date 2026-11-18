@@ -1086,9 +1086,442 @@ pub mod client {
     }
 }
 
+/// (What spoils what is read from outside: the engine's, taken in as it is.)
+#[cfg(test)]
+#[path = "../../engine/src/spoil.rs"]
+mod spoil;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    /// What a desktop was asked to do.
+    #[derive(Debug, Clone, PartialEq)]
+    enum Did {
+        Place(isize, After, u32),
+        Show(isize, i32, bool),
+        Foreground(isize),
+        Close(isize),
+        Style(isize, bool, i32, i32),
+        Alpha(isize, u8),
+        Dwm(isize, u32, u32),
+        HearBy(Vec<(i32, gevrek_engine::input::Hotkey)>),
+    }
+
+    /// A desktop that does nothing and writes down what it was asked.
+    #[derive(Default)]
+    struct Written {
+        /// The windows that may be asked about.
+        there: HashSet<isize>,
+        styles: HashMap<(isize, bool), i32>,
+        did: Vec<Did>,
+    }
+
+    impl Written {
+        fn with(windows: &[isize]) -> Self {
+            Self {
+                there: windows.iter().copied().collect(),
+                ..Self::default()
+            }
+        }
+    }
+
+    impl Desk for Written {
+        fn may_be_asked_of(&mut self, window: isize) -> Result<(), String> {
+            if self.there.contains(&window) {
+                Ok(())
+            } else {
+                Err("no such window".to_string())
+            }
+        }
+
+        fn place(
+            &mut self,
+            window: isize,
+            after: After,
+            _x: i32,
+            _y: i32,
+            _width: i32,
+            _height: i32,
+            flags: u32,
+        ) -> Result<(), String> {
+            self.did.push(Did::Place(window, after, flags));
+            Ok(())
+        }
+
+        fn show(&mut self, window: isize, command: i32, posted: bool) {
+            self.did.push(Did::Show(window, command, posted));
+        }
+
+        fn foreground(&mut self, window: isize) {
+            self.did.push(Did::Foreground(window));
+        }
+
+        fn close(&mut self, window: isize) -> Result<(), String> {
+            self.did.push(Did::Close(window));
+            Ok(())
+        }
+
+        fn style(&mut self, window: isize, extended: bool) -> i32 {
+            self.styles.get(&(window, extended)).copied().unwrap_or(0)
+        }
+
+        fn set_style(&mut self, window: isize, extended: bool, value: i32) {
+            let before = self.style(window, extended);
+            self.styles.insert((window, extended), value);
+            self.did.push(Did::Style(window, extended, before, value));
+        }
+
+        fn alpha(&mut self, window: isize, alpha: u8) -> Result<(), String> {
+            self.did.push(Did::Alpha(window, alpha));
+            Ok(())
+        }
+
+        fn dwm(&mut self, window: isize, attribute: u32, value: u32) -> Result<(), String> {
+            self.did.push(Did::Dwm(window, attribute, value));
+            Ok(())
+        }
+
+        fn is_there(&mut self, window: isize) -> bool {
+            self.there.contains(&window)
+        }
+
+        fn hears(&self) -> bool {
+            true
+        }
+
+        fn hear_by(
+            &mut self,
+            registrations: Vec<(i32, gevrek_engine::input::Hotkey)>,
+            _suspended: bool,
+            _own_windows_key: bool,
+            _drag_with_windows_key: bool,
+        ) {
+            self.did.push(Did::HearBy(registrations));
+        }
+    }
+
+    /// What a desktop was asked to do that is more than the helper may
+    /// do, if anything.
+    fn beyond(desk: &Written) -> Option<String> {
+        for did in &desk.did {
+            let (window, wrong) = match did {
+                Did::Place(window, after, flags) => {
+                    let below = match after {
+                        After::Below(other) => !desk.there.contains(other),
+                        _ => false,
+                    };
+                    (Some(*window), flags & !PLACE_FLAGS != 0 || below)
+                }
+                Did::Show(window, command, _) => {
+                    (Some(*window), !(SW_HIDE..=SHOW_LAST).contains(command))
+                }
+                Did::Style(window, extended, before, after) => {
+                    let bits = if *extended { EXTENDED_BITS } else { STYLE_BITS };
+                    (Some(*window), (before ^ after) & !bits != 0)
+                }
+                Did::Dwm(window, attribute, _) => {
+                    (Some(*window), !DWM_ATTRIBUTES.contains(attribute))
+                }
+                Did::Foreground(window) | Did::Close(window) | Did::Alpha(window, _) => {
+                    (Some(*window), false)
+                }
+                Did::HearBy(registrations) => (
+                    None,
+                    registrations
+                        .iter()
+                        .any(|(_, hotkey)| !crate::hotkey::may_be_heard_by_helper(hotkey)),
+                ),
+            };
+            if wrong || window.is_some_and(|window| !desk.there.contains(&window)) {
+                return Some(format!("{did:?}"));
+            }
+        }
+        // What was hidden last and is there still, is shown at the end.
+        let mut hidden: HashSet<isize> = HashSet::new();
+        for did in &desk.did {
+            if let Did::Show(window, command, _) = did {
+                if *command == SW_HIDE {
+                    hidden.insert(*window);
+                } else {
+                    hidden.remove(window);
+                }
+            }
+        }
+        hidden
+            .iter()
+            .next()
+            .map(|window| format!("{window} is left hidden"))
+    }
+
+    /// One of everything that may be asked.
+    fn one_of_each() -> Vec<Ask> {
+        let key = |key: &str, win: bool| {
+            gevrek_engine::input::Hotkey::new(key.to_string(), false, false, false, win)
+        };
+        vec![
+            Ask::Hello { version: VERSION },
+            Ask::Place {
+                window: 10,
+                after: After::Below(20),
+                x: -8,
+                y: 0,
+                width: 800,
+                height: 600,
+                flags: 0x14,
+            },
+            Ask::Place {
+                window: 20,
+                after: After::Topmost,
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+                flags: u32::MAX,
+            },
+            Ask::Show {
+                window: 10,
+                command: 0,
+                posted: true,
+            },
+            Ask::Show {
+                window: 20,
+                command: 0,
+                posted: false,
+            },
+            Ask::Show {
+                window: 10,
+                command: 9,
+                posted: false,
+            },
+            Ask::Foreground { window: 20 },
+            Ask::Close { window: 30 },
+            Ask::Style {
+                window: 10,
+                extended: false,
+                value: -1,
+            },
+            Ask::Style {
+                window: 10,
+                extended: true,
+                value: 0x0008_0000,
+            },
+            Ask::Alpha {
+                window: 20,
+                alpha: 128,
+            },
+            Ask::Dwm {
+                window: 20,
+                attribute: 33,
+                value: 2,
+            },
+            Ask::Input {
+                registrations: vec![(1, key("J", true)), (2, key("A", false)), (3, key("F5", false))],
+                suspended: false,
+                own_windows_key: true,
+                drag_with_windows_key: true,
+            },
+        ]
+    }
+
+    #[test]
+    fn what_is_asked_is_done_within_what_the_helper_may_do() {
+        let mut desk = Written::with(&[10, 20]);
+        desk.styles.insert((10, false), 0x1000_0000);
+        let mut hidden = HashSet::new();
+        let mut ask = |desk: &mut Written, ask: Ask| carry_out_on(desk, &ask, &mut hidden);
+
+        // Every flag there is: the ones that show or hide are not passed on.
+        let all = Ask::Place {
+            window: 10,
+            after: After::Top,
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+            flags: u32::MAX,
+        };
+        assert_eq!(ask(&mut desk, all), Answer::Done);
+        assert_eq!(desk.did.pop(), Some(Did::Place(10, After::Top, PLACE_FLAGS)));
+        assert_eq!(PLACE_FLAGS & (0x0040 | 0x0080), 0);
+
+        // Below a window that may not be asked about: not at all.
+        let below = Ask::Place {
+            window: 10,
+            after: After::Below(99),
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+            flags: 0,
+        };
+        assert!(matches!(ask(&mut desk, below), Answer::Refused(_)));
+
+        // Only what shows, hides, minimises, maximises and restores.
+        for command in [-1, 10, 11, i32::MIN, i32::MAX] {
+            let show = Ask::Show {
+                window: 10,
+                command,
+                posted: false,
+            };
+            assert!(matches!(ask(&mut desk, show), Answer::Refused(_)), "{command}");
+        }
+        assert!(desk.did.is_empty(), "{:?}", desk.did);
+
+        // Of a style only gevrek's bits, and nothing where they are as asked.
+        let style = |value| Ask::Style {
+            window: 10,
+            extended: false,
+            value,
+        };
+        assert_eq!(ask(&mut desk, style(-1)), Answer::Done);
+        assert_eq!(
+            desk.did.pop(),
+            Some(Did::Style(10, false, 0x1000_0000, 0x1000_0000 | STYLE_BITS))
+        );
+        assert_eq!(ask(&mut desk, style(STYLE_BITS)), Answer::Done);
+        assert!(desk.did.is_empty(), "{:?}", desk.did);
+
+        // A binding of a plain letter does not reach the hooks.
+        let input = one_of_each().pop().unwrap();
+        assert_eq!(ask(&mut desk, input), Answer::Done);
+        let Some(Did::HearBy(heard)) = desk.did.pop() else {
+            panic!("the hooks were told nothing");
+        };
+        assert_eq!(heard.iter().map(|(id, _)| *id).collect::<Vec<_>>(), [1, 3]);
+
+        // A window that may not be asked about is asked nothing.
+        for ask_of_another in one_of_each() {
+            let mut desk = Written::with(&[]);
+            let answer = carry_out_on(&mut desk, &ask_of_another, &mut HashSet::new());
+            let about_no_window =
+                matches!(ask_of_another, Ask::Hello { .. } | Ask::Input { .. });
+            assert_eq!(
+                matches!(answer, Answer::Refused(_)),
+                !about_no_window,
+                "{ask_of_another:?}"
+            );
+            assert!(
+                desk.did.iter().all(|did| matches!(did, Did::HearBy(_))),
+                "{:?}",
+                desk.did
+            );
+        }
+    }
+
+    #[test]
+    fn what_was_hidden_is_shown_again_when_the_asker_goes() {
+        let hide = |window| {
+            serde_json::to_string(&Ask::Show {
+                window,
+                command: 0,
+                posted: true,
+            })
+            .unwrap()
+        };
+        let show = serde_json::to_string(&Ask::Show {
+            window: 20,
+            command: 5,
+            posted: true,
+        })
+        .unwrap();
+        // 10 stays hidden, 20 is shown again by the asker, 30 is hidden
+        // and is gone when the asker goes.
+        let asked = format!("{}\n{}\n{show}\n{}\n", hide(10), hide(20), hide(30));
+        let mut desk = Written::with(&[10, 20, 30]);
+        let mut hidden = HashSet::new();
+        for line in asked.lines() {
+            let ask: Ask = serde_json::from_str(line).unwrap();
+            assert_eq!(carry_out_on(&mut desk, &ask, &mut hidden), Answer::Done);
+        }
+        desk.there.remove(&30);
+        desk.did.clear();
+        assert_eq!(show_hidden_on(&mut desk, &mut hidden), 1);
+        assert_eq!(desk.did, [Did::Show(10, 8, true)]);
+        assert!(hidden.is_empty());
+
+        // And over the line: the asker goes after hiding, with no word.
+        let mut desk = Written::with(&[10, 20]);
+        let mut answered = Vec::new();
+        answer_until_gone_on(
+            &mut desk,
+            format!("{}\n{}", hide(10), hide(20)).as_bytes(),
+            &mut answered,
+        );
+        assert_eq!(beyond(&desk), None);
+        assert_eq!(desk.did.len(), 4);
+    }
+
+    /// The helper has an administrator's rights and reads what a program
+    /// without them writes: whatever is written, the helper comes to its
+    /// end, answers each line with one, and does nothing beyond what it
+    /// may do.
+    #[test]
+    fn no_asking_from_outside_ends_the_helper_or_takes_it_further() {
+        use super::spoil::{harder, lived, places, spoil, Chance};
+        let whole: Vec<serde_json::Value> = one_of_each()
+            .iter()
+            .map(|ask| serde_json::to_value(ask).unwrap())
+            .collect();
+        let whole = serde_json::Value::Array(whole);
+        let mut all = Vec::new();
+        places(&whole, &mut Vec::new(), &mut all);
+
+        let (times, seed) = harder();
+        let mut chance = Chance(0x5be0_cd19_137e_2179 ^ seed.rotate_left(11) | 1);
+        let mut wrong: Vec<String> = Vec::new();
+        for _ in 0..2000 * times {
+            let mut document = whole.clone();
+            let mut done = Vec::new();
+            for _ in 0..1 + chance.below(4) {
+                done.push(spoil(&mut document, &all, &mut chance));
+            }
+            let lines: Vec<String> = match &document {
+                serde_json::Value::Array(asks) => asks.iter().map(|ask| ask.to_string()).collect(),
+                other => vec![other.to_string()],
+            };
+            let mut asked = lines.join("\n");
+            // (Sometimes cut short, as by an asker that goes in the middle.)
+            if chance.below(6) == 0 {
+                let mut end = chance.below(asked.len() + 1);
+                while !asked.is_char_boundary(end) {
+                    end -= 1;
+                }
+                asked.truncate(end);
+            }
+            let found = std::sync::Arc::new(Mutex::new(None::<String>));
+            let tell = found.clone();
+            let text = asked.clone();
+            let run = lived(move || {
+                let mut desk = Written::with(&[10, 20, 30, -1, 0, 1]);
+                let mut answered = Vec::new();
+                answer_until_gone_on(&mut desk, text.as_bytes(), &mut answered);
+                let answers = String::from_utf8(answered).unwrap_or_default();
+                let mut said = beyond(&desk);
+                if answers.lines().count() != text.lines().count() {
+                    said = Some(format!(
+                        "{} answers to {} lines",
+                        answers.lines().count(),
+                        text.lines().count()
+                    ));
+                }
+                if answers
+                    .lines()
+                    .any(|line| serde_json::from_str::<Answer>(line).is_err())
+                {
+                    said = Some("an answer that is none".to_string());
+                }
+                *tell.lock().unwrap() = said;
+            });
+            let said = found.lock().unwrap().take();
+            if let Some(why) = run.err().or(said) {
+                wrong.push(format!("with {}: {why}", done.join(", ")));
+            }
+        }
+        wrong.truncate(20);
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    }
 
     #[test]
     fn what_is_asked_is_written_as_one_line_and_read_back() {
