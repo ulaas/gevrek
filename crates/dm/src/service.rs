@@ -246,10 +246,94 @@ fn peer_uid(stream: &UnixStream) -> Option<u32> {
     (done == 0).then_some(credentials.uid)
 }
 
+/// The machine as the service touches it for what the greeter asks:
+/// every step that changes something is one of these. The service's own
+/// is `TheMachine`; a check has one that only writes down what was done.
+trait Machine: Send + Sync + 'static {
+    /// A session that was opened, until it is over.
+    type Session: Send + 'static;
+    /// Have a worker check the password and open the session.
+    fn open(&self, order: &Order) -> anyhow::Result<(Self::Session, Answer)>;
+    /// The login goes under its veil, and is given the time for it.
+    fn veil(&self);
+    /// Show a console.
+    fn show(&self, console: u32);
+    /// Let go of a console.
+    fn release(&self, console: u32);
+    /// The session's console is shown: the session may start.
+    fn go(&self, session: &mut Self::Session);
+    /// Wait until the session is over.
+    fn wait(&self, session: Self::Session, user: &str);
+    /// Switch the machine off, or start it again; whether it took that.
+    fn power(&self, restart: bool) -> bool;
+    /// The login is on the display: the boot splash under it ends.
+    fn shown(&self);
+}
+
+/// The machine itself.
+struct TheMachine;
+
+impl Machine for TheMachine {
+    type Session = (Child, Option<std::process::ChildStdin>);
+
+    fn open(&self, order: &Order) -> anyhow::Result<(Self::Session, Answer)> {
+        let (worker, answer, go) = start_worker(order)?;
+        Ok(((worker, Some(go)), answer))
+    }
+
+    fn veil(&self) {
+        let greeter = GREETER.load(Ordering::SeqCst);
+        if greeter > 0 {
+            // SAFETY: a signal to the service's own child.
+            unsafe {
+                libc::kill(greeter, libc::SIGUSR1);
+            }
+            std::thread::sleep(FOR_THE_VEIL);
+        }
+    }
+
+    fn show(&self, console: u32) {
+        if let Err(error) = crate::console::show(console) {
+            log::error!("console {console} was not shown: {error}");
+        }
+    }
+
+    fn release(&self, console: u32) {
+        crate::console::release(console);
+    }
+
+    fn go(&self, session: &mut Self::Session) {
+        if let Some(mut go) = session.1.take() {
+            let _ = writeln!(go, "go");
+        }
+    }
+
+    fn wait(&self, mut session: Self::Session, user: &str) {
+        let status = session.0.wait();
+        log::info!("the session of {user} is over ({status:?})");
+    }
+
+    fn power(&self, restart: bool) -> bool {
+        Command::new("systemctl")
+            .arg(if restart { "reboot" } else { "poweroff" })
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    fn shown(&self) {
+        crate::splash::end(true);
+    }
+}
+
 /// Log a person in: the worker checks the password and opens the
 /// session; then the session's console is shown, and when the session is
 /// over the greeter's again.
-fn login(user: String, password: String, running: &Arc<AtomicBool>) -> Answer {
+fn login<M: Machine>(
+    machine: &Arc<M>,
+    user: String,
+    password: String,
+    running: &Arc<AtomicBool>,
+) -> Answer {
     if running.swap(true, Ordering::SeqCst) {
         return Answer::no("A session is running already.");
     }
@@ -261,7 +345,7 @@ fn login(user: String, password: String, running: &Arc<AtomicBool>) -> Answer {
         command: session_command(),
         environment: Vec::new(),
     };
-    let (mut worker, answer, mut go) = match start_worker(&order) {
+    let (mut session, answer) = match machine.open(&order) {
         Ok(started) => started,
         Err(error) => {
             log::error!("no worker for the session: {error}");
@@ -278,43 +362,52 @@ fn login(user: String, password: String, running: &Arc<AtomicBool>) -> Answer {
     // showed last stays until the desktop's first frame.)
     // The login goes under its veil, and the desktop comes out from
     // under its own: the change of consoles is not seen as a cut.
-    let greeter = GREETER.load(Ordering::SeqCst);
-    if greeter > 0 {
-        // SAFETY: a signal to the service's own child.
-        unsafe {
-            libc::kill(greeter, libc::SIGUSR1);
-        }
-        std::thread::sleep(FOR_THE_VEIL);
-    }
-    if let Err(error) = crate::console::show(SESSION_CONSOLE) {
-        log::error!("console {SESSION_CONSOLE} was not shown: {error}");
-    }
+    machine.veil();
+    machine.show(SESSION_CONSOLE);
     // Its console is shown: the session may start.
-    let _ = writeln!(go, "go");
-    drop(go);
+    machine.go(&mut session);
     let running = Arc::clone(running);
+    let machine = Arc::clone(machine);
     std::thread::spawn(move || {
-        let status = worker.wait();
-        log::info!("the session of {user} is over ({status:?})");
-        if let Err(error) = crate::console::show(GREETER_CONSOLE) {
-            log::error!("console {GREETER_CONSOLE} was not shown: {error}");
-        }
-        crate::console::release(SESSION_CONSOLE);
+        machine.wait(session, &user);
+        machine.show(GREETER_CONSOLE);
+        machine.release(SESSION_CONSOLE);
         running.store(false, Ordering::SeqCst);
     });
     answer
 }
 
-fn power(restart: bool, running: &AtomicBool) -> Answer {
+fn power(machine: &impl Machine, restart: bool, running: &AtomicBool) -> Answer {
     if running.load(Ordering::SeqCst) {
         return Answer::no("A session is running.");
     }
-    let done = Command::new("systemctl")
-        .arg(if restart { "reboot" } else { "poweroff" })
-        .status();
-    match done {
-        Ok(status) if status.success() => Answer::yes(),
-        _ => Answer::no("The system did not take that."),
+    if machine.power(restart) {
+        Answer::yes()
+    } else {
+        Answer::no("The system did not take that.")
+    }
+}
+
+/// The line the greeter wrote. (A line longer than any name and password
+/// is not read to its end.)
+fn line_of(reader: impl std::io::Read) -> Option<String> {
+    let mut line = String::new();
+    BufReader::new(std::io::Read::take(reader, 8192))
+        .read_line(&mut line)
+        .ok()?;
+    Some(line)
+}
+
+/// What is answered to a line of the greeter's, after what it asks is done.
+fn answer_to<M: Machine>(machine: &Arc<M>, line: &str, running: &Arc<AtomicBool>) -> Answer {
+    match serde_json::from_str::<Ask>(line) {
+        Ok(Ask::Login { user, password }) => login(machine, user, password, running),
+        Ok(Ask::Power { restart }) => power(&**machine, restart, running),
+        Ok(Ask::Shown) => {
+            machine.shown();
+            Answer::yes()
+        }
+        Err(_) => Answer::no("That was not understood."),
     }
 }
 
@@ -326,27 +419,13 @@ fn serve(stream: UnixStream, greeter_uid: u32, running: &Arc<AtomicBool>) {
         return;
     }
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-    let mut line = String::new();
-    let Ok(mut reader) = stream.try_clone().map(BufReader::new) else {
+    let Ok(reader) = stream.try_clone() else {
         return;
     };
-    // (A line longer than any name and password is not read to its end.)
-    if std::io::Read::take(&mut reader, 8192)
-        .read_line(&mut line)
-        .is_err()
-    {
+    let Some(line) = line_of(reader) else {
         return;
-    }
-    let answer = match serde_json::from_str::<Ask>(&line) {
-        Ok(Ask::Login { user, password }) => login(user, password, running),
-        Ok(Ask::Power { restart }) => power(restart, running),
-        Ok(Ask::Shown) => {
-            // The login is on the display: the boot splash under it ends.
-            crate::splash::end(true);
-            Answer::yes()
-        }
-        Err(_) => Answer::no("That was not understood."),
     };
+    let answer = answer_to(&Arc::new(TheMachine), &line, running);
     let mut stream = stream;
     let _ = writeln!(
         stream,
