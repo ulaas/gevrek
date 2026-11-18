@@ -15,7 +15,7 @@ use crate::executor::Executor;
 use crate::focus_manager::FocusManager;
 use crate::layouts::LayoutType;
 use crate::outputs::{MonitorHandle, Outputs};
-use crate::outside_input::Chance;
+use crate::spoil::Chance;
 use crate::rules::RuleEngine;
 use crate::testing::fake_desktop::FakeDesktop;
 use crate::zones::ZoneManager;
@@ -79,7 +79,7 @@ fn display_changed(core: &mut WmCore, desktop: &mut FakeDesktop, there: bool) {
 
 /// Commands that reach outside the engine (a file of the person's, a
 /// program started, the session ended): not for a run of chance.
-const LEFT_OUT: [&str; 19] = [
+pub(crate) const LEFT_OUT: [&str; 19] = [
     "exec",
     "shell",
     "notify",
@@ -103,7 +103,7 @@ const LEFT_OUT: [&str; 19] = [
 
 /// Every command a run may give, as JSON: what the examples bind keys
 /// to, and commands with numbers at and beyond their edges.
-fn commands() -> Vec<serde_json::Value> {
+pub(crate) fn commands() -> Vec<serde_json::Value> {
     let mut all: BTreeMap<String, serde_json::Value> = BTreeMap::new();
     for example in gevrek_model::examples::built_in_examples() {
         for binding in &example.config.desktop.bindings {

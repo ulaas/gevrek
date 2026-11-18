@@ -53,6 +53,8 @@ mod core_scenarios;
 
 #[cfg(test)]
 mod outside_input;
+#[cfg(test)]
+mod spoil;
 
 #[cfg(test)]
 mod random_runs;
