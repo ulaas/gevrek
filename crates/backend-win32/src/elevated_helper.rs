@@ -244,30 +244,207 @@ pub fn pipe_name(instance: &str) -> String {
     format!(r"\\.\pipe\gevrek-elevated-{}-{}", plain(&user), plain(instance))
 }
 
-/// Whether a window is one the helper may be asked about: a top-level
-/// window that is there and is not the helper's own.
-fn may_be_asked_of(window: isize) -> Result<HWND, String> {
-    let hwnd = HWND(window as *mut _);
-    // SAFETY: plain questions about a window that may be gone.
-    unsafe {
-        if !IsWindow(hwnd).as_bool() {
-            return Err("no such window".to_string());
+/// The desktop as the helper touches it: every call that changes
+/// something is one of these. The helper's own is `TheDesk`; a check has
+/// one that only writes down what it was asked.
+pub trait Desk {
+    /// Whether a window is one the helper may be asked about: a top-level
+    /// window that is there and is not the helper's own.
+    fn may_be_asked_of(&mut self, window: isize) -> Result<(), String>;
+    /// `SetWindowPos`.
+    #[allow(clippy::too_many_arguments)]
+    fn place(
+        &mut self,
+        window: isize,
+        after: After,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        flags: u32,
+    ) -> Result<(), String>;
+    /// `ShowWindow`, or `ShowWindowAsync` where `posted`.
+    fn show(&mut self, window: isize, command: i32, posted: bool);
+    fn foreground(&mut self, window: isize);
+    /// Ask the window to close (`WM_CLOSE`).
+    fn close(&mut self, window: isize) -> Result<(), String>;
+    /// A window's style, or its extended style.
+    fn style(&mut self, window: isize, extended: bool) -> i32;
+    fn set_style(&mut self, window: isize, extended: bool, value: i32);
+    fn alpha(&mut self, window: isize, alpha: u8) -> Result<(), String>;
+    fn dwm(&mut self, window: isize, attribute: u32, value: u32) -> Result<(), String>;
+    /// Whether a window is there (still).
+    fn is_there(&mut self, window: isize) -> bool;
+    /// Whether the helper's hooks run.
+    fn hears(&self) -> bool;
+    /// What the helper's hooks go by from now on.
+    fn hear_by(
+        &mut self,
+        registrations: Vec<(i32, gevrek_engine::input::Hotkey)>,
+        suspended: bool,
+        own_windows_key: bool,
+        drag_with_windows_key: bool,
+    );
+}
+
+/// The desktop itself.
+pub struct TheDesk;
+
+fn hwnd(window: isize) -> HWND {
+    HWND(window as *mut _)
+}
+
+impl Desk for TheDesk {
+    fn may_be_asked_of(&mut self, window: isize) -> Result<(), String> {
+        let hwnd = hwnd(window);
+        // SAFETY: plain questions about a window that may be gone.
+        unsafe {
+            if !IsWindow(hwnd).as_bool() {
+                return Err("no such window".to_string());
+            }
+            if GetAncestor(hwnd, GA_ROOT) != hwnd {
+                return Err("not a top-level window".to_string());
+            }
+            let mut process = 0u32;
+            GetWindowThreadProcessId(hwnd, Some(&mut process));
+            if process == std::process::id() {
+                return Err("a window of the helper's own".to_string());
+            }
         }
-        if GetAncestor(hwnd, GA_ROOT) != hwnd {
-            return Err("not a top-level window".to_string());
+        Ok(())
+    }
+
+    fn place(
+        &mut self,
+        window: isize,
+        after: After,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        flags: u32,
+    ) -> Result<(), String> {
+        // SAFETY: a plain call on a window that may be gone meanwhile.
+        unsafe {
+            SetWindowPos(
+                hwnd(window),
+                after.hwnd(),
+                x,
+                y,
+                width,
+                height,
+                SET_WINDOW_POS_FLAGS(flags),
+            )
         }
-        let mut process = 0u32;
-        GetWindowThreadProcessId(hwnd, Some(&mut process));
-        if process == std::process::id() {
-            return Err("a window of the helper's own".to_string());
+        .map_err(|error| error.to_string())
+    }
+
+    fn show(&mut self, window: isize, command: i32, posted: bool) {
+        // SAFETY: plain calls on a window that may be gone meanwhile.
+        unsafe {
+            if posted {
+                let _ = ShowWindowAsync(hwnd(window), SHOW_WINDOW_CMD(command));
+            } else {
+                let _ = ShowWindow(hwnd(window), SHOW_WINDOW_CMD(command));
+            }
         }
     }
-    Ok(hwnd)
+
+    fn foreground(&mut self, window: isize) {
+        let hwnd = hwnd(window);
+        // SAFETY: plain calls; an input of nothing makes this the
+        // program that had the last input, which Windows asks for.
+        unsafe {
+            use windows::Win32::UI::Input::KeyboardAndMouse::{SendInput, INPUT, INPUT_MOUSE};
+            use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+            if SetForegroundWindow(hwnd).as_bool() && GetForegroundWindow() == hwnd {
+                return;
+            }
+            let nothing = INPUT {
+                r#type: INPUT_MOUSE,
+                ..Default::default()
+            };
+            SendInput(&[nothing], std::mem::size_of::<INPUT>() as i32);
+            let _ = SetForegroundWindow(hwnd);
+        }
+    }
+
+    fn close(&mut self, window: isize) -> Result<(), String> {
+        // SAFETY: posted, never sent: a program that hangs is not waited for.
+        unsafe { PostMessageW(hwnd(window), WM_CLOSE, WPARAM(0), LPARAM(0)) }
+            .map_err(|error| error.to_string())
+    }
+
+    fn style(&mut self, window: isize, extended: bool) -> i32 {
+        let which = if extended { GWL_EXSTYLE } else { GWL_STYLE };
+        // SAFETY: a plain call on a window that may be gone meanwhile.
+        unsafe { GetWindowLongW(hwnd(window), which) }
+    }
+
+    fn set_style(&mut self, window: isize, extended: bool, value: i32) {
+        let which = if extended { GWL_EXSTYLE } else { GWL_STYLE };
+        // SAFETY: a plain call on a window that may be gone meanwhile.
+        unsafe {
+            SetWindowLongW(hwnd(window), which, value);
+        }
+    }
+
+    fn alpha(&mut self, window: isize, alpha: u8) -> Result<(), String> {
+        // SAFETY: a plain call on a window that may be gone meanwhile.
+        unsafe {
+            SetLayeredWindowAttributes(
+                hwnd(window),
+                windows::Win32::Foundation::COLORREF(0),
+                alpha,
+                LWA_ALPHA,
+            )
+        }
+        .map_err(|error| error.to_string())
+    }
+
+    fn dwm(&mut self, window: isize, attribute: u32, value: u32) -> Result<(), String> {
+        // SAFETY: the value lives until the call returns, and is of
+        // the size every one of these attributes has.
+        unsafe {
+            windows::Win32::Graphics::Dwm::DwmSetWindowAttribute(
+                hwnd(window),
+                windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE(attribute as i32),
+                &value as *const u32 as *const core::ffi::c_void,
+                std::mem::size_of::<u32>() as u32,
+            )
+        }
+        .map_err(|error| error.to_string())
+    }
+
+    fn is_there(&mut self, window: isize) -> bool {
+        // SAFETY: a plain question about a window that may be gone.
+        unsafe { IsWindow(hwnd(window)).as_bool() }
+    }
+
+    fn hears(&self) -> bool {
+        HEARS.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn hear_by(
+        &mut self,
+        registrations: Vec<(i32, gevrek_engine::input::Hotkey)>,
+        suspended: bool,
+        own_windows_key: bool,
+        drag_with_windows_key: bool,
+    ) {
+        crate::hotkey::set_helper_table(registrations.into_iter().collect(), suspended);
+        crate::windows_key::configure(own_windows_key, drag_with_windows_key);
+    }
 }
 
 /// Do what was asked. `hidden`: the windows hidden on the asker's behalf
 /// (shown again when the asker goes: `show_hidden`).
 pub fn carry_out(ask: &Ask, hidden: &mut HashSet<isize>) -> Answer {
+    carry_out_on(&mut TheDesk, ask, hidden)
+}
+
+/// As `carry_out`, on the desktop that is given.
+pub fn carry_out_on(desk: &mut impl Desk, ask: &Ask, hidden: &mut HashSet<isize>) -> Answer {
     let done = |result: Result<(), String>| match result {
         Ok(()) => Answer::Done,
         Err(why) => Answer::Refused(why),
@@ -277,7 +454,7 @@ pub fn carry_out(ask: &Ask, hidden: &mut HashSet<isize>) -> Answer {
             if version == VERSION {
                 Answer::Hello {
                     version: VERSION,
-                    hears: HEARS.load(std::sync::atomic::Ordering::Acquire),
+                    hears: desk.hears(),
                 }
             } else {
                 Answer::Refused(format!("this helper speaks version {VERSION}"))
@@ -291,29 +468,17 @@ pub fn carry_out(ask: &Ask, hidden: &mut HashSet<isize>) -> Answer {
             width,
             height,
             flags,
-        } => done(may_be_asked_of(window).and_then(|hwnd| {
+        } => done(desk.may_be_asked_of(window).and_then(|()| {
             if let After::Below(other) = after {
-                may_be_asked_of(other)?;
+                desk.may_be_asked_of(other)?;
             }
-            // SAFETY: a plain call on a window that may be gone meanwhile.
-            unsafe {
-                SetWindowPos(
-                    hwnd,
-                    after.hwnd(),
-                    x,
-                    y,
-                    width,
-                    height,
-                    SET_WINDOW_POS_FLAGS(flags & PLACE_FLAGS),
-                )
-            }
-            .map_err(|error| error.to_string())
+            desk.place(window, after, x, y, width, height, flags & PLACE_FLAGS)
         })),
         Ask::Show {
             window,
             command,
             posted,
-        } => done(may_be_asked_of(window).and_then(|hwnd| {
+        } => done(desk.may_be_asked_of(window).and_then(|()| {
             if !(SW_HIDE..=SHOW_LAST).contains(&command) {
                 return Err(format!("{command} is no way to show a window"));
             }
@@ -322,90 +487,42 @@ pub fn carry_out(ask: &Ask, hidden: &mut HashSet<isize>) -> Answer {
             } else {
                 hidden.remove(&window);
             }
-            // SAFETY: plain calls on a window that may be gone meanwhile.
-            unsafe {
-                if posted {
-                    let _ = ShowWindowAsync(hwnd, SHOW_WINDOW_CMD(command));
-                } else {
-                    let _ = ShowWindow(hwnd, SHOW_WINDOW_CMD(command));
-                }
-            }
+            desk.show(window, command, posted);
             Ok(())
         })),
-        Ask::Foreground { window } => done(may_be_asked_of(window).map(|hwnd| {
-            // SAFETY: plain calls; an input of nothing makes this the
-            // program that had the last input, which Windows asks for.
-            unsafe {
-                use windows::Win32::UI::Input::KeyboardAndMouse::{
-                    SendInput, INPUT, INPUT_MOUSE,
-                };
-                use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
-                if SetForegroundWindow(hwnd).as_bool() && GetForegroundWindow() == hwnd {
-                    return;
-                }
-                let nothing = INPUT {
-                    r#type: INPUT_MOUSE,
-                    ..Default::default()
-                };
-                SendInput(&[nothing], std::mem::size_of::<INPUT>() as i32);
-                let _ = SetForegroundWindow(hwnd);
-            }
-        })),
-        Ask::Close { window } => done(may_be_asked_of(window).and_then(|hwnd| {
-            // SAFETY: posted, never sent: a program that hangs is not waited for.
-            unsafe { PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0)) }
-                .map_err(|error| error.to_string())
-        })),
+        Ask::Foreground { window } => done(
+            desk.may_be_asked_of(window)
+                .map(|()| desk.foreground(window)),
+        ),
+        Ask::Close { window } => done(
+            desk.may_be_asked_of(window)
+                .and_then(|()| desk.close(window)),
+        ),
         Ask::Style {
             window,
             extended,
             value,
-        } => done(may_be_asked_of(window).map(|hwnd| {
-            let (which, bits) = if extended {
-                (GWL_EXSTYLE, EXTENDED_BITS)
-            } else {
-                (GWL_STYLE, STYLE_BITS)
-            };
-            // SAFETY: plain calls on a window that may be gone meanwhile.
-            unsafe {
-                let now = GetWindowLongW(hwnd, which);
-                let wanted = (now & !bits) | (value & bits);
-                if wanted != now {
-                    SetWindowLongW(hwnd, which, wanted);
-                }
+        } => done(desk.may_be_asked_of(window).map(|()| {
+            let bits = if extended { EXTENDED_BITS } else { STYLE_BITS };
+            let now = desk.style(window, extended);
+            let wanted = (now & !bits) | (value & bits);
+            if wanted != now {
+                desk.set_style(window, extended, wanted);
             }
         })),
-        Ask::Alpha { window, alpha } => done(may_be_asked_of(window).and_then(|hwnd| {
-            // SAFETY: a plain call on a window that may be gone meanwhile.
-            unsafe {
-                SetLayeredWindowAttributes(
-                    hwnd,
-                    windows::Win32::Foundation::COLORREF(0),
-                    alpha,
-                    LWA_ALPHA,
-                )
-            }
-            .map_err(|error| error.to_string())
-        })),
+        Ask::Alpha { window, alpha } => done(
+            desk.may_be_asked_of(window)
+                .and_then(|()| desk.alpha(window, alpha)),
+        ),
         Ask::Dwm {
             window,
             attribute,
             value,
-        } => done(may_be_asked_of(window).and_then(|hwnd| {
+        } => done(desk.may_be_asked_of(window).and_then(|()| {
             if !DWM_ATTRIBUTES.contains(&attribute) {
                 return Err(format!("{attribute} is nothing gevrek tells the compositor"));
             }
-            // SAFETY: the value lives until the call returns, and is of
-            // the size every one of these attributes has.
-            unsafe {
-                windows::Win32::Graphics::Dwm::DwmSetWindowAttribute(
-                    hwnd,
-                    windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE(attribute as i32),
-                    &value as *const u32 as *const core::ffi::c_void,
-                    std::mem::size_of::<u32>() as u32,
-                )
-            }
-            .map_err(|error| error.to_string())
+            desk.dwm(window, attribute, value)
         })),
         Ask::Input {
             ref registrations,
@@ -424,8 +541,7 @@ pub fn carry_out(ask: &Ask, hidden: &mut HashSet<isize>) -> Answer {
                     left_out.len()
                 );
             }
-            crate::hotkey::set_helper_table(heard.into_iter().collect(), suspended);
-            crate::windows_key::configure(own_windows_key, drag_with_windows_key);
+            desk.hear_by(heard, suspended, own_windows_key, drag_with_windows_key);
             Answer::Done
         }
     }
@@ -436,16 +552,18 @@ static HEARS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new
 
 /// Show again every window that was hidden on the asker's behalf.
 pub fn show_hidden(hidden: &mut HashSet<isize>) -> usize {
+    show_hidden_on(&mut TheDesk, hidden)
+}
+
+/// As `show_hidden`, on the desktop that is given.
+pub fn show_hidden_on(desk: &mut impl Desk, hidden: &mut HashSet<isize>) -> usize {
     let mut shown = 0;
     for window in hidden.drain() {
-        let hwnd = HWND(window as *mut _);
-        // SAFETY: plain calls; a window that is gone is skipped.
-        unsafe {
-            if IsWindow(hwnd).as_bool() {
-                // (8: SW_SHOWNA, as it is and without the keyboard.)
-                let _ = ShowWindowAsync(hwnd, SHOW_WINDOW_CMD(8));
-                shown += 1;
-            }
+        // (A window that is gone is skipped.)
+        if desk.is_there(window) {
+            // (8: SW_SHOWNA, as it is and without the keyboard.)
+            desk.show(window, 8, true);
+            shown += 1;
         }
     }
     shown
@@ -453,14 +571,23 @@ pub fn show_hidden(hidden: &mut HashSet<isize>) -> usize {
 
 /// Answer one asker until it goes: a line for each thing asked, a line
 /// for each answer. What it had hidden is shown again at the end.
-pub fn answer_until_gone(reader: impl std::io::Read, mut writer: impl Write) {
+pub fn answer_until_gone(reader: impl std::io::Read, writer: impl Write) {
+    answer_until_gone_on(&mut TheDesk, reader, writer)
+}
+
+/// As `answer_until_gone`, on the desktop that is given.
+pub fn answer_until_gone_on(
+    desk: &mut impl Desk,
+    reader: impl std::io::Read,
+    mut writer: impl Write,
+) {
     let mut hidden = HashSet::new();
     for line in BufReader::new(reader).lines() {
         let Ok(line) = line else {
             break;
         };
         let answer = match serde_json::from_str::<Ask>(&line) {
-            Ok(ask) => carry_out(&ask, &mut hidden),
+            Ok(ask) => carry_out_on(desk, &ask, &mut hidden),
             Err(error) => Answer::Refused(format!("not understood: {error}")),
         };
         let Ok(mut text) = serde_json::to_string(&answer) else {
@@ -471,7 +598,7 @@ pub fn answer_until_gone(reader: impl std::io::Read, mut writer: impl Write) {
             break;
         }
     }
-    let shown = show_hidden(&mut hidden);
+    let shown = show_hidden_on(desk, &mut hidden);
     if shown > 0 {
         log::warn!("the window manager went: {shown} window(s) it had hidden are shown again");
     }
