@@ -8,7 +8,7 @@ impl Executor {
         &mut self,
         window_manager: &mut dyn Desktop,
         monitor_manager: &mut MonitorManager,
-        _zone_manager: &mut ZoneManager,
+        _snap_zone_manager: &mut SnapZoneManager,
         _focus_manager: &mut FocusManager,
         command: DispatchCommand,
     ) -> Result<()> {

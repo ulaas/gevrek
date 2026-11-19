@@ -735,6 +735,14 @@ impl Config {
         let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         let mut value: serde_json::Value = serde_json::from_str(text)?;
         crate::migrate::migrate(&mut value);
+        // (Snap zones are `desktop.snap_zones` since schema 26. A file of
+        // that schema with them under `desktop.zones` is not guessed at.)
+        if crate::migrate::has_snap_zones_under_zones(&value) {
+            return Err(serde::de::Error::custom(
+                "desktop.zones holds snap zones (behavior, default_layout, monitor_layouts); \
+                 since schema 26 their place is desktop.snap_zones",
+            ));
+        }
         serde_json::from_value(value)
     }
 }

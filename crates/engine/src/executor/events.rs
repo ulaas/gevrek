@@ -152,7 +152,7 @@ impl Executor {
         &mut self,
         window_manager: &dyn Desktop,
         monitor_manager: &mut MonitorManager,
-        zone_manager: &mut ZoneManager,
+        snap_zone_manager: &mut SnapZoneManager,
     ) {
         let gone: Vec<WindowHandle> = crate::reload::managed_windows(monitor_manager)
             .into_iter()
@@ -163,7 +163,7 @@ impl Executor {
                 log::info!("{window:?} is gone without its end being told: it leaves its workspace");
                 self.mark_layout_dirty(output);
             }
-            zone_manager.remove_window(window);
+            snap_zone_manager.remove_window(window);
             self.rule_metadata.forget(window);
         }
         self.cleanup_stale_tracking_in(window_manager);
@@ -268,7 +268,7 @@ impl Executor {
         &mut self,
         window_manager: &mut dyn Desktop,
         monitor_manager: &mut MonitorManager,
-        zone_manager: &mut ZoneManager,
+        snap_zone_manager: &mut SnapZoneManager,
     ) -> Result<()> {
         const DRAG_END_TIMEOUT: Duration = Duration::from_millis(500);
         let now = Instant::now();
@@ -324,13 +324,13 @@ impl Executor {
                     let current_monitor_handle = current_monitor_info.handle;
 
                     let mut snapped_to_zone = false;
-                    if zone_manager.is_enabled() {
+                    if snap_zone_manager.is_enabled() {
                         if let Ok(window_rect) = queries(window_manager)
                             .rect(handle)
                             .map_err(anyhow::Error::msg)
                         {
                             if let Some(zone_hit) =
-                                zone_manager.find_zone_for_rect(&window_rect, monitor_manager)
+                                snap_zone_manager.find_zone_for_rect(&window_rect, monitor_manager)
                             {
                                 log::info!("📍 Tiled window dropped on zone '{}' (via timeout) - snapping!", zone_hit.zone.name);
                                 effect(
@@ -346,7 +346,7 @@ impl Executor {
                                         states: WindowStates::default(),
                                     },
                                 )?;
-                                zone_manager.assign_window_to_zone(
+                                snap_zone_manager.assign_window_to_zone(
                                     handle,
                                     zone_hit.monitor,
                                     zone_hit.zone.id,
@@ -508,7 +508,7 @@ impl Executor {
         &mut self,
         window_manager: &mut dyn Desktop,
         monitor_manager: &mut MonitorManager,
-        zone_manager: &mut ZoneManager,
+        snap_zone_manager: &mut SnapZoneManager,
         focus_manager: &mut FocusManager,
         event: WindowEvent,
     ) -> Result<()> {
@@ -519,7 +519,7 @@ impl Executor {
             }
             WindowEvent::Destroyed(handle) => {
                 let result =
-                    self.on_window_destroyed(window_manager, monitor_manager, zone_manager, handle);
+                    self.on_window_destroyed(window_manager, monitor_manager, snap_zone_manager, handle);
                 // What the graph was told of the window is not kept: a
                 // key pressed next would hand a window that has gone to
                 // the nodes behind it.
@@ -547,7 +547,7 @@ impl Executor {
             }
             WindowEvent::DragEnded(handle) => {
                 let result =
-                    self.on_drag_ended(window_manager, monitor_manager, zone_manager, handle);
+                    self.on_drag_ended(window_manager, monitor_manager, snap_zone_manager, handle);
                 // The window with the keyboard was dropped on another
                 // output: the keyboard is on that output now, and what is
                 // asked for next (a layout, a workspace) is asked of it.
@@ -663,7 +663,7 @@ impl Executor {
         &mut self,
         window_manager: &mut dyn Desktop,
         monitor_manager: &mut MonitorManager,
-        zone_manager: &mut ZoneManager,
+        snap_zone_manager: &mut SnapZoneManager,
         handle: WindowHandle,
     ) -> Result<()> {
         log::debug!("🗑️  Handling Destroyed event for window {:?}", handle);
@@ -673,7 +673,7 @@ impl Executor {
         }
         self.suppressed_windows.remove(&handle);
         self.scratchpads.forget_window(handle);
-        zone_manager.remove_window(handle);
+        snap_zone_manager.remove_window(handle);
 
         // Remove border if this window has one
         let _ = effect(
@@ -1285,7 +1285,7 @@ impl Executor {
         &mut self,
         window_manager: &mut dyn Desktop,
         monitor_manager: &mut MonitorManager,
-        zone_manager: &mut ZoneManager,
+        snap_zone_manager: &mut SnapZoneManager,
         handle: WindowHandle,
     ) -> Result<()> {
         log::info!("🎯 DRAG ENDED - User released window");
@@ -1412,10 +1412,10 @@ impl Executor {
                     }
 
                     // Zone snapping (only for tiled windows)
-                    let snapped_to_zone = if zone_manager.is_enabled() && !was_resized {
+                    let snapped_to_zone = if snap_zone_manager.is_enabled() && !was_resized {
                         if let Some(window_rect) = current_rect.as_ref() {
                             if let Some(zone_hit) =
-                                zone_manager.find_zone_for_rect(window_rect, monitor_manager)
+                                snap_zone_manager.find_zone_for_rect(window_rect, monitor_manager)
                             {
                                 log::info!(
                                     "📍 Tiled window dropped on zone '{}' - snapping!",
@@ -1434,7 +1434,7 @@ impl Executor {
                                         states: WindowStates::default(),
                                     },
                                 )?;
-                                zone_manager.assign_window_to_zone(
+                                snap_zone_manager.assign_window_to_zone(
                                     handle,
                                     zone_hit.monitor,
                                     zone_hit.zone.id,

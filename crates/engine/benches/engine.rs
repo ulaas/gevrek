@@ -24,7 +24,7 @@ use gevrek_engine::outputs::{MonitorHandle, Outputs};
 use gevrek_engine::reload::ConfigDiff;
 use gevrek_engine::rules::{RuleEngine, WindowInfo};
 use gevrek_engine::testing::fake_desktop::FakeDesktop;
-use gevrek_engine::zones::ZoneManager;
+use gevrek_engine::snap_zones::SnapZoneManager;
 use gevrek_engine::{Padding, Rect, WindowId};
 use gevrek_model::command::{DispatchCommand, WorkspaceSelector};
 use gevrek_model::config::Config;
@@ -53,7 +53,7 @@ fn desk(names: &[&str], layout: LayoutType) -> (WmCore, FakeDesktop) {
         executor,
         outputs,
         FocusManager::new(),
-        ZoneManager::new(Default::default()),
+        SnapZoneManager::new(Default::default()),
     );
     (core, FakeDesktop::new(OUTPUT))
 }

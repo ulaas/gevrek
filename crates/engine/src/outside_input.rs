@@ -20,7 +20,7 @@ use crate::outputs::{MonitorHandle, Outputs};
 use crate::rules::RuleEngine;
 use crate::spoil::{harder, lived, places, spoil, Chance};
 use crate::testing::fake_desktop::FakeDesktop;
-use crate::zones::ZoneManager;
+use crate::snap_zones::SnapZoneManager;
 use gevrek_model::config::Config;
 use gevrek_model::graph::NodeGraph;
 use std::sync::{Arc, Mutex};
@@ -39,7 +39,7 @@ fn desk() -> (WmCore, FakeDesktop) {
         executor,
         outputs,
         FocusManager::new(),
-        ZoneManager::new(Default::default()),
+        SnapZoneManager::new(Default::default()),
     );
     (core, FakeDesktop::new(OUTPUT))
 }
@@ -73,8 +73,8 @@ fn taken_in(text: &str) {
     let rules = crate::config_apply::build_rule_engine(&config.desktop);
     let _ = rules.rule_states();
     crate::config_apply::configure_monitor_profiles(&mut core.monitor_manager, &config.desktop);
-    let _ = crate::config_apply::build_zone_manager(
-        &config.desktop.zones,
+    let _ = crate::config_apply::build_snap_zone_manager(
+        &config.desktop.snap_zones,
         &core.monitor_manager,
         |_| false,
     );

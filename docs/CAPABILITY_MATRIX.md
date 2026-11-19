@@ -32,7 +32,7 @@ on 2026-08-01:
 - `cargo clippy --workspace --all-targets` (warnings remain; warnings are not
   denied repository-wide yet)
 - optimized CLI, editor, overlay, and WM entry-point builds
-- release CLI parsing for workspace selectors, layouts, groups, zones, and
+- release CLI parsing for workspace selectors, layouts, groups, snap zones, and
   binding submaps
 - live health/state queries against a running two-monitor WM
 - live creation and departure from a named workspace, with the resulting
@@ -84,7 +84,7 @@ Windows scenario tests before gevrek can be called production-ready.
 | Effects | per-window opacity, blur/backdrop, shadow, dim, overrides | Implemented | schema-v9 composes global/rule opacity with focus-relative inactive dimming, fullscreen policy, reversible per-rule dim exemptions, Windows DWM shadow enable/disable/default overrides, backdrop/corner/border/caption effects, editor controls, starter coverage, and effective IPC/CLI/overlay/inspector state |
 | Animations | non-blocking layout, workspace, window-effect, and border transitions | Implemented | schema-v11 gives layout, workspace, border, and window/graph channels independent enable switches, durations, and curves on one cancellable 60 Hz scheduler; graph automation transitions render the five graph styles (Fade/Slide/Scale/Expand/Contract); configurable None/Fade/Slide/Scale entrance and WM-requested exit styles preserve rule opacity, defer close safely, survive hot-reload disabling, publish IPC/CLI/overlay state, and have editor previews, starter coverage, and deterministic timing/completion tests |
 | Overview | expose-style window overview | Implemented | runtime action and editor/CLI dispatcher |
-| Zones | snap layouts and zone assignment | Implemented | schema-v8 behavior, nine presets, custom visual geometry editor, monitor overrides, activation modifiers, drag snapping, direct/cycling runtime actions, bindings, gRPC, CLI, Command Center, and starter |
+| Snap zones | snap layouts and zone assignment | Implemented | schema-v8 behavior, nine presets, custom visual geometry editor, monitor overrides, activation modifiers, drag snapping, direct/cycling runtime actions, bindings, gRPC, CLI, Command Center, and starter |
 | IPC | health, complete desktop state, events, config collaboration, typed actions | Implemented | protocol-v2 publishes server/config-schema versions, feature flags, all 138 typed dispatchers with argument metadata, automation node types, and every materialized workspace/window including inactive workspace contents and active-workspace identity; prevalidated uninterrupted batches support continue/stop-on-error with per-command results, alongside health, event streams, graph collaboration, and atomic full-config get/update |
 | CLI | lifecycle, state, logs, graph/config apply, dispatchers, and persistent rules | Implemented | typed lifecycle/state/actions, versioned capability discovery, prevalidated uninterrupted batch files, full live-config export and offline validation, plus atomic persistent rule list/upsert/remove through the shared configuration validator |
 | Autostart | run programs and event-driven commands | Implemented | schema-v10 provides structured program/argument/environment/working-directory launches, delay and enable controls, restart policies and limits, reload reconciliation, optional shutdown termination, binding/IPC/CLI/editor controls, live status in the editor/CLI/overlays, and an event-driven Launch Process graph node demonstrated by a built-in starter |

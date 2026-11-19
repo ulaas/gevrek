@@ -318,6 +318,7 @@ mod tests {
             handle: MonitorHandle(handle),
             name: format!("Display {handle}"),
             device_path: path.to_string(),
+            stable_id: String::new(),
             is_primary: primary,
             x,
             y: 0,

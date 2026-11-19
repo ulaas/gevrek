@@ -65,7 +65,38 @@ const STEPS: &[(u32, Step)] = &[
             to_25(desktop);
         }
     }),
+    // 26: the places windows snap to are `desktop.snap_zones`. They were
+    // `desktop.zones`, a name that is something else from here on.
+    (26, |config| {
+        if let Some(desktop) = config.get_mut("desktop").and_then(Value::as_object_mut) {
+            to_26(desktop);
+        }
+    }),
 ];
+
+/// 25 -> 26: `desktop.zones` became `desktop.snap_zones`. Whatever a file
+/// from before has under `zones` is of the snap zones, so all of it moves.
+fn to_26(desktop: &mut serde_json::Map<String, Value>) {
+    let Some(zones) = desktop.remove("zones") else {
+        return;
+    };
+    // Snap zones already written in the new place win.
+    desktop.entry("snap_zones").or_insert(zones);
+}
+
+/// What only snap zones have. A file of schema 26 or later that has one of
+/// these under `desktop.zones` was written by hand in the old layout, and
+/// is refused (see `Config::from_json`) rather than read as something else.
+const SNAP_ZONE_KEYS: [&str; 3] = ["behavior", "default_layout", "monitor_layouts"];
+
+/// Whether `config`, already brought to the current schema version, still
+/// has snap zones under `desktop.zones`.
+pub fn has_snap_zones_under_zones(config: &Value) -> bool {
+    config
+        .pointer("/desktop/zones")
+        .and_then(Value::as_object)
+        .is_some_and(|zones| SNAP_ZONE_KEYS.iter().any(|key| zones.contains_key(*key)))
+}
 
 /// 24 -> 25: `also_called` is gone. An entry that had it took the place,
 /// on its display, of the workspace it named there: it is that
@@ -262,7 +293,7 @@ mod chain_tests {
 
     #[test]
     fn a_document_from_any_older_version_ends_at_the_current_one() {
-        for old in [0u64, 7, 12, 20] {
+        for old in [0u64, 7, 12, 20, 25] {
             let mut document = serde_json::json!({ "desktop": { "schema_version": old } });
             migrate(&mut document);
             assert_eq!(
@@ -380,6 +411,158 @@ mod tests {
             own["desktop"]["appearance"]["floating"],
             serde_json::json!({"border_width": 1})
         );
+    }
+
+    #[test]
+    fn the_zones_of_a_file_from_before_26_are_its_snap_zones() {
+        let mut document = serde_json::json!({ "desktop": { "schema_version": 25, "zones": {
+            "behavior": { "enabled": false, "snap_threshold": 0.2, "activation_modifier": "Alt" },
+            "default_layout": { "id": "mine", "name": "Mine", "description": "", "zones": [
+                { "id": 0, "name": "All", "x_percent": 0.0, "y_percent": 0.0,
+                  "width_percent": 1.0, "height_percent": 1.0, "gap": 4, "priority": 0 } ] },
+            "from_later": 1 } } });
+        let before = document["desktop"]["zones"].clone();
+        migrate(&mut document);
+        let desktop = &document["desktop"];
+        assert!(desktop.get("zones").is_none(), "the old place is empty");
+        assert_eq!(desktop["snap_zones"], before, "nothing of it is changed");
+        let config = Config::from_json(&document.to_string()).expect("loads");
+        let snap_zones = &config.desktop.snap_zones;
+        assert!(!snap_zones.behavior.enabled);
+        assert_eq!(snap_zones.behavior.snap_threshold, 0.2);
+        assert_eq!(
+            snap_zones.behavior.activation_modifier,
+            Some(crate::snap_zones::SnapZoneModifier::Alt)
+        );
+        assert_eq!(snap_zones.default_layout.id, "mine");
+        assert_eq!(snap_zones.default_layout.zones[0].gap, 4);
+        assert_eq!(
+            snap_zones.extra.0["from_later"], 1,
+            "a key that is not known is kept"
+        );
+        // And is written under its new name only: what is under `zones`
+        // now is the zones of the desktop, as they are by default.
+        let saved = serde_json::to_value(&config).unwrap();
+        assert_eq!(
+            saved["desktop"]["zones"],
+            serde_json::to_value(crate::zones::ZonesConfig::default()).unwrap()
+        );
+        assert!(!has_snap_zones_under_zones(&saved));
+        assert_eq!(saved["desktop"]["snap_zones"]["default_layout"]["id"], "mine");
+
+        // Snap zones already written in the new place win, and the old
+        // place is empty all the same.
+        let mut both = serde_json::json!({ "desktop": { "schema_version": 25,
+            "zones": { "behavior": { "enabled": false } },
+            "snap_zones": { "behavior": { "enabled": true } } } });
+        migrate(&mut both);
+        assert!(both["desktop"].get("zones").is_none());
+        assert_eq!(both["desktop"]["snap_zones"]["behavior"]["enabled"], true);
+
+        // A file without zones reads with the snap zones as they are by default.
+        let mut bare = serde_json::json!({ "desktop": { "schema_version": 25 } });
+        migrate(&mut bare);
+        assert!(bare["desktop"].get("snap_zones").is_none());
+    }
+
+    #[test]
+    fn snap_zones_under_the_old_name_in_a_file_of_26_are_refused() {
+        // Written by hand in the old layout, under the new version: it is
+        // not moved (the name is something else now) and not read wrongly.
+        for zones in [
+            serde_json::json!({ "behavior": { "enabled": false } }),
+            serde_json::json!({ "default_layout": { "id": "mine" } }),
+            serde_json::json!({ "monitor_layouts": [] }),
+        ] {
+            let document = serde_json::json!({ "desktop": { "schema_version": 26, "zones": zones } });
+            let mut migrated = document.clone();
+            migrate(&mut migrated);
+            assert_eq!(migrated, document, "a current file is left as it is");
+            let error = Config::from_json(&document.to_string()).expect_err("refused");
+            assert!(error.to_string().contains("desktop.snap_zones"), "{error}");
+        }
+        // What is under `zones` and is not of the snap zones stops nothing.
+        for zones in [
+            serde_json::json!({}),
+            serde_json::json!({ "enabled": false }),
+        ] {
+            let document = serde_json::json!({ "desktop": { "schema_version": 26, "zones": zones } });
+            let config = Config::from_json(&document.to_string()).expect("loads");
+            assert_eq!(
+                serde_json::to_value(&config.desktop.snap_zones).unwrap(),
+                serde_json::to_value(Config::new().desktop.snap_zones).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn the_zones_of_the_desktop_are_read_and_written_under_zones() {
+        use crate::zones::{Matcher, Rule, RuleAction, ZoneDefinition, ZoneId, ZoneKind, ZonesConfig};
+        // Nothing the zones of the desktop are written with is a key that
+        // only snap zones have: a file gevrek wrote is never refused.
+        let mut filled = ZonesConfig {
+            enabled: true,
+            zones: vec![
+                ZoneDefinition::manual("papers", "Papers"),
+                ZoneDefinition {
+                    kind: ZoneKind::Portal { directory: "/home/ada/Downloads".to_string() },
+                    tab_group: Some("side".to_string()),
+                    ..ZoneDefinition::manual("downloads", "Downloads")
+                },
+                ZoneDefinition {
+                    kind: ZoneKind::Smart { query: vec![Matcher::Untouched { days: 30 }] },
+                    ..ZoneDefinition::manual("stale", "Stale")
+                },
+            ],
+            rules: vec![Rule {
+                name: "papers".to_string(),
+                matchers: vec![
+                    Matcher::Extension { any_of: vec!["pdf".to_string()] },
+                    Matcher::Size { at_least: Some(1), at_most: None },
+                ],
+                action: RuleAction::AssignToZone { zone: ZoneId::new("papers") },
+                ..Rule::default()
+            }],
+            catch_all: Some(RuleAction::MoveToFolder { folder: "/home/ada/Sorted".to_string() }),
+            ..ZonesConfig::default()
+        };
+        filled.look.opacity = Some(70);
+        filled.snap.grid = 16;
+        for zones in [ZonesConfig::default(), filled] {
+            let mut config = Config::new();
+            config.desktop.zones = zones.clone();
+            let text = serde_json::to_string_pretty(&config).unwrap();
+            let written: Value = serde_json::from_str(&text).unwrap();
+            for key in SNAP_ZONE_KEYS {
+                assert!(written["desktop"]["zones"].get(key).is_none(), "{key}");
+            }
+            assert!(!has_snap_zones_under_zones(&written));
+            let read = Config::from_json(&text).expect("what gevrek wrote is read");
+            assert_eq!(read.desktop.zones, zones);
+            assert_eq!(serde_json::to_string_pretty(&read).unwrap(), text, "and written as it was");
+            let errors: Vec<_> = read
+                .desktop
+                .validate()
+                .into_iter()
+                .filter(|issue| issue.path.starts_with("desktop.zones"))
+                .collect();
+            assert!(errors.is_empty(), "{errors:?}");
+        }
+        // Off, unless a file says otherwise.
+        assert!(!Config::new().desktop.zones.enabled);
+        // The old shape under the new version is refused all the same, also
+        // beside keys that are of the new zones.
+        let mixed = serde_json::json!({ "desktop": { "schema_version": 26, "zones": {
+            "enabled": true, "zones": [], "behavior": { "enabled": true } } } });
+        let error = Config::from_json(&mixed.to_string()).expect_err("refused");
+        assert!(error.to_string().contains("desktop.snap_zones"), "{error}");
+        // And a file from before 26 that has both: its `zones` were snap
+        // zones and become that; the new section starts as it is by default.
+        let old = serde_json::json!({ "desktop": { "schema_version": 25, "zones": {
+            "behavior": { "enabled": false } } } });
+        let config = Config::from_json(&old.to_string()).expect("migrated");
+        assert!(!config.desktop.snap_zones.behavior.enabled);
+        assert_eq!(config.desktop.zones, ZonesConfig::default());
     }
 
     #[test]

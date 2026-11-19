@@ -1,0 +1,18 @@
+[package]
+name = "gevrek-zones"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Zones: containers on the desktop that hold its icons. The portable half: no system API, no drawing."
+
+[features]
+# The backend in memory (`testing::FakeBackend`) for crates that test
+# against the zones.
+test-support = []
+
+[dependencies]
+gevrek-model = { path = "../model" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }

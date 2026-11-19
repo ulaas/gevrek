@@ -14,6 +14,9 @@ use std::collections::HashMap;
 mod reconcile;
 pub use reconcile::MonitorChanges;
 
+#[path = "outputs_edid.rs"]
+pub mod edid;
+
 pub use gevrek_model::ids::OutputId as MonitorHandle;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +28,17 @@ pub struct MonitorInfo {
     /// Falls back to the GDI device name (`\\.\DISPLAY1`).
     #[serde(default)]
     pub device_path: String,
+    /// Who the display is, wherever it is plugged in: made of its EDID
+    /// (maker, product code, serial number: `GSM-5B7F-0004E2A1`), so the
+    /// same on another port or connector and on the other system. A display
+    /// that gives no serial number ends in `-noserial`, and one of two such
+    /// twins in `#1`, `#2` by where they are plugged in; one without an
+    /// EDID is known by its place alone (`port:HDMI-A-1`). See [`edid`].
+    ///
+    /// Nothing is found by it yet: workspaces, profiles and what is kept
+    /// over a restart go by `device_path` and the name.
+    #[serde(default)]
+    pub stable_id: String,
     pub is_primary: bool,
 
     // Full monitor rectangle
@@ -85,6 +99,40 @@ pub fn number_same_names(monitors: &mut [MonitorInfo]) {
         for (number, index) in twins.into_iter().enumerate() {
             let name = monitors[index].name.trim().to_string();
             monitors[index].name = format!("{name} ({})", number + 1);
+        }
+    }
+}
+
+/// Tell displays apart that have the same id: two of one model that give no
+/// serial number (or the same one) have the same EDID to the last byte.
+/// Each gets a number after its id, `GSM-5B7F-noserial#1` and `#2`, by the
+/// device path as in `number_same_names`. That number stays with the port
+/// (it is all there is to go by), and a twin that is left alone, the other
+/// unplugged, has the id without a number. An id that is alone is left as
+/// it is.
+pub fn number_same_stable_ids(monitors: &mut [MonitorInfo]) {
+    let mut by_id: HashMap<String, Vec<usize>> = HashMap::new();
+    for (index, monitor) in monitors.iter().enumerate() {
+        if !monitor.stable_id.is_empty() {
+            by_id
+                .entry(monitor.stable_id.clone())
+                .or_default()
+                .push(index);
+        }
+    }
+    for mut twins in by_id.into_values().filter(|twins| twins.len() > 1) {
+        twins.sort_by(|a, b| {
+            let (a, b) = (&monitors[*a], &monitors[*b]);
+            a.device_path
+                .to_lowercase()
+                .cmp(&b.device_path.to_lowercase())
+                .then((a.x, a.y).cmp(&(b.x, b.y)))
+                .then(a.handle.0.cmp(&b.handle.0))
+        });
+        for (number, index) in twins.into_iter().enumerate() {
+            monitors[index]
+                .stable_id
+                .push_str(&format!("#{}", number + 1));
         }
     }
 }
@@ -550,6 +598,7 @@ impl Outputs {
                 handle,
                 name: name.to_string(),
                 device_path: String::new(),
+                stable_id: edid::stable_id_of_place(name),
                 is_primary: self.primary_monitor.is_none(),
                 x: 0,
                 y: 0,
@@ -1318,6 +1367,7 @@ mod tests {
             handle: MonitorHandle(handle),
             name: name.to_string(),
             device_path: path.to_string(),
+            stable_id: String::new(),
             is_primary: handle == 1,
             x,
             y: 0,
@@ -1476,6 +1526,46 @@ mod tests {
     }
 
     #[test]
+    fn displays_with_the_same_id_are_told_apart_by_where_they_are_plugged_in() {
+        let with_id = |handle, path: &str, id: &str| {
+            let mut display = named(handle, "LG ULTRAGEAR", path, 0);
+            display.stable_id = id.to_string();
+            display
+        };
+        let mut monitors = vec![
+            with_id(1, "port-b", "GSM-5B7F-noserial"),
+            with_id(2, "port-c", "GSM-5C4D-0004E2A1"),
+            with_id(3, "port-a", "GSM-5B7F-noserial"),
+            // (A display the backend gave no id.)
+            with_id(4, "port-d", ""),
+            with_id(5, "port-e", ""),
+        ];
+        number_same_stable_ids(&mut monitors);
+        let ids: Vec<&str> = monitors
+            .iter()
+            .map(|monitor| monitor.stable_id.as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                "GSM-5B7F-noserial#2",
+                "GSM-5C4D-0004E2A1",
+                "GSM-5B7F-noserial#1",
+                "",
+                ""
+            ]
+        );
+    }
+
+    #[test]
+    fn a_test_monitor_is_known_by_its_place() {
+        let mut outputs = Outputs::new();
+        outputs.add_test_monitor(MonitorHandle(1), "Monitor A");
+        let display = outputs.get_monitor(MonitorHandle(1)).unwrap();
+        assert_eq!(display.stable_id, "port:Monitor A");
+    }
+
+    #[test]
     fn displays_of_one_model_get_a_number_each_and_keep_it() {
         let mut monitors = vec![
             named(1, "DELL U2720Q", "port-c", 0),
@@ -1556,6 +1646,7 @@ mod tests {
             handle: MonitorHandle(handle),
             name: name.to_string(),
             device_path: String::new(),
+            stable_id: String::new(),
             is_primary,
             x,
             y,

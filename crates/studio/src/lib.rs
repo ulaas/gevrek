@@ -45,4 +45,4 @@ pub mod theme_card;
 pub mod tryout;
 pub mod wallpaper_preview;
 pub mod welcome;
-pub mod zones_edit;
+pub mod snap_zones_edit;

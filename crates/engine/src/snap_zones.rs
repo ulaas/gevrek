@@ -1,14 +1,16 @@
 use crate::container::Rect;
 use crate::outputs::{MonitorHandle, Outputs as MonitorManager};
 use crate::WindowHandle;
-pub use gevrek_model::zones::{presets, Zone, ZoneConfig, ZoneLayout, ZoneModifier};
+pub use gevrek_model::snap_zones::{
+    presets, SnapZone, SnapZoneConfig, SnapZoneLayout, SnapZoneModifier,
+};
 use std::collections::HashMap;
 
 /// Result of zone detection
 #[derive(Debug, Clone)]
-pub struct ZoneHit {
+pub struct SnapZoneHit {
     /// The zone that was hit
-    pub zone: Zone,
+    pub zone: SnapZone,
     /// The actual pixel rect of the zone
     pub rect: Rect,
     /// Overlap percentage (0.0 to 1.0)
@@ -18,24 +20,24 @@ pub struct ZoneHit {
 }
 
 /// Zone manager for handling zone layouts per monitor
-pub struct ZoneManager {
+pub struct SnapZoneManager {
     /// Configuration
-    config: ZoneConfig,
+    config: SnapZoneConfig,
     /// Layout per monitor (monitor handle -> layout)
-    layouts: HashMap<MonitorHandle, ZoneLayout>,
+    layouts: HashMap<MonitorHandle, SnapZoneLayout>,
     /// Default layout for monitors without specific assignment
-    default_layout: ZoneLayout,
+    default_layout: SnapZoneLayout,
     /// Currently highlighted zone during drag
-    active_zone: Option<ZoneHit>,
+    active_zone: Option<SnapZoneHit>,
     /// Windows assigned to zones (window -> (monitor, zone_id))
     window_zones: HashMap<WindowHandle, (MonitorHandle, usize)>,
     /// Asks the backend whether a modifier key is held. Without one, a
     /// configured activation modifier counts as not held.
-    modifier_probe: fn(ZoneModifier) -> bool,
+    modifier_probe: fn(SnapZoneModifier) -> bool,
 }
 
-impl ZoneManager {
-    pub fn new(config: ZoneConfig) -> Self {
+impl SnapZoneManager {
+    pub fn new(config: SnapZoneConfig) -> Self {
         Self {
             config,
             layouts: HashMap::new(),
@@ -47,21 +49,21 @@ impl ZoneManager {
     }
 
     /// Give the manager the backend's way to read modifier keys.
-    pub fn with_modifier_probe(mut self, probe: fn(ZoneModifier) -> bool) -> Self {
+    pub fn with_modifier_probe(mut self, probe: fn(SnapZoneModifier) -> bool) -> Self {
         self.modifier_probe = probe;
         self
     }
 
-    pub fn with_default_layout(mut self, layout: ZoneLayout) -> Self {
+    pub fn with_default_layout(mut self, layout: SnapZoneLayout) -> Self {
         self.default_layout = layout;
         self
     }
 
-    pub fn set_config(&mut self, config: ZoneConfig) {
+    pub fn set_config(&mut self, config: SnapZoneConfig) {
         self.config = config;
     }
 
-    pub fn config(&self) -> &ZoneConfig {
+    pub fn config(&self) -> &SnapZoneConfig {
         &self.config
     }
 
@@ -77,17 +79,17 @@ impl ZoneManager {
     }
 
     /// Set layout for a specific monitor
-    pub fn set_monitor_layout(&mut self, monitor: MonitorHandle, layout: ZoneLayout) {
+    pub fn set_monitor_layout(&mut self, monitor: MonitorHandle, layout: SnapZoneLayout) {
         self.layouts.insert(monitor, layout);
     }
 
     /// Get layout for a monitor (returns default if not set)
-    pub fn get_monitor_layout(&self, monitor: MonitorHandle) -> &ZoneLayout {
+    pub fn get_monitor_layout(&self, monitor: MonitorHandle) -> &SnapZoneLayout {
         self.layouts.get(&monitor).unwrap_or(&self.default_layout)
     }
 
     /// Set the default layout
-    pub fn set_default_layout(&mut self, layout: ZoneLayout) {
+    pub fn set_default_layout(&mut self, layout: SnapZoneLayout) {
         self.default_layout = layout;
     }
 
@@ -97,7 +99,7 @@ impl ZoneManager {
         cursor_x: i32,
         cursor_y: i32,
         monitor_manager: &MonitorManager,
-    ) -> Option<ZoneHit> {
+    ) -> Option<SnapZoneHit> {
         if !self.is_enabled() {
             return None;
         }
@@ -121,7 +123,7 @@ impl ZoneManager {
         let layout = self.get_monitor_layout(current_monitor.handle);
 
         // Find zone containing cursor (prefer higher priority)
-        let mut best_zone: Option<&Zone> = None;
+        let mut best_zone: Option<&SnapZone> = None;
         for zone in &layout.zones {
             if zone.contains_point(&work_area, cursor_x, cursor_y)
                 && (best_zone.is_none() || zone.priority > best_zone.unwrap().priority)
@@ -130,7 +132,7 @@ impl ZoneManager {
             }
         }
 
-        best_zone.map(|z| ZoneHit {
+        best_zone.map(|z| SnapZoneHit {
             zone: z.clone(),
             rect: z.to_rect(&work_area),
             overlap: 1.0,
@@ -143,7 +145,7 @@ impl ZoneManager {
         &self,
         window_rect: &Rect,
         monitor_manager: &MonitorManager,
-    ) -> Option<ZoneHit> {
+    ) -> Option<SnapZoneHit> {
         if !self.is_enabled() {
             return None;
         }
@@ -170,7 +172,7 @@ impl ZoneManager {
         let layout = self.get_monitor_layout(current_monitor.handle);
 
         // Find zone with best overlap (considering priority)
-        let mut best_hit: Option<ZoneHit> = None;
+        let mut best_hit: Option<SnapZoneHit> = None;
 
         for zone in &layout.zones {
             let overlap = zone.overlaps(&work_area, window_rect);
@@ -185,7 +187,7 @@ impl ZoneManager {
                 };
 
                 if is_better {
-                    best_hit = Some(ZoneHit {
+                    best_hit = Some(SnapZoneHit {
                         zone: zone.clone(),
                         rect: zone.to_rect(&work_area),
                         overlap,
@@ -203,7 +205,7 @@ impl ZoneManager {
         &self,
         monitor: MonitorHandle,
         monitor_manager: &MonitorManager,
-    ) -> Vec<(Zone, Rect)> {
+    ) -> Vec<(SnapZone, Rect)> {
         let monitors = monitor_manager.get_all_monitors();
         let monitor_info = monitors.iter().find(|m| m.handle == monitor);
 
@@ -222,12 +224,12 @@ impl ZoneManager {
     }
 
     /// Set the currently active (highlighted) zone during drag
-    pub fn set_active_zone(&mut self, zone: Option<ZoneHit>) {
+    pub fn set_active_zone(&mut self, zone: Option<SnapZoneHit>) {
         self.active_zone = zone;
     }
 
     /// Get the currently active zone
-    pub fn get_active_zone(&self) -> Option<&ZoneHit> {
+    pub fn get_active_zone(&self) -> Option<&SnapZoneHit> {
         self.active_zone.as_ref()
     }
 
@@ -278,9 +280,9 @@ impl ZoneManager {
     }
 }
 
-impl Default for ZoneManager {
+impl Default for SnapZoneManager {
     fn default() -> Self {
-        Self::new(ZoneConfig::default())
+        Self::new(SnapZoneConfig::default())
     }
 }
 
@@ -290,7 +292,7 @@ mod tests {
 
     #[test]
     fn test_zone_to_rect() {
-        let zone = Zone::new(0, 0.0, 0.0, 0.5, 1.0).with_gap(0);
+        let zone = SnapZone::new(0, 0.0, 0.0, 0.5, 1.0).with_gap(0);
         let work_area = Rect::new(0, 0, 1920, 1080);
         let rect = zone.to_rect(&work_area);
 
@@ -302,7 +304,7 @@ mod tests {
 
     #[test]
     fn test_zone_with_gap() {
-        let zone = Zone::new(0, 0.0, 0.0, 0.5, 1.0).with_gap(10);
+        let zone = SnapZone::new(0, 0.0, 0.0, 0.5, 1.0).with_gap(10);
         let work_area = Rect::new(0, 0, 1920, 1080);
         let rect = zone.to_rect(&work_area);
 
@@ -314,7 +316,7 @@ mod tests {
 
     #[test]
     fn test_zone_contains_point() {
-        let zone = Zone::new(0, 0.0, 0.0, 0.5, 1.0).with_gap(0);
+        let zone = SnapZone::new(0, 0.0, 0.0, 0.5, 1.0).with_gap(0);
         let work_area = Rect::new(0, 0, 1920, 1080);
 
         assert!(zone.contains_point(&work_area, 100, 100));
@@ -333,7 +335,7 @@ mod tests {
 
     #[test]
     fn test_zone_overlap() {
-        let zone = Zone::new(0, 0.0, 0.0, 0.5, 1.0).with_gap(0);
+        let zone = SnapZone::new(0, 0.0, 0.0, 0.5, 1.0).with_gap(0);
         let work_area = Rect::new(0, 0, 1920, 1080);
 
         // Window fully inside zone

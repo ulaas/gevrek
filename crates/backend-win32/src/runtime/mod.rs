@@ -22,12 +22,12 @@ use crate::config::Config;
 use crate::dwm::HwndExt;
 use crate::dwm::{
     FocusManager, MonitorManager, OverlayData, RuleEngine, WindowManager, WindowMonitor,
-    ZoneManager,
+    SnapZoneManager,
 };
 use crate::hotkey::{GestureEvent, GesturePhase, GestureRegistration, Hotkey, HotkeyManager};
 use crate::node_editor::LogEntry;
 use crate::persistence::PersistenceManager;
-use crate::settings::{DesktopConfig, ReservedArea, WorkspaceProfile, ZoneSettings};
+use crate::settings::{DesktopConfig, ReservedArea, WorkspaceProfile, SnapZoneSettings};
 use anyhow::Result;
 use std::collections::HashSet;
 use std::sync::mpsc::Receiver;
@@ -246,18 +246,18 @@ fn carried_by_hand(window: crate::dwm::WindowHandle) -> bool {
     }
 }
 
-fn zone_modifier_held(modifier: crate::dwm::ZoneModifier) -> bool {
-    use crate::dwm::ZoneModifier;
+fn snap_zone_modifier_held(modifier: crate::dwm::SnapZoneModifier) -> bool {
+    use crate::dwm::SnapZoneModifier;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         GetAsyncKeyState, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
     };
     // SAFETY: GetAsyncKeyState has no preconditions.
     let pressed = |key: VIRTUAL_KEY| unsafe { GetAsyncKeyState(key.0 as i32) < 0 };
     match modifier {
-        ZoneModifier::Shift => pressed(VK_SHIFT),
-        ZoneModifier::Control => pressed(VK_CONTROL),
-        ZoneModifier::Alt => pressed(VK_MENU),
-        ZoneModifier::Win => pressed(VK_LWIN) || pressed(VK_RWIN),
+        SnapZoneModifier::Shift => pressed(VK_SHIFT),
+        SnapZoneModifier::Control => pressed(VK_CONTROL),
+        SnapZoneModifier::Alt => pressed(VK_MENU),
+        SnapZoneModifier::Win => pressed(VK_LWIN) || pressed(VK_RWIN),
     }
 }
 
@@ -382,8 +382,8 @@ impl Runtime {
         let focus_manager = FocusManager::with_config(config.desktop.focus.clone());
         log::debug!("FocusManager created");
 
-        let zone_manager = Self::build_zone_manager(&config.desktop.zones, &monitor_manager);
-        log::debug!("ZoneManager created");
+        let snap_zone_manager = Self::build_snap_zone_manager(&config.desktop.snap_zones, &monitor_manager);
+        log::debug!("SnapZoneManager created");
 
         let persistence = PersistenceManager::new();
         log::debug!(
@@ -405,7 +405,7 @@ impl Runtime {
             config,
             window_manager,
             window_monitor,
-            core: core::WmCore::new(executor, monitor_manager, focus_manager, zone_manager),
+            core: core::WmCore::new(executor, monitor_manager, focus_manager, snap_zone_manager),
             hotkey_manager,
             registered_hotkey_ids: Vec::new(),
             active_binding_submap: "default".to_string(),
@@ -1429,7 +1429,7 @@ impl Runtime {
                 if let Err(e) = self.core.executor.process_pending_drags(
                     &mut self.window_manager,
                     &mut self.core.monitor_manager,
-                    &mut self.core.zone_manager,
+                    &mut self.core.snap_zone_manager,
                 ) {
                     log::error!("Error processing pending drags: {}", e);
                 }
@@ -1450,7 +1450,7 @@ impl Runtime {
                 self.core.executor.cleanup_stale_members(
                     &self.window_manager,
                     &mut self.core.monitor_manager,
-                    &mut self.core.zone_manager,
+                    &mut self.core.snap_zone_manager,
                 );
                 match self.window_manager.cleanup_stale_borders() {
                     Ok(count) if count > 0 => {
@@ -2270,8 +2270,8 @@ impl Runtime {
                 log::warn!("Could not create workspaces for a new monitor: {}", error);
             }
         }
-        self.core.zone_manager =
-            Self::build_zone_manager(&self.config.desktop.zones, &self.core.monitor_manager);
+        self.core.snap_zone_manager =
+            Self::build_snap_zone_manager(&self.config.desktop.snap_zones, &self.core.monitor_manager);
         self.core.executor.apply_monitor_changes(
             &mut self.window_manager,
             &self.core.monitor_manager,
@@ -2280,14 +2280,14 @@ impl Runtime {
         self.send_debug_overlay_data(Some("Display configuration changed".to_string()));
     }
 
-    fn build_zone_manager(
-        settings: &ZoneSettings,
+    fn build_snap_zone_manager(
+        settings: &SnapZoneSettings,
         monitor_manager: &MonitorManager,
-    ) -> ZoneManager {
-        gevrek_engine::config_apply::build_zone_manager(
+    ) -> SnapZoneManager {
+        gevrek_engine::config_apply::build_snap_zone_manager(
             settings,
             monitor_manager,
-            zone_modifier_held,
+            snap_zone_modifier_held,
         )
     }
 

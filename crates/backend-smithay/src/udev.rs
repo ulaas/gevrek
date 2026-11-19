@@ -498,6 +498,37 @@ pub fn run(
     Ok(())
 }
 
+/// Who the display on a connector is wherever it is plugged in
+/// (`MonitorInfo::stable_id`): of the EDID the kernel read from it, which
+/// it gives as the connector's property `EDID`. A display that gives none
+/// (or one that cannot be read) is known by its connector.
+fn stable_id_of(drm: &DrmDevice, connector: connector::Handle, name: &str) -> String {
+    use gevrek_engine::outputs::edid::{stable_id_of_place, Edid};
+    let edid = drm.get_properties(connector).ok().and_then(|properties| {
+        properties.iter().find_map(|(property, value)| {
+            let about = drm.get_property(*property).ok()?;
+            if about.name().to_bytes() != b"EDID" {
+                return None;
+            }
+            // The property's value is the number of the blob that holds
+            // the bytes; 0 when the display sent none.
+            let bytes = drm.get_property_blob(*value).ok()?;
+            Edid::parse(&bytes)
+        })
+    });
+    match edid {
+        Some(edid) => {
+            let id = edid.stable_id();
+            log::info!("{name} is {id} ({:?})", edid.name.unwrap_or_default());
+            id
+        }
+        None => {
+            log::info!("{name} gives no EDID: known by its connector");
+            stable_id_of_place(name)
+        }
+    }
+}
+
 /// Bring the outputs in line with the displays that are connected now: a
 /// display that appeared gets an output to the right of the others, at its
 /// preferred mode; one that is gone loses its output, and the engine moves
@@ -595,7 +626,7 @@ fn scan_outputs(hardware: &mut Hardware, state: &mut State) {
         };
         // The engine works in logical pixels: the mode divided by the scale.
         let scale = state.configured_scale(&name);
-        let output = state.add_scaled_output(
+        let output = state.add_identified_output(
             &name,
             Rect::new(
                 next_x,
@@ -604,6 +635,7 @@ fn scan_outputs(hardware: &mut Hardware, state: &mut State) {
                 (f64::from(height) / scale).round() as i32,
             ),
             scale,
+            stable_id_of(&hardware.drm, handle, &name),
         );
         // A display that stands on its side or on its head: the picture
         // is turned for it (and is then as wide as the display is high).

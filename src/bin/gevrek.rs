@@ -1105,14 +1105,17 @@ enum Commands {
     /// Restart a configured startup application
     StartupRestart { id: String },
 
-    /// Snap the active window to a zero-based zone index
-    Zone { index: usize },
+    /// Snap the active window to a zero-based snap zone index
+    #[command(alias = "zone")]
+    SnapZone { index: usize },
 
-    /// Snap the active window to the next zone
-    ZoneNext,
+    /// Snap the active window to the next snap zone
+    #[command(alias = "zone-next")]
+    SnapZoneNext,
 
-    /// Snap the active window to the previous zone
-    ZonePrevious,
+    /// Snap the active window to the previous snap zone
+    #[command(alias = "zone-previous")]
+    SnapZonePrevious,
 
     /// Enter a named advanced-binding submap
     Submap { name: String },
@@ -2241,6 +2244,10 @@ async fn show_state(address: &str) -> Result<()> {
             "    Primary: {} · Focused: {}",
             monitor.is_primary, monitor.is_focused
         );
+        // Who the display is wherever it is plugged in (of its EDID).
+        if !monitor.stable_id.is_empty() {
+            println!("    Stable id: {}", monitor.stable_id);
+        }
     }
     println!();
 
@@ -5290,7 +5297,7 @@ async fn run() -> Result<()> {
             request.argument = id;
             dispatch_command(&cli.address, request, "Restarted startup application").await?;
         }
-        Commands::Zone { index } => {
+        Commands::SnapZone { index } => {
             let mut request = dispatch_request(proto::DispatchType::SnapActiveToZone);
             request.x = index as i32;
             dispatch_command(
@@ -5300,7 +5307,7 @@ async fn run() -> Result<()> {
             )
             .await?;
         }
-        Commands::ZoneNext => {
+        Commands::SnapZoneNext => {
             dispatch_command(
                 &cli.address,
                 dispatch_request(proto::DispatchType::CycleActiveZoneNext),
@@ -5308,7 +5315,7 @@ async fn run() -> Result<()> {
             )
             .await?;
         }
-        Commands::ZonePrevious => {
+        Commands::SnapZonePrevious => {
             dispatch_command(
                 &cli.address,
                 dispatch_request(proto::DispatchType::CycleActiveZonePrevious),
@@ -5870,6 +5877,30 @@ mod tests {
             Commands::FocusWindow { selector }
                 if selector == "class:WindowsTerminal"
         ));
+    }
+
+    #[test]
+    fn snap_zone_commands_parse_and_their_old_names_still_do() {
+        for name in ["snap-zone", "zone"] {
+            assert!(matches!(
+                read(["gevrek", name, "2"]).unwrap().command,
+                Commands::SnapZone { index: 2 }
+            ));
+        }
+        for name in ["snap-zone-next", "zone-next"] {
+            assert!(matches!(
+                read(["gevrek", name]).unwrap().command,
+                Commands::SnapZoneNext
+            ));
+        }
+        for name in ["snap-zone-previous", "zone-previous"] {
+            assert!(matches!(
+                read(["gevrek", name]).unwrap().command,
+                Commands::SnapZonePrevious
+            ));
+        }
+        // The plural is not one of them: it is kept for something else.
+        assert!(read(["gevrek", "zones"]).is_err());
     }
 
     #[test]

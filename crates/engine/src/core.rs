@@ -16,7 +16,7 @@ use crate::events::WindowEvent;
 use crate::executor::Executor;
 use crate::focus_manager::FocusManager;
 use crate::outputs::Outputs as MonitorManager;
-use crate::zones::ZoneManager;
+use crate::snap_zones::SnapZoneManager;
 use anyhow::Result;
 
 pub struct WmCore {
@@ -24,7 +24,7 @@ pub struct WmCore {
     /// Outputs and their workspaces.
     pub monitor_manager: MonitorManager,
     pub focus_manager: FocusManager,
-    pub zone_manager: ZoneManager,
+    pub snap_zone_manager: SnapZoneManager,
     /// The colour that stands out in the wallpaper, where the backend
     /// draws one and has looked: a theme whose accent is `wallpaper`
     /// takes it.
@@ -36,13 +36,13 @@ impl WmCore {
         executor: Executor,
         monitor_manager: MonitorManager,
         focus_manager: FocusManager,
-        zone_manager: ZoneManager,
+        snap_zone_manager: SnapZoneManager,
     ) -> Self {
         Self {
             executor,
             monitor_manager,
             focus_manager,
-            zone_manager,
+            snap_zone_manager,
             wallpaper_accent: None,
         }
     }
@@ -67,7 +67,7 @@ impl WmCore {
         self.executor.execute_window_event(
             backend,
             &mut self.monitor_manager,
-            &mut self.zone_manager,
+            &mut self.snap_zone_manager,
             &mut self.focus_manager,
             event,
         )
@@ -82,7 +82,7 @@ impl WmCore {
         self.executor.execute_dispatch(
             backend,
             &mut self.monitor_manager,
-            &mut self.zone_manager,
+            &mut self.snap_zone_manager,
             &mut self.focus_manager,
             command,
         )

@@ -18,7 +18,7 @@ use crate::outputs::{MonitorHandle, Outputs};
 use crate::spoil::Chance;
 use crate::rules::RuleEngine;
 use crate::testing::fake_desktop::FakeDesktop;
-use crate::zones::ZoneManager;
+use crate::snap_zones::SnapZoneManager;
 use crate::{Rect, WindowHandle};
 use gevrek_model::command::DispatchCommand;
 use gevrek_model::graph::NodeGraph;
@@ -35,6 +35,7 @@ fn second() -> crate::outputs::MonitorInfo {
         handle: SECOND,
         name: "Second".to_string(),
         device_path: String::new(),
+        stable_id: String::new(),
         is_primary: false,
         x: SECOND_AT.x,
         y: SECOND_AT.y,
@@ -207,7 +208,7 @@ fn desk(two: bool) -> (WmCore, FakeDesktop, Arc<Mutex<RuleEngine>>) {
         executor,
         outputs,
         FocusManager::new(),
-        ZoneManager::new(Default::default()),
+        SnapZoneManager::new(Default::default()),
     );
     let (mut core, mut desktop) = (core, FakeDesktop::new(OUTPUT));
     if two {

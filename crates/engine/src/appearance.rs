@@ -272,6 +272,7 @@ impl WmCore {
                 handle: info.handle,
                 name: info.name.clone(),
                 connector: info.device_path.clone(),
+                stable_id: info.stable_id.clone(),
                 is_primary: info.is_primary,
                 is_focused: focused_monitor == Some(info.handle),
                 workspace: active_workspace,

@@ -14,7 +14,7 @@ use egui::{RichText, Ui};
 use gevrek_ui::{icons, theme};
 use serde_json::{json, Value};
 
-const ZONES: &str = "/desktop/zones";
+const SNAP_ZONES: &str = "/desktop/snap_zones";
 /// The least share of a display a zone is wide or high.
 const LEAST: f32 = 0.05;
 /// How near (in shares of the display) an edge catches on another.
@@ -146,7 +146,7 @@ pub fn another(zones: &[Value]) -> Value {
     let id = (0u64..)
         .find(|id| !zones.iter().any(|zone| zone["id"].as_u64() == Some(*id)))
         .unwrap_or(0);
-    let zone = gevrek_model::zones::Zone::new(id as usize, 0.25, 0.25, 0.5, 0.5);
+    let zone = gevrek_model::snap_zones::SnapZone::new(id as usize, 0.25, 0.25, 0.5, 0.5);
     serde_json::to_value(zone).unwrap_or(Value::Null)
 }
 
@@ -159,26 +159,26 @@ struct Drag {
 
 /// What the card remembers between frames.
 #[derive(Default)]
-pub struct ZonesEdit {
+pub struct SnapZonesEdit {
     /// 0: the layout of every display; n: the n-th display's own.
     which: usize,
     chosen: Option<usize>,
     drag: Option<Drag>,
 }
 
-impl ZonesEdit {
+impl SnapZonesEdit {
     /// Where the layout that is edited stands in the configuration.
     fn layout(&self) -> String {
         match self.which {
-            0 => format!("{ZONES}/default_layout"),
-            own => format!("{ZONES}/monitor_layouts/{}/layout", own - 1),
+            0 => format!("{SNAP_ZONES}/default_layout"),
+            own => format!("{SNAP_ZONES}/monitor_layouts/{}/layout", own - 1),
         }
     }
 
     pub fn show(&mut self, ui: &mut Ui, document: &mut Document) {
         let palette = theme::pal(ui.ctx());
         let own: Vec<String> = document
-            .get(&format!("{ZONES}/monitor_layouts"))
+            .get(&format!("{SNAP_ZONES}/monitor_layouts"))
             .and_then(Value::as_array)
             .map(|layouts| {
                 layouts
@@ -225,7 +225,7 @@ impl ZonesEdit {
             egui::ComboBox::from_id_salt("zones begun from")
                 .selected_text(called)
                 .show_ui(ui, |ui| {
-                    for preset in gevrek_model::zones::presets::all() {
+                    for preset in gevrek_model::snap_zones::presets::all() {
                         if ui
                             .selectable_label(false, &preset.name)
                             .on_hover_text(&preset.description)
@@ -431,7 +431,7 @@ impl ZonesEdit {
                 if self.which > 0 {
                     crate::form::Form::new(document).only(
                         ui,
-                        &format!("{ZONES}/monitor_layouts/{}", self.which - 1),
+                        &format!("{SNAP_ZONES}/monitor_layouts/{}", self.which - 1),
                         &["enabled", "monitor"],
                     );
                 }
@@ -460,13 +460,13 @@ impl ZonesEdit {
             });
         if add_own {
             let copy = document.get(&layout).cloned().unwrap_or(Value::Null);
-            let mut own = serde_json::to_value(gevrek_model::settings::MonitorZoneLayout::default())
+            let mut own = serde_json::to_value(gevrek_model::settings::MonitorSnapZoneLayout::default())
                 .unwrap_or_else(|_| json!({}));
             if !copy.is_null() {
                 own["layout"] = copy;
             }
             let mut count = 0;
-            document.edit(&format!("{ZONES}/monitor_layouts"), |layouts| {
+            document.edit(&format!("{SNAP_ZONES}/monitor_layouts"), |layouts| {
                 if let Some(layouts) = layouts.as_array_mut() {
                     layouts.push(own);
                     count = layouts.len();
@@ -480,7 +480,7 @@ impl ZonesEdit {
         }
         if remove_own {
             let at = self.which - 1;
-            document.edit(&format!("{ZONES}/monitor_layouts"), |layouts| {
+            document.edit(&format!("{SNAP_ZONES}/monitor_layouts"), |layouts| {
                 if let Some(layouts) = layouts.as_array_mut() {
                     if at < layouts.len() {
                         layouts.remove(at);

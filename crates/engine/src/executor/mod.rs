@@ -26,7 +26,7 @@ use crate::rules::{RuleResolution, RuleResolutionScope};
 use crate::scratchpads::{self, Scratchpads, Toggle};
 use crate::workspace_profile::WorkspaceProfileApply;
 use crate::workspaces;
-use crate::zones::ZoneManager;
+use crate::snap_zones::SnapZoneManager;
 use crate::WindowHandle;
 use anyhow::Result;
 use gevrek_model::command::{

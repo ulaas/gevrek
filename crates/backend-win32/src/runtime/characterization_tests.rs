@@ -37,7 +37,7 @@ fn drive(runtime: &mut Runtime, events: Vec<WindowEvent>) {
             .execute_window_event(
                 &mut runtime.window_manager,
                 &mut runtime.core.monitor_manager,
-                &mut runtime.core.zone_manager,
+                &mut runtime.core.snap_zone_manager,
                 &mut runtime.core.focus_manager,
                 event,
             )
@@ -312,6 +312,7 @@ fn display(handle: isize, name: &str, primary: bool, x: i32) -> MonitorInfo {
         handle: MonitorHandle(handle),
         name: name.to_string(),
         device_path: String::new(),
+        stable_id: String::new(),
         is_primary: primary,
         x,
         y: 0,

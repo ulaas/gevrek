@@ -87,7 +87,7 @@ pub struct ConfigDiff {
     pub focus: bool,
     /// Monitor profiles or the global work-area offset.
     pub monitors: bool,
-    pub zones: bool,
+    pub snap_zones: bool,
     pub scratchpads: bool,
     /// Workspace profiles that are new or edited (lower-case names).
     pub profiles: HashSet<String>,
@@ -115,7 +115,7 @@ impl ConfigDiff {
             monitors: !same(&before.monitors, &after.monitors)
                 || !same(&before.work_area_offset, &after.work_area_offset)
                 || !same(&before.shell.panel, &after.shell.panel),
-            zones: !same(&before.zones, &after.zones),
+            snap_zones: !same(&before.snap_zones, &after.snap_zones),
             scratchpads: !same(&before.scratchpads, &after.scratchpads),
             profiles: changed_profile_names(&before.workspaces, &after.workspaces),
         }
@@ -131,9 +131,9 @@ impl ConfigDiff {
         self.appearance || !self.profiles.is_empty()
     }
 
-    /// Zone layouts depend on the monitors as well.
-    pub fn rebuilds_zones(&self) -> bool {
-        self.monitors || self.zones
+    /// Snap zone layouts depend on the monitors as well.
+    pub fn rebuilds_snap_zones(&self) -> bool {
+        self.monitors || self.snap_zones
     }
 }
 
@@ -152,8 +152,8 @@ pub enum ReloadStep {
     Focus,
     /// Monitor profiles or the global work-area offset changed.
     Monitors,
-    /// Zone layouts changed, or the monitors they depend on.
-    Zones,
+    /// Snap zone layouts changed, or the monitors they depend on.
+    SnapZones,
     /// The window rules are rebuilt.
     Rules,
     /// Scratchpads changed: release the removed ones, store the new set.
@@ -204,7 +204,7 @@ impl ConfigDiff {
         when(self.animations, Animations);
         when(self.focus, Focus);
         when(self.monitors, Monitors);
-        when(self.rebuilds_zones(), Zones);
+        when(self.rebuilds_snap_zones(), SnapZones);
         when(true, Rules);
         when(self.scratchpads, Scratchpads);
         when(true, StoreProfiles);

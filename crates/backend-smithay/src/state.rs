@@ -503,8 +503,8 @@ impl State {
             config.desktop.appearance.clone(),
         );
         let outputs = Outputs::new();
-        let zone_manager = gevrek_engine::config_apply::build_zone_manager(
-            &config.desktop.zones,
+        let snap_zone_manager = gevrek_engine::config_apply::build_snap_zone_manager(
+            &config.desktop.snap_zones,
             &outputs,
             |_| false,
         );
@@ -512,7 +512,7 @@ impl State {
             executor,
             outputs,
             FocusManager::with_config(config.desktop.focus.clone()),
-            zone_manager,
+            snap_zone_manager,
         );
 
         let mut seat_state = SeatState::new();
@@ -919,6 +919,21 @@ impl State {
     /// As `add_output`, for an output whose device pixels are `scale`
     /// times smaller than logical ones (`rect` is logical).
     pub fn add_scaled_output(&mut self, name: &str, rect: Rect, scale: f64) -> MonitorHandle {
+        // No display behind it that says who it is (a window of another
+        // session, a picture in memory): it is known by its name.
+        let stable_id = gevrek_engine::outputs::edid::stable_id_of_place(name);
+        self.add_identified_output(name, rect, scale, stable_id)
+    }
+
+    /// As `add_scaled_output`, for a display that says who it is:
+    /// `stable_id` is made of its EDID (`MonitorInfo::stable_id`).
+    pub fn add_identified_output(
+        &mut self,
+        name: &str,
+        rect: Rect,
+        scale: f64,
+        stable_id: String,
+    ) -> MonitorHandle {
         self.next_output += 1;
         let id = MonitorHandle(self.next_output);
         let output = Output::new(
@@ -951,6 +966,7 @@ impl State {
         self.desktop.outputs.push(WlOutput {
             id,
             name: name.to_string(),
+            stable_id,
             rect,
             work: rect,
             usable: rect,
@@ -1217,7 +1233,7 @@ impl State {
                     .iter()
                     .any(|output| output.name.eq_ignore_ascii_case(name))
             });
-        let monitors: Vec<MonitorInfo> = self
+        let mut monitors: Vec<MonitorInfo> = self
             .desktop
             .outputs
             .iter()
@@ -1226,6 +1242,7 @@ impl State {
                 handle: output.id,
                 name: output.name.clone(),
                 device_path: output.name.clone(),
+                stable_id: output.stable_id.clone(),
                 is_primary: match &primary {
                     Some(name) => output.name.eq_ignore_ascii_case(name),
                     None => index == 0,
@@ -1242,6 +1259,9 @@ impl State {
                 dpi_scale: output.scale as f32,
             })
             .collect();
+        // Two displays of one model that give no serial number: told apart
+        // by their connectors.
+        gevrek_engine::outputs::number_same_stable_ids(&mut monitors);
         if self.core.monitor_manager.get_all_monitors().is_empty() {
             self.core.monitor_manager.replace_monitors(monitors);
         } else {
@@ -1263,8 +1283,8 @@ impl State {
     /// the workspace profiles, and a default workspace where there is none.
     pub fn start(&mut self) -> anyhow::Result<()> {
         self.configure_monitors();
-        self.core.zone_manager = gevrek_engine::config_apply::build_zone_manager(
-            &self.config.desktop.zones,
+        self.core.snap_zone_manager = gevrek_engine::config_apply::build_snap_zone_manager(
+            &self.config.desktop.snap_zones,
             &self.core.monitor_manager,
             |_| false,
         );

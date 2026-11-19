@@ -7,11 +7,11 @@ use crate::core::WmCore;
 use crate::outputs::{MonitorHandle, MonitorInfo, Outputs};
 use crate::rules::{FloatRule, MatchKind, MatchStrategy, RuleEngine, WindowRule};
 use crate::workspace_profile::WorkspaceProfileApply;
-use crate::zones::ZoneManager;
+use crate::snap_zones::SnapZoneManager;
 use gevrek_model::settings::{
-    AppearanceProfile, DesktopConfig, MonitorSelector, WorkspaceProfile, ZoneSettings,
+    AppearanceProfile, DesktopConfig, MonitorSelector, WorkspaceProfile, SnapZoneSettings,
 };
-use gevrek_model::zones::ZoneModifier;
+use gevrek_model::snap_zones::SnapZoneModifier;
 
 /// The rule engine for a configuration: the built-in float and system
 /// rules, the configured window rules, and Gevrek's own windows floating.
@@ -95,12 +95,12 @@ pub fn configure_monitor_profiles(outputs: &mut Outputs, config: &DesktopConfig)
 
 /// The zone manager for the zone settings and the attached monitors.
 /// `modifier_probe` is the backend's way to read the activation key.
-pub fn build_zone_manager(
-    settings: &ZoneSettings,
+pub fn build_snap_zone_manager(
+    settings: &SnapZoneSettings,
     outputs: &Outputs,
-    modifier_probe: fn(ZoneModifier) -> bool,
-) -> ZoneManager {
-    let mut manager = ZoneManager::new(settings.behavior.clone())
+    modifier_probe: fn(SnapZoneModifier) -> bool,
+) -> SnapZoneManager {
+    let mut manager = SnapZoneManager::new(settings.behavior.clone())
         .with_default_layout(settings.default_layout.clone())
         .with_modifier_probe(modifier_probe);
     let monitors = outputs.get_all_monitors_ordered();
@@ -553,6 +553,7 @@ mod tests {
             handle: MonitorHandle(handle),
             name: name.to_string(),
             device_path: String::new(),
+            stable_id: String::new(),
             is_primary: primary,
             x: 0,
             y: 0,

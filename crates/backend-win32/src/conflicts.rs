@@ -7,7 +7,7 @@
 //!
 //! - **PowerToys FancyZones**: by default a window dragged with Shift held
 //!   is dropped into one of its zones, which is exactly gevrek's default
-//!   for its own zones (`desktop.zones.activation_modifier`).
+//!   for its own zones (`desktop.snap_zones.activation_modifier`).
 //!
 //! And one thing about gevrek itself that changes what its keys do:
 //!
@@ -17,13 +17,13 @@
 
 use gevrek_engine::overlay_data::Notice;
 use gevrek_model::settings::DesktopConfig;
-use gevrek_model::zones::ZoneModifier;
+use gevrek_model::snap_zones::SnapZoneModifier;
 
 /// What there is to say about the desktop as it is now.
 pub fn notices(desktop: &DesktopConfig) -> Vec<Notice> {
-    let zones = &desktop.zones.behavior;
+    let zones = &desktop.snap_zones.behavior;
     // Asked only when it could matter: the list of processes is not free.
-    let shift_zones = zones.enabled && zones.activation_modifier == Some(ZoneModifier::Shift);
+    let shift_zones = zones.enabled && zones.activation_modifier == Some(SnapZoneModifier::Shift);
     let fancy_zones = shift_zones && process_runs("PowerToys.FancyZones.exe");
     fancyzones_notice(
         shift_zones,
@@ -60,9 +60,9 @@ fn fancyzones_notice(shift_zones: bool, running: bool, uses_shift: bool) -> Opti
     (shift_zones && running && uses_shift).then(|| Notice {
         id: "fancyzones-shift-drag".to_string(),
         title: "PowerToys FancyZones also uses Shift while dragging".to_string(),
-        text: "A window dragged with Shift held is meant for one of gevrek's zones, and \
+        text: "A window dragged with Shift held is meant for one of gevrek's snap zones, and \
                FancyZones takes it for one of its own. Give one of the two another key \
-               (gevrek: Zones, activation key; FancyZones: \"Hold Shift key to activate \
+               (gevrek: Snap zones, activation key; FancyZones: \"Hold Shift key to activate \
                zones while dragging\"), or switch FancyZones off."
             .to_string(),
     })
@@ -220,17 +220,17 @@ mod tests {
                 .any(|notice| notice.id == "fancyzones-shift-drag")
         };
         let mut desktop = DesktopConfig::default();
-        desktop.zones.behavior.enabled = false;
+        desktop.snap_zones.behavior.enabled = false;
         assert!(!of_fancyzones(&desktop));
-        desktop.zones.behavior.enabled = true;
-        desktop.zones.behavior.activation_modifier = Some(ZoneModifier::Alt);
+        desktop.snap_zones.behavior.enabled = true;
+        desktop.snap_zones.behavior.activation_modifier = Some(SnapZoneModifier::Alt);
         assert!(!of_fancyzones(&desktop));
     }
 
     #[test]
     fn what_is_said_of_the_machine_is_what_is_so_there() {
         let mut desktop = DesktopConfig::default();
-        desktop.zones.behavior.enabled = false;
+        desktop.snap_zones.behavior.enabled = false;
         let said: Vec<String> = notices(&desktop).into_iter().map(|notice| notice.id).collect();
         let expected: Vec<String> = administrator_notice(runs_as_administrator())
             .into_iter()

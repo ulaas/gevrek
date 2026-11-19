@@ -1,311 +1,623 @@
-//! Snap zones: layouts and settings.
+//! Zones: containers on the desktop that hold its icons (`desktop.zones`).
+//! What the person sets is here: the zones there are, how they look, and
+//! the rules that sort items into them. Everything has a default, a file
+//! without a field reads with it, and keys this version does not know are
+//! kept and written back as they were.
+//!
+//! What changes with every drag (which item is in which zone, where a zone
+//! is on which displays) is not configuration: `gevrek-zones` keeps it in a
+//! state file of its own, and holds the logic. The places windows snap to
+//! are another thing (`snap_zones`).
 
-use crate::geometry::Rect;
+use crate::Extra;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
-/// A snap zone definition (relative to monitor work area)
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct Zone {
-    /// Unique identifier for this zone
-    pub id: usize,
-    /// Zone name for display
-    pub name: String,
-    /// Left position as percentage of monitor width (0.0 to 1.0)
-    pub x_percent: f32,
-    /// Top position as percentage of monitor height (0.0 to 1.0)
-    pub y_percent: f32,
-    /// Width as percentage of monitor width (0.0 to 1.0)
-    pub width_percent: f32,
-    /// Height as percentage of monitor height (0.0 to 1.0)
-    pub height_percent: f32,
-    /// Gap/margin in pixels (applied inside zone bounds)
-    pub gap: i32,
-    /// Priority for overlapping zones (higher = selected first when ambiguous)
-    pub priority: i32,
-    /// Keys this version does not know: kept, and written back as they
-    /// were, so a file from a newer gevrek survives being edited here.
-    #[serde(flatten)]
-    pub extra: crate::Extra,
-}
+/// A zone, as the configuration names it.
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash,
+    Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(transparent)]
+pub struct ZoneId(pub String);
 
-impl Zone {
-    pub fn new(id: usize, x: f32, y: f32, width: f32, height: f32) -> Self {
-        Self {
-            extra: Default::default(),
-            id,
-            name: format!("Zone {}", id),
-            x_percent: x.clamp(0.0, 1.0),
-            y_percent: y.clamp(0.0, 1.0),
-            width_percent: width.clamp(0.0, 1.0),
-            height_percent: height.clamp(0.0, 1.0),
-            gap: 8,
-            priority: 0,
-        }
+impl ZoneId {
+    pub fn new(text: impl Into<String>) -> Self {
+        Self(text.into())
     }
 
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = name.into();
-        self
-    }
-
-    pub fn with_gap(mut self, gap: i32) -> Self {
-        self.gap = gap;
-        self
-    }
-
-    pub fn with_priority(mut self, priority: i32) -> Self {
-        self.priority = priority;
-        self
-    }
-
-    /// Calculate the actual pixel rect for this zone on a given work area
-    pub fn to_rect(&self, work_area: &Rect) -> Rect {
-        let x = work_area.x + (work_area.width as f32 * self.x_percent) as i32;
-        let y = work_area.y + (work_area.height as f32 * self.y_percent) as i32;
-        let width = (work_area.width as f32 * self.width_percent) as i32;
-        let height = (work_area.height as f32 * self.height_percent) as i32;
-
-        // Apply gap
-        // (A gap of any size out of a file: none of this overflows.)
-        let both = self.gap.saturating_mul(2);
-        Rect::new(
-            x.saturating_add(self.gap),
-            y.saturating_add(self.gap),
-            width.saturating_sub(both).max(100),
-            height.saturating_sub(both).max(100),
-        )
-    }
-
-    /// Check if a point is inside this zone (using pixel rect)
-    pub fn contains_point(&self, work_area: &Rect, x: i32, y: i32) -> bool {
-        let rect = self.to_rect(work_area);
-        x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height
-    }
-
-    /// Check if a rect overlaps with this zone
-    pub fn overlaps(&self, work_area: &Rect, other: &Rect) -> f32 {
-        let rect = self.to_rect(work_area);
-
-        let x1 = rect.x.max(other.x);
-        let y1 = rect.y.max(other.y);
-        let x2 = (rect.x + rect.width).min(other.x + other.width);
-        let y2 = (rect.y + rect.height).min(other.y + other.height);
-
-        if x2 <= x1 || y2 <= y1 {
-            return 0.0;
-        }
-
-        let overlap_area = (x2 - x1) * (y2 - y1);
-        let other_area = other.width * other.height;
-
-        if other_area == 0 {
-            return 0.0;
-        }
-
-        overlap_area as f32 / other_area as f32
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
-/// A layout preset containing multiple zones
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ZoneLayout {
-    /// Layout identifier
-    pub id: String,
-    /// Display name
-    pub name: String,
-    /// Description of the layout
-    pub description: String,
-    /// Zones in this layout
-    pub zones: Vec<Zone>,
-    /// Keys this version does not know: kept, and written back as they
-    /// were, so a file from a newer gevrek survives being edited here.
-    #[serde(flatten)]
-    pub extra: crate::Extra,
-}
-
-impl ZoneLayout {
-    pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
-        Self {
-            extra: Default::default(),
-            id: id.into(),
-            name: name.into(),
-            description: String::new(),
-            zones: Vec::new(),
-        }
-    }
-
-    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
-        self.description = desc.into();
-        self
-    }
-
-    pub fn add_zone(mut self, zone: Zone) -> Self {
-        self.zones.push(zone);
-        self
+impl std::fmt::Display for ZoneId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
     }
 }
 
-/// Configuration for zone snapping behavior
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+impl From<&str> for ZoneId {
+    fn from(text: &str) -> Self {
+        Self(text.to_string())
+    }
+}
+
+/// What sort of thing an item of the desktop is.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash,
+    Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemKind {
+    #[default]
+    File,
+    Folder,
+    /// A link to something else (`.lnk`, a symbolic link, a `.url`).
+    Shortcut,
+    /// Something that starts a program (a `.desktop` entry).
+    Launcher,
+    /// Not a file at all: This PC, the Recycle Bin.
+    Virtual,
+}
+
+/// The section.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
-pub struct ZoneConfig {
-    /// Whether zone snapping is enabled
+pub struct ZonesConfig {
+    /// Whether zones are shown at all.
     pub enabled: bool,
-    /// Show zone preview during window drag
-    pub show_preview: bool,
-    /// Highlight zones while dragging
-    pub highlight_zones: bool,
-    /// Minimum overlap percentage to trigger zone snap (0.0 to 1.0)
-    pub snap_threshold: f32,
-    /// Key to hold while dropping a window for it to snap to a zone (None =
-    /// every drop snaps). Shift by default: zones cover the whole screen, so
-    /// without a key every drag of a tiled window would end in a zone, and
-    /// a window in a zone is floating.
-    pub activation_modifier: Option<ZoneModifier>,
-    /// Preview opacity (0.0 to 1.0)
-    pub preview_opacity: f32,
-    /// Preview color (RGB)
-    pub preview_color: (u8, u8, u8),
-    /// Keys this version does not know: kept, and written back as they
-    /// were, so a file from a newer gevrek survives being edited here.
+    pub zones: Vec<ZoneDefinition>,
+    /// Tried in order for each item; the first that matches decides.
+    pub rules: Vec<Rule>,
+    /// What happens to an item no rule matches. Without it such an item
+    /// stays where it is.
+    pub catch_all: Option<RuleAction>,
+    /// An item that comes to the desktop is put into the zone its rule
+    /// names, at once. (Only that: a rule that moves the file itself waits
+    /// until the person asks for the rules to be applied.)
+    pub rules_on_arrival: bool,
+    /// Each workspace has an arrangement of its own.
+    pub profile_per_workspace: bool,
+    /// How large the items outside of every zone are drawn.
+    pub loose_icon_size: u32,
+    /// The look of every zone that does not set its own.
+    pub look: ZoneLook,
+    pub snap: SnapSettings,
+    /// Keys this version does not know: kept, and written back as they were.
     #[serde(flatten)]
-    pub extra: crate::Extra,
+    pub extra: Extra,
 }
 
-impl Default for ZoneConfig {
+impl Default for ZonesConfig {
     fn default() -> Self {
         Self {
-            extra: Default::default(),
-            enabled: true,
-            show_preview: true,
-            highlight_zones: true,
-            snap_threshold: 0.3,
-            activation_modifier: Some(ZoneModifier::Shift),
-            preview_opacity: 0.3,
-            preview_color: (0, 120, 215),
+            enabled: false,
+            zones: Vec::new(),
+            rules: Vec::new(),
+            catch_all: None,
+            rules_on_arrival: true,
+            profile_per_workspace: false,
+            loose_icon_size: DEFAULT_ICON_SIZE,
+            look: ZoneLook::default(),
+            snap: SnapSettings::default(),
+            extra: Extra::new(),
         }
     }
 }
 
-/// Modifier key for zone activation
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
-pub enum ZoneModifier {
-    Shift,
-    Control,
-    Alt,
-    Win,
+impl ZonesConfig {
+    pub fn zone(&self, id: &ZoneId) -> Option<&ZoneDefinition> {
+        self.zones.iter().find(|zone| &zone.id == id)
+    }
+
+    pub fn zone_mut(&mut self, id: &ZoneId) -> Option<&mut ZoneDefinition> {
+        self.zones.iter_mut().find(|zone| &zone.id == id)
+    }
+
+    /// The actions of the rules and of the catch-all, each with its place.
+    fn actions(&self) -> impl Iterator<Item = (String, &RuleAction)> {
+        self.rules
+            .iter()
+            .enumerate()
+            .map(|(index, rule)| (format!("desktop.zones.rules[{index}].action"), &rule.action))
+            .chain(self.catch_all.iter().map(|action| ("desktop.zones.catch_all".to_string(), action)))
+    }
+
+    /// What cannot be right, as `(path, message)`.
+    pub fn problems(&self) -> Vec<(String, String)> {
+        let mut problems = Vec::new();
+        let mut say = |path: String, message: &str| problems.push((path, message.to_string()));
+        let size_is_wrong = |size: u32| !(ICON_SIZES.0..=ICON_SIZES.1).contains(&size);
+        const SIZE: &str = "An icon is between 16 and 256 units";
+        const OPACITY: &str = "Opacity is in hundredths, from 0 to 100";
+        if size_is_wrong(self.loose_icon_size) {
+            say("desktop.zones.loose_icon_size".to_string(), SIZE);
+        }
+        if self.look.opacity.is_some_and(|opacity| opacity > 100) {
+            say("desktop.zones.look.opacity".to_string(), OPACITY);
+        }
+        for (name, value, most) in [
+            ("distance", self.snap.distance, 200),
+            ("gap", self.snap.gap, 200),
+            ("grid", self.snap.grid, 1000),
+        ] {
+            if !(0..=most).contains(&value) {
+                say(
+                    format!("desktop.zones.snap.{name}"),
+                    &format!("Must be between 0 and {most} units"),
+                );
+            }
+        }
+        let mut ids = BTreeSet::new();
+        for (index, zone) in self.zones.iter().enumerate() {
+            let path = format!("desktop.zones.zones[{index}]");
+            if zone.id.as_str().trim().is_empty() {
+                say(format!("{path}.id"), "A zone needs an id");
+            } else if !ids.insert(&zone.id) {
+                say(format!("{path}.id"), &format!("Another zone is called '{}' already", zone.id));
+            }
+            if size_is_wrong(zone.icon_size) {
+                say(format!("{path}.icon_size"), SIZE);
+            }
+            if zone.look.opacity.is_some_and(|opacity| opacity > 100) {
+                say(format!("{path}.look.opacity"), OPACITY);
+            }
+            if matches!(&zone.kind, ZoneKind::Portal { directory } if directory.trim().is_empty()) {
+                say(format!("{path}.kind.directory"), "A portal needs the folder it shows");
+            }
+            if zone.tab_group.as_ref().is_some_and(|group| group.trim().is_empty()) {
+                say(format!("{path}.tab_group"), "A group of tabs needs a name (or leave it out)");
+            }
+        }
+        for (path, action) in self.actions() {
+            match action {
+                RuleAction::AssignToZone { zone } if zone.as_str().trim().is_empty() => {
+                    say(format!("{path}.zone"), "Name the zone the items go to");
+                }
+                RuleAction::MoveToFolder { folder } if folder.trim().is_empty() => {
+                    say(format!("{path}.folder"), "Name the folder the files are moved to");
+                }
+                _ => {}
+            }
+        }
+        problems
+    }
+
+    /// What is worth knowing and stops nothing, as `(path, message)`: a
+    /// rule that names a zone which is not there. (Its items stay where
+    /// they are. It is no error, so that taking a zone away never leaves a
+    /// configuration that cannot be saved.)
+    pub fn remarks(&self) -> Vec<(String, String)> {
+        self.actions()
+            .filter_map(|(path, action)| match action {
+                RuleAction::AssignToZone { zone }
+                    if !zone.as_str().trim().is_empty() && self.zone(zone).is_none() =>
+                {
+                    Some((format!("{path}.zone"), format!("No zone is called '{zone}'")))
+                }
+                _ => None,
+            })
+            .collect()
+    }
 }
 
-/// Preset zone layouts
-pub mod presets {
+/// The side of an icon, in logical units, where nothing else is set.
+pub const DEFAULT_ICON_SIZE: u32 = 48;
+
+/// The smallest and the largest an icon is drawn.
+pub const ICON_SIZES: (u32, u32) = (16, 256);
+
+/// One zone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default)]
+pub struct ZoneDefinition {
+    pub id: ZoneId,
+    pub title: String,
+    pub kind: ZoneKind,
+    pub view: View,
+    pub sort: Sort,
+    /// The order turned around (the newest first, the largest first).
+    pub sort_descending: bool,
+    pub icon_size: u32,
+    /// What this zone looks like where it differs from the others.
+    pub look: ZoneLook,
+    pub lock: Lock,
+    /// Only the title is shown.
+    pub rolled_up: bool,
+    /// Stays when the zones are hidden with one key.
+    pub always_visible: bool,
+    /// Zones with the same name here share one place and are shown as tabs.
+    pub tab_group: Option<String>,
+    /// Keys this version does not know: kept, and written back as they were.
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl Default for ZoneDefinition {
+    fn default() -> Self {
+        Self {
+            id: ZoneId::default(),
+            title: String::new(),
+            kind: ZoneKind::Manual,
+            view: View::Grid,
+            sort: Sort::Manual,
+            sort_descending: false,
+            icon_size: DEFAULT_ICON_SIZE,
+            look: ZoneLook::default(),
+            lock: Lock::default(),
+            rolled_up: false,
+            always_visible: false,
+            tab_group: None,
+            extra: Extra::new(),
+        }
+    }
+}
+
+impl ZoneDefinition {
+    /// A zone filled by hand, with a title.
+    pub fn manual(id: &str, title: &str) -> Self {
+        Self {
+            id: ZoneId::new(id),
+            title: title.to_string(),
+            ..Self::default()
+        }
+    }
+}
+
+/// Where a zone's items come from.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ZoneKind {
+    /// Items of the desktop the person (or a rule) put here.
+    #[default]
+    Manual,
+    /// A window into a folder: it shows what is in there, and what is
+    /// dropped on it is moved there.
+    Portal { directory: String },
+    /// Every item of the desktop that all of these match, without taking
+    /// it from where it is.
+    Smart { query: Vec<Matcher> },
+}
+
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum View {
+    /// Icons with their names below, in rows.
+    #[default]
+    Grid,
+    /// One item a line, a small icon before the name.
+    List,
+}
+
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Sort {
+    /// The order the person gave.
+    #[default]
+    Manual,
+    Name,
+    /// Folders, then by extension.
+    Type,
+    /// When last changed.
+    Date,
+    Size,
+}
+
+/// What of a zone may not be changed by dragging.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(default)]
+pub struct Lock {
+    /// The zone stays where it is and as large as it is.
+    pub geometry: bool,
+    /// Nothing is put into the zone or taken out of it.
+    pub members: bool,
+}
+
+/// How a zone looks. Each value that is absent is taken from the look of
+/// all zones, and there from the theme.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default)]
+pub struct ZoneLook {
+    /// The ground's colour (`#rrggbb` or `#rrggbbaa`).
+    pub background: Option<String>,
+    /// How much of the ground is seen, in hundredths.
+    pub opacity: Option<u8>,
+    /// What is behind the zone is blurred, where the system can.
+    pub blur: Option<bool>,
+    pub corner_radius: Option<u32>,
+    pub title_colour: Option<String>,
+    /// The title is shown only while the pointer is over the zone.
+    pub title_on_hover: Option<bool>,
+    /// Keys this version does not know: kept, and written back as they were.
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl ZoneLook {
+    /// This look, with what it leaves open taken from `general`.
+    pub fn over(&self, general: &ZoneLook) -> ZoneLook {
+        ZoneLook {
+            background: self.background.clone().or_else(|| general.background.clone()),
+            opacity: self.opacity.or(general.opacity),
+            blur: self.blur.or(general.blur),
+            corner_radius: self.corner_radius.or(general.corner_radius),
+            title_colour: self.title_colour.clone().or_else(|| general.title_colour.clone()),
+            title_on_hover: self.title_on_hover.or(general.title_on_hover),
+            extra: Extra::new(),
+        }
+    }
+}
+
+/// What a dragged zone is drawn to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default)]
+pub struct SnapSettings {
+    pub enabled: bool,
+    /// From how near an edge pulls, in logical units.
+    pub distance: i32,
+    /// The room left between two zones that are snapped to each other.
+    pub gap: i32,
+    /// Zones rest on multiples of this where no edge pulls; 0 for no grid.
+    pub grid: i32,
+    /// Keys this version does not know: kept, and written back as they were.
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl Default for SnapSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            distance: 12,
+            gap: 8,
+            grid: 0,
+            extra: Extra::new(),
+        }
+    }
+}
+
+/// One rule: every matcher must hold for the action to be taken.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default)]
+pub struct Rule {
+    /// What the person calls it.
+    pub name: String,
+    pub enabled: bool,
+    /// All of them must hold. A rule without any matches nothing: what is
+    /// to happen to everything else is said by `catch_all`, on purpose.
+    pub matchers: Vec<Matcher>,
+    pub action: RuleAction,
+    /// Keys this version does not know: kept, and written back as they were.
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl Default for Rule {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            enabled: true,
+            matchers: Vec::new(),
+            action: RuleAction::default(),
+            extra: Extra::new(),
+        }
+    }
+}
+
+/// One thing asked of an item. Patterns are globs (`*` for any run of
+/// letters, `?` for one) and letters are compared without regard to case.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "match", rename_all = "snake_case")]
+pub enum Matcher {
+    /// The extension is one of these (without the dot).
+    Extension { any_of: Vec<String> },
+    /// The MIME type fits (`image/*`).
+    Mime { pattern: String },
+    /// The shown name fits.
+    Name { pattern: String },
+    /// The item is one of these kinds.
+    Kind { any_of: Vec<ItemKind> },
+    /// A time of the item lies in a span. Every bound that is given must
+    /// hold; `after` and `before` are seconds since 1970, the two others
+    /// count days back from now.
+    Date {
+        field: DateField,
+        #[serde(default)]
+        after: Option<u64>,
+        #[serde(default)]
+        before: Option<u64>,
+        #[serde(default)]
+        newer_than_days: Option<u32>,
+        #[serde(default)]
+        older_than_days: Option<u32>,
+    },
+    /// The size in bytes lies between the two (each included).
+    Size {
+        #[serde(default)]
+        at_least: Option<u64>,
+        #[serde(default)]
+        at_most: Option<u64>,
+    },
+    /// Where a shortcut leads fits.
+    ShortcutTarget { pattern: String },
+    /// Neither made, changed nor opened for this many days.
+    Untouched { days: u32 },
+}
+
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum DateField {
+    Created,
+    #[default]
+    Modified,
+    Accessed,
+}
+
+/// What a rule does with an item it matches.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum RuleAction {
+    /// Show the item in a zone. The file stays where it is.
+    AssignToZone { zone: ZoneId },
+    /// Move the file itself into a folder.
+    MoveToFolder { folder: String },
+}
+
+impl Default for RuleAction {
+    fn default() -> Self {
+        RuleAction::AssignToZone {
+            zone: ZoneId::default(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
     use super::*;
 
-    /// Single full-screen zone
-    pub fn focus() -> ZoneLayout {
-        ZoneLayout::new("focus", "Focus")
-            .with_description("Single window takes full screen")
-            .add_zone(Zone::new(0, 0.0, 0.0, 1.0, 1.0).with_name("Full"))
+    #[test]
+    fn an_empty_section_reads_as_the_defaults() {
+        let config: ZonesConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(config, ZonesConfig::default());
+        let zone: ZoneDefinition = serde_json::from_str(r#"{"id": "a"}"#).unwrap();
+        assert_eq!(zone.icon_size, DEFAULT_ICON_SIZE);
+        assert_eq!(zone.kind, ZoneKind::Manual);
     }
 
-    /// Two equal columns
-    pub fn columns_2() -> ZoneLayout {
-        ZoneLayout::new("columns_2", "Two Columns")
-            .with_description("Two equal-width columns")
-            .add_zone(Zone::new(0, 0.0, 0.0, 0.5, 1.0).with_name("Left"))
-            .add_zone(Zone::new(1, 0.5, 0.0, 0.5, 1.0).with_name("Right"))
+    #[test]
+    fn keys_of_a_newer_version_are_kept() {
+        let text = r#"{
+            "enabled": true,
+            "from_the_future": [1, 2],
+            "zones": [{"id": "a", "title": "A", "glow": "soft", "look": {"sheen": 3}}],
+            "rules": [{"name": "r", "matchers": [], "action": {"action": "assign_to_zone", "zone": "a"}, "weight": 2}],
+            "snap": {"magnet": true}
+        }"#;
+        let config: ZonesConfig = serde_json::from_str(text).unwrap();
+        let written = serde_json::to_value(&config).unwrap();
+        assert_eq!(written["from_the_future"], serde_json::json!([1, 2]));
+        assert_eq!(written["zones"][0]["glow"], "soft");
+        assert_eq!(written["zones"][0]["look"]["sheen"], 3);
+        assert_eq!(written["rules"][0]["weight"], 2);
+        assert_eq!(written["snap"]["magnet"], true);
+        let again: ZonesConfig = serde_json::from_value(written).unwrap();
+        assert_eq!(again, config);
     }
 
-    /// Three equal columns
-    pub fn columns_3() -> ZoneLayout {
-        ZoneLayout::new("columns_3", "Three Columns")
-            .with_description("Three equal-width columns")
-            .add_zone(Zone::new(0, 0.0, 0.0, 0.333, 1.0).with_name("Left"))
-            .add_zone(Zone::new(1, 0.333, 0.0, 0.334, 1.0).with_name("Center"))
-            .add_zone(Zone::new(2, 0.667, 0.0, 0.333, 1.0).with_name("Right"))
+    #[test]
+    fn kinds_matchers_and_actions_are_written_with_their_names() {
+        let zone = ZoneDefinition {
+            kind: ZoneKind::Portal {
+                directory: "/home/ada/Downloads".to_string(),
+            },
+            ..ZoneDefinition::manual("d", "Downloads")
+        };
+        let written = serde_json::to_value(&zone).unwrap();
+        assert_eq!(written["kind"]["type"], "portal");
+        let matcher = Matcher::Untouched { days: 30 };
+        assert_eq!(
+            serde_json::to_value(&matcher).unwrap(),
+            serde_json::json!({"match": "untouched", "days": 30})
+        );
+        let action = RuleAction::MoveToFolder {
+            folder: "/tmp/old".to_string(),
+        };
+        assert_eq!(
+            serde_json::to_value(&action).unwrap(),
+            serde_json::json!({"action": "move_to_folder", "folder": "/tmp/old"})
+        );
     }
 
-    /// Two equal rows
-    pub fn rows_2() -> ZoneLayout {
-        ZoneLayout::new("rows_2", "Two Rows")
-            .with_description("Two equal-height rows")
-            .add_zone(Zone::new(0, 0.0, 0.0, 1.0, 0.5).with_name("Top"))
-            .add_zone(Zone::new(1, 0.0, 0.5, 1.0, 0.5).with_name("Bottom"))
+    #[test]
+    fn the_section_has_a_schema_for_the_configurations_own() {
+        let schema = serde_json::to_value(schemars::schema_for!(ZonesConfig)).unwrap();
+        for field in ["enabled", "zones", "rules", "catch_all", "look", "snap"] {
+            assert!(schema["properties"].get(field).is_some(), "{field} is not in the schema");
+        }
+        let text = schema.to_string();
+        for name in ["ZoneDefinition", "Matcher", "RuleAction", "untouched", "move_to_folder", "portal"] {
+            assert!(text.contains(name), "{name} is not in the schema");
+        }
     }
 
-    /// Grid 2x2
-    pub fn grid_2x2() -> ZoneLayout {
-        ZoneLayout::new("grid_2x2", "2x2 Grid")
-            .with_description("Four equal quadrants")
-            .add_zone(Zone::new(0, 0.0, 0.0, 0.5, 0.5).with_name("Top Left"))
-            .add_zone(Zone::new(1, 0.5, 0.0, 0.5, 0.5).with_name("Top Right"))
-            .add_zone(Zone::new(2, 0.0, 0.5, 0.5, 0.5).with_name("Bottom Left"))
-            .add_zone(Zone::new(3, 0.5, 0.5, 0.5, 0.5).with_name("Bottom Right"))
+    #[test]
+    fn what_cannot_be_right_is_said_with_its_place() {
+        assert_eq!(ZonesConfig::default().problems(), []);
+        assert_eq!(ZonesConfig::default().remarks(), []);
+        let assign = |zone: &str| RuleAction::AssignToZone { zone: ZoneId::new(zone) };
+        let rule = |action: RuleAction| Rule { action, ..Rule::default() };
+        let mut config = ZonesConfig {
+            zones: vec![
+                ZoneDefinition::manual("a", "A"),
+                ZoneDefinition::manual("a", "Again"),
+                ZoneDefinition::manual(" ", "Nameless"),
+                ZoneDefinition {
+                    icon_size: 4,
+                    kind: ZoneKind::Portal { directory: String::new() },
+                    tab_group: Some(String::new()),
+                    look: ZoneLook { opacity: Some(101), ..ZoneLook::default() },
+                    ..ZoneDefinition::manual("b", "B")
+                },
+            ],
+            rules: vec![
+                rule(assign("a")),
+                rule(assign("")),
+                rule(assign("gone")),
+                rule(RuleAction::MoveToFolder { folder: " ".to_string() }),
+            ],
+            catch_all: Some(assign("nowhere")),
+            loose_icon_size: 1000,
+            ..ZonesConfig::default()
+        };
+        config.look.opacity = Some(200);
+        config.snap.distance = -1;
+        config.snap.grid = 5000;
+        let places: Vec<String> = config.problems().into_iter().map(|(path, _)| path).collect();
+        assert_eq!(
+            places,
+            [
+                "desktop.zones.loose_icon_size",
+                "desktop.zones.look.opacity",
+                "desktop.zones.snap.distance",
+                "desktop.zones.snap.grid",
+                "desktop.zones.zones[1].id",
+                "desktop.zones.zones[2].id",
+                "desktop.zones.zones[3].icon_size",
+                "desktop.zones.zones[3].look.opacity",
+                "desktop.zones.zones[3].kind.directory",
+                "desktop.zones.zones[3].tab_group",
+                "desktop.zones.rules[1].action.zone",
+                "desktop.zones.rules[3].action.folder",
+            ]
+        );
+        // A rule for a zone that is not there is said, and stops nothing.
+        let places: Vec<String> = config.remarks().into_iter().map(|(path, _)| path).collect();
+        assert_eq!(places, ["desktop.zones.rules[2].action.zone", "desktop.zones.catch_all.zone"]);
     }
 
-    /// Priority grid (large left, two stacked right)
-    pub fn priority_grid() -> ZoneLayout {
-        ZoneLayout::new("priority_grid", "Priority Grid")
-            .with_description("Large main area with two side zones")
-            .add_zone(
-                Zone::new(0, 0.0, 0.0, 0.65, 1.0)
-                    .with_name("Main")
-                    .with_priority(1),
-            )
-            .add_zone(Zone::new(1, 0.65, 0.0, 0.35, 0.5).with_name("Top Right"))
-            .add_zone(Zone::new(2, 0.65, 0.5, 0.35, 0.5).with_name("Bottom Right"))
-    }
-
-    /// Ultrawide layout (centered with side columns)
-    pub fn ultrawide() -> ZoneLayout {
-        ZoneLayout::new("ultrawide", "Ultrawide")
-            .with_description("Centered main area for ultrawide monitors")
-            .add_zone(Zone::new(0, 0.0, 0.0, 0.2, 1.0).with_name("Left"))
-            .add_zone(
-                Zone::new(1, 0.2, 0.0, 0.6, 1.0)
-                    .with_name("Center")
-                    .with_priority(1),
-            )
-            .add_zone(Zone::new(2, 0.8, 0.0, 0.2, 1.0).with_name("Right"))
-    }
-
-    /// Master-stack style
-    pub fn master_stack() -> ZoneLayout {
-        ZoneLayout::new("master_stack", "Master Stack")
-            .with_description("Large master on left, three stacked on right")
-            .add_zone(
-                Zone::new(0, 0.0, 0.0, 0.6, 1.0)
-                    .with_name("Master")
-                    .with_priority(1),
-            )
-            .add_zone(Zone::new(1, 0.6, 0.0, 0.4, 0.333).with_name("Stack 1"))
-            .add_zone(Zone::new(2, 0.6, 0.333, 0.4, 0.334).with_name("Stack 2"))
-            .add_zone(Zone::new(3, 0.6, 0.667, 0.4, 0.333).with_name("Stack 3"))
-    }
-
-    /// Rows of 3 (6 zones)
-    pub fn rows_of_3() -> ZoneLayout {
-        ZoneLayout::new("rows_of_3", "Rows of 3")
-            .with_description("Two rows with three columns each")
-            .add_zone(Zone::new(0, 0.0, 0.0, 0.333, 0.5).with_name("Top Left"))
-            .add_zone(Zone::new(1, 0.333, 0.0, 0.334, 0.5).with_name("Top Center"))
-            .add_zone(Zone::new(2, 0.667, 0.0, 0.333, 0.5).with_name("Top Right"))
-            .add_zone(Zone::new(3, 0.0, 0.5, 0.333, 0.5).with_name("Bottom Left"))
-            .add_zone(Zone::new(4, 0.333, 0.5, 0.334, 0.5).with_name("Bottom Center"))
-            .add_zone(Zone::new(5, 0.667, 0.5, 0.333, 0.5).with_name("Bottom Right"))
-    }
-
-    /// Get all preset layouts
-    pub fn all() -> Vec<ZoneLayout> {
-        vec![
-            focus(),
-            columns_2(),
-            columns_3(),
-            rows_2(),
-            grid_2x2(),
-            priority_grid(),
-            ultrawide(),
-            master_stack(),
-            rows_of_3(),
-        ]
+    #[test]
+    fn a_zones_look_fills_its_gaps_from_the_general_one() {
+        let general = ZoneLook {
+            opacity: Some(60),
+            blur: Some(true),
+            ..ZoneLook::default()
+        };
+        let own = ZoneLook {
+            opacity: Some(90),
+            ..ZoneLook::default()
+        };
+        let both = own.over(&general);
+        assert_eq!(both.opacity, Some(90));
+        assert_eq!(both.blur, Some(true));
+        assert_eq!(both.corner_radius, None);
     }
 }

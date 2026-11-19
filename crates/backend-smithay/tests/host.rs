@@ -204,6 +204,8 @@ fn commands_and_configurations_from_the_ipc_server_reach_the_wm() {
         assert_eq!(data.total_windows, 1);
         assert_eq!(data.monitors.len(), 1);
         assert_eq!(data.monitors[0].width, SCREEN.width);
+        // An output with no display behind it is known by its name.
+        assert_eq!(data.monitors[0].stable_id, "port:TEST-1");
     }
 
     // A command: answered, and carried out.

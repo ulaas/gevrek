@@ -12,7 +12,13 @@ test-support = []
 
 [dependencies]
 # (And the displays' colour ramps, for the night light.)
-windows = { workspace = true, features = ["Win32_UI_ColorSystem", "Win32_Devices_Display"] }
+windows = { workspace = true, features = [
+    "Win32_UI_ColorSystem",
+    "Win32_Devices_Display",
+    # A display's EDID: the device of the display, and that device's key.
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Devices_Properties",
+] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

@@ -8,6 +8,7 @@
 
 fn main() {
     let displays = gevrek_win32::display_settings::displays();
+    let told = gevrek_win32::dwm::monitor::ids_by_makers_and_models();
     for display in &displays {
         println!(
             "{} ({}): {}x{} at {} Hz at ({}, {}), {:?}{}, {} modes",
@@ -22,6 +23,36 @@ fn main() {
             if display.primary { ", the main one" } else { "" },
             display.modes.len()
         );
+        // Who the display is wherever it is plugged in, and what that is
+        // made of: its EDID as Windows keeps it, and what Windows' display
+        // configuration tells of it without the EDID.
+        println!("  stable id: {}", display.stable_id);
+        println!("  device path: {}", display.path);
+        match gevrek_win32::dwm::monitor::edid_of(&display.path) {
+            None => println!("  EDID: none"),
+            Some(bytes) => match gevrek_engine::outputs::edid::Edid::parse(&bytes) {
+                None => println!("  EDID: {} bytes that are no EDID", bytes.len()),
+                Some(edid) => println!(
+                    "  EDID: {} bytes: maker {}, product {:04X}, serial {:08X}, serial text {:?}, \
+                     name {:?}, made in week {} of {}",
+                    bytes.len(),
+                    edid.maker,
+                    edid.product,
+                    edid.serial,
+                    edid.serial_text,
+                    edid.name,
+                    edid.week,
+                    edid.year
+                ),
+            },
+        }
+        match told
+            .iter()
+            .find(|(path, _)| path.eq_ignore_ascii_case(&display.path))
+        {
+            Some((_, id)) => println!("  without the EDID it would be: {id}"),
+            None => println!("  without the EDID it would be known by its device path"),
+        }
     }
     let Some(file) = std::env::args().nth(1) else {
         return;

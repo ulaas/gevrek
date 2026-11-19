@@ -686,7 +686,7 @@ impl Executor {
         &mut self,
         window_manager: &mut dyn Desktop,
         monitor_manager: &mut MonitorManager,
-        zone_manager: &mut ZoneManager,
+        snap_zone_manager: &mut SnapZoneManager,
         target: MonitorTarget,
     ) -> Result<()> {
         let (source, target_monitor) =
@@ -729,7 +729,7 @@ impl Executor {
             target_monitor,
         );
         for window in workspace_windows {
-            zone_manager.remove_window(window);
+            snap_zone_manager.remove_window(window);
         }
         Self::translate_floating_windows(
             window_manager,
@@ -755,7 +755,7 @@ impl Executor {
         &mut self,
         window_manager: &mut dyn Desktop,
         monitor_manager: &mut MonitorManager,
-        zone_manager: &mut ZoneManager,
+        snap_zone_manager: &mut SnapZoneManager,
         target: MonitorTarget,
     ) -> Result<()> {
         let (source, target_monitor) =
@@ -811,7 +811,7 @@ impl Executor {
             source,
         );
         for window in source_windows.into_iter().chain(target_windows) {
-            zone_manager.remove_window(window);
+            snap_zone_manager.remove_window(window);
         }
         Self::translate_floating_windows(
             window_manager,

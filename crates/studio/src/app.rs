@@ -227,7 +227,7 @@ pub struct Studio {
     layout_preview: crate::preview::LayoutPreview,
     /// The workspaces of each display.
     workspaces: crate::workspaces::Page,
-    zones_edit: crate::zones_edit::ZonesEdit,
+    snap_zones_edit: crate::snap_zones_edit::SnapZonesEdit,
     /// This studio asked the window manager to have a window picked,
     /// and has not heard which yet.
     picking: bool,
@@ -360,7 +360,7 @@ impl Studio {
             appearance_preview: Default::default(),
             layout_preview: Default::default(),
             workspaces: Default::default(),
-            zones_edit: Default::default(),
+            snap_zones_edit: Default::default(),
             picking: false,
             arrangement: Default::default(),
             night_light: Default::default(),
@@ -1465,9 +1465,9 @@ impl Studio {
                     });
                 }
                 // The zones, moved and sized by dragging.
-                if page == Page::Zones {
+                if page == Page::SnapZones {
                     widgets::card(ui, "Where they are", |ui| {
-                        self.zones_edit.show(ui, &mut self.document);
+                        self.snap_zones_edit.show(ui, &mut self.document);
                     });
                 }
                 // The keyboard's layouts, chosen by what they are called.

@@ -511,9 +511,9 @@ impl State {
                     // and the windows gave way and came back.)
                     self.core.monitor_manager.expect_no_bar();
                 }
-                ReloadStep::Zones => {
-                    self.core.zone_manager = gevrek_engine::config_apply::build_zone_manager(
-                        &desktop.zones,
+                ReloadStep::SnapZones => {
+                    self.core.snap_zone_manager = gevrek_engine::config_apply::build_snap_zone_manager(
+                        &desktop.snap_zones,
                         &self.core.monitor_manager,
                         |_| false,
                     );

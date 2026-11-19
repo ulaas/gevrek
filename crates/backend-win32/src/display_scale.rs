@@ -272,6 +272,7 @@ mod tests {
             device: device.to_string(),
             name: name.to_string(),
             path: format!(r"\\?\DISPLAY#{name}"),
+            stable_id: String::new(),
             primary: false,
             x: 0,
             y: 0,

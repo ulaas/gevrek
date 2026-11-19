@@ -20,7 +20,7 @@ pub enum Page {
     Gestures,
     Rules,
     Scratchpads,
-    Zones,
+    SnapZones,
     Focus,
     Input,
     Startup,
@@ -87,7 +87,7 @@ impl Page {
         Page::Gestures,
         Page::Rules,
         Page::Scratchpads,
-        Page::Zones,
+        Page::SnapZones,
         Page::Focus,
         Page::Input,
         Page::Startup,
@@ -118,7 +118,7 @@ impl Page {
             Page::Gestures => "gestures",
             Page::Rules => "rules",
             Page::Scratchpads => "scratchpads",
-            Page::Zones => "zones",
+            Page::SnapZones => "snap-zones",
             Page::Focus => "focus",
             Page::Input => "input",
             Page::Startup => "startup",
@@ -153,7 +153,7 @@ impl Page {
             Page::Gestures => "Mouse and gestures",
             Page::Rules => "Window rules",
             Page::Scratchpads => "Scratchpads",
-            Page::Zones => "Snap zones",
+            Page::SnapZones => "Snap zones",
             Page::Focus => "Focus",
             Page::Input => "Input",
             Page::Startup => "Startup",
@@ -184,7 +184,7 @@ impl Page {
             Page::Gestures => "What the corners of a display do, and touchpad gestures.",
             Page::Rules => "What happens to a window when it opens, by what it is.",
             Page::Scratchpads => "Programs that come and go on a key.",
-            Page::Zones => "Places on a display that windows snap to.",
+            Page::SnapZones => "Places on a display that windows snap to.",
             Page::Focus => "Which window has the keyboard, and when that changes.",
             Page::Input => "Keyboard layouts, mouse and touchpad.",
             Page::Startup => "Programs started with the session.",
@@ -215,7 +215,7 @@ impl Page {
             Page::Gestures => icons::HAND_SWIPE_RIGHT,
             Page::Rules => icons::FUNNEL,
             Page::Scratchpads => icons::NOTE_PENCIL,
-            Page::Zones => icons::GRID_FOUR,
+            Page::SnapZones => icons::GRID_FOUR,
             Page::Focus => icons::CROSSHAIR,
             Page::Input => icons::MOUSE,
             Page::Startup => icons::ROCKET_LAUNCH,
@@ -247,7 +247,7 @@ impl Page {
             | Page::Gestures
             | Page::Rules
             | Page::Scratchpads
-            | Page::Zones
+            | Page::SnapZones
             | Page::Focus
             | Page::Input => "Behaviour",
             Page::Startup | Page::Session | Page::System => "Session",
@@ -380,9 +380,9 @@ impl Page {
         ];
         const SCRATCHPADS: &[Card] = &[card("Scratchpads", "/desktop/scratchpads", Show::Place)];
         // (The zones themselves are drawn and dragged in the card above.)
-        const ZONES: &[Card] = &[card(
+        const SNAP_ZONES: &[Card] = &[card(
             "How they behave",
-            "/desktop/zones",
+            "/desktop/snap_zones",
             Show::Rest(&["default_layout", "monitor_layouts"]),
         )];
         const FOCUS: &[Card] = &[card("Focus", "/desktop/focus", Show::AllBut(&[]))];
@@ -434,7 +434,7 @@ impl Page {
             Page::Gestures => GESTURES,
             Page::Rules => RULES,
             Page::Scratchpads => SCRATCHPADS,
-            Page::Zones => ZONES,
+            Page::SnapZones => SNAP_ZONES,
             Page::Focus => FOCUS,
             Page::Input => INPUT,
             Page::Startup => STARTUP,
@@ -505,6 +505,12 @@ mod tests {
         {
             // Written by gevrek, not set by a person.
             if setting.pointer == "/desktop/schema_version" {
+                continue;
+            }
+            // The zones of the desktop are switched off and have nothing
+            // to show them yet; their page comes with what draws them.
+            if setting.pointer.starts_with("/desktop/zones/") {
+                assert!(Page::ALL.into_iter().all(|page| !page.shows(&setting.pointer)));
                 continue;
             }
             let pages: Vec<Page> = Page::ALL

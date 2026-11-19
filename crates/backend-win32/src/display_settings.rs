@@ -34,6 +34,8 @@ pub struct Display {
     /// The name `gevrek state` shows, and the device path.
     pub name: String,
     pub path: String,
+    /// Who it is wherever it is plugged in (`MonitorInfo::stable_id`).
+    pub stable_id: String,
     pub primary: bool,
     pub x: i32,
     pub y: i32,
@@ -275,6 +277,7 @@ mod system {
                     device,
                     name: info.name,
                     path: info.device_path,
+                    stable_id: info.stable_id,
                     primary: info.is_primary,
                     x: at.x,
                     y: at.y,
@@ -430,6 +433,7 @@ mod tests {
                 device: r"\\.\DISPLAY1".to_string(),
                 name: "Monitor ACM2401".to_string(),
                 path: r"\\?\DISPLAY#ACM2401#one".to_string(),
+                stable_id: String::new(),
                 primary: true,
                 x: 0,
                 y: 0,
@@ -443,6 +447,7 @@ mod tests {
                 device: r"\\.\DISPLAY2".to_string(),
                 name: "Monitor ACM2702".to_string(),
                 path: r"\\?\DISPLAY#ACM2702#two".to_string(),
+                stable_id: String::new(),
                 primary: false,
                 x: 2560,
                 y: 0,

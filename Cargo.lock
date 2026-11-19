@@ -2260,6 +2260,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gevrek-zones"
+version = "0.6.0"
+dependencies = [
+ "gevrek-model",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "gif"
 version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

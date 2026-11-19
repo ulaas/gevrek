@@ -12,7 +12,7 @@ use crate::settings::{
     RuleColor, RuleEffect, RuleMeasure, RulePredicate, ScratchpadPosition, ScratchpadProfile,
     ShadowPolicy, StartupProfile, StartupRestartPolicy, WindowRuleProfile, WorkspaceProfile,
 };
-use crate::zones::presets as zone_presets;
+use crate::snap_zones::presets as snap_zone_presets;
 
 #[derive(Debug, Clone)]
 pub struct BuiltInExample {
@@ -1955,8 +1955,8 @@ fn example_snap_zone_workbench() -> BuiltInExample {
     let mut config = Config::new();
     config.node_graph = startup_filter_graph();
     config.desktop.workspaces = vec![workspace("zone-lab", LayoutType::BSP, true)];
-    config.desktop.zones.default_layout = zone_presets::priority_grid();
-    config.desktop.zones.behavior.snap_threshold = 0.2;
+    config.desktop.snap_zones.default_layout = snap_zone_presets::priority_grid();
+    config.desktop.snap_zones.behavior.snap_threshold = 0.2;
     config.desktop.bindings = vec![
         binding(
             "Snap to main zone",
@@ -2342,7 +2342,7 @@ mod tests {
                 })
         }));
         assert!(examples.iter().any(|example| {
-            example.config.desktop.zones.default_layout.zones.len() >= 3
+            example.config.desktop.snap_zones.default_layout.zones.len() >= 3
                 && example.config.desktop.bindings.iter().any(|binding| {
                     matches!(binding.command, DispatchCommand::SnapActiveToZone { .. })
                 })

@@ -8,7 +8,7 @@ impl Executor {
         &mut self,
         window_manager: &mut dyn Desktop,
         monitor_manager: &mut MonitorManager,
-        zone_manager: &mut ZoneManager,
+        snap_zone_manager: &mut SnapZoneManager,
         _focus_manager: &mut FocusManager,
         command: DispatchCommand,
     ) -> Result<()> {
@@ -20,13 +20,13 @@ impl Executor {
                 self.toggle_scratchpad(window_manager, monitor_manager, &id)
             }
             DispatchCommand::SnapActiveToZone { index } => {
-                self.snap_active_to_zone(window_manager, monitor_manager, zone_manager, index)
+                self.snap_active_to_zone(window_manager, monitor_manager, snap_zone_manager, index)
             }
             DispatchCommand::CycleActiveZoneNext => {
-                self.cycle_active_zone(window_manager, monitor_manager, zone_manager, false)
+                self.cycle_active_zone(window_manager, monitor_manager, snap_zone_manager, false)
             }
             DispatchCommand::CycleActiveZonePrevious => {
-                self.cycle_active_zone(window_manager, monitor_manager, zone_manager, true)
+                self.cycle_active_zone(window_manager, monitor_manager, snap_zone_manager, true)
             }
             DispatchCommand::ScrollView { pixels } => {
                 self.scroll_view(window_manager, monitor_manager, pixels);

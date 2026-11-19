@@ -13,7 +13,7 @@ mod stand_in;
 use gevrek_engine::overlay_data;
 pub(crate) mod window_manager;
 mod window_monitor;
-pub use gevrek_engine::zones;
+pub use gevrek_engine::snap_zones;
 
 pub use animation_scheduler::{
     AnimationFrame as RuntimeAnimationFrame, BorderFrame as RuntimeBorderFrame,
@@ -40,6 +40,7 @@ pub use window_manager::{
 };
 pub use window_monitor::{WindowEvent, WindowMonitor};
 pub use workspace::{ExposeState, WindowContainerBehaviour, Workspace};
-pub use zones::{
-    presets as zone_presets, Zone, ZoneConfig, ZoneHit, ZoneLayout, ZoneManager, ZoneModifier,
+pub use snap_zones::{
+    presets as snap_zone_presets, SnapZone, SnapZoneConfig, SnapZoneHit, SnapZoneLayout,
+    SnapZoneManager, SnapZoneModifier,
 };

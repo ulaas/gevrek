@@ -903,7 +903,7 @@ impl Executor {
         &mut self,
         window_manager: &mut dyn Desktop,
         monitor_manager: &mut MonitorManager,
-        zone_manager: &mut ZoneManager,
+        snap_zone_manager: &mut SnapZoneManager,
         index: usize,
     ) -> Result<()> {
         let active = queries(window_manager)
@@ -917,7 +917,7 @@ impl Executor {
             })
             .or_else(|| self.active_monitor(window_manager, monitor_manager))
             .ok_or_else(|| anyhow::anyhow!("Could not determine the active monitor"))?;
-        let zone_id = zone_manager
+        let zone_id = snap_zone_manager
             .get_monitor_layout(monitor)
             .zones
             .get(index)
@@ -926,10 +926,10 @@ impl Executor {
                 anyhow::anyhow!(
                     "Zone index {} does not exist; active layout has {} zones",
                     index,
-                    zone_manager.zone_count(monitor)
+                    snap_zone_manager.zone_count(monitor)
                 )
             })?;
-        let rect = zone_manager
+        let rect = snap_zone_manager
             .snap_to_zone_index(monitor, index, monitor_manager)
             .ok_or_else(|| anyhow::anyhow!("Could not resolve zone geometry"))?;
         self.set_window_floating(window_manager, monitor_manager, active, true)?;
@@ -946,7 +946,7 @@ impl Executor {
                 states: WindowStates::default(),
             },
         )?;
-        zone_manager.assign_window_to_zone(active, monitor, zone_id);
+        snap_zone_manager.assign_window_to_zone(active, monitor, zone_id);
         effect(
             window_manager,
             Effect::SetVisible {
@@ -1023,7 +1023,7 @@ impl Executor {
         &mut self,
         window_manager: &mut dyn Desktop,
         monitor_manager: &mut MonitorManager,
-        zone_manager: &mut ZoneManager,
+        snap_zone_manager: &mut SnapZoneManager,
         backwards: bool,
     ) -> Result<()> {
         let active = queries(window_manager)
@@ -1037,11 +1037,11 @@ impl Executor {
             })
             .or_else(|| self.active_monitor(window_manager, monitor_manager))
             .ok_or_else(|| anyhow::anyhow!("Could not determine the active monitor"))?;
-        let layout = zone_manager.get_monitor_layout(monitor);
+        let layout = snap_zone_manager.get_monitor_layout(monitor);
         if layout.zones.is_empty() {
             anyhow::bail!("The active monitor's zone layout is empty");
         }
-        let current_index = zone_manager
+        let current_index = snap_zone_manager
             .get_window_zone(active)
             .filter(|(assigned_monitor, _)| *assigned_monitor == monitor)
             .and_then(|(_, zone_id)| layout.zones.iter().position(|zone| zone.id == zone_id));
@@ -1051,7 +1051,7 @@ impl Executor {
             (Some(index), false) => (index + 1) % layout.zones.len(),
             (None, false) => 0,
         };
-        self.snap_active_to_zone(window_manager, monitor_manager, zone_manager, index)
+        self.snap_active_to_zone(window_manager, monitor_manager, snap_zone_manager, index)
     }
 
     pub fn focus_managed_window(

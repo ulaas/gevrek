@@ -165,9 +165,11 @@ and mouse bindings, named special-workspace/scratchpad profiles, and ordered
 multi-condition window rules. Snap zones include nine presets,
 custom normalized geometry with a visual preview, per-monitor overrides,
 overlap thresholds, activation modifiers, drag snapping, and direct/cycling
-commands. A window is dropped into a zone only while the activation key is
-held (Shift by default); a plain drag of a tiled window puts it back into the
-tiling. `Win+F1` (the `shortcuts` command) opens a list of the current key
+commands. A window is dropped into a snap zone only while the activation key
+is held (Shift by default); a plain drag of a tiled window puts it back into the
+tiling. They are set under `desktop.snap_zones`; a file written before schema
+version 26 has them under `desktop.zones`, and they are moved when it is read.
+`Win+F1` (the `shortcuts` command) opens a list of the current key
 assignments; `gevrek start` writes each component's log next to its pid file
 (`%LOCALAPPDATA%\gevrek\wm.log`). Scratchpads support safe structured launches,
 title/class/executable/path matching, active/primary/indexed/named monitor
@@ -587,8 +589,8 @@ target\release\gevrek.exe layout-promote
 target\release\gevrek.exe dwindle-direction horizontal
 target\release\gevrek.exe dwindle-cycle-split
 target\release\gevrek.exe scratchpad terminal
-target\release\gevrek.exe zone 0
-target\release\gevrek.exe zone-next
+target\release\gevrek.exe snap-zone 0
+target\release\gevrek.exe snap-zone-next
 target\release\gevrek.exe shortcuts
 target\release\gevrek.exe submap resize
 target\release\gevrek.exe submap-reset

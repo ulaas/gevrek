@@ -10,7 +10,7 @@ use crate::layouts::LayoutType;
 use crate::outputs::{MonitorHandle, Outputs};
 use crate::rules::RuleEngine;
 use crate::testing::fake_desktop::FakeDesktop;
-use crate::zones::ZoneManager;
+use crate::snap_zones::SnapZoneManager;
 use crate::{Rect, WindowHandle};
 use gevrek_model::command::{DispatchCommand, WorkspaceSelector};
 use gevrek_model::graph::NodeGraph;
@@ -34,7 +34,7 @@ fn setup(names: &[&str]) -> (WmCore, FakeDesktop) {
         executor,
         outputs,
         FocusManager::new(),
-        ZoneManager::new(Default::default()),
+        SnapZoneManager::new(Default::default()),
     );
     (core, FakeDesktop::new(OUTPUT))
 }
@@ -188,6 +188,7 @@ fn a_window_is_followed_on_its_own_display() {
         handle: SECOND,
         name: "Second".to_string(),
         device_path: String::new(),
+        stable_id: String::new(),
         is_primary: false,
         x: screen.x,
         y: screen.y,
@@ -667,6 +668,7 @@ fn a_window_tiles_on_the_output_it_opened_on() {
         handle: SECOND,
         name: "Second".to_string(),
         device_path: String::new(),
+        stable_id: String::new(),
         is_primary: false,
         x: screen.x,
         y: screen.y,
@@ -715,6 +717,7 @@ fn going_to_an_output_with_nothing_on_it_takes_the_keyboard_along() {
         handle: SECOND,
         name: "Second".to_string(),
         device_path: String::new(),
+        stable_id: String::new(),
         is_primary: false,
         x: screen.x,
         y: screen.y,
@@ -804,6 +807,7 @@ fn a_window_dropped_with_the_pointer_on_another_output_goes_there() {
         handle: SECOND,
         name: "Second".to_string(),
         device_path: String::new(),
+        stable_id: String::new(),
         is_primary: false,
         x: screen.x,
         y: screen.y,
@@ -855,6 +859,7 @@ fn a_layout_is_set_on_the_output_the_user_went_to_not_where_the_window_is() {
         handle: SECOND,
         name: "Second".to_string(),
         device_path: String::new(),
+        stable_id: String::new(),
         is_primary: false,
         x: screen.x,
         y: screen.y,
@@ -1134,6 +1139,7 @@ fn a_floating_window_moves_with_its_workspace_by_the_distance_between_the_output
         handle: SECOND,
         name: "Second".to_string(),
         device_path: String::new(),
+        stable_id: String::new(),
         is_primary: false,
         x: screen.x,
         y: screen.y,

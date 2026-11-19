@@ -5,11 +5,11 @@ use crate::graph::BorderStyle;
 use crate::layout::{DwindleDirection, LayoutType, MasterPosition, NewWindowPlacement};
 use crate::platform::windows::{SystemBackdrop, WindowCorner};
 use crate::rules::{MatchKind, MatchStrategy};
-use crate::zones::{presets as zone_presets, ZoneConfig, ZoneLayout};
+use crate::snap_zones::{presets as snap_zone_presets, SnapZoneConfig, SnapZoneLayout};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
-pub const DESKTOP_CONFIG_SCHEMA_VERSION: u32 = 25;
+pub const DESKTOP_CONFIG_SCHEMA_VERSION: u32 = 26;
 
 /// What is wrong with the pattern in a command's window selector, where
 /// it has one that cannot be read (`re:` and what follows is a regular
@@ -96,7 +96,10 @@ pub struct DesktopConfig {
     pub work_area_offset: ReservedArea,
     pub monitors: Vec<MonitorProfile>,
     pub workspaces: Vec<WorkspaceProfile>,
-    pub zones: ZoneSettings,
+    pub snap_zones: SnapZoneSettings,
+    /// Zones: containers on the desktop that hold its icons. Off until
+    /// there is something to show them with.
+    pub zones: crate::zones::ZonesConfig,
     pub startup: Vec<StartupProfile>,
     pub scratchpads: Vec<ScratchpadProfile>,
     pub bindings: Vec<BindingProfile>,
@@ -145,7 +148,8 @@ impl Default for DesktopConfig {
             work_area_offset: ReservedArea::default(),
             monitors: Vec::new(),
             workspaces: Vec::new(),
-            zones: ZoneSettings::default(),
+            snap_zones: SnapZoneSettings::default(),
+            zones: Default::default(),
             startup: Vec::new(),
             scratchpads: Vec::new(),
             bindings: Vec::new(),
@@ -1351,8 +1355,12 @@ impl DesktopConfig {
             .chain(self.session.problems())
             .chain(self.night_light.problems())
             .chain(crate::outputs::problems(&self.outputs))
+            .chain(self.zones.problems())
         {
             issues.push(ConfigIssue::error(path, message));
+        }
+        for (path, message) in self.zones.remarks() {
+            issues.push(ConfigIssue::warning(path, message));
         }
         if self.schema_version > DESKTOP_CONFIG_SCHEMA_VERSION {
             issues.push(ConfigIssue::error(
@@ -1652,25 +1660,25 @@ impl DesktopConfig {
             }
         }
 
-        if !(0.0..=1.0).contains(&self.zones.behavior.snap_threshold) {
+        if !(0.0..=1.0).contains(&self.snap_zones.behavior.snap_threshold) {
             issues.push(ConfigIssue::error(
-                "desktop.zones.behavior.snap_threshold",
+                "desktop.snap_zones.behavior.snap_threshold",
                 "Zone snap threshold must be between 0 and 1",
             ));
         }
-        if !(0.0..=1.0).contains(&self.zones.behavior.preview_opacity) {
+        if !(0.0..=1.0).contains(&self.snap_zones.behavior.preview_opacity) {
             issues.push(ConfigIssue::error(
-                "desktop.zones.behavior.preview_opacity",
+                "desktop.snap_zones.behavior.preview_opacity",
                 "Zone preview opacity must be between 0 and 1",
             ));
         }
-        Self::validate_zone_layout(
-            &self.zones.default_layout,
-            "desktop.zones.default_layout",
+        Self::snap_validate_zone_layout(
+            &self.snap_zones.default_layout,
+            "desktop.snap_zones.default_layout",
             &mut issues,
         );
-        for (index, monitor_layout) in self.zones.monitor_layouts.iter().enumerate() {
-            let path = format!("desktop.zones.monitor_layouts[{index}]");
+        for (index, monitor_layout) in self.snap_zones.monitor_layouts.iter().enumerate() {
+            let path = format!("desktop.snap_zones.monitor_layouts[{index}]");
             if matches!(&monitor_layout.monitor, MonitorSelector::Name(name) if name.trim().is_empty())
             {
                 issues.push(ConfigIssue::error(
@@ -1678,7 +1686,7 @@ impl DesktopConfig {
                     "Named zone monitor selectors require a name",
                 ));
             }
-            Self::validate_zone_layout(
+            Self::snap_validate_zone_layout(
                 &monitor_layout.layout,
                 &format!("{path}.layout"),
                 &mut issues,
@@ -2275,7 +2283,7 @@ impl DesktopConfig {
         issues
     }
 
-    fn validate_zone_layout(layout: &ZoneLayout, path: &str, issues: &mut Vec<ConfigIssue>) {
+    fn snap_validate_zone_layout(layout: &SnapZoneLayout, path: &str, issues: &mut Vec<ConfigIssue>) {
         if layout.id.trim().is_empty() {
             issues.push(ConfigIssue::error(
                 format!("{path}.id"),
@@ -3257,22 +3265,22 @@ impl Default for MonitorProfile {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
-pub struct ZoneSettings {
-    pub behavior: ZoneConfig,
-    pub default_layout: ZoneLayout,
-    pub monitor_layouts: Vec<MonitorZoneLayout>,
+pub struct SnapZoneSettings {
+    pub behavior: SnapZoneConfig,
+    pub default_layout: SnapZoneLayout,
+    pub monitor_layouts: Vec<MonitorSnapZoneLayout>,
     /// Keys this version does not know: kept, and written back as they
     /// were, so a file from a newer gevrek survives being edited here.
     #[serde(flatten)]
     pub extra: crate::Extra,
 }
 
-impl Default for ZoneSettings {
+impl Default for SnapZoneSettings {
     fn default() -> Self {
         Self {
             extra: Default::default(),
-            behavior: ZoneConfig::default(),
-            default_layout: zone_presets::columns_2(),
+            behavior: SnapZoneConfig::default(),
+            default_layout: snap_zone_presets::columns_2(),
             monitor_layouts: Vec::new(),
         }
     }
@@ -3280,23 +3288,23 @@ impl Default for ZoneSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
-pub struct MonitorZoneLayout {
+pub struct MonitorSnapZoneLayout {
     pub enabled: bool,
     pub monitor: MonitorSelector,
-    pub layout: ZoneLayout,
+    pub layout: SnapZoneLayout,
     /// Keys this version does not know: kept, and written back as they
     /// were, so a file from a newer gevrek survives being edited here.
     #[serde(flatten)]
     pub extra: crate::Extra,
 }
 
-impl Default for MonitorZoneLayout {
+impl Default for MonitorSnapZoneLayout {
     fn default() -> Self {
         Self {
             extra: Default::default(),
             enabled: true,
             monitor: MonitorSelector::Primary,
-            layout: zone_presets::columns_2(),
+            layout: snap_zone_presets::columns_2(),
         }
     }
 }
@@ -5026,26 +5034,26 @@ mod tests {
 
     #[test]
     fn zone_settings_validate_geometry_and_round_trip_monitor_overrides() {
-        let settings = ZoneSettings {
-            default_layout: zone_presets::priority_grid(),
-            monitor_layouts: vec![MonitorZoneLayout {
+        let settings = SnapZoneSettings {
+            default_layout: snap_zone_presets::priority_grid(),
+            monitor_layouts: vec![MonitorSnapZoneLayout {
                 monitor: MonitorSelector::Name("Studio Display".to_string()),
-                layout: zone_presets::ultrawide(),
-                ..MonitorZoneLayout::default()
+                layout: snap_zone_presets::ultrawide(),
+                ..MonitorSnapZoneLayout::default()
             }],
-            ..ZoneSettings::default()
+            ..SnapZoneSettings::default()
         };
         let json = serde_json::to_string(&settings).unwrap();
-        let decoded: ZoneSettings = serde_json::from_str(&json).unwrap();
+        let decoded: SnapZoneSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.default_layout.id, "priority_grid");
         assert_eq!(decoded.monitor_layouts[0].layout.id, "ultrawide");
 
         let mut config = DesktopConfig {
-            zones: decoded,
+            snap_zones: decoded,
             ..DesktopConfig::default()
         };
         assert!(config.validate().is_empty());
-        config.zones.default_layout.zones[0].width_percent = 1.5;
+        config.snap_zones.default_layout.zones[0].width_percent = 1.5;
         assert!(config
             .validate()
             .iter()

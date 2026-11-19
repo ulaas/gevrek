@@ -214,7 +214,7 @@ back to those frontends.
 
 Ordered monitor profiles resolve primary/index/name/all selectors after Windows
 monitor discovery. Their per-edge reservations are applied after the native
-taskbar work area and before layouts, zones, rules, or scratchpads consume the
+taskbar work area and before layouts, snap zones, rules, or scratchpads consume the
 usable rectangle. Master-family workspace profiles persist the master edge and
 new-window insertion policy. Full hot reload preserves tiled container and
 group ordering so applying a placement policy does not reorder existing windows.
@@ -228,10 +228,10 @@ them on focus loss, and preserves tracked windows across full hot reloads.
 Bindings, graph nodes, gRPC dispatch, the CLI, editor Command Center, state
 queries, and the overlay all use or report the same runtime state.
 
-Zone settings configure the existing drag-snap engine instead of constructing
+Snap zone settings configure the existing drag-snap engine instead of constructing
 a hard-coded manager. A default normalized layout and monitor-specific
 primary/index/name/all overrides are resolved after monitor discovery. Direct
-zone dispatch converts tiled windows to floating placement, records the zone
+snap-zone dispatch converts tiled windows to floating placement, records the zone
 assignment, and supports stable next/previous cycling through runtime
 bindings, gRPC, CLI, and the editor Command Center.
 

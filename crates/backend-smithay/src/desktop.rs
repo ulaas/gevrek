@@ -235,6 +235,10 @@ pub struct Stackbar {
 pub struct WlOutput {
     pub id: MonitorHandle,
     pub name: String,
+    /// Who the display is wherever it is plugged in
+    /// (`MonitorInfo::stable_id`): of its EDID on hardware, of its name
+    /// where there is no display behind it (nested, headless).
+    pub stable_id: String,
     pub rect: Rect,
     /// The part of it no bar reserves: where windows go.
     pub work: Rect,

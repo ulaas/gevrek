@@ -43,7 +43,7 @@ pub mod scratchpads;
 pub mod workspace;
 pub mod workspace_profile;
 pub mod workspaces;
-pub mod zones;
+pub mod snap_zones;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;

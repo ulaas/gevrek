@@ -10,8 +10,8 @@ $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
 $target = 'x86_64-unknown-linux-gnu'
-$crates = @('gevrek-model', 'gevrek-engine')
-$dirs = @('crates/model', 'crates/engine')
+$crates = @('gevrek-model', 'gevrek-engine', 'gevrek-zones')
+$dirs = @('crates/model', 'crates/engine', 'crates/zones')
 
 if (-not (rustup target list --installed | Select-String -SimpleMatch $target)) {
     rustup target add $target

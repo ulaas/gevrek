@@ -14,10 +14,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Test backend-neutral crates
-        run: cargo test -p gevrek-model -p gevrek-engine --all-targets
+        run: cargo test -p gevrek-model -p gevrek-engine -p gevrek-zones --all-targets
       - name: No Windows, UI, or async dependency
         run: |
-          if grep -rnE '(^|[^:A-Za-z_])windows::|\begui\b|\beframe\b|\btokio\b' crates/model crates/engine --include='*.rs' | grep -vE '^\S+:[0-9]+:\s*//'; then
+          if grep -rnE '(^|[^:A-Za-z_])windows::|\begui\b|\beframe\b|\btokio\b' crates/model crates/engine crates/zones --include='*.rs' | grep -vE '^\S+:[0-9]+:\s*//'; then
             echo "Backend-neutral crates use a forbidden dependency"
             exit 1
           fi

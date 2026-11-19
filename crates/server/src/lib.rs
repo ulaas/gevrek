@@ -161,6 +161,7 @@ fn overlay_state_to_proto(data: &gevrek_engine::overlay_data::OverlayData) -> St
             name: monitor.name.clone(),
             output_id: monitor.handle.0 as u64,
             connector: monitor.connector.clone(),
+            stable_id: monitor.stable_id.clone(),
             position: Some(Position {
                 x: monitor.x as f32,
                 y: monitor.y as f32,
@@ -265,6 +266,7 @@ pub fn overlay_response(
             name: m.name.clone(),
             output_id: m.handle.0 as u64,
             connector: m.connector.clone(),
+            stable_id: m.stable_id.clone(),
             is_primary: m.is_primary,
             position: Some(Position {
                 x: m.x as f32,
@@ -2173,6 +2175,7 @@ impl WMService for WMServer {
             "configuration_revisions_v1",
             "graph_json_v1",
             "focus_steal_prevention",
+            "zones_v1",
         ]
         .iter()
         .map(|feature| feature.to_string())
@@ -2751,6 +2754,7 @@ mod overlay_conversion_tests {
                 handle: MonitorHandle(1),
                 name: "Test monitor".to_string(),
                 connector: "TEST-1".to_string(),
+                stable_id: "port:TEST-1".to_string(),
                 is_primary: true,
                 is_focused: true,
                 workspace: active.clone(),

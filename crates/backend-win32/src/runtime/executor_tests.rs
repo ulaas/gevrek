@@ -9,7 +9,7 @@ use crate::dwm::MonitorManagerWin32;
 use crate::dwm::{
     stackbar_content_rect, FocusManager, MonitorHandle, MonitorManager, RuleResolution,
     RuleResolutionScope, StackbarContainerState, WindowEvent, WindowHandle, WindowManager,
-    ZoneManager,
+    SnapZoneManager,
 };
 use crate::node_editor::{
     AnimationType, BorderStyle, LogEntry, NodeGraph, NodeId, NodeType, PinId, RuleDefinition,
@@ -863,7 +863,7 @@ mod manual_trigger_tests {
         let mut executor = test_executor();
         let (mut monitor_manager, primary, _secondary) = monitor_pair();
         let mut window_manager = WindowManager::new();
-        let mut zone_manager = ZoneManager::default();
+        let mut snap_zone_manager = SnapZoneManager::default();
         let mut focus_manager = FocusManager::new();
         add_tiled_window(&mut monitor_manager, primary, WindowHandle(7));
         executor.focused_monitor = Some(primary);
@@ -880,7 +880,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::ToggleTiling,
             )
@@ -898,7 +898,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::Retile,
             )
@@ -912,7 +912,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::ToggleTiling,
             )
@@ -926,7 +926,7 @@ mod manual_trigger_tests {
         let mut executor = test_executor();
         let (mut monitor_manager, primary, secondary) = monitor_pair();
         let mut window_manager = WindowManager::new();
-        let mut zone_manager = ZoneManager::default();
+        let mut snap_zone_manager = SnapZoneManager::default();
         let mut focus_manager = FocusManager::new();
         add_tiled_window(&mut monitor_manager, primary, WindowHandle(7));
         add_tiled_window(&mut monitor_manager, secondary, WindowHandle(8));
@@ -936,7 +936,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::ToggleWorkspaceTiling {
                     selector: WorkspaceSelector::Index(0),
@@ -967,7 +967,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::ToggleWorkspaceTiling {
                     selector: WorkspaceSelector::Index(0),
@@ -988,7 +988,7 @@ mod manual_trigger_tests {
         let mut executor = test_executor();
         let (mut monitor_manager, primary, _secondary) = monitor_pair();
         let mut window_manager = WindowManager::new();
-        let mut zone_manager = ZoneManager::default();
+        let mut snap_zone_manager = SnapZoneManager::default();
         let mut focus_manager = FocusManager::new();
         add_tiled_window(&mut monitor_manager, primary, WindowHandle(7));
         add_tiled_window(&mut monitor_manager, primary, WindowHandle(8));
@@ -998,7 +998,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::ToggleWorkspaceFloatOverride {
                     selector: WorkspaceSelector::Index(0),
@@ -1024,7 +1024,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::ToggleWorkspaceFloatOverride {
                     selector: WorkspaceSelector::Index(0),
@@ -1084,7 +1084,7 @@ mod manual_trigger_tests {
         let mut executor = test_executor();
         let (mut monitor_manager, primary, secondary) = monitor_pair();
         let mut window_manager = WindowManager::new();
-        let mut zone_manager = ZoneManager::default();
+        let mut snap_zone_manager = SnapZoneManager::default();
         let mut focus_manager = FocusManager::new();
         monitor_manager
             .create_workspace(
@@ -1099,7 +1099,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::FocusMonitorWorkspace {
                     target: MonitorTarget::Index(1),
@@ -1130,7 +1130,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::FocusMonitorWorkspace {
                     target: MonitorTarget::Index(0),
@@ -1153,7 +1153,7 @@ mod manual_trigger_tests {
         let mut executor = test_executor();
         let (mut monitor_manager, primary, secondary) = monitor_pair();
         let mut window_manager = WindowManager::new();
-        let mut zone_manager = ZoneManager::default();
+        let mut snap_zone_manager = SnapZoneManager::default();
         let mut focus_manager = FocusManager::new();
         monitor_manager
             .create_workspace(
@@ -1172,7 +1172,7 @@ mod manual_trigger_tests {
                     .execute_dispatch(
                         &mut window_manager,
                         monitor_manager,
-                        &mut zone_manager,
+                        &mut snap_zone_manager,
                         &mut focus_manager,
                         DispatchCommand::SwitchWorkspaceSelector {
                             selector: WorkspaceSelector::Name(name.to_string()),
@@ -1495,7 +1495,7 @@ mod manual_trigger_tests {
         let mut executor = test_executor();
         let (mut monitor_manager, primary, _secondary) = monitor_pair();
         let mut window_manager = WindowManager::new();
-        let mut zone_manager = ZoneManager::default();
+        let mut snap_zone_manager = SnapZoneManager::default();
         let mut focus_manager = FocusManager::new();
         add_tiled_window(&mut monitor_manager, primary, WindowHandle(7));
         executor.focused_monitor = Some(primary);
@@ -1504,7 +1504,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::ToggleWindowContainerBehaviour,
             )
@@ -1540,7 +1540,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::ToggleWorkspaceWindowContainerBehaviour {
                     selector: WorkspaceSelector::Index(0),
@@ -1658,13 +1658,13 @@ mod manual_trigger_tests {
         monitor_manager: &mut MonitorManager,
         event: WindowEvent,
     ) {
-        let mut zone_manager = ZoneManager::new(Default::default());
+        let mut snap_zone_manager = SnapZoneManager::new(Default::default());
         let mut focus_manager = FocusManager::new();
         executor
             .execute_window_event(
                 window_manager,
                 monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 event,
             )
@@ -1783,7 +1783,7 @@ mod manual_trigger_tests {
         let mut executor = test_executor();
         let (mut monitor_manager, primary, _secondary) = monitor_pair();
         let mut window_manager = WindowManager::new();
-        let mut zone_manager = ZoneManager::new(Default::default());
+        let mut snap_zone_manager = SnapZoneManager::new(Default::default());
         let mut focus_manager = FocusManager::new();
         let tray_app = HiddenTestWindow::create();
         let other_workspace = HiddenTestWindow::create();
@@ -1802,7 +1802,7 @@ mod manual_trigger_tests {
                 .execute_window_event(
                     &mut window_manager,
                     &mut monitor_manager,
-                    &mut zone_manager,
+                    &mut snap_zone_manager,
                     &mut focus_manager,
                     WindowEvent::Unmapped(window),
                 )
@@ -1880,7 +1880,7 @@ mod manual_trigger_tests {
         let mut executor = test_executor();
         let (mut monitor_manager, primary, _secondary) = monitor_pair();
         let mut window_manager = WindowManager::new();
-        let mut zone_manager = ZoneManager::default();
+        let mut snap_zone_manager = SnapZoneManager::default();
         let mut focus_manager = FocusManager::new();
         for window in [WindowHandle(7), WindowHandle(8), WindowHandle(9)] {
             add_tiled_window(&mut monitor_manager, primary, window);
@@ -1891,7 +1891,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::StackAll,
             )
@@ -1914,7 +1914,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::StackAll,
             )
@@ -1924,7 +1924,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::UnstackAll,
             )
@@ -1944,7 +1944,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::UnstackAll,
             )
@@ -1956,7 +1956,7 @@ mod manual_trigger_tests {
         let mut executor = test_executor();
         let (mut monitor_manager, primary, _secondary) = monitor_pair();
         let mut window_manager = WindowManager::new();
-        let mut zone_manager = ZoneManager::default();
+        let mut snap_zone_manager = SnapZoneManager::default();
         let mut focus_manager = FocusManager::new();
         add_tiled_window(&mut monitor_manager, primary, WindowHandle(7));
         executor.focused_monitor = Some(primary);
@@ -1965,7 +1965,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::ToggleMonocle,
             )
@@ -1981,7 +1981,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::ToggleMonocle,
             )
@@ -2000,7 +2000,7 @@ mod manual_trigger_tests {
         let mut executor = test_executor();
         let (mut monitor_manager, primary, _secondary) = monitor_pair();
         let mut window_manager = WindowManager::new();
-        let mut zone_manager = ZoneManager::default();
+        let mut snap_zone_manager = SnapZoneManager::default();
         let mut focus_manager = FocusManager::new();
         add_tiled_window(&mut monitor_manager, primary, WindowHandle(7));
         executor.focused_monitor = Some(primary);
@@ -2009,7 +2009,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::ToggleLayoutLock,
             )
@@ -2027,7 +2027,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::ToggleLayoutLock,
             )
@@ -2047,7 +2047,7 @@ mod manual_trigger_tests {
         let mut executor = test_executor();
         let (mut monitor_manager, primary, _secondary) = monitor_pair();
         let mut window_manager = WindowManager::new();
-        let mut zone_manager = ZoneManager::default();
+        let mut snap_zone_manager = SnapZoneManager::default();
         let mut focus_manager = FocusManager::new();
         add_tiled_window(&mut monitor_manager, primary, WindowHandle(7));
         executor.focused_monitor = Some(primary);
@@ -2068,7 +2068,7 @@ mod manual_trigger_tests {
                 .execute_dispatch(
                     &mut window_manager,
                     &mut monitor_manager,
-                    &mut zone_manager,
+                    &mut snap_zone_manager,
                     &mut focus_manager,
                     command,
                 )
@@ -2098,7 +2098,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::AdjustWorkspacePadding { delta: -100 },
             )
@@ -2107,7 +2107,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::SetWorkspaceWorkAreaOffset {
                     left: -5,
@@ -2132,7 +2132,7 @@ mod manual_trigger_tests {
         let mut executor = test_executor();
         let (mut monitor_manager, primary, _secondary) = monitor_pair();
         let mut window_manager = WindowManager::new();
-        let mut zone_manager = ZoneManager::default();
+        let mut snap_zone_manager = SnapZoneManager::default();
         let mut focus_manager = FocusManager::new();
         add_tiled_window(&mut monitor_manager, primary, WindowHandle(7));
         executor.focused_monitor = Some(primary);
@@ -2141,7 +2141,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::FlipLayout {
                     axis: LayoutAxis::Horizontal,
@@ -2160,7 +2160,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::FlipLayout {
                     axis: LayoutAxis::HorizontalAndVertical,
@@ -2181,7 +2181,7 @@ mod manual_trigger_tests {
         let mut executor = test_executor();
         let (mut monitor_manager, primary, _secondary) = monitor_pair();
         let mut window_manager = WindowManager::new();
-        let mut zone_manager = ZoneManager::default();
+        let mut snap_zone_manager = SnapZoneManager::default();
         let mut focus_manager = FocusManager::new();
         executor.focused_monitor = Some(primary);
         assert_eq!(executor.resize_delta(), 50);
@@ -2190,7 +2190,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::SetResizeDelta { pixels: 120 },
             )
@@ -2201,7 +2201,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::SetResizeDelta { pixels: 0 },
             )
@@ -2214,7 +2214,7 @@ mod manual_trigger_tests {
         let mut executor = test_executor();
         let (mut monitor_manager, primary, _secondary) = monitor_pair();
         let mut window_manager = WindowManager::new();
-        let mut zone_manager = ZoneManager::default();
+        let mut snap_zone_manager = SnapZoneManager::default();
         let mut focus_manager = FocusManager::new();
         executor.focused_monitor = Some(primary);
 
@@ -2222,7 +2222,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::SetResizeDelta { pixels: 120 },
             )
@@ -2252,7 +2252,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::SaveResize {
                     path: path_string.clone(),
@@ -2276,7 +2276,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::SetResizeDelta { pixels: 60 },
             )
@@ -2286,7 +2286,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::LoadResize { path: path_string },
             )
@@ -2313,7 +2313,7 @@ mod manual_trigger_tests {
         let mut executor = test_executor();
         let (mut monitor_manager, primary, _secondary) = monitor_pair();
         let mut window_manager = WindowManager::new();
-        let mut zone_manager = ZoneManager::default();
+        let mut snap_zone_manager = SnapZoneManager::default();
         let mut focus_manager = FocusManager::new();
         executor.focused_monitor = Some(primary);
 
@@ -2326,7 +2326,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::LoadResize {
                     path: missing.to_string_lossy().to_string(),
@@ -2345,7 +2345,7 @@ mod manual_trigger_tests {
             .execute_dispatch(
                 &mut window_manager,
                 &mut monitor_manager,
-                &mut zone_manager,
+                &mut snap_zone_manager,
                 &mut focus_manager,
                 DispatchCommand::LoadResize {
                     path: path.to_string_lossy().to_string(),

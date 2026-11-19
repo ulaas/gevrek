@@ -1,7 +1,7 @@
 {
   "version": "0.6.0",
   "desktop": {
-    "schema_version": 25,
+    "schema_version": 26,
     "focus": {
       "history_size": 20,
       "focus_follows_mouse": false,
@@ -235,7 +235,7 @@
         "inactive_border_alpha": 180
       }
     ],
-    "zones": {
+    "snap_zones": {
       "behavior": {
         "enabled": true,
         "show_preview": true,
@@ -277,6 +277,29 @@
         ]
       },
       "monitor_layouts": []
+    },
+    "zones": {
+      "enabled": false,
+      "zones": [],
+      "rules": [],
+      "catch_all": null,
+      "rules_on_arrival": true,
+      "profile_per_workspace": false,
+      "loose_icon_size": 48,
+      "look": {
+        "background": null,
+        "opacity": null,
+        "blur": null,
+        "corner_radius": null,
+        "title_colour": null,
+        "title_on_hover": null
+      },
+      "snap": {
+        "enabled": true,
+        "distance": 12,
+        "gap": 8,
+        "grid": 0
+      }
     },
     "startup": [],
     "scratchpads": [

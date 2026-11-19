@@ -175,6 +175,9 @@ pub struct MonitorData {
     pub name: String,
     /// The connector or device the output is on.
     pub connector: String,
+    /// Who the display is wherever it is plugged in
+    /// (`MonitorInfo::stable_id`).
+    pub stable_id: String,
     pub is_primary: bool,
     pub is_focused: bool,
     /// The currently focused workspace, retained for compact overlays.
@@ -217,6 +220,7 @@ pub fn changes(
             field("output", monitor.handle.0.to_string()),
             field("name", monitor.name.clone()),
             field("connector", monitor.connector.clone()),
+            field("stable_id", monitor.stable_id.clone()),
             field("x", monitor.x.to_string()),
             field("y", monitor.y.to_string()),
             field("width", monitor.width.to_string()),
@@ -376,6 +380,7 @@ mod change_tests {
             handle: crate::outputs::MonitorHandle(handle),
             name: format!("out-{handle}"),
             connector: format!("DP-{handle}"),
+            stable_id: format!("GSM-5B7F-0000000{handle}"),
             is_primary: handle == 1,
             is_focused: handle == 1,
             workspaces: vec![shown.clone()],

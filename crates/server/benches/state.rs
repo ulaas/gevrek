@@ -16,7 +16,7 @@ use gevrek_engine::outputs::{MonitorHandle, Outputs};
 use gevrek_engine::overlay_data::OverlayData;
 use gevrek_engine::rules::RuleEngine;
 use gevrek_engine::testing::fake_desktop::FakeDesktop;
-use gevrek_engine::zones::ZoneManager;
+use gevrek_engine::snap_zones::SnapZoneManager;
 use gevrek_model::command::{DispatchCommand, WorkspaceSelector};
 use gevrek_model::graph::NodeGraph;
 use gevrek_protocol::proto::OverlayDataResponse;
@@ -45,7 +45,7 @@ fn published() -> OverlayData {
         executor,
         outputs,
         FocusManager::new(),
-        ZoneManager::new(Default::default()),
+        SnapZoneManager::new(Default::default()),
     );
     let mut desktop = FakeDesktop::new(OUTPUT);
     for workspace in 0..3 {

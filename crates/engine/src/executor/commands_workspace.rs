@@ -8,7 +8,7 @@ impl Executor {
         &mut self,
         window_manager: &mut dyn Desktop,
         monitor_manager: &mut MonitorManager,
-        zone_manager: &mut ZoneManager,
+        snap_zone_manager: &mut SnapZoneManager,
         _focus_manager: &mut FocusManager,
         command: DispatchCommand,
     ) -> Result<()> {
@@ -81,11 +81,11 @@ impl Executor {
             DispatchCommand::MoveWorkspaceToMonitor { target } => self.move_workspace_to_monitor(
                 window_manager,
                 monitor_manager,
-                zone_manager,
+                snap_zone_manager,
                 target,
             ),
             DispatchCommand::SwapActiveWorkspaces { target } => {
-                self.swap_active_workspaces(window_manager, monitor_manager, zone_manager, target)
+                self.swap_active_workspaces(window_manager, monitor_manager, snap_zone_manager, target)
             }
             DispatchCommand::ToggleWindowCentered { window, target } => {
                 let window =

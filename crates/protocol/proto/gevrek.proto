@@ -794,6 +794,10 @@ message MonitorInfo {
   // The id the WM gave the output, and the name of its connector or device.
   uint64 output_id = 13;
   string connector = 14;
+  // Who the display is wherever it is plugged in, made of its EDID
+  // (`GSM-5B7F-0004E2A1`: maker, product code, serial number);
+  // `port:<connector>` for a display without one.
+  string stable_id = 15;
 }
 
 message Size {
@@ -942,6 +946,8 @@ message MonitorOverlayData {
   // The modes the display offers, where the WM sets them (Linux on
   // hardware). Empty where it does not.
   repeated OutputModeInfo modes = 22;
+  // As in MonitorInfo.
+  string stable_id = 23;
 }
 
 // One mode a display offers.

@@ -94,9 +94,9 @@ impl Runtime {
                 ReloadStep::Monitors => {
                     Self::configure_monitor_profiles(&mut self.core.monitor_manager, &desktop)
                 }
-                ReloadStep::Zones => {
-                    self.core.zone_manager =
-                        Self::build_zone_manager(&desktop.zones, &self.core.monitor_manager)
+                ReloadStep::SnapZones => {
+                    self.core.snap_zone_manager =
+                        Self::build_snap_zone_manager(&desktop.snap_zones, &self.core.monitor_manager)
                 }
                 ReloadStep::Rules => {
                     let mut engine = self

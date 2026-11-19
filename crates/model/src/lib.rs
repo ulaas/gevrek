@@ -52,6 +52,7 @@ pub mod shortcuts;
 pub mod theme;
 pub mod wallpaper;
 pub mod window;
+pub mod snap_zones;
 pub mod zones;
 
 pub use config::Config;
