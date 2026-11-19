@@ -127,11 +127,20 @@ impl gevrek_engine::contract::WindowQueries for WindowManager {
             .map_err(|error| format!("{error:#}"))
     }
 
+    // (Of a window gevrek has hidden: where it belongs. What Windows says
+    // of a hidden window's place can be a place it only passed through:
+    // `WindowManager::hidden_place`.)
     fn position(&self, id: crate::dwm::WindowHandle) -> Option<(i32, i32)> {
+        if let Some(place) = self.hidden_place(id) {
+            return Some((place.x, place.y));
+        }
         self.get_window_position(id).ok()
     }
 
     fn size(&self, id: crate::dwm::WindowHandle) -> Option<(i32, i32)> {
+        if let Some(place) = self.hidden_place(id) {
+            return Some((place.width, place.height));
+        }
         self.get_window_size(id).ok()
     }
 
@@ -168,6 +177,9 @@ impl gevrek_engine::contract::WindowQueries for WindowManager {
     }
 
     fn rect(&self, id: crate::dwm::WindowHandle) -> Result<gevrek_model::geometry::Rect, String> {
+        if let Some(place) = self.hidden_place(id) {
+            return Ok(place);
+        }
         self.get_window_rect(id)
             .map_err(|error| format!("{error:#}"))
     }

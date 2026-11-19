@@ -171,6 +171,45 @@ pub fn fitted(window: Rect, place: Rect) -> Rect {
     )
 }
 
+/// The order of the windows, bottom to top, after one of them is raised:
+/// it goes to the top, and the windows that belong to it (its dialogs,
+/// and theirs) above it, in the order they had among themselves.
+pub fn raised(
+    stacking: &[WindowHandle],
+    id: WindowHandle,
+    parent_of: impl Fn(WindowHandle) -> Option<WindowHandle>,
+) -> Vec<WindowHandle> {
+    if !stacking.contains(&id) {
+        return stacking.to_vec();
+    }
+    // (No further up than there are windows: two that name each other
+    // end nowhere.)
+    let belongs = |window: WindowHandle| {
+        let mut above = parent_of(window);
+        for _ in 0..stacking.len() {
+            match above {
+                Some(found) if found == id => return true,
+                Some(found) => above = parent_of(found),
+                None => return false,
+            }
+        }
+        false
+    };
+    let with_it: Vec<WindowHandle> = stacking
+        .iter()
+        .copied()
+        .filter(|window| *window != id && belongs(*window))
+        .collect();
+    let mut order: Vec<WindowHandle> = stacking
+        .iter()
+        .copied()
+        .filter(|window| *window != id && !with_it.contains(window))
+        .collect();
+    order.push(id);
+    order.extend(with_it);
+    order
+}
+
 /// A colour: red, green, blue.
 type Rgb = (u8, u8, u8);
 
@@ -583,10 +622,13 @@ impl WlDesktop {
         };
         // Tiled windows, then floating ones (a press on a tiled window
         // does not bring it over a floating one that lies above it), then
-        // those kept on top, then fullscreen ones.
+        // those kept on top, then fullscreen ones (and with a fullscreen
+        // window what belongs to it: its dialog is over it, not under it
+        // with the other floating windows, where nobody would see what
+        // has the keyboard).
         let rank = |id: &WindowHandle| {
             let window = &self.windows[id];
-            if window.fullscreen {
+            if window.fullscreen || self.over_fullscreen(*id) {
                 3
             } else if window.always_on_top {
                 2
@@ -625,11 +667,45 @@ impl WlDesktop {
         })
     }
 
+    /// A window comes to the top, and with it the windows that belong to
+    /// it: a dialog is not left under the window it asks about.
     fn raise(&mut self, id: WindowHandle) {
-        if let Some(index) = self.stacking.iter().position(|other| *other == id) {
-            self.stacking.remove(index);
-            self.stacking.push(id);
+        self.stacking = raised(&self.stacking, id, |other| self.parent_of(other));
+    }
+
+    /// The window another one belongs to (a dialog's, a tool window's):
+    /// the parent of a Wayland toplevel, the window an X11 window says it
+    /// is there for.
+    pub fn parent_of(&self, id: WindowHandle) -> Option<WindowHandle> {
+        let above = match &self.windows.get(&id)?.surface {
+            WindowSurface::Xdg(toplevel) => self.id_of_surface(&toplevel.parent()?),
+            WindowSurface::X11(window) => {
+                let above = window.is_transient_for()?;
+                self.windows.iter().find_map(|(other, record)| {
+                    matches!(&record.surface, WindowSurface::X11(known)
+                        if known.window_id() == above)
+                    .then_some(*other)
+                })
+            }
+        };
+        above.filter(|above| *above != id)
+    }
+
+    /// Whether a window belongs to one that is fullscreen and shown (its
+    /// dialog, or a dialog of that): it is drawn and reached over that
+    /// window.
+    pub fn over_fullscreen(&self, id: WindowHandle) -> bool {
+        let mut above = self.parent_of(id);
+        for _ in 0..8 {
+            let Some(found) = above else {
+                return false;
+            };
+            if self.windows[&found].fullscreen && self.shown(found) {
+                return true;
+            }
+            above = self.parent_of(found);
         }
+        false
     }
 
     fn lower(&mut self, id: WindowHandle) {
@@ -1293,7 +1369,13 @@ impl Desktop for WlDesktop {
                 .get(id)
                 .filter(|window| window.passing)
                 .and_then(|window| window.drawn);
-            self.place(*id, *target);
+            // (One that is where it comes to already is not put there
+            // again: a floating window that fills the display, or is
+            // maximized, comes to the place it has, and put there it
+            // would take that for the place to go back to afterwards.)
+            if self.get(*id).map(|window| window.rect) != Some(*target) {
+                self.place(*id, *target);
+            }
             if fade {
                 let Some(opacity) = self.get(*id).map(|window| window.opacity) else {
                     continue;
@@ -1803,6 +1885,46 @@ mod turn_tests {
         );
     }
     use gevrek_model::outputs::OutputTransform as T;
+
+    #[test]
+    fn a_raised_window_takes_its_dialogs_up_with_it() {
+        let w = WindowHandle;
+        // 3 is a dialog of 1, 5 a dialog of that dialog; 2 and 4 are
+        // other windows.
+        let parent_of = |window: WindowHandle| match window.0 {
+            3 => Some(w(1)),
+            5 => Some(w(3)),
+            _ => None,
+        };
+        let order = [w(1), w(3), w(2), w(5), w(4)];
+        // The window is pressed: it comes up, its dialogs stay above it.
+        assert_eq!(
+            raised(&order, w(1), parent_of),
+            [w(2), w(4), w(1), w(3), w(5)]
+        );
+        // A dialog comes up with its own, and not the window under it.
+        assert_eq!(
+            raised(&order, w(3), parent_of),
+            [w(1), w(2), w(4), w(3), w(5)]
+        );
+        // Another window: only itself.
+        assert_eq!(
+            raised(&order, w(2), parent_of),
+            [w(1), w(3), w(5), w(4), w(2)]
+        );
+        // One that is not there changes nothing.
+        assert_eq!(raised(&order, w(9), parent_of), order);
+        // Two windows that name each other do not hang it.
+        let each_other = |window: WindowHandle| match window.0 {
+            1 => Some(w(2)),
+            2 => Some(w(1)),
+            _ => None,
+        };
+        assert_eq!(
+            raised(&[w(1), w(2), w(3)], w(1), each_other),
+            [w(3), w(1), w(2)]
+        );
+    }
 
     #[test]
     fn a_display_on_its_side_is_as_wide_as_it_is_high() {

@@ -69,8 +69,8 @@ const WS_EX_NOACTIVATE: u32 = 0x0800_0000;
 /// Whether a class is one that menus, flyouts, tooltips and the shadows
 /// under them are made of, by the toolkits that make them. (Most of them
 /// say so by their styles as well; a few do not, or not at every moment.)
-fn is_a_popups_class(class: &str) -> bool {
-    const WHOLE: [&str; 9] = [
+pub fn is_a_popups_class(class: &str) -> bool {
+    const WHOLE: [&str; 10] = [
         // Windows' own menus, tooltips, the list of a combo box, shadows.
         "#32768",
         "tooltips_class32",
@@ -84,11 +84,24 @@ fn is_a_popups_class(class: &str) -> bool {
         // Firefox' menus and their shadow.
         "MozillaDropShadowWindowClass",
         "MozillaHiddenWindowClass",
+        // GTK's menus and tooltips (kept, and hidden when not shown).
+        "gdkWindowTemp",
     ];
     WHOLE.contains(&class)
         // Qt (`Qt5QWindowPopupDropShadowSaveBits`, `Qt6…ToolTip…`).
         || (class.starts_with("Qt")
             && (class.contains("QWindowPopup") || class.contains("QWindowToolTip")))
+}
+
+/// Whether a class is one of the system's own parts of a window (a text,
+/// a button), which a program makes inside its windows. One of them made
+/// as a window of its own, which can be neither resized nor minimised nor
+/// closed by a box, is no window to work in: a program keeps it for its
+/// own ends (Unreal Editor's "SplashScreenGuard", a title bar with
+/// nothing below it, shown for as long as the editor runs).
+fn is_a_controls_class(class: &str) -> bool {
+    const WHOLE: [&str; 6] = ["Static", "Button", "Edit", "ListBox", "ScrollBar", "ComboBox"];
+    WHOLE.iter().any(|name| class.eq_ignore_ascii_case(name))
 }
 
 /// The class of the dialogs Windows makes itself.
@@ -166,6 +179,12 @@ pub fn kind(facts: &Facts) -> Kind {
     if facts.class == DIALOG_CLASS
         || (!facts.resizable() && facts.style & WS_MINIMIZEBOX == 0)
     {
+        // What would be a dialog, made of one of the system's own parts
+        // of a window, with not even a box to close it by: nothing to
+        // answer, and nothing to work in.
+        if is_a_controls_class(facts.class) && facts.style & WS_SYSMENU == 0 {
+            return Kind::Passing;
+        }
         return Kind::Beside;
     }
     Kind::Ordinary
@@ -410,6 +429,17 @@ mod tests {
             kind_of(WS_POPUP | WS_THICKFRAME | WS_SYSMENU, 0, "Qt5QWindowIcon", false),
             Kind::Ordinary
         );
+        // Unreal Editor's windows that are none to work in, as they are on
+        // the screen (read off a running one): a notification, and the
+        // title bar with nothing below it that it keeps from its start.
+        assert_eq!(kind_of(0x9600_0000, 0x0008_0088, "UnrealWindow", false), Kind::Passing);
+        assert_eq!(kind_of(0x14C0_0000, 0x0000_0100, "Static", false), Kind::Passing);
+        // (A window made of such a part that is a program's window in
+        // all else stays one.)
+        assert_eq!(kind_of(OVERLAPPED, 0, "STATIC", false), Kind::Ordinary);
+        assert_eq!(kind_of(WS_CAPTION | WS_SYSMENU, 0, "Static", false), Kind::Beside);
+        // Its own window is a window of its own.
+        assert_eq!(kind_of(0x96CF_0000, 0x0004_0100, "UnrealWindow", false), Kind::Ordinary);
         // A Qt program's own window is not a popup for being Qt's.
         assert_eq!(kind_of(OVERLAPPED, 0, "Qt5151QWindowIcon", false), Kind::Ordinary);
     }

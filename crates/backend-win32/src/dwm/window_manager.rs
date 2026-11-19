@@ -555,6 +555,12 @@ pub struct WindowManager {
     /// window has open, when the window is put away with its workspace):
     /// shown again when that window is.
     hidden_with_owner: RefCell<HashMap<WindowHandle, Vec<WindowHandle>>>,
+    /// Where each window that gevrek has hidden belongs: where it was when
+    /// it was hidden, or where gevrek has put it since. A hidden window is
+    /// moved by messages its program answers when it gets to them, and
+    /// what Windows says of where it is can be a place it only passed
+    /// through (`hidden_place`).
+    hidden_places: RefCell<HashMap<WindowHandle, crate::dwm::container::Rect>>,
     /// The windows that are cut at their display's edge (a column of the
     /// scrolling layout that reaches past it), each with the window's
     /// place and the display it was last cut for.
@@ -776,6 +782,7 @@ impl WindowManager {
             overview: OverviewShown::default(),
             overview_leaving: HashSet::new(),
             hidden_with_owner: RefCell::new(HashMap::new()),
+            hidden_places: RefCell::new(HashMap::new()),
             cut: RefCell::new(HashMap::new()),
             plain_frame: RefCell::new(HashSet::new()),
             border_windows: HashMap::new(),
@@ -817,6 +824,7 @@ impl WindowManager {
             overview: OverviewShown::default(),
             overview_leaving: HashSet::new(),
             hidden_with_owner: RefCell::new(HashMap::new()),
+            hidden_places: RefCell::new(HashMap::new()),
             cut: RefCell::new(HashMap::new()),
             plain_frame: RefCell::new(HashSet::new()),
             border_hwnd_set: HashSet::new(),
@@ -1035,6 +1043,7 @@ impl WindowManager {
         self.smallest_window_sizes.borrow_mut().remove(&handle);
         self.initial_window_metadata.remove(&handle);
         self.identities.borrow_mut().remove(&handle);
+        self.hidden_places.borrow_mut().remove(&handle);
     }
 
     /// Remove registry entries whose window no longer exists (a destroy
@@ -1559,6 +1568,7 @@ impl WindowManager {
                     );
                     return Ok(()); // Continue without crashing
                 }
+                note_posted_move(hwnd, (x, y, width, height));
             }
         }
         Ok(())
@@ -1590,6 +1600,7 @@ impl WindowManager {
                     );
                     return Ok(()); // Continue without crashing
                 }
+                note_posted_move(hwnd, (rect.left, rect.top, width, height));
             }
         }
         Ok(())
@@ -1670,6 +1681,7 @@ impl WindowManager {
 
                 // Use NOACTIVATE to prevent visible shuffling
                 // Removed SWP_ASYNCWINDOWPOS to ensure synchronous positioning
+                let flags = nonblocking_swp(hwnd, SWP_NOZORDER | SWP_NOACTIVATE);
                 if let Err(e) = super::reach::set_window_pos(
                     hwnd,
                     None,
@@ -1677,7 +1689,7 @@ impl WindowManager {
                     adjusted_y,
                     adjusted_width,
                     adjusted_height,
-                    nonblocking_swp(hwnd, SWP_NOZORDER | SWP_NOACTIVATE),
+                    flags,
                 ) {
                     log::warn!(
                         "Failed to move/resize window (might be protected/system window): {}",
@@ -1685,6 +1697,16 @@ impl WindowManager {
                     );
                     return Ok(()); // Continue without crashing
                 }
+                if flags.contains(SWP_ASYNCWINDOWPOS) {
+                    note_posted_move(
+                        hwnd,
+                        (adjusted_x, adjusted_y, adjusted_width, adjusted_height),
+                    );
+                }
+                self.note_placed(
+                    handle,
+                    crate::dwm::container::Rect::new(x, y, width, height),
+                );
                 log::debug!("✓ SetWindowPos succeeded for hwnd={:?}", hwnd);
             } else {
                 log::warn!("⚠️ IsWindow returned false for handle {:?}", handle);
@@ -1699,6 +1721,7 @@ impl WindowManager {
         let _ = self.restore_native_window_alpha(handle);
         self.caption_buttons_removed.borrow_mut().remove(&handle);
         self.show_owned_windows(handle);
+        self.hidden_places.borrow_mut().remove(&handle);
         self.windows.remove(&handle);
         self.preferred_window_sizes.remove(&handle);
         self.smallest_window_sizes.borrow_mut().remove(&handle);
@@ -1955,15 +1978,26 @@ impl WindowManager {
                     // what is seen of it is: the window itself is larger
                     // by its frame that is not seen.)
                     let (left, top, right, bottom) = self.get_window_frame_offsets(hwnd);
-                    let _ = super::reach::set_window_pos(
-                        hwnd,
-                        None,
+                    let outer = (
                         home.x - left,
                         home.y - top,
                         home.width + left + right,
                         home.height + top + bottom,
-                        SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
                     );
+                    if super::reach::set_window_pos(
+                        hwnd,
+                        None,
+                        outer.0,
+                        outer.1,
+                        outer.2,
+                        outer.3,
+                        SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
+                    )
+                    .is_ok()
+                    {
+                        note_posted_move(hwnd, outer);
+                    }
+                    self.note_placed(handle, home);
                 } else {
                     // (It stays in sight: put there now, as every window is.)
                     let _ = self.batch_move_resize(&[(handle, home)]);
@@ -1994,6 +2028,96 @@ impl WindowManager {
             .collect();
         for handle in waiting.into_iter().chain(over) {
             self.stop_going_out(handle, true);
+        }
+    }
+
+    /// Where a window is, or is on its way to: where it belongs while it
+    /// goes out with its workspace, where a movement of it ends, else
+    /// where it is now.
+    ///
+    /// What Windows says of a window that is being moved is where it is
+    /// in that moment. Taken as the window's place, that was a place
+    /// beside the display: a window hidden a second time on its way out
+    /// was put back, once hidden, where its way out ended.
+    fn settled_rect(&self, handle: WindowHandle) -> Option<crate::dwm::container::Rect> {
+        if let Some((home, _, _)) = self.going_out.leaving.get(&handle) {
+            return Some(*home);
+        }
+        if let Some((_, home)) = self
+            .going_out
+            .waiting
+            .iter()
+            .find(|(waiting, _)| *waiting == handle)
+        {
+            return Some(*home);
+        }
+        self.animation_scheduler
+            .rect_target(handle)
+            .or_else(|| self.get_window_rect(handle).ok())
+    }
+
+    /// Where a window that gevrek has hidden belongs, and is put when it
+    /// is shown again (`hidden_places`). `None` for a window that is not
+    /// hidden by gevrek, and for one hidden while it was minimised or
+    /// maximised (Windows keeps the place of such a window itself).
+    ///
+    /// Only while it is out of sight, or on its way out: a window that its
+    /// program has shown again by itself is where Windows says it is.
+    pub fn hidden_place(&self, handle: WindowHandle) -> Option<crate::dwm::container::Rect> {
+        let place = self.hidden_places.borrow().get(&handle).copied()?;
+        let going = self.going_out.leaving.contains_key(&handle)
+            || self
+                .going_out
+                .waiting
+                .iter()
+                .any(|(waiting, _)| *waiting == handle);
+        // SAFETY: a plain question about a window that may be gone.
+        (going || !unsafe { IsWindowVisible(handle.to_hwnd()) }.as_bool()).then_some(place)
+    }
+
+    /// gevrek puts a window somewhere: if it is hidden, that is where it
+    /// belongs from now on.
+    fn note_placed(&self, handle: WindowHandle, place: crate::dwm::container::Rect) {
+        if let Some(kept) = self.hidden_places.borrow_mut().get_mut(&handle) {
+            *kept = place;
+        }
+    }
+
+    /// A window that is shown again is where it belongs. While it was
+    /// hidden it was moved by messages its program answered when it got to
+    /// them, in an order that is not always the order they were sent in:
+    /// a window of a program that was busy for a moment (Unreal Editor is,
+    /// often) was left where its workspace's way in began, beside the
+    /// display, and was shown there: on a workspace whose windows float,
+    /// where no layout puts it right, it was gone.
+    fn put_back_where_it_belongs(&mut self, handle: WindowHandle) {
+        let Some(place) = self.hidden_places.borrow_mut().remove(&handle) else {
+            return;
+        };
+        let hwnd = handle.to_hwnd();
+        // SAFETY: plain questions about a window that may be gone.
+        let placed = unsafe {
+            IsWindow(hwnd).as_bool() && !IsIconic(hwnd).as_bool() && !IsZoomed(hwnd).as_bool()
+        };
+        // (One that is on its way somewhere arrives there by itself, and
+        // one that comes in as a picture is in its place already.)
+        if !placed
+            || self.animation_scheduler.rect_target(handle).is_some()
+            || self.stand_ins.has(handle)
+            || self.is_window_fullscreen(handle)
+        {
+            return;
+        }
+        if self.get_window_rect(handle).is_ok_and(|now| now != place) {
+            log::info!("Window {} is shown again where it belongs: {place:?}", handle.0);
+            let _ = self.batch_move_resize(&[(handle, place)]);
+            let _ = self.update_border_position_explicit(
+                handle,
+                place.x,
+                place.y,
+                place.width,
+                place.height,
+            );
         }
     }
 
@@ -2029,17 +2153,20 @@ impl WindowManager {
                 // small as a title. Put back there when it had gone out,
                 // that became where the window is when it is brought
                 // back: very small, and out of sight.)
-                let kept = self.going_out.expected
-                    && self.is_window_visible(handle)
-                    && !IsZoomed(hwnd).as_bool()
-                    && !IsIconic(hwnd).as_bool();
-                let home = kept
-                    .then(|| {
-                        self.animation_scheduler
-                            .rect_target(handle)
-                            .or_else(|| self.get_window_rect(handle).ok())
-                    })
-                    .flatten();
+                let placed = !IsZoomed(hwnd).as_bool() && !IsIconic(hwnd).as_bool();
+                let kept = self.going_out.expected && self.is_window_visible(handle) && placed;
+                // (Where it belongs, asked before anything about its way
+                // out is undone: `settled_rect`.)
+                let settled = placed.then(|| self.settled_rect(handle)).flatten();
+                // Where it is to be when it is shown again. One that is
+                // hidden already keeps the place it has: what Windows says
+                // of a hidden window's place is not to be relied on.
+                if let Some(place) = settled {
+                    if self.hidden_place(handle).is_none() {
+                        self.hidden_places.borrow_mut().insert(handle, place);
+                    }
+                }
+                let home = kept.then_some(settled).flatten();
                 match home {
                     Some(home) => {
                         self.stop_going_out(handle, false);
@@ -2072,6 +2199,7 @@ impl WindowManager {
     pub fn show_window(&mut self, handle: WindowHandle) -> Result<()> {
         // (One that was on its way out is where it belongs again.)
         self.stop_going_out(handle, false);
+        self.put_back_where_it_belongs(handle);
         // Forget the window even when it is gone, so the journal never keeps
         // dead handles. A window hidden by a cloak path (e.g. the graph's
         // workspace nodes) needs an uncloak; SW_SHOW alone leaves it invisible.
@@ -2110,8 +2238,19 @@ impl WindowManager {
     /// owner is hidden: a "Save as" would stay behind on a workspace its
     /// program is not on. They are no windows of gevrek's (`window_kind`),
     /// so they are remembered here, by the window they went with.
+    ///
+    /// And what a program shows beside its windows that belongs to none
+    /// of them: Unreal Editor's notifications ("Compiling shaders", up for
+    /// minutes), its menus and the small window it keeps from its start
+    /// belong to no window, and stayed on the screen over the workspace
+    /// that came. They go with the last of the program's windows that is
+    /// in sight (`companions_on_screen`).
     fn hide_owned_windows(&self, owner: WindowHandle) {
-        let owned = owned_windows_on_screen(owner.to_hwnd());
+        let mut owned = owned_windows_on_screen(owner.to_hwnd());
+        owned.extend(companions_on_screen(owner.to_hwnd(), |hwnd| {
+            let handle = WindowHandle::from_hwnd(hwnd);
+            self.windows.contains_key(&handle) && !super::hidden_journal::is_hidden(handle)
+        }));
         if owned.is_empty() {
             return;
         }
@@ -3477,6 +3616,10 @@ impl WindowManager {
         }
         // (Windows are laid out anew: an overview of them is over.)
         self.close_window_overview(OverviewEnd::Away);
+        // (A window that is hidden belongs where it is laid out.)
+        for (handle, target) in operations {
+            self.note_placed(*handle, *target);
+        }
 
         let now = Instant::now();
         // A window coming in as a picture of itself: the window goes to
@@ -4058,15 +4201,18 @@ impl WindowManager {
         // EndDeferWindowPos waits for every window in the batch; one hung app
         // would freeze the whole layout. Hung windows get a posted, async
         // move instead and land in place once they recover.
-        let (hung, targets): (Vec<_>, Vec<_>) = targets
-            .into_iter()
-            .partition(|target| is_hung(target.1) || super::reach::by_helper(target.1));
+        // (And a window that was sent a move by post before, which it may
+        // not have carried out yet, is sent this one by post as well: see
+        // `move_must_be_posted`.)
+        let (hung, targets): (Vec<_>, Vec<_>) = targets.into_iter().partition(|target| {
+            move_must_be_posted(target.1) || super::reach::by_helper(target.1)
+        });
         for (handle, hwnd, x, y, width, height) in &hung {
             log::debug!(
                 "Window {} is not responding; positioning it asynchronously",
                 handle.0
             );
-            let _ = unsafe {
+            let posted = unsafe {
                 super::reach::set_window_pos(
                     *hwnd,
                     None,
@@ -4077,6 +4223,9 @@ impl WindowManager {
                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
                 )
             };
+            if posted.is_ok() && !super::reach::by_helper(*hwnd) {
+                note_posted_move(*hwnd, (*x, *y, *width, *height));
+            }
         }
         if targets.is_empty() {
             return Ok(());
@@ -4107,7 +4256,10 @@ impl WindowManager {
                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
                 )
             } {
-                Ok(()) => positioned += 1,
+                Ok(()) => {
+                    positioned += 1;
+                    note_posted_move(*hwnd, (*x, *y, *width, *height));
+                }
                 Err(error) => log::warn!("SetWindowPos failed for window {}: {}", handle.0, error),
             }
         }
@@ -6378,11 +6530,84 @@ fn is_hung(hwnd: HWND) -> bool {
 /// until the app recovers. Responsive windows stay synchronous, because layout
 /// code reads rectangles back right after positioning.
 fn nonblocking_swp(hwnd: HWND, flags: SET_WINDOW_POS_FLAGS) -> SET_WINDOW_POS_FLAGS {
-    if is_hung(hwnd) {
+    if move_must_be_posted(hwnd) {
         flags | SWP_ASYNCWINDOWPOS
     } else {
         flags
     }
+}
+
+/// How long after a move was sent to a window by post the next ones are
+/// sent by post as well, when the window is not seen to have carried it
+/// out (a program may put its window elsewhere than it was asked to).
+const POSTED_MOVE_LIMIT: Duration = Duration::from_secs(2);
+
+/// The last move sent to each window by post that it has not been seen
+/// to carry out: its handle, the place asked for (the window's whole
+/// rectangle: x, y, width, height), and when.
+type PostedMoves = HashMap<isize, ((i32, i32, i32, i32), Instant)>;
+
+thread_local! {
+    static POSTED_MOVES: RefCell<PostedMoves> = RefCell::new(HashMap::new());
+}
+
+/// A move was sent to this window by post (`SWP_ASYNCWINDOWPOS`).
+fn note_posted_move(hwnd: HWND, outer: (i32, i32, i32, i32)) {
+    POSTED_MOVES.with(|moves| {
+        moves
+            .borrow_mut()
+            .insert(hwnd.0 as isize, (outer, Instant::now()));
+    });
+}
+
+/// Whether a move that was sent by post still stands between a window and
+/// the next one: it was sent `since` ago, asked for `asked`, and the
+/// window is at `now` (`None`: it is gone).
+fn posted_move_stands(
+    asked: (i32, i32, i32, i32),
+    now: Option<(i32, i32, i32, i32)>,
+    since: Duration,
+) -> bool {
+    now.is_some_and(|now| now != asked) && since < POSTED_MOVE_LIMIT
+}
+
+/// Whether the next move of this window has to be sent by post: the
+/// window does not answer, or a move sent to it by post before may still
+/// lie in its queue.
+///
+/// A move sent by post is carried out when the window's program gets to
+/// it; one sent the plain way is carried out before every posted one that
+/// still waits, however much later it was sent. A window of a program
+/// that was busy for a moment, sent its first place by post and its next
+/// ones the plain way, took the later places first and the first place
+/// last, and stayed there: where its workspace's way in began, beside the
+/// display. So the moves of one window are all sent the same way until
+/// the posted one has been carried out: posted ones keep their order.
+fn move_must_be_posted(hwnd: HWND) -> bool {
+    if is_hung(hwnd) {
+        return true;
+    }
+    let key = hwnd.0 as isize;
+    let Some((asked, at)) = POSTED_MOVES.with(|moves| moves.borrow().get(&key).copied()) else {
+        return false;
+    };
+    let mut rect = RECT::default();
+    // SAFETY: plain questions about a window that may be gone.
+    let now = unsafe {
+        (IsWindow(hwnd).as_bool() && GetWindowRect(hwnd, &mut rect).is_ok()).then(|| {
+            (
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+            )
+        })
+    };
+    if posted_move_stands(asked, now, at.elapsed()) {
+        return true;
+    }
+    POSTED_MOVES.with(|moves| moves.borrow_mut().remove(&key));
+    false
 }
 
 /// `ShowWindow` that never blocks on a hung window. Kept synchronous for
@@ -6471,6 +6696,85 @@ fn owned_windows_on_screen(owner: HWND) -> Vec<HWND> {
     // (EnumWindows goes from the top down.)
     search.found.reverse();
     search.found
+}
+
+/// What a program shows beside its windows that belongs to none of them
+/// and is no window to gevrek (`window_kind::Kind::Passing`): a
+/// notification it draws itself, a menu, a window it keeps for its own
+/// ends. Only those made by the same part of the program as `window` (its
+/// thread: Windows' own taskbar and desktop are made by another part of
+/// the program that shows the folders), and only when `in_sight` says of
+/// no other window made by it that it is a window of gevrek's still to be
+/// seen: then the program has left the screen, and these go with it.
+///
+/// Not what is made of the classes of the system's menus and tooltips
+/// (`window_kind::is_a_popups_class`): such a window is gone in a moment
+/// by itself, and many programs keep theirs and only hide it, so that one
+/// shown again later would be a tooltip of long ago.
+fn companions_on_screen(window: HWND, in_sight: impl Fn(HWND) -> bool) -> Vec<HWND> {
+    struct Search {
+        window: HWND,
+        others: Vec<HWND>,
+    }
+    unsafe extern "system" fn each(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let search = &mut *(lparam.0 as *mut Search);
+        if hwnd != search.window && IsWindowVisible(hwnd).as_bool() {
+            search.others.push(hwnd);
+        }
+        true.into()
+    }
+    let mut search = Search {
+        window,
+        others: Vec::new(),
+    };
+    // SAFETY: the callback runs before the call returns and gets a pointer
+    // to `search`, which outlives it; the rest are plain questions about
+    // windows that may be gone.
+    unsafe {
+        if !IsWindow(window).as_bool() {
+            return Vec::new();
+        }
+        let thread = GetWindowThreadProcessId(window, None);
+        // (Nothing of the program that is the desktop itself.)
+        let shell = GetShellWindow();
+        if thread == 0
+            || (!shell.is_invalid() && GetWindowThreadProcessId(shell, None) == thread)
+        {
+            return Vec::new();
+        }
+        let _ = EnumThreadWindows(
+            thread,
+            Some(each),
+            LPARAM(&mut search as *mut Search as isize),
+        );
+    }
+    if search.others.iter().any(|other| in_sight(*other)) {
+        return Vec::new();
+    }
+    search
+        .others
+        .into_iter()
+        .filter(|hwnd| {
+            // SAFETY: plain questions about a window that may be gone.
+            let (owned, sized) = unsafe {
+                let mut rect = RECT::default();
+                (
+                    GetWindow(*hwnd, GW_OWNER).is_ok_and(|owner| !owner.is_invalid()),
+                    GetWindowRect(*hwnd, &mut rect).is_ok()
+                        && rect.right > rect.left
+                        && rect.bottom > rect.top,
+                )
+            };
+            let class = read_window_class(*hwnd);
+            // (What belongs to a window goes with that window.)
+            !owned
+                && sized
+                && !class.starts_with("Gevrek_")
+                && !crate::window_kind::is_a_popups_class(&class)
+                && crate::window_kind::of_window(hwnd.0 as isize)
+                    == crate::window_kind::Kind::Passing
+        })
+        .collect()
 }
 
 /// Whether the panel of this instance's shell (`gevrek-shell`) is on the
@@ -7442,7 +7746,10 @@ mod title_bar_tests {
 
 #[cfg(test)]
 mod exit_animation_tests {
-    use super::{ExitRestore, WindowHandle, WindowManager};
+    use super::{
+        move_must_be_posted, note_posted_move, posted_move_stands, ExitRestore, WindowHandle,
+        WindowManager, POSTED_MOVE_LIMIT,
+    };
     use crate::dwm::container::Rect;
     use std::time::{Duration, Instant};
     use windows::Win32::Foundation::HWND;
@@ -7674,6 +7981,160 @@ mod exit_animation_tests {
     fn is_shown(window: WindowHandle) -> bool {
         use windows::Win32::UI::WindowsAndMessaging::IsWindowVisible;
         unsafe { IsWindowVisible(HWND(window.0 as _)).as_bool() }
+    }
+
+    /// A window that was moved behind gevrek's back while it was hidden
+    /// (by a move its program got to late: one sent by post, which Windows
+    /// carries out after every move sent the plain way since) is where it
+    /// belongs when it is shown again, and that is where gevrek says it
+    /// is meanwhile. (It was shown where its workspace's way in began,
+    /// beside the display: on a workspace whose windows float, gone.)
+    #[test]
+    fn a_hidden_window_is_shown_again_where_it_belongs() {
+        let _alone = crate::runtime::test_support::alone_with_the_journal();
+        use gevrek_engine::contract::WindowQueries;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            DestroyWindow, SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER,
+        };
+        let mut window_manager = WindowManager::new();
+        let window = shown_window_out_of_sight();
+        let hwnd = HWND(window.0 as _);
+        let home = Rect::new(-30000, -30000, 600, 400);
+        let astray = Rect::new(-27000, -30000, 600, 400);
+        window_manager.batch_move_resize(&[(window, home)]).unwrap();
+        assert_eq!(window_manager.hidden_place(window), None);
+
+        window_manager.hide_window(window).unwrap();
+        messages_are_heard();
+        assert!(!is_shown(window));
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                None,
+                astray.x,
+                astray.y,
+                astray.width,
+                astray.height,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+            .unwrap();
+        }
+        assert_eq!(window_manager.get_window_rect(window).unwrap(), astray);
+        assert_eq!(window_manager.hidden_place(window), Some(home));
+        assert_eq!(WindowQueries::rect(&window_manager, window).unwrap(), home);
+        // Hidden a second time, it still belongs where it did.
+        window_manager.hide_window(window).unwrap();
+        assert_eq!(window_manager.hidden_place(window), Some(home));
+
+        window_manager.show_window(window).unwrap();
+        messages_are_heard();
+        assert!(is_shown(window));
+        assert_eq!(window_manager.get_window_rect(window).unwrap(), home);
+        assert_eq!(window_manager.hidden_place(window), None);
+
+        // Where gevrek puts a hidden window is where it belongs from then
+        // on (a tile it is given while its workspace is away).
+        let tile = Rect::new(-29000, -29000, 500, 300);
+        window_manager.hide_window(window).unwrap();
+        messages_are_heard();
+        window_manager
+            .move_and_resize_window(window, tile.x, tile.y, tile.width, tile.height)
+            .unwrap();
+        assert_eq!(window_manager.hidden_place(window), Some(tile));
+        window_manager.show_window(window).unwrap();
+        messages_are_heard();
+        assert_eq!(window_manager.get_window_rect(window).unwrap(), tile);
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+    }
+
+    /// A window that is asked to hide again while it is on its way out
+    /// with its workspace belongs where it did before it set out, not
+    /// where its way out ends.
+    #[test]
+    fn a_window_hidden_again_on_its_way_out_keeps_its_place() {
+        let _alone = crate::runtime::test_support::alone_with_the_journal();
+        use windows::Win32::UI::WindowsAndMessaging::DestroyWindow;
+        let mut window_manager = WindowManager::new();
+        window_manager.set_animation_profile(workspace_slide_profile(false, false));
+        let window = shown_window_out_of_sight();
+        let home = Rect::new(-30000, -30000, 600, 400);
+        window_manager.batch_move_resize(&[(window, home)]).unwrap();
+
+        window_manager.workspace_gives_way();
+        window_manager.hide_window(window).unwrap();
+        let _ = window_manager.begin_workspace_transition(&[], 800, 0);
+        assert!(window_manager.going_out.leaving.contains_key(&window));
+        std::thread::sleep(Duration::from_millis(30));
+        window_manager.tick_runtime_animations().unwrap();
+        assert_ne!(window_manager.get_window_rect(window).unwrap(), home);
+
+        window_manager.workspace_gives_way();
+        window_manager.hide_window(window).unwrap();
+        assert_eq!(window_manager.going_out.waiting, vec![(window, home)]);
+        assert_eq!(window_manager.hidden_place(window), Some(home));
+
+        window_manager.show_window(window).unwrap();
+        messages_are_heard();
+        assert_eq!(window_manager.get_window_rect(window).unwrap(), home);
+        unsafe {
+            let _ = DestroyWindow(HWND(window.0 as _));
+        }
+    }
+
+    /// What a program shows beside its windows that belongs to none of
+    /// them (a notification it draws itself) goes with the last of its
+    /// windows that is in sight, and stays while another one is.
+    #[test]
+    fn what_a_program_shows_beside_its_windows_goes_with_the_last_of_them() {
+        let (own, beside) = (hidden_window(), shown_window_out_of_sight());
+        let (own, beside) = (HWND(own.0 as _), HWND(beside.0 as _));
+        assert_eq!(super::companions_on_screen(own, |_| false), vec![beside]);
+        // Another window of the program is still to be seen.
+        assert!(super::companions_on_screen(own, |other| other == beside).is_empty());
+        // Nothing goes with itself, and nothing that is not shown.
+        assert!(super::companions_on_screen(beside, |_| false).is_empty());
+        unsafe {
+            let _ = DestroyWindow(own);
+            let _ = DestroyWindow(beside);
+        }
+    }
+
+    /// The moves of one window are sent the same way until one sent by
+    /// post has been carried out.
+    #[test]
+    fn a_posted_move_stands_until_it_is_carried_out() {
+        let asked = (10, 20, 300, 200);
+        let short = Duration::from_millis(50);
+        // Not there yet: the next one is posted as well.
+        assert!(posted_move_stands(asked, Some((0, 0, 300, 200)), short));
+        // Carried out, or the window is gone: no longer.
+        assert!(!posted_move_stands(asked, Some(asked), short));
+        assert!(!posted_move_stands(asked, None, short));
+        // A program that put its window elsewhere than asked is not
+        // waited for without end.
+        assert!(!posted_move_stands(asked, Some((0, 0, 300, 200)), POSTED_MOVE_LIMIT));
+    }
+
+    /// A window that was sent a move by post gets its next move by post
+    /// too, while the first has not been carried out.
+    #[test]
+    fn a_window_with_a_posted_move_under_way_is_moved_by_post() {
+        use windows::Win32::UI::WindowsAndMessaging::DestroyWindow;
+        let window = shown_window_out_of_sight();
+        let hwnd = HWND(window.0 as _);
+        assert!(!move_must_be_posted(hwnd));
+        // (Asked for a place it is not at.)
+        note_posted_move(hwnd, (-29000, -29000, 200, 150));
+        assert!(move_must_be_posted(hwnd));
+        // (It is where it was asked to be: carried out.)
+        note_posted_move(hwnd, (-30000, -30000, 200, 150));
+        assert!(!move_must_be_posted(hwnd));
+        assert!(!move_must_be_posted(hwnd));
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
     }
 
     /// A window that is minimized "is" where the system keeps its mark:

@@ -1681,7 +1681,15 @@ impl State {
         let screen = expected
             .or_else(|| self.desktop.output_at_cursor())
             .and_then(|output| self.desktop.output_rectangle(output));
-        if let (Some(screen), Some(window)) = (screen, self.desktop.windows.get_mut(&id)) {
+        // (A window that floats and has a place of its own starts there:
+        // where its X11 program put it, or over the window it belongs to.)
+        let own = self
+            .own_starting_place(id)
+            .filter(|_| expected.is_none() && !self.is_shortcut_list(id));
+        if let (Some((x, y)), Some(window)) = (own, self.desktop.windows.get_mut(&id)) {
+            window.rect.x = x;
+            window.rect.y = y;
+        } else if let (Some(screen), Some(window)) = (screen, self.desktop.windows.get_mut(&id)) {
             let step = 32 * (self.cascade % 8) as i32;
             self.cascade += 1;
             window.rect.x = screen.x + ((screen.width - window.rect.width) / 2).max(0) + step;
@@ -1703,6 +1711,21 @@ impl State {
             .apply_appearance_to_window(&mut self.desktop, &self.config.desktop, id);
         if self.desktop.shown(id) {
             self.focus_window(id);
+        }
+        // An X11 window that was given no tile (it floats) has not been
+        // told where it is: its program would reckon from where it last
+        // was to the X server, and open its menus and tooltips there.
+        if let Some(record) = self.desktop.windows.get(&id) {
+            if let WindowSurface::X11(window) = &record.surface {
+                let at = window.geometry().loc;
+                if !record.fullscreen
+                    && (at.x, at.y) != (record.rect.x, record.rect.y)
+                    && record.rect.width > 0
+                    && record.rect.height > 0
+                {
+                    record.surface.request_rect(record.rect);
+                }
+            }
         }
         // After the core has seen the window: whatever it did with it, the
         // list of shortcuts ends in the middle.

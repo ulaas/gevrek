@@ -449,8 +449,13 @@ impl State {
             }
             return elements;
         }
-        // X11 menus and tooltips place themselves, above everything.
+        // X11 menus and tooltips place themselves, above everything; out
+        // of sight while the windows of their program are (a notification
+        // that stays up does not stay over another workspace).
         for window in self.x11_overrides.iter().rev() {
+            if !self.x11_own_shown(window) {
+                continue;
+            }
             let Some(surface) = window.wl_surface() else {
                 continue;
             };
@@ -472,6 +477,10 @@ impl State {
         // every other window; it is collected apart and put between.
         let mut fullscreen: Vec<OutputElement<R>> = Vec::new();
         let mut windows: Vec<OutputElement<R>> = Vec::new();
+        // The menus and tooltips of the windows: above every window, as
+        // the pointer finds them (`surface_under`). Drawn with its own
+        // window alone, a menu went under a floating window beside it.
+        let mut menus: Vec<OutputElement<R>> = Vec::new();
         let mut top: Vec<OutputElement<R>> = Vec::new();
         self.layer_elements(renderer, output, &[Layer::Top], &mut top);
         for id in self.desktop.drawn_in_order().into_iter().rev() {
@@ -501,7 +510,8 @@ impl State {
                     continue;
                 }
             }
-            let elements = if window.fullscreen {
+            // (A dialog of a fullscreen window is over it, with it.)
+            let elements = if window.fullscreen || self.desktop.over_fullscreen(id) {
                 &mut fullscreen
             } else {
                 &mut windows
@@ -555,8 +565,17 @@ impl State {
             )
                 .into();
 
-            // Popups are above their window.
-            for (popup, offset) in PopupManager::popups_for_surface(surface) {
+            // Popups are above their window, and above the other windows
+            // (those of a fullscreen window stay with it, over the bars).
+            let above = if window.fullscreen {
+                &mut *elements
+            } else {
+                &mut menus
+            };
+            // (The last one opened is the one on top.)
+            let mut popups: Vec<_> = PopupManager::popups_for_surface(surface).collect();
+            popups.reverse();
+            for (popup, offset) in popups {
                 let at: Point<i32, Physical> = match &popup {
                     PopupKind::Xdg(_) => {
                         let geometry = popup.geometry();
@@ -573,7 +592,7 @@ impl State {
                         (origin.x + x, origin.y + y).into()
                     }
                 };
-                elements.extend(render_elements_from_surface_tree(
+                above.extend(render_elements_from_surface_tree(
                     renderer,
                     popup.wl_surface(),
                     at,
@@ -1073,6 +1092,7 @@ impl State {
         }
         elements.append(&mut fullscreen);
         elements.append(&mut top);
+        elements.append(&mut menus);
         elements.append(&mut windows);
         self.overview_elements(renderer, output, screen, &mut elements);
         self.window_overview_elements(renderer, output, screen, &mut elements);
@@ -1758,6 +1778,9 @@ impl State {
             send_frames(lock.wl_surface(), time);
         }
         for window in &self.x11_overrides {
+            if !self.x11_own_shown(window) {
+                continue;
+            }
             if let Some(surface) = window.wl_surface() {
                 send_frames(&surface, time);
             }

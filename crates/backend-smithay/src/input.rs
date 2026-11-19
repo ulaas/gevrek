@@ -537,7 +537,15 @@ impl State {
                     None,
                     Vec::new(),
                 );
-                if let Some(id) = self.desktop.window_at(x, y) {
+                if self.x11_own_at(location) {
+                    // A press on an X11 program's menu (or its tooltip,
+                    // its notification): that program's alone. The window
+                    // that lies under it is not given the keyboard: the
+                    // program whose menu it is would see its window lose
+                    // it, and close the menu before the press was told.
+                } else if let Some(id) = self.surface_under(location).0 {
+                    // (The window whose menu is pressed, where a menu
+                    // reaches over another window.)
                     self.focus_window(id);
                 } else {
                     // A press on the bare desktop of another display: the
@@ -1517,8 +1525,12 @@ impl State {
             });
             return (None, under);
         }
-        // X11 menus and tooltips are above everything.
+        // X11 menus and tooltips are above everything (while the windows
+        // of their program are in sight).
         for window in self.x11_overrides.iter().rev() {
+            if !self.x11_own_shown(window) {
+                continue;
+            }
             let geometry = window.geometry();
             let Some(surface) = window.wl_surface() else {
                 continue;
@@ -1537,7 +1549,9 @@ impl State {
         let fullscreen_here = self
             .desktop
             .window_at(location.x as i32, location.y as i32)
-            .is_some_and(|id| self.desktop.windows[&id].fullscreen);
+            .is_some_and(|id| {
+                self.desktop.windows[&id].fullscreen || self.desktop.over_fullscreen(id)
+            });
         if !fullscreen_here {
             if let Some(found) = self.layer_surface_under(location, &[Layer::Top]) {
                 return (None, Some(found));

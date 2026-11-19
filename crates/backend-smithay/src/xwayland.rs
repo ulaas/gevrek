@@ -405,6 +405,101 @@ impl State {
             })
     }
 
+    /// Whether an X11 window that places itself (a menu, a tooltip, a
+    /// notification that stays up for minutes) is in sight: it goes with
+    /// the workspace of its program's windows and comes back with it.
+    /// The window it says it belongs to decides, where that is a window
+    /// of a workspace; else any window of its program whose workspace is
+    /// shown. One of a program with no window at all is shown. (A window
+    /// that is minimized is not out of sight in this sense: what its
+    /// program puts up meanwhile is seen.)
+    pub(crate) fn x11_own_shown(&self, window: &X11Surface) -> bool {
+        let managed = |x11_window: u32| {
+            self.desktop.windows.values().find(|record| {
+                matches!(&record.surface, WindowSurface::X11(other)
+                    if record.alive && other.window_id() == x11_window)
+            })
+        };
+        // (A submenu belongs to its menu, that to the window.)
+        let mut link = window.is_transient_for();
+        for _ in 0..8 {
+            let Some(above) = link else {
+                break;
+            };
+            if let Some(record) = managed(above) {
+                return !record.hidden_by_wm;
+            }
+            link = self
+                .x11_overrides
+                .iter()
+                .find(|other| other.window_id() == above)
+                .and_then(|other| other.is_transient_for());
+        }
+        let of_x11_programs: Vec<(Option<u32>, bool)> = self
+            .desktop
+            .windows
+            .values()
+            .filter(|record| {
+                record.alive && record.mapped && matches!(record.surface, WindowSurface::X11(_))
+            })
+            .map(|record| (record.pid, !record.hidden_by_wm))
+            .collect();
+        in_sight_with_its_program(window.pid(), &of_x11_programs)
+    }
+
+    /// Whether what is topmost at a place is an X11 window that places
+    /// itself: a press there is its program's alone, and no window under
+    /// it is given the keyboard for it.
+    pub(crate) fn x11_own_at(&self, location: smithay::utils::Point<f64, Logical>) -> bool {
+        self.x11_overrides.iter().any(|window| {
+            window.geometry().to_f64().contains(location)
+                && window.wl_surface().is_some()
+                && self.x11_own_shown(window)
+        })
+    }
+
+    /// Where a new window that floats starts, where that is not the
+    /// middle of the display the pointer is on: an X11 window where its
+    /// program put it (it says so in its size hints: a tool's window, a
+    /// dialog, a splash screen, a window that was hidden and comes back),
+    /// any other dialog in the middle of the window it belongs to. Not a
+    /// place from which too little of it would be on a display to take
+    /// hold of.
+    pub(crate) fn own_starting_place(&self, id: gevrek_engine::WindowHandle) -> Option<(i32, i32)> {
+        use gevrek_engine::WindowQueries;
+        let record = self.desktop.windows.get(&id)?;
+        if !self.desktop.floats_by_rules(id) {
+            return None;
+        }
+        let (width, height) = (record.rect.width, record.rect.height);
+        let said = match &record.surface {
+            WindowSurface::X11(window) => window
+                .size_hints()
+                .is_some_and(|hints| hints.position.is_some())
+                .then(|| window.geometry().loc)
+                .map(|at| (at.x, at.y)),
+            WindowSurface::Xdg(_) => None,
+        };
+        let over_its_window = || {
+            let above = self.desktop.windows.get(&self.desktop.parent_of(id)?)?;
+            above.mapped.then(|| {
+                (
+                    above.rect.x + (above.rect.width - width) / 2,
+                    above.rect.y + (above.rect.height - height) / 2,
+                )
+            })
+        };
+        let displays: Vec<gevrek_engine::Rect> = self
+            .desktop
+            .outputs
+            .iter()
+            .map(|output| output.rect)
+            .collect();
+        said.into_iter().chain(over_its_window()).find(|(x, y)| {
+            reaches_a_display(gevrek_engine::Rect::new(*x, *y, width, height), &displays)
+        })
+    }
+
     /// An X11 window went away (unmapped or destroyed).
     fn x11_window_gone(&mut self, window: &X11Surface) {
         self.x11_composited.remove(&window.window_id());
@@ -459,6 +554,7 @@ impl XwmHandler for State {
         // mapped, that property is the window manager's to write. The X
         // server is asked on a line of its own and waited for a moment
         // only, never longer.
+        let (mut places_itself, mut kept_above) = (false, false);
         if let Some(display) = self.x_display {
             let x11_window = window.window_id();
             let (answer, heard) = std::sync::mpsc::channel();
@@ -467,21 +563,41 @@ impl XwmHandler for State {
                 .spawn(move || {
                     let _ = answer.send(said_of_itself(display, x11_window).unwrap_or_default());
                 });
-            let (fullscreen, bypass) = asked
-                .ok()
-                .and_then(|_| {
-                    heard
-                        .recv_timeout(std::time::Duration::from_millis(150))
-                        .ok()
-                })
-                .unwrap_or_default();
-            if fullscreen {
+            let said = asked.ok().and_then(|_| {
+                heard
+                    .recv_timeout(std::time::Duration::from_millis(150))
+                    .ok()
+            });
+            // (Not heard in time: what the library read of its kind.)
+            places_itself = match &said {
+                Some(said) => said.kind.as_deref().is_some_and(kind_places_itself),
+                None => {
+                    use smithay::xwayland::xwm::WmWindowType;
+                    matches!(
+                        window.window_type(),
+                        Some(
+                            WmWindowType::Tooltip
+                                | WmWindowType::Notification
+                                | WmWindowType::PopupMenu
+                                | WmWindowType::DropdownMenu
+                        )
+                    )
+                }
+            };
+            let Said {
+                fullscreen,
+                bypass,
+                above,
+                ..
+            } = said.unwrap_or_default();
+            kept_above = above;
+            if fullscreen && !places_itself {
                 self.x11_start_fullscreen.push(x11_window);
             }
             // `_NET_WM_BYPASS_COMPOSITOR` 2: its picture is never to go
             // to the display past the compositor (1, that it may, is
             // what a fullscreen window gets anyway).
-            if never_past_the_compositor(bypass) {
+            if never_past_the_compositor(bypass) && !places_itself {
                 log::info!(
                     "An X11 window asks never to be handed to the display past the compositor"
                 );
@@ -494,18 +610,34 @@ impl XwmHandler for State {
             log::warn!("X11 map: {error}");
             return;
         }
+        // A tooltip, a notification, a menu, what is being dragged: its
+        // program's own, as if it had said that no window manager is to
+        // touch it (some programs leave that out for these). It is no
+        // window of a workspace: it is shown where it put itself, is
+        // given no border, no tile and never the keyboard.
+        if places_itself {
+            log::debug!("An X11 window of a kind that places itself is left to its program");
+            self.x11_overrides.retain(|other| *other != window);
+            self.x11_overrides.push(window);
+            self.desktop.needs_redraw = true;
+            return;
+        }
         let pid = window.pid();
         let geometry = window.geometry();
         let id = self.desktop.track(WindowSurface::X11(window), pid);
         if let Some(record) = self.desktop.windows.get_mut(&id) {
             record.rect.width = geometry.size.w;
             record.rect.height = geometry.size.h;
+            // (`_NET_WM_STATE_ABOVE` written before it is shown: it is
+            // kept above the others from the start.)
+            record.always_on_top = kept_above;
         }
     }
 
     /// Menus, tooltips and the like: they place themselves and are drawn
     /// above everything, without being managed.
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {
+        self.x11_overrides.retain(|other| *other != window);
         self.x11_overrides.push(window);
         self.desktop.needs_redraw = true;
     }
@@ -521,14 +653,17 @@ impl XwmHandler for State {
         self.x11_window_gone(&window);
     }
 
-    /// The client asks for a place or a size. A window gevrek manages is
-    /// told again where it is; one it does not know yet may choose.
+    /// The client asks for a place or a size. A window that has a tile is
+    /// told again where it is; a floating one goes where its program puts
+    /// it (a tool's window its program moves or makes larger by itself),
+    /// and one gevrek does not know yet, or leaves to its program, may
+    /// choose.
     fn configure_request(
         &mut self,
         _xwm: XwmId,
         window: X11Surface,
-        _x: Option<i32>,
-        _y: Option<i32>,
+        x: Option<i32>,
+        y: Option<i32>,
         w: Option<u32>,
         h: Option<u32>,
         _reorder: Option<Reorder>,
@@ -599,25 +734,48 @@ impl XwmHandler for State {
         let known = self
             .desktop
             .id_of(&WindowSurface::X11(window.clone()))
-            .and_then(|id| self.desktop.windows.get(&id))
-            .filter(|record| record.mapped)
-            .map(|record| record.rect);
-        let mut geometry = window.geometry();
-        match known {
-            Some(rect) => {
-                geometry =
-                    Rectangle::new((rect.x, rect.y).into(), (rect.width, rect.height).into());
-            }
-            None => {
-                if let Some(w) = w {
-                    geometry.size.w = w as i32;
-                }
-                if let Some(h) = h {
-                    geometry.size.h = h as i32;
-                }
-            }
+            .and_then(|id| Some((id, self.desktop.windows.get(&id)?)))
+            .filter(|(_, record)| record.mapped)
+            .map(|(id, record)| (id, record.rect, record.fullscreen || record.maximized));
+        let Some((id, rect, filling)) = known else {
+            // Not shown yet, or left to its program (a notification that
+            // moves up as another goes): as it asks.
+            let geometry = window.geometry();
+            let now = gevrek_engine::Rect::new(
+                geometry.loc.x,
+                geometry.loc.y,
+                geometry.size.w,
+                geometry.size.h,
+            );
+            let asked = asked_rect(now, (x, y), (w, h));
+            let _ = window.configure(Rectangle::new(
+                (asked.x, asked.y).into(),
+                (asked.width, asked.height).into(),
+            ));
+            self.desktop.needs_redraw = true;
+            return;
+        };
+        // Its place is its program's to choose only where no layout and
+        // no state gave it one, and not while the pointer moves it or an
+        // overview shows its picture elsewhere.
+        let manager = &self.core.monitor_manager;
+        let tiled = manager.find_window(id).is_some() && !manager.is_window_floating(id);
+        let held = self.drag.as_ref().is_some_and(|drag| drag.id == id);
+        let asked = asked_rect(rect, (x, y), (w, h));
+        if tiled || filling || held || !self.desktop.decorations_visible || asked == rect {
+            let _ = window.configure(Rectangle::new(
+                (rect.x, rect.y).into(),
+                (rect.width, rect.height).into(),
+            ));
+            return;
         }
-        let _ = window.configure(geometry);
+        self.desktop.place_now(id, asked);
+        if (asked.x, asked.y) != (rect.x, rect.y) {
+            self.window_event(WindowEvent::Moved(id, asked.x, asked.y));
+        }
+        if (asked.width, asked.height) != (rect.width, rect.height) {
+            self.window_event(WindowEvent::Resized(id, asked.width, asked.height));
+        }
     }
 
     fn configure_notify(
@@ -662,6 +820,22 @@ impl XwmHandler for State {
         self.x11_state_request(
             &window,
             gevrek_engine::contract::StateChange::Fullscreen(false),
+        );
+    }
+
+    /// The program puts its own window away (the button of a title bar it
+    /// draws itself), or brings it back.
+    fn minimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        self.x11_state_request(
+            &window,
+            gevrek_engine::contract::StateChange::Minimized(true),
+        );
+    }
+
+    fn unminimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        self.x11_state_request(
+            &window,
+            gevrek_engine::contract::StateChange::Minimized(false),
         );
     }
 
@@ -1014,9 +1188,106 @@ pub(crate) fn never_past_the_compositor(hint: u32) -> bool {
     hint == 2
 }
 
-/// What an X11 window wrote on itself before it is shown: that it is
-/// fullscreen, and its `_NET_WM_BYPASS_COMPOSITOR` (0 where it says none).
-fn said_of_itself(display: u32, window: u32) -> Option<(bool, u32)> {
+/// The kinds of window (`_NET_WM_WINDOW_TYPE_` and this name) there are,
+/// as a window names its own.
+const WINDOW_KINDS: [&str; 14] = [
+    "DESKTOP",
+    "DOCK",
+    "TOOLBAR",
+    "MENU",
+    "UTILITY",
+    "SPLASH",
+    "DIALOG",
+    "DROPDOWN_MENU",
+    "POPUP_MENU",
+    "TOOLTIP",
+    "NOTIFICATION",
+    "COMBO",
+    "DND",
+    "NORMAL",
+];
+
+/// Whether an X11 window of this kind is its program's own to place and
+/// to show, like one that says no window manager is to touch it: a
+/// tooltip, a notification, the menus that open under the pointer or
+/// under a button, the list of a combo box, the picture of what is being
+/// dragged. (A torn-off menu, a tool's window, a dialog and a splash
+/// screen are windows of a workspace, and float.)
+pub(crate) fn kind_places_itself(kind: &str) -> bool {
+    matches!(
+        kind,
+        "TOOLTIP" | "NOTIFICATION" | "POPUP_MENU" | "DROPDOWN_MENU" | "COMBO" | "DND"
+    )
+}
+
+/// The place and size an X11 window is to have when its program asks for
+/// some of the four (the others stay as they are). No size under one.
+pub(crate) fn asked_rect(
+    now: gevrek_engine::Rect,
+    (x, y): (Option<i32>, Option<i32>),
+    (width, height): (Option<u32>, Option<u32>),
+) -> gevrek_engine::Rect {
+    let size = |asked: Option<u32>, now: i32| {
+        asked.map_or(now, |asked| i32::try_from(asked).unwrap_or(i32::MAX).max(1))
+    };
+    gevrek_engine::Rect::new(
+        x.unwrap_or(now.x),
+        y.unwrap_or(now.y),
+        size(width, now.width),
+        size(height, now.height),
+    )
+}
+
+/// Whether a window that places itself is in sight, by the windows of
+/// workspaces that X11 programs have (each with its program and whether
+/// its workspace is shown): with those of its own program, where it has
+/// any and says which program it is of; else it is shown.
+pub(crate) fn in_sight_with_its_program(
+    program: Option<u32>,
+    windows: &[(Option<u32>, bool)],
+) -> bool {
+    let Some(program) = program else {
+        return true;
+    };
+    let mut its_own = windows
+        .iter()
+        .filter(|(other, _)| *other == Some(program))
+        .map(|(_, shown)| *shown)
+        .peekable();
+    its_own.peek().is_none() || its_own.any(|shown| shown)
+}
+
+/// Whether enough of a window lies on a display to take hold of it.
+pub(crate) fn reaches_a_display(
+    window: gevrek_engine::Rect,
+    displays: &[gevrek_engine::Rect],
+) -> bool {
+    displays.iter().any(|display| {
+        let wide =
+            (window.x + window.width).min(display.x + display.width) - window.x.max(display.x);
+        let high =
+            (window.y + window.height).min(display.y + display.height) - window.y.max(display.y);
+        wide > 0 && high > 0 && wide >= window.width.min(32) && high >= window.height.min(16)
+    })
+}
+
+/// What an X11 window wrote on itself before it is shown.
+#[derive(Debug, Default)]
+struct Said {
+    /// `_NET_WM_STATE_FULLSCREEN` is among its states.
+    fullscreen: bool,
+    /// Its `_NET_WM_BYPASS_COMPOSITOR` (0 where it says none).
+    bypass: u32,
+    /// `_NET_WM_STATE_ABOVE` is among its states.
+    above: bool,
+    /// The kind of window it is: the first it names that there is (one
+    /// of `WINDOW_KINDS`), or none where it names none.
+    kind: Option<String>,
+}
+
+/// Read what an X11 window wrote on itself. Asked of the X server on a
+/// line of its own.
+fn said_of_itself(display: u32, window: u32) -> Option<Said> {
     use x11rb::protocol::xproto::{AtomEnum, ConnectionExt};
     let (connection, _) = x11rb::connect(Some(&format!(":{display}"))).ok()?;
     let atom = |name: &[u8]| -> Option<u32> {
@@ -1028,9 +1299,37 @@ fn said_of_itself(display: u32, window: u32) -> Option<(bool, u32)> {
         .ok()?
         .reply()
         .ok()?;
-    let is_fullscreen = reply
-        .value32()
-        .is_some_and(|mut states| states.any(|one| one == fullscreen));
+    let states: Vec<u32> = reply.value32().map(Iterator::collect).unwrap_or_default();
+    let is_fullscreen = states.contains(&fullscreen);
+    let above = atom(b"_NET_WM_STATE_ABOVE").is_some_and(|above| states.contains(&above));
+    // The kind: all the names are asked for at once, then heard.
+    let named: Vec<_> = WINDOW_KINDS
+        .iter()
+        .filter_map(|kind| {
+            let name = format!("_NET_WM_WINDOW_TYPE_{kind}");
+            Some((*kind, connection.intern_atom(false, name.as_bytes()).ok()?))
+        })
+        .collect();
+    let kinds: Vec<(&str, u32)> = named
+        .into_iter()
+        .filter_map(|(kind, asked)| Some((kind, asked.reply().ok()?.atom)))
+        .collect();
+    let kind = atom(b"_NET_WM_WINDOW_TYPE")
+        .and_then(|kind| {
+            connection
+                .get_property(false, window, kind, AtomEnum::ATOM, 0, 16)
+                .ok()?
+                .reply()
+                .ok()
+        })
+        .and_then(|reply| {
+            reply.value32()?.find_map(|one| {
+                kinds
+                    .iter()
+                    .find(|(_, known)| *known == one)
+                    .map(|(kind, _)| (*kind).to_string())
+            })
+        });
     let bypass = atom(b"_NET_WM_BYPASS_COMPOSITOR")
         .and_then(|bypass| {
             connection
@@ -1041,14 +1340,129 @@ fn said_of_itself(display: u32, window: u32) -> Option<(bool, u32)> {
         })
         .and_then(|reply| reply.value32().and_then(|mut values| values.next()))
         .unwrap_or(0);
-    Some((is_fullscreen, bypass))
+    Some(Said {
+        fullscreen: is_fullscreen,
+        bypass,
+        above,
+        kind,
+    })
 }
 
 smithay::delegate_xwayland_shell!(State);
 
 #[cfg(test)]
 mod tests {
-    use super::{is_emulated, never_past_the_compositor, resources_at};
+    use super::{
+        asked_rect, in_sight_with_its_program, is_emulated, kind_places_itself,
+        never_past_the_compositor, reaches_a_display, resources_at,
+    };
+    use gevrek_engine::Rect;
+
+    #[test]
+    fn a_tooltip_a_notification_and_a_menu_are_left_to_their_program() {
+        for kind in [
+            "TOOLTIP",
+            "NOTIFICATION",
+            "POPUP_MENU",
+            "DROPDOWN_MENU",
+            "COMBO",
+            "DND",
+        ] {
+            assert!(kind_places_itself(kind), "{kind}");
+        }
+        // Windows of a workspace: tiled, or floating over the others.
+        for kind in [
+            "NORMAL", "DIALOG", "UTILITY", "SPLASH", "TOOLBAR", "MENU", "DOCK", "DESKTOP",
+        ] {
+            assert!(!kind_places_itself(kind), "{kind}");
+        }
+        // Every kind that is left to its program is one that is told apart.
+        for kind in super::WINDOW_KINDS {
+            assert_eq!(
+                kind_places_itself(kind),
+                [
+                    "TOOLTIP",
+                    "NOTIFICATION",
+                    "POPUP_MENU",
+                    "DROPDOWN_MENU",
+                    "COMBO",
+                    "DND"
+                ]
+                .contains(&kind)
+            );
+        }
+    }
+
+    #[test]
+    fn a_program_that_asks_for_a_place_or_a_size_changes_only_what_it_names() {
+        let now = Rect::new(100, 200, 640, 480);
+        assert_eq!(asked_rect(now, (None, None), (None, None)), now);
+        // Moved only (a notification that goes up as another leaves).
+        assert_eq!(
+            asked_rect(now, (Some(1500), Some(900)), (None, None)),
+            Rect::new(1500, 900, 640, 480)
+        );
+        // Made larger only: it stays where it is.
+        assert_eq!(
+            asked_rect(now, (None, None), (Some(800), None)),
+            Rect::new(100, 200, 800, 480)
+        );
+        // On a display to the left of the first, places are below zero.
+        assert_eq!(
+            asked_rect(now, (Some(-1900), None), (None, Some(300))),
+            Rect::new(-1900, 200, 640, 300)
+        );
+        // No size of nothing.
+        assert_eq!(
+            asked_rect(now, (None, None), (Some(0), Some(0))),
+            Rect::new(100, 200, 1, 1)
+        );
+    }
+
+    #[test]
+    fn what_places_itself_comes_and_goes_with_the_windows_of_its_program() {
+        // The editor (program 7) is on a workspace that is not shown; a
+        // terminal of another program is.
+        let away = [(Some(7), false), (Some(7), false), (Some(9), true)];
+        assert!(!in_sight_with_its_program(Some(7), &away));
+        assert!(in_sight_with_its_program(Some(9), &away));
+        // One of its windows is shown (a tool's window on this workspace).
+        let partly = [(Some(7), false), (Some(7), true)];
+        assert!(in_sight_with_its_program(Some(7), &partly));
+        // A program with no window of a workspace, or one that does not
+        // say which program it is of: shown.
+        assert!(in_sight_with_its_program(Some(3), &away));
+        assert!(in_sight_with_its_program(None, &away));
+        assert!(in_sight_with_its_program(Some(3), &[]));
+    }
+
+    #[test]
+    fn a_place_a_program_names_is_taken_only_where_the_window_can_be_reached() {
+        let displays = [Rect::new(0, 0, 1920, 1080), Rect::new(1920, 0, 2560, 1440)];
+        assert!(reaches_a_display(Rect::new(100, 100, 400, 300), &displays));
+        // On the second display, and across the two.
+        assert!(reaches_a_display(
+            Rect::new(4000, 1200, 400, 300),
+            &displays
+        ));
+        assert!(reaches_a_display(Rect::new(1800, 500, 400, 300), &displays));
+        // Beyond every display, or with a sliver left on one.
+        assert!(!reaches_a_display(
+            Rect::new(5000, 100, 400, 300),
+            &displays
+        ));
+        assert!(!reaches_a_display(
+            Rect::new(-390, 100, 400, 300),
+            &displays
+        ));
+        assert!(!reaches_a_display(
+            Rect::new(100, 1075, 400, 300),
+            &displays
+        ));
+        // A window smaller than a hold is reached where all of it is.
+        assert!(reaches_a_display(Rect::new(10, 10, 20, 10), &displays));
+        assert!(!reaches_a_display(Rect::new(100, 100, 400, 300), &[]));
+    }
 
     #[test]
     fn a_size_is_a_programs_own_resolution_when_xwayland_wrote_it_on_the_window() {

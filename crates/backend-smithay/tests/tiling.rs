@@ -580,3 +580,74 @@ fn a_closed_window_leaves_with_its_transition_and_borders_change_colour_graduall
         .drawn_opacity
         .is_none());
 }
+
+#[test]
+fn a_floating_window_that_fills_the_display_goes_back_to_its_place_after_a_change_of_workspace() {
+    let mut harness = Harness::new(Config::new());
+    assert!(
+        harness.state.desktop.animations.profile().enabled,
+        "the default configuration animates: the workspaces slide"
+    );
+    let output = harness.output;
+    harness
+        .state
+        .core
+        .monitor_manager
+        .create_workspace(output, "two".to_string(), LayoutType::BSP)
+        .expect("second workspace");
+    let first_name = harness
+        .state
+        .core
+        .monitor_manager
+        .get_focused_workspace(output)
+        .expect("a workspace is shown")
+        .name
+        .clone();
+    let client = harness.connect();
+    let (_, viewer) = harness.open(client, "viewer", "org.test.viewer");
+    harness
+        .state
+        .run_command(DispatchCommand::ToggleFloating)
+        .expect("floating");
+    harness.pump();
+    harness.finish_transitions();
+    let place = harness.rect(viewer);
+
+    harness
+        .state
+        .run_command(DispatchCommand::ToggleMaximized)
+        .expect("maximized");
+    harness.pump();
+    harness.finish_transitions();
+    let filling = harness.rect(viewer);
+    assert!(harness.state.desktop.is_maximized(viewer));
+    assert_ne!(filling, place, "it fills the display's room");
+    assert_eq!(harness.state.desktop.windows[&viewer].restore, Some(place));
+
+    // Away and back, each with its slide.
+    for name in ["two", first_name.as_str()] {
+        harness
+            .state
+            .dispatch(DispatchCommand::SwitchWorkspaceSelector {
+                selector: WorkspaceSelector::Name(name.to_string()),
+            })
+            .expect("switch");
+        harness.pump();
+        harness.finish_transitions();
+    }
+    assert!(harness.shown(viewer));
+    assert_eq!(harness.rect(viewer), filling, "as it was left");
+    assert_eq!(
+        harness.state.desktop.windows[&viewer].restore,
+        Some(place),
+        "the place to go back to is the one it had before it filled the display"
+    );
+
+    harness
+        .state
+        .run_command(DispatchCommand::ToggleMaximized)
+        .expect("no longer maximized");
+    harness.pump();
+    harness.finish_transitions();
+    assert_eq!(harness.rect(viewer), place);
+}
