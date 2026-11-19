@@ -1531,3 +1531,289 @@ fn workspaces_of_the_moment_are_numbered_and_go_when_left_empty() {
     new(&mut core, &mut desktop, None);
     assert_eq!(names(&core), ["1", "2", "3", "7", "5"]);
 }
+
+/// A second display beside the first, with the workspaces `names`.
+fn second_display(core: &mut WmCore, desktop: &mut FakeDesktop, names: &[&str]) -> Rect {
+    let screen = Rect::new(1920, 0, 2560, 1440);
+    let mut monitors = core.monitor_manager.get_all_monitors();
+    monitors.push(crate::outputs::MonitorInfo {
+        handle: BESIDE,
+        name: "Second".to_string(),
+        device_path: String::new(),
+        stable_id: String::new(),
+        is_primary: false,
+        x: screen.x,
+        y: screen.y,
+        width: screen.width,
+        height: screen.height,
+        work_x: screen.x,
+        work_y: screen.y,
+        work_width: screen.width,
+        work_height: screen.height,
+        dpi_scale: 1.0,
+    });
+    core.monitor_manager.replace_monitors(monitors);
+    for name in names {
+        core.monitor_manager
+            .create_workspace(BESIDE, name.to_string(), LayoutType::BSP)
+            .expect("workspace on the second output");
+    }
+    desktop.more_outputs.push((BESIDE, screen));
+    screen
+}
+
+const BESIDE: MonitorHandle = MonitorHandle(2);
+
+/// What the window manager publishes of its outputs (what each panel
+/// draws its own output's part of), after it was looked at for a window
+/// listed twice.
+fn published(core: &WmCore, desktop: &FakeDesktop) -> Vec<crate::overlay_data::MonitorData> {
+    let (monitors, _) = core.monitor_data(desktop, &Default::default());
+    assert_eq!(crate::overlay_data::listed_amiss(&monitors), None);
+    monitors
+}
+
+/// The output and the workspace a window is published for.
+fn listed(
+    monitors: &[crate::overlay_data::MonitorData],
+    window: WindowHandle,
+) -> Option<(MonitorHandle, String)> {
+    crate::overlay_data::homes(monitors)
+        .get(&window)
+        .map(|home| (home.output, home.workspace_name.to_string()))
+}
+
+/// The windows that were told as being on another workspace or output
+/// between two published states.
+fn told_moved(
+    before: &[crate::overlay_data::MonitorData],
+    after: &[crate::overlay_data::MonitorData],
+) -> Vec<String> {
+    crate::overlay_data::changes(before, after)
+        .into_iter()
+        .filter(|(kind, _)| *kind == crate::executor::RuntimeEventKind::WindowWorkspaceChanged)
+        .filter_map(|(_, fields)| {
+            fields
+                .into_iter()
+                .find(|(name, _)| name == "window")
+                .map(|(_, window)| window)
+        })
+        .collect()
+}
+
+/// A window is published for the output its workspace is on, whatever
+/// its rectangle says: across the edge with most of it on the other
+/// output, somewhere else while its workspace is put away, far off
+/// while it is minimized. (A panel that went by where a window lies
+/// would show it on the other output's taskbar in each of these.)
+#[test]
+fn a_window_is_listed_for_its_workspaces_output_wherever_it_lies() {
+    let (mut core, mut desktop) = setup(&["main", "two"]);
+    second_display(&mut core, &mut desktop, &["side", "more"]);
+    let editor = open(&mut core, &mut desktop, "editor");
+    let notes = open(&mut core, &mut desktop, "notes");
+    let home = Some((OUTPUT, "main".to_string()));
+    let first = published(&core, &desktop);
+    assert_eq!(listed(&first, editor), home);
+    assert_eq!(listed(&first, notes), home);
+
+    // Across the edge, with most of it on the second output. Nobody
+    // dragged it there (its program moved it): it is where it was.
+    desktop.windows.get_mut(&notes).unwrap().rect = Rect::new(1700, 200, 1600, 900);
+    core.handle_window_event(&mut desktop, WindowEvent::Moved(notes, 1700, 200))
+        .expect("moved");
+    assert_eq!(Desktop::output_of(&desktop, notes), Some(BESIDE));
+    let across = published(&core, &desktop);
+    assert_eq!(listed(&across, notes), home);
+    assert!(told_moved(&first, &across).is_empty());
+
+    // Its workspace is put away, and its windows lie on the other output
+    // on their way (as they do while a workspace slides).
+    switch_to(&mut core, &mut desktop, "two");
+    for window in [editor, notes] {
+        desktop.windows.get_mut(&window).unwrap().rect = Rect::new(2600, 1500, 900, 700);
+    }
+    let away = published(&core, &desktop);
+    assert_eq!(listed(&away, editor), home);
+    assert_eq!(listed(&away, notes), home);
+    assert_eq!(away[0].workspace.name, "two");
+    assert!(away[1]
+        .workspaces
+        .iter()
+        .all(|workspace| workspace.detailed_windows.is_empty()));
+    assert!(told_moved(&across, &away).is_empty());
+
+    // Back, and minimized: its rectangle is nowhere on the desktop.
+    switch_to(&mut core, &mut desktop, "main");
+    {
+        let window = desktop.windows.get_mut(&editor).unwrap();
+        window.minimized = true;
+        window.rect = Rect::new(-32000, -32000, 160, 28);
+    }
+    core.handle_window_event(&mut desktop, WindowEvent::Minimized(editor))
+        .expect("minimized");
+    core.flush_pending_layouts(&mut desktop).expect("layout");
+    let minimized = published(&core, &desktop);
+    assert!(
+        listed(&minimized, editor).is_none_or(|(output, _)| output == OUTPUT),
+        "never the other output's: {:?}",
+        listed(&minimized, editor)
+    );
+    assert_eq!(listed(&minimized, notes), home);
+}
+
+/// What was reported. A floating window let go of on the other output is
+/// that output's workspace's from then on: published for it and for no
+/// other, and told as moved, so that both panels ask for the state.
+#[test]
+fn a_floating_window_let_go_of_on_the_other_output_is_listed_there_and_told() {
+    let (mut core, mut desktop) = setup(&["main"]);
+    second_display(&mut core, &mut desktop, &["side"]);
+    let editor = open(&mut core, &mut desktop, "editor");
+    let viewer = open(&mut core, &mut desktop, "viewer");
+    focus(&mut core, &mut desktop, viewer);
+    command(&mut core, &mut desktop, DispatchCommand::ToggleFloating);
+    assert!(core.monitor_manager.is_window_floating(viewer));
+    let before = published(&core, &desktop);
+    assert_eq!(listed(&before, viewer), Some((OUTPUT, "main".to_string())));
+
+    core.handle_window_event(&mut desktop, WindowEvent::DragStarted(viewer))
+        .expect("taken");
+    desktop.windows.get_mut(&viewer).unwrap().rect = Rect::new(2400, 300, 800, 600);
+    core.handle_window_event(&mut desktop, WindowEvent::Moved(viewer, 2400, 300))
+        .expect("moved");
+    // While it is held it is its workspace's still.
+    assert_eq!(
+        listed(&published(&core, &desktop), viewer),
+        Some((OUTPUT, "main".to_string()))
+    );
+    desktop.output = BESIDE;
+    core.handle_window_event(&mut desktop, WindowEvent::DragEnded(viewer))
+        .expect("let go");
+    core.flush_pending_layouts(&mut desktop).expect("layout");
+
+    let after = published(&core, &desktop);
+    assert_eq!(listed(&after, viewer), Some((BESIDE, "side".to_string())));
+    assert_eq!(listed(&after, editor), Some((OUTPUT, "main".to_string())));
+    assert_eq!(told_moved(&before, &after), [viewer.0.to_string()]);
+    // And back, by a drag whose end was never told (the window manager
+    // finds it let go of a moment later).
+    core.handle_window_event(&mut desktop, WindowEvent::DragStarted(viewer))
+        .expect("taken");
+    desktop.windows.get_mut(&viewer).unwrap().rect = Rect::new(300, 300, 800, 600);
+    desktop.output = OUTPUT;
+    if let Some(drag) = core.executor.window_state.get_mut(viewer).drag.as_mut() {
+        drag.last_move_time = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(2))
+            .expect("the machine is up for longer than that");
+    }
+    core.executor
+        .process_pending_drags(
+            &mut desktop,
+            &mut core.monitor_manager,
+            &mut core.snap_zone_manager,
+        )
+        .expect("the drag is taken as ended");
+    let back = published(&core, &desktop);
+    assert_eq!(listed(&back, viewer), Some((OUTPUT, "main".to_string())));
+    assert_eq!(told_moved(&after, &back), [viewer.0.to_string()]);
+}
+
+/// A tiled window dragged to the other output, and a window sent there
+/// by a command: each is published for the output it went to alone.
+#[test]
+fn a_window_that_goes_to_the_other_output_leaves_the_first_ones_list() {
+    use gevrek_model::command::{MonitorTarget, WindowSelector};
+    let (mut core, mut desktop) = setup(&["main"]);
+    second_display(&mut core, &mut desktop, &["side"]);
+    let editor = open(&mut core, &mut desktop, "editor");
+    let terminal = open(&mut core, &mut desktop, "terminal");
+    let before = published(&core, &desktop);
+
+    core.handle_window_event(&mut desktop, WindowEvent::DragStarted(editor))
+        .expect("taken");
+    desktop.output = BESIDE;
+    core.handle_window_event(&mut desktop, WindowEvent::DragEnded(editor))
+        .expect("let go");
+    core.flush_pending_layouts(&mut desktop).expect("layout");
+    let dragged = published(&core, &desktop);
+    assert_eq!(listed(&dragged, editor), Some((BESIDE, "side".to_string())));
+    assert_eq!(listed(&dragged, terminal), Some((OUTPUT, "main".to_string())));
+    assert_eq!(told_moved(&before, &dragged), [editor.0.to_string()]);
+
+    desktop.output = OUTPUT;
+    command(
+        &mut core,
+        &mut desktop,
+        DispatchCommand::MoveWindowToMonitor {
+            window: WindowSelector::Handle(terminal.0 as i64),
+            target: MonitorTarget::Name("Second".to_string()),
+        },
+    );
+    let sent = published(&core, &desktop);
+    assert_eq!(listed(&sent, terminal), Some((BESIDE, "side".to_string())));
+    assert_eq!(told_moved(&dragged, &sent), [terminal.0.to_string()]);
+    assert!(sent[0]
+        .workspaces
+        .iter()
+        .all(|workspace| workspace.detailed_windows.is_empty()));
+}
+
+/// A display goes: its windows are the remaining one's, each listed
+/// once. It comes back: every window is listed once still, for an output
+/// that is there.
+#[test]
+fn the_windows_of_a_display_that_goes_are_listed_once_for_one_that_is_there() {
+    let (mut core, mut desktop) = setup(&["main"]);
+    let screen = second_display(&mut core, &mut desktop, &["side"]);
+    let editor = open(&mut core, &mut desktop, "editor");
+    let viewer = desktop.open_at("viewer", Rect::new(2200, 300, 800, 600));
+    core.handle_window_event(&mut desktop, WindowEvent::Created(viewer))
+        .expect("created");
+    core.flush_pending_layouts(&mut desktop).expect("layout");
+    let both = published(&core, &desktop);
+    assert_eq!(listed(&both, editor), Some((OUTPUT, "main".to_string())));
+    assert_eq!(listed(&both, viewer), Some((BESIDE, "side".to_string())));
+
+    let second = core
+        .monitor_manager
+        .get_monitor(BESIDE)
+        .cloned()
+        .expect("the second display");
+    let change = |core: &mut WmCore, desktop: &mut FakeDesktop, there: bool| {
+        let mut monitors: Vec<_> = core
+            .monitor_manager
+            .get_all_monitors()
+            .into_iter()
+            .filter(|monitor| monitor.handle != BESIDE)
+            .collect();
+        desktop.more_outputs.clear();
+        if there {
+            monitors.push(second.clone());
+            desktop.more_outputs.push((BESIDE, screen));
+        }
+        let changes = core.monitor_manager.reconcile_with(monitors);
+        core.executor
+            .apply_monitor_changes(desktop, &core.monitor_manager, &changes);
+        core.flush_pending_layouts(desktop).expect("layout");
+    };
+
+    change(&mut core, &mut desktop, false);
+    let one = published(&core, &desktop);
+    assert_eq!(one.len(), 1, "one display is published");
+    for window in [editor, viewer] {
+        assert_eq!(
+            listed(&one, window).map(|(output, _)| output),
+            Some(OUTPUT),
+            "{window:?} is the remaining display's"
+        );
+    }
+
+    change(&mut core, &mut desktop, true);
+    let again = published(&core, &desktop);
+    let there: Vec<MonitorHandle> = again.iter().map(|monitor| monitor.handle).collect();
+    for window in [editor, viewer] {
+        let (output, _) = listed(&again, window).expect("listed");
+        assert!(there.contains(&output), "{window:?} is listed for {output:?}");
+    }
+}

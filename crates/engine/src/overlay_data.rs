@@ -281,7 +281,100 @@ pub fn changes(
             ));
         }
     }
+    // A window that is listed for another workspace, or another output,
+    // than before. Whatever brought it there (a drag that ended, a key of
+    // the graph, a rule, an output that went) is told here once, from
+    // what is published: a panel lists a window for its own output only,
+    // and one that was never told showed the window on the output it had
+    // left until something else happened.
+    let (were, are) = (homes(before), homes(after));
+    for (window, now) in &are {
+        let Some(was) = were.get(window) else {
+            continue;
+        };
+        if (was.output, was.workspace_id) != (now.output, now.workspace_id) {
+            events.push((
+                Kind::WindowWorkspaceChanged,
+                vec![
+                    field("window", window.0.to_string()),
+                    field("output", now.output.0.to_string()),
+                    field("workspace_id", now.workspace_id.to_string()),
+                    field("name", now.workspace_name.to_string()),
+                    field("previous_output", was.output.0.to_string()),
+                    field("previous_workspace_id", was.workspace_id.to_string()),
+                    field("previous_name", was.workspace_name.to_string()),
+                ],
+            ));
+        }
+    }
     events
+}
+
+/// Where a window is listed in a snapshot of the outputs: the output and
+/// the workspace it belongs to, by the window manager's own account of
+/// its workspaces. Never by where the window lies: its rectangle passes
+/// through other outputs while its workspace slides in, stays where it
+/// was while its workspace is put away, and can lie across two outputs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Home<'a> {
+    pub output: MonitorHandle,
+    pub workspace_id: usize,
+    pub workspace_name: &'a str,
+}
+
+/// Every window a snapshot lists, with the output and the workspace it is
+/// listed for. A window is listed once; were it ever listed twice, the
+/// first listing is the one kept here (and [`listed_amiss`] says so).
+pub fn homes(monitors: &[MonitorData]) -> std::collections::BTreeMap<WindowHandle, Home<'_>> {
+    let mut found = std::collections::BTreeMap::new();
+    for monitor in monitors {
+        for workspace in &monitor.workspaces {
+            for window in &workspace.detailed_windows {
+                found.entry(window.handle).or_insert(Home {
+                    output: monitor.handle,
+                    workspace_id: workspace.id,
+                    workspace_name: &workspace.name,
+                });
+            }
+        }
+    }
+    found
+}
+
+/// What is wrong with how a snapshot lists its windows, if anything: a
+/// window listed for two outputs or twice for one (two panels would show
+/// it, or one would show it twice), or an output whose shown workspace
+/// is none of its own. Each panel draws one output's part of the
+/// snapshot and nothing else, so a snapshot without such a fault is what
+/// keeps a panel its own output's alone.
+pub fn listed_amiss(monitors: &[MonitorData]) -> Option<String> {
+    let mut seen: std::collections::BTreeMap<WindowHandle, (MonitorHandle, &str)> =
+        std::collections::BTreeMap::new();
+    for monitor in monitors {
+        if !monitor
+            .workspaces
+            .iter()
+            .any(|workspace| workspace.id == monitor.workspace.id)
+        {
+            return Some(format!(
+                "the workspace {} shown on {} is none of that output's",
+                monitor.workspace.name, monitor.name
+            ));
+        }
+        for workspace in &monitor.workspaces {
+            for window in &workspace.detailed_windows {
+                if let Some((output, name)) =
+                    seen.insert(window.handle, (monitor.handle, &workspace.name))
+                {
+                    return Some(format!(
+                        "{:?} is listed for workspace {name} of {output:?} and again for workspace {} of {:?}",
+                        window.handle, workspace.name, monitor.handle
+                    ));
+                }
+            }
+        }
+    }
+    None
 }
 
 #[derive(Debug, Clone)]
@@ -457,5 +550,117 @@ mod change_tests {
             ),
             ("Monocle", "Dwindle")
         );
+    }
+
+    fn window(handle: isize) -> DetailedWindowInfo {
+        DetailedWindowInfo {
+            handle: gevrek_model::ids::WindowId(handle),
+            title: format!("window {handle}"),
+            class: String::new(),
+            exe: String::new(),
+            app_id: String::new(),
+            icon: String::new(),
+            x: 0,
+            y: 0,
+            width: 800,
+            height: 600,
+            is_focused: false,
+            is_minimized: false,
+            is_maximized: false,
+            is_managed: true,
+            is_tiled: false,
+            is_floating: true,
+            has_border: false,
+            is_border_window: false,
+            workspace_id: 0,
+            tags: Vec::new(),
+            matched_rules: Vec::new(),
+            effective_rule_effects: Vec::new(),
+            effective_opacity: 255,
+            is_dimmed: false,
+            shadow_policy: String::new(),
+        }
+    }
+
+    /// Two outputs side by side, each with the windows named for its one
+    /// workspace.
+    fn two_outputs(first: &[isize], second: &[isize]) -> Vec<MonitorData> {
+        let with = |handle: isize, x: i32, windows: &[isize]| {
+            let mut shown = workspace(0, "1", "Floating");
+            shown.detailed_windows = windows.iter().map(|id| window(*id)).collect();
+            shown.total_windows = windows.len();
+            monitor(handle, x, shown)
+        };
+        vec![with(1, 0, first), with(2, 1920, second)]
+    }
+
+    /// The fault that was reported: a window let go of on the other
+    /// output belonged to that output's workspace from then on, and no
+    /// event said so that a panel asks for the state after (a drag's end
+    /// was none of them). The panel of the output it had left went on
+    /// showing it. The change is told from the snapshots themselves.
+    #[test]
+    fn a_window_that_is_listed_for_another_output_is_told() {
+        let before = two_outputs(&[7, 8], &[9]);
+        let after = two_outputs(&[8], &[9, 7]);
+        let events = changes(&before, &after);
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0].0, Kind::WindowWorkspaceChanged);
+        assert_eq!(events[0].0.as_str(), "window.workspace_changed");
+        let fields: std::collections::BTreeMap<_, _> = events[0].1.iter().cloned().collect();
+        assert_eq!(
+            (
+                fields["window"].as_str(),
+                fields["previous_output"].as_str(),
+                fields["output"].as_str()
+            ),
+            ("7", "1", "2")
+        );
+        // Told once: the next snapshot is the same.
+        assert!(changes(&after, &after.clone()).is_empty());
+    }
+
+    #[test]
+    fn a_window_that_is_listed_for_another_workspace_of_its_output_is_told() {
+        let mut before = two_outputs(&[7], &[]);
+        before[0].workspaces.push(workspace(1, "2", "Dwindle"));
+        let mut after = before.clone();
+        let moved = after[0].workspaces[0].detailed_windows.remove(0);
+        after[0].workspace.detailed_windows.clear();
+        after[0].workspaces[1].detailed_windows.push(moved);
+        let events = changes(&before, &after);
+        assert_eq!(kinds(&before, &after), [Kind::WindowWorkspaceChanged]);
+        let fields: std::collections::BTreeMap<_, _> = events[0].1.iter().cloned().collect();
+        assert_eq!(
+            (fields["previous_name"].as_str(), fields["name"].as_str()),
+            ("1", "2")
+        );
+    }
+
+    /// Windows that open and close have events of their own, and one that
+    /// only lies elsewhere on its output's workspace is where it was.
+    #[test]
+    fn windows_that_come_go_or_only_lie_elsewhere_are_not_told_as_moved() {
+        let before = two_outputs(&[7], &[9]);
+        assert!(changes(&before, &two_outputs(&[7, 8], &[9])).is_empty());
+        assert!(changes(&before, &two_outputs(&[7], &[])).is_empty());
+        // Its rectangle is on the second output (its workspace slides, or
+        // it floats across the edge): it is the first output's still.
+        let mut slid = before.clone();
+        slid[0].workspaces[0].detailed_windows[0].x = 2400;
+        assert!(changes(&before, &slid).is_empty());
+        assert_eq!(homes(&slid)[&gevrek_model::ids::WindowId(7)].output.0, 1);
+    }
+
+    #[test]
+    fn a_snapshot_that_lists_a_window_for_two_outputs_is_amiss() {
+        assert_eq!(listed_amiss(&two_outputs(&[7, 8], &[9])), None);
+        let twice = listed_amiss(&two_outputs(&[7, 8], &[7])).expect("amiss");
+        assert!(twice.contains("WindowId(7)"), "{twice}");
+        assert!(listed_amiss(&two_outputs(&[7, 7], &[])).is_some());
+        // The workspace an output shows is one of its own.
+        let mut strange = two_outputs(&[7], &[]);
+        strange[1].workspace.id = 5;
+        assert!(listed_amiss(&strange).is_some());
     }
 }

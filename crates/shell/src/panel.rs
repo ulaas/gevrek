@@ -250,13 +250,20 @@ pub fn name_of(monitor: &Value) -> Option<&str> {
 
 /// Read a display's part of the window manager's state. `None` when the
 /// display is not in it.
+///
+/// The display is the one with that connector; only where none has it,
+/// the one of that name. (Asked for both at once, the first display of
+/// the state that answered to either was taken: a display named as
+/// another's connector is would have had that other's panel.)
 pub fn view(state: &Value, output: &str) -> Option<View> {
-    let (index, monitor) = state["monitors"].as_array()?.iter().enumerate().find(
-        |(_, monitor)| {
-            monitor["connector"].as_str() == Some(output)
-                || monitor["name"].as_str() == Some(output)
-        },
-    )?;
+    let monitors = state["monitors"].as_array()?;
+    let by = |key: &str| {
+        monitors
+            .iter()
+            .enumerate()
+            .find(|(_, monitor)| monitor[key].as_str() == Some(output))
+    };
+    let (index, monitor) = by("connector").or_else(|| by("name"))?;
     Some(view_at(monitor, Some(index)))
 }
 
@@ -720,6 +727,16 @@ pub fn follows(kind: &str) -> bool {
                 | "window.restored"
                 | "window.metadata_changed"
                 | "window.unmapped"
+                // A window that was let go of may be on another display
+                // now, or at another place among its workspace's: once
+                // for a drag, not many times a second as while it moves.
+                // (Left out, the panel of the display a window was
+                // dragged from listed it until something else happened.)
+                | "window.drag_ended"
+                // And however else a window came to another workspace or
+                // display: the window manager tells it from what it
+                // publishes.
+                | "window.workspace_changed"
                 // A command may have moved a window to another workspace,
                 // or changed the keys' mode: neither has an event.
                 | "dispatch.succeeded"
@@ -3382,6 +3399,8 @@ mod tests {
             "window.destroyed",
             "window.focused",
             "window.metadata_changed",
+            "window.drag_ended",
+            "window.workspace_changed",
             "dispatch.succeeded",
             "configuration.reloaded",
         ] {
@@ -3427,6 +3446,163 @@ mod tests {
         assert!(concerns("workspace.switched", None, &known));
         // What changes nothing on a panel stays so.
         assert!(!concerns("window.moved", Some(8), &known));
+        // A window let go of, or told to be on another workspace or
+        // display: asked, whichever window it is.
+        assert!(concerns("window.drag_ended", Some(8), &known));
+        assert!(concerns("window.workspace_changed", None, &known));
+    }
+
+    /// Two displays side by side as the window manager tells of them,
+    /// each with two workspaces. The rectangles are what they are on a
+    /// desktop in use, and say nothing of whose a window is: `2` floats
+    /// across the edge with most of it on the second display, `3` is on a
+    /// workspace that is put away (below its display), `4` is minimized,
+    /// and `6` is on its way in from beside its display, over the first.
+    fn two_displays() -> Value {
+        let window = |id: u64, title: &str, x: i32, y: i32, focused: bool| {
+            json!({"window_id": id, "title": title, "class": "app", "is_focused": focused,
+                   "position": {"x": x, "y": y}, "size": {"width": 1600, "height": 900}})
+        };
+        json!({"monitors": [
+            {"name": "Monitor GSM5B7F", "connector": "", "is_primary": true, "is_focused": true,
+             "position": {"x": 0, "y": 0}, "size": {"width": 2560, "height": 1440},
+             "workspace": {"id": 0, "name": "Saturn"},
+             "workspaces": [
+                {"id": 0, "name": "Saturn", "layout_type": "Dwindle", "total_windows": 2,
+                 "detailed_windows": [window(1, "editor", 0, 40, true),
+                                      window(2, "notes", 1700, 200, false)]},
+                {"id": 1, "name": "Web", "layout_type": "Floating", "total_windows": 2,
+                 "detailed_windows": [window(3, "browser", 300, 1500, true),
+                                      window(4, "mail", -32000, -32000, false)]}]},
+            {"name": "Monitor GSM5C4D", "connector": "", "is_primary": false, "is_focused": false,
+             "position": {"x": 2560, "y": 0}, "size": {"width": 2560, "height": 1440},
+             "workspace": {"id": 1, "name": "Web"},
+             "workspaces": [
+                {"id": 0, "name": "Saturn", "layout_type": "Dwindle", "total_windows": 1,
+                 "detailed_windows": [window(5, "terminal", 2600, 1500, true)]},
+                {"id": 1, "name": "Web", "layout_type": "Floating", "total_windows": 1,
+                 "detailed_windows": [window(6, "video", 400, 40, true)]}]},
+        ]})
+    }
+
+    /// What was reported: a window of one display in the taskbar of the
+    /// other's panel. A panel has the windows of its own display's
+    /// workspaces, as the window manager lists them, and of no other,
+    /// wherever on the desktop their rectangles are.
+    #[test]
+    fn a_panel_has_its_own_displays_windows_and_no_others() {
+        let state = two_displays();
+        let ids = |tasks: &[Task]| tasks.iter().map(|task| task.id).collect::<Vec<u64>>();
+        let views: Vec<(String, View)> = displays(&state)
+            .into_iter()
+            .enumerate()
+            .map(|(index, (name, monitor))| (name, view_at(monitor, Some(index))))
+            .collect();
+        let (first, second) = (&views[0].1, &views[1].1);
+        assert_eq!(ids(&first.tasks), [1, 2], "the shown workspace's");
+        assert_eq!(ids(&first.all_tasks), [1, 2, 3, 4], "every workspace's");
+        assert_eq!(ids(&second.tasks), [6]);
+        assert_eq!(ids(&second.all_tasks), [5, 6]);
+        // No window is on two panels, and none of the state's is on none.
+        let mut all: Vec<u64> = ids(&first.all_tasks);
+        all.extend(ids(&second.all_tasks));
+        all.sort_unstable();
+        assert_eq!(all, [1, 2, 3, 4, 5, 6]);
+        // The same of the tabs, their counts and the title a panel shows.
+        let tabs = |view: &View| {
+            view.tabs
+                .iter()
+                .map(|tab| (tab.name.clone(), tab.shown, tab.windows))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            tabs(first),
+            [("Saturn".to_string(), true, 2), ("Web".to_string(), false, 2)]
+        );
+        assert_eq!(
+            tabs(second),
+            [("Saturn".to_string(), false, 1), ("Web".to_string(), true, 1)]
+        );
+        assert_eq!((first.title.as_str(), second.title.as_str()), ("editor", "video"));
+        assert!(first.focused && !second.focused);
+    }
+
+    /// A press on a panel is for that panel's display: its workspace of
+    /// that name (both displays have a `Web`), and a window brought to
+    /// the middle comes to the middle of that display.
+    #[test]
+    fn a_press_on_a_panel_is_for_its_own_display() {
+        use gevrek_model::command::{DispatchCommand, MonitorTarget, WorkspaceSelector};
+        let state = two_displays();
+        for (name, monitor) in displays(&state) {
+            let view = view_of(monitor);
+            let web = view.tabs.iter().position(|tab| tab.name == "Web").unwrap();
+            let shown: DispatchCommand =
+                serde_json::from_str(&show_tab(&view, web).unwrap()).unwrap();
+            assert_eq!(
+                shown,
+                DispatchCommand::FocusMonitorWorkspace {
+                    target: MonitorTarget::Name(name.clone()),
+                    workspace: WorkspaceSelector::Name("Web".to_string()),
+                }
+            );
+            let centred: DispatchCommand =
+                serde_json::from_str(&centre_window(&view, 3).unwrap()).unwrap();
+            assert!(
+                matches!(&centred, DispatchCommand::ToggleWindowCentered {
+                    target: MonitorTarget::Name(display), ..
+                } if *display == name),
+                "{centred:?}"
+            );
+            // The wheel goes round this display's workspaces.
+            let next = wheel_to(&view, 1).unwrap();
+            assert!(next < view.tabs.len() && !view.tabs[next].shown);
+        }
+    }
+
+    /// The state after a window was dragged to the other display: it is
+    /// that display's, and gone from the one it left.
+    #[test]
+    fn a_window_that_went_to_the_other_display_is_on_that_panel_alone() {
+        let mut state = two_displays();
+        let moved = state["monitors"][0]["workspaces"][0]["detailed_windows"]
+            .as_array_mut()
+            .unwrap()
+            .remove(1);
+        state["monitors"][1]["workspaces"][1]["detailed_windows"]
+            .as_array_mut()
+            .unwrap()
+            .push(moved);
+        let ids = |index: usize| {
+            view_of(&state["monitors"][index])
+                .all_tasks
+                .iter()
+                .map(|task| task.id)
+                .collect::<Vec<u64>>()
+        };
+        assert_eq!(ids(0), [1, 3, 4]);
+        assert_eq!(ids(1), [5, 6, 2]);
+    }
+
+    /// On Linux a panel asks for its display by the connector's name. A
+    /// display whose name is what another's connector is called is not
+    /// that other one.
+    #[test]
+    fn a_display_is_found_by_its_connector_before_any_name() {
+        let state = json!({"monitors": [
+            {"name": "DP-2", "connector": "DP-1", "workspace": {"id": 1},
+             "workspaces": [{"id": 1, "name": "one", "detailed_windows": [{"window_id": 1}]}]},
+            {"name": "Second", "connector": "DP-2", "workspace": {"id": 2},
+             "workspaces": [{"id": 2, "name": "two", "detailed_windows": [{"window_id": 2}]}]},
+        ]});
+        let ids = |output: &str| {
+            view(&state, output)
+                .map(|view| view.tasks.iter().map(|task| task.id).collect::<Vec<u64>>())
+        };
+        assert_eq!(ids("DP-1"), Some(vec![1]));
+        assert_eq!(ids("DP-2"), Some(vec![2]), "the display on DP-2, not the one called so");
+        assert_eq!(ids("Second"), Some(vec![2]));
+        assert_eq!(ids("HDMI-1"), None);
     }
 
     #[test]

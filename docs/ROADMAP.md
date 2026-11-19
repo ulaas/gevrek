@@ -394,16 +394,48 @@ nothing broken on the way. Nothing new is built in this pass.
 - [ ] **person, W** The two that were reported and mended without being
       seen: borders around nothing; a window dragged to the other
       display (section 2c). Not closed until seen for a day.
-- [ ] **W** A panel is its own display's alone (reported by the person
-      2026-11-19, to be done with milestone 2 of the zones,
-      `docs/zones/`): a window on one display is shown, many times, in
-      the taskbar module of the panel on the other. To be found: which
-      display the module takes a window to be on (the window's
-      workspace, or where Windows says it lies, which is a place it
-      passes through while its workspace slides), and whether the same
-      is so of the workspaces' module and of what a press on either
-      does. Each panel shows and works its own display's workspaces and
-      windows, held by a test.
+- [x] **any** A panel is its own display's alone (reported by the
+      person 2026-11-19): a window on one display is shown, many times,
+      in the taskbar module of the panel on the other. Found: a panel
+      never went by where a window lies. It draws its own display's
+      part of the window manager's state, and that lists a window for
+      the workspace it belongs to (`engine/appearance.rs`,
+      `panel::view_at`); the tabs, their counts, the title and every
+      press (a workspace by its display and name, a window by its
+      handle) go by the same. What was wrong is that the panel was not
+      told. A window let go of on the other display belongs to that
+      display's workspace from then on, and the panels ask for the
+      state only after certain events (`panel::follows`), of which the
+      end of a drag was none: the panel of the display the window had
+      left went on listing it, and the other one did not have it, until
+      something else happened (the keyboard went to another window, a
+      workspace was shown). The log of the day has seven such drags,
+      each followed by one to four seconds in which nobody asked for
+      the state. The same was so of a window sent across by a key of
+      the graph (`binding.triggered` is not followed either). Mended
+      twice over: the panels ask after `window.drag_ended`, and the
+      window manager tells `window.workspace_changed` whenever a window
+      is published for another workspace or display than the last time
+      (`overlay_data::changes`), whatever brought it there, on both
+      systems. Two cases in which a window did keep the wrong display's
+      workspace are mended with it (`executor/events.rs`): a floating
+      window whose drag's end was never told, and a tiled window
+      dropped on a snap zone of the other display. Held by tests: the
+      published state lists every window once, for the display its
+      workspace is on, across the edge, with its workspace put away,
+      minimized, dragged over, sent over, and with a display going and
+      coming (`core_scenarios.rs`); the same after every step of the
+      seeded runs (`random_runs.rs`); two panels read from one state
+      share no window, and a press is for the panel's own display
+      (`shell/src/panel.rs`). (2026-11-19, tested, not committed yet;
+      to be seen by the person)
+- [ ] **person, W** The above seen on the desktop: a window dragged to
+      the other display leaves the first panel's taskbar and stands on
+      the second's as it is let go of, tiled and floating, both ways.
+      Left as it is, to be decided: a floating window that its program
+      or Windows itself moves across (Win+Shift+arrow) with no drag
+      stays its workspace's, and so on the panel of the display it
+      left, until it is dragged or sent.
 - [x] **any** The notes of the kind TODO and FIXME in the code: there
       are none. The 64 that were counted are a variable called `todo`
       (what the tutorial is to do next) and one `XXX` in the words for a

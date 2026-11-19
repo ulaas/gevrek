@@ -152,6 +152,14 @@ pub enum RuntimeEventKind {
     WindowRestored,
     WindowMetadataChanged,
     WindowUnmapped,
+    /// A window is on another workspace, or on another output, than it
+    /// was when the state was last published: dragged there, sent by a
+    /// command, a rule or the graph, or brought over when its output
+    /// went. Told from the published state itself
+    /// (`overlay_data::changes`), so that no way of getting there is
+    /// left out: a panel lists a window for its own output's workspaces
+    /// only, and has to hear when that is another.
+    WindowWorkspaceChanged,
     WorkspaceCreated,
     WorkspaceDestroyed,
     WorkspaceRenamed,
@@ -210,6 +218,7 @@ impl RuntimeEventKind {
             Self::WindowRestored => "window.restored",
             Self::WindowMetadataChanged => "window.metadata_changed",
             Self::WindowUnmapped => "window.unmapped",
+            Self::WindowWorkspaceChanged => "window.workspace_changed",
             Self::WorkspaceCreated => "workspace.created",
             Self::WorkspaceDestroyed => "workspace.destroyed",
             Self::WorkspaceRenamed => "workspace.renamed",
@@ -230,7 +239,7 @@ impl RuntimeEventKind {
 
 impl RuntimeEventKind {
     /// Every kind, for lists and tests.
-    pub const ALL: [Self; 35] = [
+    pub const ALL: [Self; 36] = [
         Self::RuntimeStarted,
         Self::RuntimeStopping,
         Self::ConfigurationReloaded,
@@ -252,6 +261,7 @@ impl RuntimeEventKind {
         Self::WindowRestored,
         Self::WindowMetadataChanged,
         Self::WindowUnmapped,
+        Self::WindowWorkspaceChanged,
         Self::WorkspaceCreated,
         Self::WorkspaceDestroyed,
         Self::WorkspaceRenamed,

@@ -297,7 +297,7 @@ impl Executor {
 
         // Process completed drags
         for handle in completed_drags {
-            if let Some(_drag_state) = self.window_state.get_mut(handle).drag.take() {
+            if let Some(drag_state) = self.window_state.get_mut(handle).drag.take() {
                 log::info!("Drag timeout - processing as completed drag");
 
                 // EARLY EXIT: Floating and unmanaged windows stay where dropped
@@ -307,6 +307,24 @@ impl Executor {
                     log::info!(
                         "📍 Floating/unmanaged window - keeping at current position (drag timeout)"
                     );
+                    // (As when the drag's end is told: on another output
+                    // it is that output's workspace's. Left out here, it
+                    // stayed listed for the output it had left.)
+                    if is_floating {
+                        let dropped_on = Self::display_dropped_on(
+                            window_manager,
+                            monitor_manager,
+                            handle,
+                            drag_state.original_rect,
+                        )
+                        .map(|monitor| monitor.handle);
+                        self.floating_window_is_on(
+                            window_manager,
+                            monitor_manager,
+                            handle,
+                            dropped_on,
+                        );
+                    }
                     let _ = effect(
                         window_manager,
                         Effect::Border {
@@ -364,6 +382,14 @@ impl Executor {
                                     handle,
                                     true,
                                 )?;
+                                // (A zone of another output: the window
+                                // is that output's from now on.)
+                                self.floating_window_is_on(
+                                    window_manager,
+                                    monitor_manager,
+                                    handle,
+                                    Some(zone_hit.monitor),
+                                );
                                 snapped_to_zone = true;
                             }
                         }
@@ -1281,6 +1307,41 @@ impl Executor {
         monitor_of(window_manager, monitor_manager, handle)
     }
 
+    /// A floating window that was put on another output than the one
+    /// its workspace is on belongs to the workspace that output shows
+    /// from now on: it is listed there (by that output's panel, and by no
+    /// other), hidden and shown with it. It stays where it was put.
+    /// Nothing happens where it is that output's already, or where the
+    /// output shows no workspace.
+    fn floating_window_is_on(
+        &mut self,
+        window_manager: &dyn Desktop,
+        monitor_manager: &mut MonitorManager,
+        handle: WindowHandle,
+        output: Option<MonitorHandle>,
+    ) {
+        let registered = monitor_manager
+            .find_window(handle)
+            .map(|(output, _)| output);
+        let (Some(from), Some(to)) = (registered, output) else {
+            return;
+        };
+        if from == to || monitor_manager.get_focused_workspace(to).is_none() {
+            return;
+        }
+        monitor_manager.find_and_remove_window(handle);
+        if let Some(workspace) = monitor_manager.get_focused_workspace_mut(to) {
+            workspace.add_floating_window(handle);
+            log::info!(
+                "Floating window dropped on another output: now on workspace '{}'",
+                workspace.name
+            );
+        }
+        if queries(window_manager).active_window() == Some(handle) {
+            self.focused_monitor = Some(to);
+        }
+    }
+
     fn on_drag_ended(
         &mut self,
         window_manager: &mut dyn Desktop,
@@ -1312,9 +1373,6 @@ impl Executor {
                 // and shown with it, and no longer with the one it left. It
                 // stays where it was dropped.
                 if is_floating {
-                    let registered = monitor_manager
-                        .find_window(handle)
-                        .map(|(output, _)| output);
                     let dropped_on = Self::display_dropped_on(
                         window_manager,
                         monitor_manager,
@@ -1322,21 +1380,7 @@ impl Executor {
                         drag_state.original_rect,
                     )
                     .map(|monitor| monitor.handle);
-                    if let (Some(from), Some(to)) = (registered, dropped_on) {
-                        if from != to && monitor_manager.get_focused_workspace(to).is_some() {
-                            monitor_manager.find_and_remove_window(handle);
-                            if let Some(workspace) = monitor_manager.get_focused_workspace_mut(to) {
-                                workspace.add_floating_window(handle);
-                                log::info!(
-                                    "Floating window dropped on another output: now on workspace '{}'",
-                                    workspace.name
-                                );
-                            }
-                            if queries(window_manager).active_window() == Some(handle) {
-                                self.focused_monitor = Some(to);
-                            }
-                        }
-                    }
+                    self.floating_window_is_on(window_manager, monitor_manager, handle, dropped_on);
                 }
                 // Just update border position
                 let _ = effect(
@@ -1454,6 +1498,17 @@ impl Executor {
                                     handle,
                                     true,
                                 )?;
+                                // A zone of another output: the window
+                                // lies there, and is that output's from
+                                // now on. (It stayed a window of the
+                                // workspace it was dragged from, and the
+                                // panel there went on listing it.)
+                                self.floating_window_is_on(
+                                    window_manager,
+                                    monitor_manager,
+                                    handle,
+                                    Some(zone_hit.monitor),
+                                );
                                 true
                             } else {
                                 false

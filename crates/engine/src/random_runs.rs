@@ -328,6 +328,30 @@ fn broken(core: &WmCore, desktop: &FakeDesktop) -> Option<String> {
             }
         }
     }
+    // What is published of the outputs (what each panel draws its own
+    // output's part of) lists every window of a workspace once, for the
+    // output that workspace is on, and no window that is on none.
+    let (published, _) = core.monitor_data(desktop, &Default::default());
+    if let Some(amiss) = crate::overlay_data::listed_amiss(&published) {
+        return Some(format!("published: {amiss}"));
+    }
+    let homes = crate::overlay_data::homes(&published);
+    if homes.len() != seen.len() {
+        return Some(format!(
+            "{} windows are published and {} are on a workspace",
+            homes.len(),
+            seen.len()
+        ));
+    }
+    for window in &seen {
+        let on = core.monitor_manager.find_window(*window).map(|(output, _)| output);
+        let published_for = homes.get(window).map(|home| home.output);
+        if on != published_for {
+            return Some(format!(
+                "{window:?} is on a workspace of {on:?} and published for {published_for:?}"
+            ));
+        }
+    }
     None
 }
 
