@@ -651,3 +651,151 @@ fn a_floating_window_that_fills_the_display_goes_back_to_its_place_after_a_chang
     harness.finish_transitions();
     assert_eq!(harness.rect(viewer), place);
 }
+
+/// A dialog a program opens for a window whose workspace is put away
+/// opens there, out of sight, and the window the person works in keeps
+/// the keyboard. (It used to come up on the workspace in sight, with the
+/// keyboard.) When that workspace is shown both are there, the dialog
+/// over its window. A dialog of a window in sight opens in sight, with the
+/// keyboard, as it always did.
+#[test]
+fn a_dialog_opens_on_the_workspace_of_the_window_it_belongs_to() {
+    let mut harness = Harness::new(Config::new());
+    let output = harness.output;
+    harness
+        .state
+        .core
+        .monitor_manager
+        .create_workspace(output, "two".to_string(), LayoutType::BSP)
+        .expect("second workspace");
+    let first_name = harness
+        .state
+        .core
+        .monitor_manager
+        .get_focused_workspace(output)
+        .expect("a workspace is shown")
+        .name
+        .clone();
+    let switch = |harness: &mut Harness, name: &str| {
+        harness
+            .state
+            .dispatch(DispatchCommand::SwitchWorkspaceSelector {
+                selector: WorkspaceSelector::Name(name.to_string()),
+            })
+            .expect("switch");
+        harness.pump();
+        harness.finish_transitions();
+    };
+    let client = harness.connect();
+    let (editor_window, editor) = harness.open(client, "editor", "org.test.editor");
+    let home = harness.state.core.monitor_manager.find_window(editor);
+    assert!(home.is_some());
+
+    switch(&mut harness, "two");
+    let (terminal_window, terminal) = harness.open(client, "terminal", "org.test.terminal");
+    assert_eq!(harness.state.desktop.focused, Some(terminal));
+
+    let (_, question) = harness.open_dialog(client, "Save changes?", "org.test.editor", editor_window);
+    assert_eq!(harness.state.desktop.parent(question), Some(editor));
+    assert_eq!(
+        harness.state.core.monitor_manager.find_window(question),
+        home,
+        "on its window's workspace"
+    );
+    assert!(harness.state.core.monitor_manager.is_window_floating(question));
+    assert!(!harness.shown(question), "out of sight with it");
+    assert_eq!(
+        harness.state.desktop.focused,
+        Some(terminal),
+        "the keyboard stays where the person works"
+    );
+    assert!(harness.shown(terminal));
+
+    switch(&mut harness, &first_name);
+    assert!(harness.shown(editor) && harness.shown(question));
+    let order = harness.state.desktop.visible_in_order();
+    let at = |id| order.iter().position(|other| *other == id);
+    assert!(
+        at(question) > at(editor),
+        "the dialog is over its window: {order:?}"
+    );
+    // Over its window too by where it lies: in the middle of it.
+    let (over, under) = (harness.rect(question), harness.rect(editor));
+    assert!(
+        (over.x + over.width / 2 - (under.x + under.width / 2)).abs() <= 1
+            && (over.y + over.height / 2 - (under.y + under.height / 2)).abs() <= 1,
+        "{over:?} over {under:?}"
+    );
+
+    // A dialog of the window in sight: in sight, with the keyboard.
+    switch(&mut harness, "two");
+    let (_, find) = harness.open_dialog(client, "Find", "org.test.terminal", terminal_window);
+    assert!(harness.shown(find));
+    assert_eq!(
+        harness.state.core.monitor_manager.find_window(find),
+        harness.state.core.monitor_manager.find_window(terminal)
+    );
+    assert_eq!(harness.state.desktop.focused, Some(find));
+}
+
+/// Under the Floating layout a program's window opens in the middle of
+/// the display; a dialog stays over the window it belongs to, wherever
+/// that one was put.
+#[test]
+fn under_the_floating_layout_a_dialog_stays_over_its_window() {
+    use gevrek_model::command::WindowSelector;
+    let mut harness = Harness::new(Config::new());
+    harness
+        .state
+        .dispatch(DispatchCommand::SetLayout {
+            layout: LayoutType::Floating,
+        })
+        .expect("the floating layout");
+    harness.pump();
+    let client = harness.connect();
+    let (editor_window, editor) = harness.open(client, "editor", "org.test.editor");
+    harness.finish_transitions();
+    let room = harness
+        .state
+        .core
+        .monitor_manager
+        .get_adjusted_work_area(harness.output, &harness.state.desktop)
+        .expect("the display's room");
+    let middle_of = |rect: Rect| (rect.x + rect.width / 2, rect.y + rect.height / 2);
+    let near = |a: (i32, i32), b: (i32, i32)| (a.0 - b.0).abs() <= 1 && (a.1 - b.1).abs() <= 1;
+    assert!(
+        near(middle_of(harness.rect(editor)), middle_of(room)),
+        "a program's window opens in the middle: {:?}",
+        harness.rect(editor)
+    );
+
+    // The person puts the editor in a corner.
+    harness
+        .state
+        .dispatch(DispatchCommand::MoveWindow {
+            selector: WindowSelector::Handle(editor.0 as i64),
+            x: 60,
+            y: 80,
+            relative: false,
+        })
+        .expect("moved");
+    harness.pump();
+    harness.finish_transitions();
+    let corner = harness.rect(editor);
+    assert_eq!((corner.x, corner.y), (60, 80));
+
+    let (_, question) = harness.open_dialog(client, "Save changes?", "org.test.editor", editor_window);
+    harness.finish_transitions();
+    assert!(harness.state.desktop.placed_itself(question));
+    assert!(harness.state.core.monitor_manager.is_window_floating(question));
+    let over = harness.rect(question);
+    assert!(
+        near(middle_of(over), middle_of(corner)),
+        "over its window: {over:?} over {corner:?}"
+    );
+    assert!(
+        !near(middle_of(over), middle_of(room)),
+        "not brought to the middle of the display: {over:?}"
+    );
+    assert_eq!(harness.rect(editor), corner, "its window was not moved");
+}

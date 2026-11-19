@@ -39,13 +39,23 @@ pub struct Placement {
     pub output: Option<OutputId>,
     /// A rule floats the window.
     pub floating: bool,
+    /// The workspace of `output` the window joins, where that is not the
+    /// one the output shows: the workspace of the window it belongs to (a
+    /// dialog of a window that is put away). It is hidden with it. `None`:
+    /// the workspace the output shows.
+    pub workspace: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Adoption {
-    /// Added to the visible workspace of `output`. `first` is true when the
+    /// Added to a workspace of `output`: the one it shows (`shown`), or one
+    /// that is put away, and the window with it. `first` is true when the
     /// window was not known before, so its initial rules must run.
-    Adopted { output: OutputId, first: bool },
+    Adopted {
+        output: OutputId,
+        first: bool,
+        shown: bool,
+    },
     /// Already a workspace member.
     AlreadyManaged,
     /// Released with `unmanage` for this session.
@@ -85,24 +95,39 @@ pub fn adopt(
         return Ok(Adoption::SessionUnmanaged);
     }
     let output = placement.output.ok_or(AdoptError::NoOutput)?;
-    let workspace = world
+    let workspaces = world
         .outputs
-        .get_focused_workspace_mut(output)
+        .get_workspaces_mut(output)
+        .ok_or(AdoptError::NoActiveWorkspace)?;
+    let index = placement
+        .workspace
+        .filter(|index| *index < workspaces.len())
+        .unwrap_or_else(|| workspaces.focused_idx());
+    let shown = index == workspaces.focused_idx();
+    let workspace = workspaces
+        .get_mut(index)
         .ok_or(AdoptError::NoActiveWorkspace)?;
     if placement.floating {
         workspace.add_floating_window(id);
     } else {
         workspace.add_window(id, true);
     }
-    changes.relayout.insert(output);
     let state = world.windows.get_mut(id);
     let first = !state.known;
     state.known = true;
-    state.hidden_by_wm = false;
+    state.hidden_by_wm = !shown;
+    // (A workspace that is put away is laid out when it is shown.)
+    if shown {
+        changes.relayout.insert(output);
+    }
     changes
         .effects
-        .push(Effect::SetVisible { id, visible: true });
-    Ok(Adoption::Adopted { output, first })
+        .push(Effect::SetVisible { id, visible: shown });
+    Ok(Adoption::Adopted {
+        output,
+        first,
+        shown,
+    })
 }
 
 /// Where a destroyed window was.
@@ -307,6 +332,7 @@ mod tests {
         Placement {
             output: Some(A),
             floating: false,
+            workspace: None,
         }
     }
 
@@ -319,7 +345,8 @@ mod tests {
             first,
             Adoption::Adopted {
                 output: A,
-                first: true
+                first: true,
+                shown: true
             }
         );
         assert_eq!(f.tiled_on(0), vec![W]);
@@ -354,9 +381,54 @@ mod tests {
         let lost = Placement {
             output: None,
             floating: false,
+            workspace: None,
         };
         let result = adopt(&mut f.world(), WindowId(12), lost, &mut Changes::default());
         assert_eq!(result, Err(AdoptError::NoOutput));
+    }
+
+    /// A window that joins a workspace that is put away (its parent's) is
+    /// that workspace's, floating, and out of sight with it; the workspace
+    /// the output shows is not laid out for it.
+    #[test]
+    fn adoption_into_a_workspace_that_is_put_away_hides_the_window() {
+        let mut f = Fixture::new();
+        let away = Placement {
+            floating: true,
+            workspace: Some(1),
+            ..place()
+        };
+        let mut changes = Changes::default();
+        let adopted = adopt(&mut f.world(), W, away, &mut changes).unwrap();
+        assert_eq!(
+            adopted,
+            Adoption::Adopted {
+                output: A,
+                first: true,
+                shown: false
+            }
+        );
+        assert_eq!(f.outputs.find_window(W), Some((A, 1)));
+        assert!(f.outputs.is_window_floating(W));
+        assert!(f.windows.get(W).hidden_by_wm);
+        assert_eq!(
+            changes.effects,
+            vec![Effect::SetVisible {
+                id: W,
+                visible: false
+            }]
+        );
+        assert!(changes.relayout.is_empty());
+
+        // The one the output shows, named: as when none is named.
+        let here = Placement {
+            workspace: Some(0),
+            ..place()
+        };
+        let other = WindowId(11);
+        let adopted = adopt(&mut f.world(), other, here, &mut Changes::default()).unwrap();
+        assert!(matches!(adopted, Adoption::Adopted { shown: true, .. }));
+        assert!(!f.windows.get(other).hidden_by_wm);
     }
 
     #[test]
@@ -431,7 +503,8 @@ mod tests {
             again,
             Adoption::Adopted {
                 output: A,
-                first: true
+                first: true,
+                shown: true
             }
         );
     }

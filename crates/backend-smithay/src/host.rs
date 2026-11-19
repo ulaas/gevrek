@@ -262,6 +262,13 @@ impl State {
         let due = self.host.as_ref().is_some_and(|host| {
             host.last_overlay.elapsed() >= std::time::Duration::from_millis(250)
         });
+        // A floating window its program moved to another display is that
+        // display's once it has come to rest (the state that is published
+        // next says so).
+        if due {
+            self.core
+                .settle_moved_windows(&mut self.desktop, std::time::Instant::now());
+        }
         if had_commands || due || std::mem::take(&mut self.overlay_stale) {
             self.publish_overlay(None);
         }
@@ -269,6 +276,8 @@ impl State {
             self.desktop.tick_closing();
             self.refresh_keyboard_layout();
             self.poll_screenshot_request();
+            // (Whether a display is still shared or recorded.)
+            self.tick_sharing(std::time::Instant::now());
         }
         self.running
     }
@@ -1123,7 +1132,14 @@ impl State {
         if self.host.is_none() {
             return;
         }
-        let (monitors, total_windows) = self.core.monitor_data(&self.desktop, &self.config.desktop);
+        let (mut monitors, total_windows) =
+            self.core.monitor_data(&self.desktop, &self.config.desktop);
+        // The room the shell's zones keep is asked of the compositor by
+        // surfaces of their own (`protocols.rs`,
+        // `zones_room`): how much of a display's kept room is theirs.
+        for monitor in &mut monitors {
+            monitor.zones_room = self.zones_room(monitor.handle);
+        }
         for (kind, fields) in
             gevrek_engine::overlay_data::changes(&self.published_monitors, &monitors)
         {

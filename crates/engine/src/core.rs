@@ -94,6 +94,36 @@ impl WmCore {
             .flush_pending_layouts(backend, &mut self.monitor_manager)
     }
 
+    /// The floating windows that were moved to another display without a
+    /// drag and have come to rest there join that display's workspace
+    /// (`Executor::settle_moved_windows`). The host calls this every now
+    /// and then, and publishes the state when a window is returned.
+    pub fn settle_moved_windows(
+        &mut self,
+        backend: &mut dyn Desktop,
+        now: std::time::Instant,
+    ) -> Vec<crate::WindowHandle> {
+        self.executor
+            .settle_moved_windows(backend, &mut self.monitor_manager, now)
+    }
+
+    /// The keyboard goes back to the window that had it before `from`
+    /// took it: a window the backend has put out of sight as it opened
+    /// (it belongs to a window that is put away). Returns whether there
+    /// was a window to give it to.
+    pub fn hand_keyboard_back(
+        &mut self,
+        backend: &mut dyn Desktop,
+        from: crate::WindowHandle,
+    ) -> Result<bool> {
+        self.executor.hand_keyboard_back(
+            backend,
+            &mut self.monitor_manager,
+            &mut self.focus_manager,
+            from,
+        )
+    }
+
     /// Every output has at least one workspace.
     pub fn ensure_default_workspaces(&mut self) {
         for monitor in self.monitor_manager.get_all_monitors() {

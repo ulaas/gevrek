@@ -16,58 +16,58 @@ use crate::store::{LoadReport, Store};
 use crate::testing::fake_backend::{FakeBackend, DESKTOP};
 use gevrek_model::geometry::Rect;
 
-const NOW: u64 = 1_800_000_000;
-const DAY: u64 = 24 * 60 * 60;
+pub(crate) const NOW: u64 = 1_800_000_000;
+pub(crate) const DAY: u64 = 24 * 60 * 60;
 
 /// A core, a backend and what carries between them.
-struct Desk {
-    core: ZonesCore,
-    backend: FakeBackend,
-    host: Host,
+pub(crate) struct Desk {
+    pub(crate) core: ZonesCore,
+    pub(crate) backend: FakeBackend,
+    pub(crate) host: Host,
 }
 
 impl Desk {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::with(ZonesConfig::default(), ZonesState::default())
     }
 
-    fn with(config: ZonesConfig, state: ZonesState) -> Self {
+    pub(crate) fn with(config: ZonesConfig, state: ZonesState) -> Self {
         Self::on(config, state, FakeBackend::new())
     }
 
     /// (The zones are switched on: off is looked at by a test of its own.)
-    fn on(config: ZonesConfig, state: ZonesState, backend: FakeBackend) -> Self {
+    pub(crate) fn on(config: ZonesConfig, state: ZonesState, backend: FakeBackend) -> Self {
         Self::as_configured(ZonesConfig { enabled: true, ..config }, state, backend)
     }
 
-    fn as_configured(config: ZonesConfig, state: ZonesState, backend: FakeBackend) -> Self {
+    pub(crate) fn as_configured(config: ZonesConfig, state: ZonesState, backend: FakeBackend) -> Self {
         let mut desk = Self { core: ZonesCore::new(config, state), backend, host: Host::new() };
         desk.host.start(&mut desk.core, &mut desk.backend, NOW);
         assert_eq!(desk.core.broken(), None);
         desk
     }
 
-    fn ask(&mut self, command: Command) -> Vec<Effect> {
+    pub(crate) fn ask(&mut self, command: Command) -> Vec<Effect> {
         let effects = self.host.command(&mut self.core, &mut self.backend, command, NOW);
         assert_eq!(self.core.broken(), None);
         effects
     }
 
     /// The command is carried out and not refused.
-    fn does(&mut self, command: Command) -> Vec<Effect> {
+    pub(crate) fn does(&mut self, command: Command) -> Vec<Effect> {
         let effects = self.ask(command.clone());
         assert_eq!(refusal(&effects), None, "{command:?}");
         effects
     }
 
-    fn pump(&mut self) -> Vec<Effect> {
+    pub(crate) fn pump(&mut self) -> Vec<Effect> {
         let effects = self.host.pump(&mut self.core, &mut self.backend, NOW);
         assert_eq!(self.core.broken(), None);
         effects
     }
 
     /// Make a zone at a rectangle and say what it is called.
-    fn zone(&mut self, title: &str, rect: Rect) -> ZoneId {
+    pub(crate) fn zone(&mut self, title: &str, rect: Rect) -> ZoneId {
         let effects = self.does(Command::CreateZone {
             title: title.to_string(),
             kind: ZoneKind::Manual,
@@ -82,26 +82,26 @@ impl Desk {
             .expect("a zone was made")
     }
 
-    fn file(&mut self, name: &str) -> ItemId {
+    pub(crate) fn file(&mut self, name: &str) -> ItemId {
         let item = self.backend.add_file(name);
         self.pump();
         item.id
     }
 
-    fn put(&mut self, zone: &ZoneId, item: &ItemId) {
+    pub(crate) fn put(&mut self, zone: &ZoneId, item: &ItemId) {
         self.does(Command::AddItem { zone: zone.clone(), item: item.clone(), index: None, cell: None });
     }
 
-    fn rect(&self, zone: &ZoneId) -> Rect {
+    pub(crate) fn rect(&self, zone: &ZoneId) -> Rect {
         self.core.zone_rect(zone).expect("the zone has a place")
     }
 
-    fn names_in(&self, zone: &ZoneId) -> Vec<String> {
+    pub(crate) fn names_in(&self, zone: &ZoneId) -> Vec<String> {
         self.core.zone_items(zone, NOW).into_iter().map(|item| item.name.clone()).collect()
     }
 }
 
-fn events(effects: &[Effect]) -> Vec<ZonesEvent> {
+pub(crate) fn events(effects: &[Effect]) -> Vec<ZonesEvent> {
     effects
         .iter()
         .filter_map(|effect| match effect {
@@ -111,14 +111,14 @@ fn events(effects: &[Effect]) -> Vec<ZonesEvent> {
         .collect()
 }
 
-fn refusal(effects: &[Effect]) -> Option<String> {
+pub(crate) fn refusal(effects: &[Effect]) -> Option<String> {
     events(effects).into_iter().find_map(|event| match event {
         ZonesEvent::Refused { reason } => Some(reason),
         _ => None,
     })
 }
 
-fn second() -> Display {
+pub(crate) fn second() -> Display {
     Display::new("fake-2", Rect::new(1920, 0, 2560, 1440))
 }
 
@@ -183,7 +183,8 @@ fn zones_that_are_switched_off_show_nothing_and_ask_for_nothing() {
         kind: ZoneKind::Portal { directory: "/downloads".to_string() },
         ..ZoneDefinition::manual("portal", "Downloads")
     });
-    assert!(!config.enabled, "off is what a configuration is by default");
+    assert!(config.enabled, "on is what a configuration is by default");
+    config.enabled = false;
     let mut desk = Desk::as_configured(config.clone(), ZonesState::default(), backend);
     assert_eq!(desk.backend.watches(), 0, "nothing is watched");
     assert_eq!(desk.backend.calls, 0, "the backend was asked nothing");
@@ -399,7 +400,7 @@ fn zones_are_hidden_with_one_key_and_peeked_at_with_another() {
     assert_eq!(shown(&desk), [true, true, true]);
 }
 
-fn sorting_config() -> ZonesConfig {
+pub(crate) fn sorting_config() -> ZonesConfig {
     ZonesConfig {
         zones: vec![ZoneDefinition::manual("pictures", "Pictures"), ZoneDefinition::manual("papers", "Papers")],
         rules: vec![
@@ -431,7 +432,7 @@ fn sorting_config() -> ZonesConfig {
 
 /// A desktop with an old paper, a new one and a picture, before the
 /// zones start.
-fn sorting_desk(rules_on_arrival: bool) -> Desk {
+pub(crate) fn sorting_desk(rules_on_arrival: bool) -> Desk {
     let mut backend = FakeBackend::new();
     backend.add_folder("/archive");
     for (name, age) in [("old.doc", 200), ("new.doc", 1), ("cat.png", 5)] {
@@ -450,7 +451,7 @@ fn rules_are_previewed_applied_and_taken_back_files_and_all() {
     let on_desk = desk.backend.in_folder(DESKTOP);
 
     let effects = desk.does(Command::PreviewRules { scope: Scope::Loose });
-    let Some(ZonesEvent::RulesPreviewed { plan }) = events(&effects).into_iter().next() else {
+    let Some(ZonesEvent::RulesPreviewed { plan, lines }) = events(&effects).into_iter().next() else {
         panic!("{effects:?}");
     };
     assert_eq!(plan.steps.len(), 3);
@@ -458,7 +459,7 @@ fn rules_are_previewed_applied_and_taken_back_files_and_all() {
     assert_eq!(desk.backend.performed, []);
 
     let effects = desk.does(Command::ApplyRules { scope: Scope::Loose });
-    assert!(events(&effects).contains(&ZonesEvent::RulesApplied { plan }), "what was previewed is what is done");
+    assert!(events(&effects).contains(&ZonesEvent::RulesApplied { plan, lines }), "what was previewed is what is done");
     assert_eq!(desk.names_in(&ZoneId::new("pictures")), ["cat.png"]);
     assert_eq!(desk.names_in(&ZoneId::new("papers")), ["new.doc"]);
     assert_eq!(
@@ -469,7 +470,7 @@ fn rules_are_previewed_applied_and_taken_back_files_and_all() {
     assert_eq!(desk.core.scene(NOW).loose.len(), 0, "the old paper left the desktop");
     // Once more: there is nothing left to do, and what can be taken back stays.
     let again = desk.does(Command::ApplyRules { scope: Scope::Loose });
-    assert!(matches!(&events(&again)[0], ZonesEvent::RulesApplied { plan } if plan.steps.is_empty()));
+    assert!(matches!(&events(&again)[0], ZonesEvent::RulesApplied { plan, .. } if plan.steps.is_empty()));
     assert!(desk.core.state().undo.is_some());
 
     desk.does(Command::UndoRules);
@@ -621,9 +622,9 @@ fn a_portal_shows_a_folder_and_what_is_dropped_on_it_is_moved_there() {
     assert!(refusal(&desk.ask(Command::UndoFileOperation)).is_some());
 
     // Found by name, wherever it is shown.
-    let hits = desk.core.search("set");
+    let hits = desk.core.search("set", NOW);
     assert_eq!((hits[0].name.as_str(), hits[0].zone.as_ref()), ("setup.exe", Some(&portal)));
-    assert_eq!(desk.core.search("report")[0].zone, None);
+    assert_eq!(desk.core.search("report", NOW)[0].zone, None);
 
     // Without the portal the folder is no longer watched.
     desk.does(Command::DeleteZone { zone: portal });
@@ -754,7 +755,13 @@ fn a_snapshot_brings_back_zones_rules_and_places() {
     assert!(refusal(&desk.ask(Command::RestoreSnapshot { name: "none".to_string() })).is_some());
     assert!(refusal(&desk.ask(Command::SaveSnapshot { name: " ".to_string() })).is_some());
     desk.does(Command::DeleteSnapshot { name: "tidy".to_string() });
-    assert!(desk.core.state().snapshots.is_empty());
+    // What was there before the snapshot was restored was kept by the
+    // zones themselves: restoring lost nothing.
+    let kept = &desk.core.state().snapshots;
+    assert_eq!(kept.len(), 1);
+    assert!(kept[0].automatic && kept[0].name == "Before restoring");
+    assert!(kept[0].zones.iter().any(|zone| zone.id == extra));
+    assert!(!kept[0].zones.iter().any(|zone| zone.id == pictures));
 }
 
 #[test]

@@ -1124,51 +1124,27 @@ enum Commands {
     SubmapReset,
 
     /// The zones on the desktop (the containers that hold its icons):
-    /// `list` them, `show` one with its items, `send` them a command,
-    /// follow their `events`, or `restore-explorer` to put Explorer's own
-    /// desktop icons back. (Snap zones for windows are `snap-zone`.)
+    /// list, create and change them, put items into them, hide and peek,
+    /// run the rules, make zones by type (`auto-create`), draw the icons
+    /// grey (`grey`), keep and restore layouts, follow what happens.
+    /// `gevrek zones <word> --help` says what each word takes. Every word
+    /// prints JSON with --json. Ends with 0 when done, 1 when the zones
+    /// refused or what was named is not there, 3 when no shell runs the
+    /// zones, 4 when the shell did not answer. (Snap zones for windows
+    /// are `snap-zone`.)
     Zones {
         #[command(subcommand)]
-        action: ZonesAction,
-    },
-}
-
-/// What `gevrek zones` does.
-#[derive(Subcommand, Debug, PartialEq)]
-enum ZonesAction {
-    /// The zones: where each is, how it is, and how much it holds
-    List {
-        /// Everything the shell tells of the zones, as one JSON object
-        #[arg(long)]
+        action: gevrek::zones_cli::ask::ZonesAction,
+        /// Print JSON: what is listed as one object, and for everything
+        /// that is asked of the zones their answer as
+        /// `{success, delivered, error, events}`
+        #[arg(long, global = true)]
         json: bool,
-    },
-    /// One zone, by its id, with its items
-    Show {
-        id: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Send the zones a command as JSON (`'{"command":"quick_hide"}'`)
-    /// and print what they answer: `Done` with what happened, or why not
-    Send {
-        command: String,
-        /// The answer as one JSON object
-        #[arg(long)]
-        json: bool,
-        /// How long to wait for the answer (the window manager waits 5
-        /// seconds where none is said, and never more than 30)
-        #[arg(long, value_name = "MS")]
+        /// How long to wait for the zones' answer (the window manager
+        /// waits 5 seconds where none is said, and never more than 30)
+        #[arg(long, global = true, value_name = "MS")]
         timeout_ms: Option<u32>,
     },
-    /// Print what happens to the zones, as it happens
-    Events {
-        /// One JSON object a line
-        #[arg(long)]
-        json: bool,
-    },
-    /// Put Explorer's own desktop icons back as they were before the
-    /// zones took them over (Windows; elsewhere there is nothing to do)
-    RestoreExplorer,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -2993,90 +2969,425 @@ fn osd_command(said: &[String]) -> Result<gevrek_model::command::DispatchCommand
     })
 }
 
-/// `gevrek zones ...`. What is printed is made in `gevrek::zones_cli`.
-async fn zones_command(address: &str, action: ZonesAction) -> Result<()> {
-    use gevrek::zones_cli;
+/// `gevrek zones ...`. What is asked and what is printed is made in
+/// `gevrek::zones_cli`; this carries it to the window manager and back,
+/// and ends with the code that says how it went (`zones_cli::exit`).
+async fn zones_command(
+    address: &str,
+    action: gevrek::zones_cli::ask::ZonesAction,
+    json: bool,
+    timeout_ms: Option<u32>,
+) -> Result<()> {
+    if let Err(failure) = zones_run(address, action, json, timeout_ms).await? {
+        if json {
+            // Said as an answer would say it; the exit code says it too.
+            println!("{}", serde_json::to_string(&failure.json())?);
+        } else {
+            eprintln!("Error: {}", failure.message);
+        }
+        std::process::exit(failure.code);
+    }
+    Ok(())
+}
+
+/// The section `desktop.zones` of the running configuration, as JSON:
+/// the rules have their names there. Null where it cannot be asked for.
+async fn zones_section(client: &mut WMClient) -> serde_json::Value {
+    let Ok(document) = client.get_configuration().await else {
+        return serde_json::Value::Null;
+    };
+    serde_json::from_str::<serde_json::Value>(&document.json)
+        .ok()
+        .and_then(|config| config.pointer("/desktop/zones").cloned())
+        .unwrap_or_default()
+}
+
+/// Send commands to the zones one after the other, until one is not
+/// carried out. The answer is one: done if all were, with everything
+/// that happened; else the reason of the one that was not, and how many
+/// were done before it.
+async fn zones_send(
+    client: &mut WMClient,
+    commands: &[serde_json::Value],
+    timeout_ms: u32,
+) -> Result<gevrek_protocol::proto::ZonesCommandReply> {
+    let mut all = gevrek_protocol::proto::ZonesCommandReply {
+        success: true,
+        error: None,
+        events: Vec::new(),
+        delivered: true,
+    };
+    for (done, command) in commands.iter().enumerate() {
+        let reply = client
+            .send_zones_command(command.to_string(), gevrek_zones::ipc::VERSION, timeout_ms)
+            .await?;
+        all.events.extend(reply.events);
+        if !reply.success {
+            all.success = false;
+            all.delivered = reply.delivered;
+            all.error = match (reply.error, done) {
+                (error, 0) => error,
+                (error, done) => Some(format!(
+                    "{} ({done} of {} done before it)",
+                    error.unwrap_or_else(|| "The zones refused".to_string()),
+                    commands.len()
+                )),
+            };
+            break;
+        }
+    }
+    Ok(all)
+}
+
+async fn zones_run(
+    address: &str,
+    action: gevrek::zones_cli::ask::ZonesAction,
+    json: bool,
+    timeout_ms: Option<u32>,
+) -> Result<std::result::Result<(), gevrek::zones_cli::Failure>> {
+    use gevrek::zones_cli::ask::{self, ProfileAction, RulesAction, SnapshotAction, ZonesAction};
+    use gevrek::zones_cli::{self, exit, Failure};
+    use gevrek_protocol::proto::ZonesStateResponse;
+
     let mut client = WMClient::connect(address.to_string()).await?;
-    // Sent with the number of the shapes this program writes, so that a
-    // shell that reads older ones says so instead of misreading.
-    let version = gevrek_zones::ipc::VERSION;
-    match action {
-        ZonesAction::List { json: true } => {
-            let state = client.get_zones_state().await?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&zones_cli::state_json(&state))?
-            );
-        }
-        ZonesAction::List { json: false } => {
-            let state = client.get_zones_state().await?;
-            println!("{}", zones_cli::list_text(&state).map_err(|why| anyhow!(why))?);
-        }
-        ZonesAction::Show { id, json } => {
-            let state = client.get_zones_state().await?;
+    let wait = timeout_ms.unwrap_or(0);
+    // Why there is nothing to read in an answer: no shell (3), or what a
+    // shell told that this program cannot read (1).
+    let unread = |state: &ZonesStateResponse, why: String| Failure {
+        code: if state.running || state.stale {
+            exit::REFUSED
+        } else {
+            exit::NOT_RUNNING
+        },
+        message: why,
+    };
+    macro_rules! attempt {
+        ($outcome:expr) => {
+            match $outcome {
+                Ok(value) => value,
+                Err(failure) => return Ok(Err(failure)),
+            }
+        };
+    }
+    let pretty = |value: &serde_json::Value| serde_json::to_string_pretty(value).unwrap_or_default();
+
+    match &action {
+        // ---- what only reads ----
+        ZonesAction::List { items } => {
+            // The items are left out unless they are asked for: a status
+            // bar asks often, and wants the zones.
+            let state = client.get_zones_state_of(!(json && *items), "").await?;
             if json {
-                let zone = zones_cli::show_json(&state, &id).map_err(|why| anyhow!(why))?;
-                println!("{}", serde_json::to_string_pretty(&zone)?);
+                println!("{}", pretty(&zones_cli::state_json(&state)));
             } else {
-                println!(
-                    "{}",
-                    zones_cli::show_text(&state, &id).map_err(|why| anyhow!(why))?
-                );
+                let text = attempt!(zones_cli::list_text(&state).map_err(|why| unread(&state, why)));
+                println!("{text}");
             }
         }
-        ZonesAction::Send {
-            command,
-            json,
-            timeout_ms,
+        ZonesAction::Show { zone: Some(text) } => {
+            let all = client.get_zones_state_of(true, "").await?;
+            let snapshot = attempt!(match zones_cli::snapshot_of(&all) {
+                Ok(Some(snapshot)) => Ok(snapshot),
+                Ok(None) => Err(unread(&all, all.message.clone())),
+                Err(why) => Err(unread(&all, why)),
+            });
+            let id = attempt!(ask::resolve_zone(&snapshot, text).map_err(Failure::refused))
+                .id
+                .to_string();
+            let one = client.get_zones_state_of(false, &id).await?;
+            if json {
+                let zone = attempt!(zones_cli::show_json(&one, &id).map_err(|why| unread(&one, why)));
+                println!("{}", pretty(&zone));
+            } else {
+                let text = attempt!(zones_cli::show_text(&one, &id).map_err(|why| unread(&one, why)));
+                println!("{text}");
+            }
+        }
+        ZonesAction::Rules {
+            action: RulesAction::List,
         } => {
+            let section = zones_section(&mut client).await;
+            if section.is_null() {
+                return Ok(Err(Failure::refused(
+                    "The running configuration could not be asked for its rules",
+                )));
+            }
+            if json {
+                let mut rules = serde_json::Map::new();
+                for key in ["rules", "catch_all", "rules_on_arrival", "timed_rules"] {
+                    if let Some(value) = section.get(key) {
+                        rules.insert(key.to_string(), value.clone());
+                    }
+                }
+                println!("{}", pretty(&serde_json::Value::Object(rules)));
+            } else {
+                // (The zones' titles, where a shell tells of them.)
+                let state = client.get_zones_state_of(true, "").await?;
+                let snapshot = zones_cli::snapshot_of(&state).ok().flatten();
+                println!("{}", zones_cli::rules_text(&section, snapshot.as_ref()));
+            }
+        }
+        ZonesAction::Snapshot {
+            action: SnapshotAction::List,
+        } => {
+            let state = client.get_zones_state_of(true, "").await?;
+            if json {
+                println!("{}", pretty(&zones_cli::snapshots_json(&state)));
+            } else {
+                let text =
+                    attempt!(zones_cli::snapshots_text(&state).map_err(|why| unread(&state, why)));
+                println!("{text}");
+            }
+        }
+        ZonesAction::Profile {
+            action: action @ (ProfileAction::List | ProfileAction::Show),
+        } => {
+            let state = client.get_zones_state_of(true, "").await?;
+            let all = matches!(action, ProfileAction::List);
+            if json {
+                println!("{}", pretty(&zones_cli::profiles_json(&state, all)));
+            } else {
+                let text = attempt!(
+                    zones_cli::profiles_text(&state, all).map_err(|why| unread(&state, why))
+                );
+                println!("{text}");
+            }
+        }
+        ZonesAction::Cancel { request: None } => {
+            let state = client.get_zones_state_of(true, "").await?;
+            attempt!(zones_cli::zones_for_asking(&state));
+            let operations = zones_cli::operations_of(&state);
+            match operations.as_slice() {
+                // The one there is: called off without being named.
+                [only] => {
+                    let command = serde_json::json!({
+                        "command": "cancel_operation", "request": only["request"],
+                    });
+                    let reply = zones_send(&mut client, &[command], wait).await?;
+                    let failure = zones_cli::failure_of(&reply);
+                    if json {
+                        println!("{}", serde_json::to_string(&zones_cli::reply_json(&reply))?);
+                        if let Some(failure) = failure {
+                            std::process::exit(failure.code);
+                        }
+                    } else {
+                        attempt!(failure.map_or(Ok(()), Err));
+                        println!("Operation {} was called off", only["request"]);
+                    }
+                }
+                _ if json => println!("{}", pretty(&serde_json::json!({ "operations": operations }))),
+                _ => println!("{}", zones_cli::operations_text(&operations)),
+            }
+        }
+        ZonesAction::Events => {
+            use gevrek_protocol::proto::execution_event::Event;
+            use std::io::Write;
+            let mut stream = client.subscribe_to_events().await?;
+            let mut out = std::io::stdout();
+            // Each line is handed on as it is written: a status bar reads
+            // through a pipe, where lines would else wait for a full
+            // buffer. A reader that went away ends this quietly.
+            let mut say = |line: String| -> bool {
+                writeln!(out, "{line}").and_then(|()| out.flush()).is_ok()
+            };
+            while let Some(event) = stream.message().await? {
+                let line = match event.event {
+                    Some(Event::RuntimeEvent(event)) => zones_cli::event_line(&event, json),
+                    // Some were missed: whoever keeps the zones' state
+                    // from the events asks for it anew.
+                    Some(Event::EventsDropped(dropped)) => Some(if json {
+                        serde_json::json!({"event": "events.dropped", "count": dropped.count})
+                            .to_string()
+                    } else {
+                        format!("[zones] {} events were missed", dropped.count)
+                    }),
+                    _ => None,
+                };
+                if line.is_some_and(|line| !say(line)) {
+                    break;
+                }
+            }
+        }
+
+        // ---- what is sent as it was written ----
+        ZonesAction::Send { command } => {
             let reply = client
-                .send_zones_command(command, version, timeout_ms.unwrap_or(0))
+                .send_zones_command(command.clone(), gevrek_zones::ipc::VERSION, wait)
                 .await?;
             if json {
                 println!("{}", serde_json::to_string(&zones_cli::reply_json(&reply))?);
-                if !reply.success {
+                if let Some(failure) = zones_cli::failure_of(&reply) {
                     // Said in the JSON already; the exit code says it too.
-                    std::process::exit(1);
+                    std::process::exit(failure.code);
                 }
             } else {
-                println!("{}", zones_cli::reply_text(&reply).map_err(|why| anyhow!(why))?);
+                attempt!(zones_cli::failure_of(&reply).map_or(Ok(()), Err));
+                println!("{}", zones_cli::reply_text(&reply).unwrap_or_default());
             }
         }
-        ZonesAction::Events { json } => {
-            use gevrek_protocol::proto::execution_event::Event;
-            let mut stream = client.subscribe_to_events().await?;
-            while let Some(event) = stream.message().await? {
-                match event.event {
-                    Some(Event::RuntimeEvent(event)) => {
-                        if let Some(line) = zones_cli::event_line(&event, json) {
-                            println!("{line}");
+
+        // ---- every other word: commands made from the zones as they are ----
+        _ => {
+            // Putting the system's icons back must work when nothing
+            // else does, so it asks for no state first.
+            let snapshot = if matches!(action, ZonesAction::RestoreExplorer) {
+                gevrek_zones::ipc::ZonesSnapshot::default()
+            } else {
+                // With the items where they are named, or where their
+                // names are printed.
+                let state = client
+                    .get_zones_state_of(!ask::names_items(&action), "")
+                    .await?;
+                attempt!(zones_cli::zones_for_asking(&state))
+            };
+            let mut commands = Vec::new();
+            let mut then_changes = None;
+            let done = match &action {
+                ZonesAction::Snapshot {
+                    action: SnapshotAction::Import { file, apply },
+                } => {
+                    let text = attempt!(std::fs::read_to_string(file).map_err(|error| {
+                        Failure::refused(format!("{} could not be read: {error}", file.display()))
+                    }));
+                    commands.push(attempt!(zones_cli::import_command(&text, *apply).map_err(
+                        |why| Failure::refused(format!("{} is no layout: {why}", file.display()))
+                    )));
+                    String::new()
+                }
+                _ => {
+                    let asked = attempt!(ask::asked(&action, &snapshot).map_err(Failure::refused));
+                    commands = asked.commands;
+                    then_changes = asked.then_changes;
+                    asked.done
+                }
+            };
+            let mut reply = zones_send(&mut client, &commands, wait).await?;
+            // A zone that was made is given the rest of what was asked
+            // for it, now that its id is known.
+            if let (true, Some(changes)) = (reply.success, then_changes) {
+                if let Some(made) = zones_cli::event_of(&reply, "zone_created") {
+                    let change = serde_json::json!({
+                        "command": "modify_zone", "zone": made["zone"], "changes": changes,
+                    });
+                    let changed = zones_send(&mut client, &[change], wait).await?;
+                    reply.events.extend(changed.events);
+                    if !changed.success {
+                        reply.success = false;
+                        reply.delivered = changed.delivered;
+                        reply.error = Some(format!(
+                            "Zone '{}' was made, but not all of it was set: {}",
+                            made["zone"].as_str().unwrap_or_default(),
+                            changed.error.unwrap_or_default()
+                        ));
+                    }
+                }
+            }
+            let failure = zones_cli::failure_of(&reply);
+            let mut answer = zones_cli::reply_json(&reply);
+            let mut said = done;
+            if failure.is_none() {
+                match &action {
+                    ZonesAction::Create { .. } => {
+                        if let Some(made) = zones_cli::event_of(&reply, "zone_created") {
+                            said = format!("Zone '{}' was made", made["zone"].as_str().unwrap_or_default());
+                            answer["zone"] = made["zone"].clone();
                         }
                     }
-                    // Some were missed: whoever keeps the zones' state
-                    // from the events asks for it anew.
-                    Some(Event::EventsDropped(dropped)) => {
-                        if json {
-                            println!(
-                                "{}",
-                                serde_json::json!({"event": "events.dropped", "count": dropped.count})
-                            );
+                    ZonesAction::Rules {
+                        action:
+                            rules @ (RulesAction::DryRun { .. }
+                            | RulesAction::Apply { .. }
+                            | RulesAction::Check),
+                    } => {
+                        let (applied, asked_of) = match rules {
+                            RulesAction::DryRun { scope } | RulesAction::Apply { scope } => (
+                                !matches!(rules, RulesAction::DryRun { .. }),
+                                match scope {
+                                    ask::RuleScope::Loose => "the items that are in no zone",
+                                    ask::RuleScope::All => "every item of the desktop",
+                                },
+                            ),
+                            _ => (true, "every item, by the rules that go by age"),
+                        };
+                        let plan = zones_cli::plan_of(&reply);
+                        said = zones_cli::plan_text(plan.as_ref(), applied, asked_of);
+                        answer["lines"] = plan
+                            .map(|plan| plan["lines"].clone())
+                            .unwrap_or_else(|| serde_json::json!([]));
+                    }
+                    ZonesAction::AutoCreate { dry_run: true, scope, .. } => {
+                        let planned = zones_cli::event_of(&reply, "auto_planned");
+                        let asked_of = match scope {
+                            ask::RuleScope::Loose => "the items that are in no zone",
+                            ask::RuleScope::All => "every item that is loose or in a zone filled by hand",
+                        };
+                        said = zones_cli::auto::plan_text(planned.as_ref(), &snapshot, asked_of);
+                        answer["plan"] = planned.map_or(serde_json::Value::Null, |event| event["plan"].clone());
+                    }
+                    ZonesAction::AutoCreate { dry_run: false, .. } => {
+                        let made = zones_cli::event_of(&reply, "auto_created");
+                        said = zones_cli::auto::created_text(made.as_ref());
+                        answer["made"] = made.unwrap_or_default();
+                    }
+                    ZonesAction::AutoUndo => {
+                        let undone = zones_cli::event_of(&reply, "auto_undone");
+                        said = zones_cli::auto::undone_text(undone.as_ref());
+                        answer["undone"] = undone.unwrap_or_default();
+                    }
+                    ZonesAction::Search { text } => {
+                        let found = zones_cli::event_of(&reply, "found").unwrap_or_else(
+                            || serde_json::json!({"typed": text, "hits": []}),
+                        );
+                        said = zones_cli::search_text(&found, &snapshot);
+                        answer["hits"] = found["hits"].clone();
+                    }
+                    ZonesAction::Snapshot {
+                        action: SnapshotAction::Export { name, file },
+                    } => {
+                        let document = attempt!(zones_cli::exported(&reply).ok_or_else(|| {
+                            Failure::refused(format!(
+                                "The zones did not hand over the layout '{name}' (this shell may be older)"
+                            ))
+                        }));
+                        attempt!(std::fs::write(file, pretty(&document) + "\n").map_err(|error| {
+                            Failure::refused(format!("{} could not be written: {error}", file.display()))
+                        }));
+                        said = format!("The layout '{name}' was written to {}", file.display());
+                        answer["file"] = file.display().to_string().into();
+                    }
+                    ZonesAction::Snapshot {
+                        action: SnapshotAction::Import { .. },
+                    } => {
+                        let taken = zones_cli::event_of(&reply, "layout_imported").unwrap_or_default();
+                        let name = taken["name"].as_str().unwrap_or_default();
+                        said = if taken["applied"].as_bool().unwrap_or(false) {
+                            match taken["kept_as"].as_str() {
+                                Some(kept) => format!(
+                                    "The layout '{name}' was taken in and is in force; what there was is kept as '{kept}'"
+                                ),
+                                None => format!("The layout '{name}' was taken in and is in force"),
+                            }
                         } else {
-                            println!("[zones] {} events were missed", dropped.count);
-                        }
+                            format!(
+                                "The layout was taken in as '{name}'; `gevrek zones snapshot restore \"{name}\"` puts it in force"
+                            )
+                        };
                     }
                     _ => {}
                 }
             }
-        }
-        ZonesAction::RestoreExplorer => {
-            let reply = client
-                .send_zones_command(zones_cli::restore_explorer_command(), version, 0)
-                .await?;
-            zones_cli::reply_text(&reply).map_err(|why| anyhow!(why))?;
-            println!("The system's own desktop icons were put back");
+            if json {
+                println!("{}", serde_json::to_string(&answer)?);
+                if let Some(failure) = failure {
+                    std::process::exit(failure.code);
+                }
+            } else {
+                attempt!(failure.map_or(Ok(()), Err));
+                println!("{said}");
+            }
         }
     }
-    Ok(())
+    Ok(Ok(()))
 }
 
 async fn run_json_command(
@@ -5475,8 +5786,12 @@ async fn run() -> Result<()> {
             .await?;
         }
 
-        Commands::Zones { action } => {
-            zones_command(&cli.address, action).await?;
+        Commands::Zones {
+            action,
+            json,
+            timeout_ms,
+        } => {
+            zones_command(&cli.address, action, json, timeout_ms).await?;
         }
     }
 
@@ -6043,43 +6358,96 @@ mod tests {
 
     #[test]
     fn the_zones_commands_parse_and_are_not_the_snap_zones() {
-        use super::ZonesAction;
-        let zones = |arguments: &[&str]| -> ZonesAction {
+        use gevrek::zones_cli::ask::{RuleScope, RulesAction, SnapshotAction, Switch, ZonesAction};
+        // What was asked, whether as JSON, and how long to wait.
+        let zones = |arguments: &[&str]| -> (ZonesAction, bool, Option<u32>) {
             let mut line = vec!["gevrek", "zones"];
             line.extend_from_slice(arguments);
             match read(line).unwrap().command {
-                Commands::Zones { action } => action,
+                Commands::Zones {
+                    action,
+                    json,
+                    timeout_ms,
+                } => (action, json, timeout_ms),
                 _ => panic!("{arguments:?} was read as another command"),
             }
         };
-        assert_eq!(zones(&["list"]), ZonesAction::List { json: false });
-        assert_eq!(zones(&["list", "--json"]), ZonesAction::List { json: true });
+        let work = || Some("work".to_string());
+        assert_eq!(zones(&["list"]), (ZonesAction::List { items: false }, false, None));
         assert_eq!(
-            zones(&["show", "work", "--json"]),
-            ZonesAction::Show {
-                id: "work".to_string(),
-                json: true
-            }
+            zones(&["list", "--json", "--items"]),
+            (ZonesAction::List { items: true }, true, None)
         );
+        // --json is every word's, before it or after.
+        assert_eq!(zones(&["show", "work", "--json"]), (ZonesAction::Show { zone: work() }, true, None));
+        assert_eq!(zones(&["--json", "info", "work"]), (ZonesAction::Show { zone: work() }, true, None));
+        assert_eq!(zones(&["show"]), (ZonesAction::Show { zone: None }, false, None));
         assert_eq!(
             zones(&["send", r#"{"command":"quick_hide"}"#]),
-            ZonesAction::Send {
-                command: r#"{"command":"quick_hide"}"#.to_string(),
-                json: false,
-                timeout_ms: None
-            }
+            (
+                ZonesAction::Send {
+                    command: r#"{"command":"quick_hide"}"#.to_string()
+                },
+                false,
+                None
+            )
         );
         assert_eq!(
             zones(&["send", "{}", "--json", "--timeout-ms", "800"]),
-            ZonesAction::Send {
-                command: "{}".to_string(),
-                json: true,
-                timeout_ms: Some(800)
+            (
+                ZonesAction::Send {
+                    command: "{}".to_string()
+                },
+                true,
+                Some(800)
+            )
+        );
+        assert_eq!(zones(&["events"]), (ZonesAction::Events, false, None));
+        assert_eq!(zones(&["events", "--json"]), (ZonesAction::Events, true, None));
+        assert_eq!(zones(&["restore-explorer"]).0, ZonesAction::RestoreExplorer);
+        assert_eq!(zones(&["peek"]).0, ZonesAction::Peek { to: Switch::Toggle });
+        assert_eq!(
+            zones(&["roll-up", "work", "on", "--timeout-ms", "100"]),
+            (
+                ZonesAction::RollUp {
+                    zone: "work".to_string(),
+                    to: Switch::On
+                },
+                false,
+                Some(100)
+            )
+        );
+        assert_eq!(
+            zones(&["rules", "dry-run", "--scope", "all", "--json"]),
+            (
+                ZonesAction::Rules {
+                    action: RulesAction::DryRun {
+                        scope: RuleScope::All
+                    }
+                },
+                true,
+                None
+            )
+        );
+        // "Apply a layout" is restoring a saved copy, under either name.
+        assert_eq!(
+            zones(&["layout", "apply", "tidy"]).0,
+            ZonesAction::Snapshot {
+                action: SnapshotAction::Restore {
+                    name: "tidy".to_string()
+                }
             }
         );
-        assert_eq!(zones(&["events"]), ZonesAction::Events { json: false });
-        assert_eq!(zones(&["events", "--json"]), ZonesAction::Events { json: true });
-        assert_eq!(zones(&["restore-explorer"]), ZonesAction::RestoreExplorer);
+        // A place may begin with a minus and is no flag for that.
+        assert_eq!(
+            zones(&["move", "work", "-20,40"]).0,
+            ZonesAction::Move {
+                zone: "work".to_string(),
+                to: "-20,40".to_string(),
+                display: None,
+                no_snap: false
+            }
+        );
         // The address is said before or after, as for every command.
         assert_eq!(
             read(["gevrek", "zones", "list", "--address", "local:test"])
@@ -6088,9 +6456,10 @@ mod tests {
             "local:test"
         );
         // What is not one of them is refused, not sent anywhere.
-        assert!(read(["gevrek", "zones", "show"]).is_err());
+        assert!(read(["gevrek", "zones"]).is_err());
         assert!(read(["gevrek", "zones", "send"]).is_err());
         assert!(read(["gevrek", "zones", "2"]).is_err());
+        assert!(read(["gevrek", "zones", "delete"]).is_err());
         // `zone 2` is still the snap zone of a window.
         assert!(matches!(
             read(["gevrek", "zone", "2"]).unwrap().command,

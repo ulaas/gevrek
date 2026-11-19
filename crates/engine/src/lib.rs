@@ -40,6 +40,7 @@ pub mod ring;
 pub mod rule_state;
 pub mod rules;
 pub mod scratchpads;
+pub mod shell_room;
 pub mod workspace;
 pub mod workspace_profile;
 pub mod workspaces;

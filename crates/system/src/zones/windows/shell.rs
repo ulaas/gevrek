@@ -24,7 +24,8 @@ use windows::core::{w, Interface, GUID, HSTRING, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{HANDLE, HWND};
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::Registry::{
-    RegGetValueW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD,
+    RegCloseKey, RegGetValueW, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ,
+    RRF_RT_REG_DWORD,
 };
 use windows::Win32::System::SystemServices::{
     SFGAO_FILESYSTEM, SFGAO_FOLDER, SFGAO_LINK, SFGAO_STREAM,
@@ -121,12 +122,22 @@ pub(super) fn plain(name: &str) -> String {
 
 /// The types of files by their endings, as the registry has them. Asked
 /// once for each ending: a desktop has many files of few kinds.
+///
+/// With them goes what else the facts of a file are read with: when the
+/// person last opened each file (`recent::Opened`), which whoever reads
+/// the shell's record of that shares with everyone who reads facts.
 #[derive(Debug, Default)]
 pub struct Types {
     known: HashMap<String, Option<String>>,
+    pub opened: super::recent::Opened,
 }
 
 impl Types {
+    /// With a record of opened files that is shared.
+    pub fn knowing(opened: super::recent::Opened) -> Self {
+        Self { known: HashMap::new(), opened }
+    }
+
     /// The type of files that end in `extension` (without the dot, in
     /// small letters).
     pub fn of(&mut self, extension: &str) -> Option<String> {
@@ -303,7 +314,33 @@ pub fn on_the_desktop(id: &str, folders: &[String]) -> bool {
     let Some(class) = class_of(id) else {
         return false;
     };
-    shown_on_desktop(id, hidden_on_desktop(HKEY_CURRENT_USER, class), hidden_on_desktop(HKEY_LOCAL_MACHINE, class))
+    let registered = registered_on_desktop(HKEY_CURRENT_USER, class) || registered_on_desktop(HKEY_LOCAL_MACHINE, class);
+    shown_on_desktop(
+        id,
+        hidden_on_desktop(HKEY_CURRENT_USER, class),
+        hidden_on_desktop(HKEY_LOCAL_MACHINE, class),
+        registered,
+    )
+}
+
+/// Whether a class is one a program put onto the desktop: Explorer shows
+/// what is registered under its `Desktop\NameSpace` key (the person's or
+/// the machine's) as an icon there, unless the settings above hide it.
+/// This is how a program that is no part of Windows gets a thing that is
+/// no file onto the desktop.
+fn registered_on_desktop(root: HKEY, class: &str) -> bool {
+    let key = HSTRING::from(format!(
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Desktop\\NameSpace\\{class}"
+    ));
+    let mut opened = HKEY::default();
+    // SAFETY: the key is opened for reading only and closed again.
+    unsafe {
+        if RegOpenKeyExW(root, &key, 0, KEY_READ, &mut opened).is_err() {
+            return false;
+        }
+        let _ = RegCloseKey(opened);
+    }
+    true
 }
 
 /// What the registry says of a class under the person's or the machine's
@@ -400,6 +437,15 @@ unsafe fn item_of(shell_item: &IShellItem, types: &mut Types) -> Option<Item> {
 /// What the file system says of a file or folder, and the type its
 /// ending has. The ending is the real one, of the file's name: the name
 /// the shell shows may leave it out.
+///
+/// Reading these fetches nothing of a file a cloud keeps: they are the
+/// file's name, size and times, which are on this machine either way.
+///
+/// `accessed` is when the person last opened the file, as the shell
+/// wrote it down, and absent where it did not: the file system's own
+/// time of last access is not to be trusted on Windows (see `recent`).
+/// So "untouched for so many days" counts from the latest of made,
+/// written and opened.
 fn facts_of_path(path: &str, kind: ItemKind, types: &mut Types) -> ItemFacts {
     let mut facts = ItemFacts::default();
     if kind == ItemKind::Folder {
@@ -414,7 +460,7 @@ fn facts_of_path(path: &str, kind: ItemKind, types: &mut Types) -> ItemFacts {
         }
         facts.created = seconds(said.created());
         facts.modified = seconds(said.modified());
-        facts.accessed = seconds(said.accessed());
     }
+    facts.accessed = types.opened.at(path);
     facts
 }

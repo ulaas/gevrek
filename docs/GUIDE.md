@@ -467,6 +467,37 @@ left to right the way things happen; "Fit" shows the whole graph. A node
 shows what it is set to in its header (the keys of a key node, the text of a
 text node).
 
+## Zones on the desktop (not snap zones)
+
+Two things have "zones" in their name, and they are not the same:
+
+- **Snap zones** are places on a display that a *window* snaps into:
+  `desktop.snap_zones`, `gevrek snap-zone 0`, `snap-zone-next`, the
+  Snap Zone Workbench example. They are described under
+  [Configuration workflow](#configuration-workflow) above.
+- **Zones** are boxes on the desktop that hold its *icons*: zones filled
+  by hand, portals that show a folder, smart zones that fill themselves,
+  rules that sort, saved layouts, one arrangement for each set of
+  displays. They are `desktop.zones` (off until `enabled` is set), drawn
+  by the shell, and driven from the command line with `gevrek zones`:
+
+  ```sh
+  gevrek zones list
+  gevrek zones create --title Work
+  gevrek zones add work report.pdf
+  gevrek zones rules dry-run
+  gevrek zones events --json
+  ```
+
+  **Super+Z** brings them above the windows, and again puts them back;
+  **Super+Shift+Z** hides and shows them. On Windows, Explorer's own desktop icons are put
+  away while zones are shown and come back when they are switched off;
+  `gevrek zones restore-explorer` brings them back at any time.
+
+Everything about them (each feature by pointer, key, configuration and
+command line, the rules, the events for status bars, what happens to
+Explorer's icons) is in [zones/user-guide.md](zones/user-guide.md).
+
 ## Touchpad gestures
 
 Gestures work with a Precision Touchpad on Windows and with any touchpad

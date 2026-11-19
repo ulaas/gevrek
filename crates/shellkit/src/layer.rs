@@ -15,10 +15,18 @@
 //! A surface that asks for it takes what other programs drag onto it and
 //! can drag files out ([`dnd`], and [`crate::dnd`] for what both systems
 //! share).
+//!
+//! What a surface asks for while it is open: another layer among the
+//! windows (`set_layer` of the layer shell, from its second version on),
+//! and the desktop shown soft behind parts of it, which is asked of the
+//! compositor with `ext-background-effect-v1` where it has that (gevrek's
+//! own has; where there is none nothing is shown, and the drawing is
+//! told so).
 
 mod dnd;
 
 use crate::dnd::{DragEvent, DragStart, DropAnswer};
+use crate::look::BlurRegion;
 use crate::{Edge, Flow, Keyboard, Level, Place, Timings};
 use anyhow::Context as _;
 use egui_wgpu::wgpu;
@@ -60,6 +68,14 @@ use wayland_client::{
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface},
     Connection, Proxy, QueueHandle,
 };
+use wayland_protocols::ext::background_effect::v1::client::{
+    ext_background_effect_manager_v1::{self, ExtBackgroundEffectManagerV1},
+    ext_background_effect_surface_v1::ExtBackgroundEffectSurfaceV1,
+};
+use wayland_protocols::wp::cursor_shape::v1::client::{
+    wp_cursor_shape_device_v1::{Shape, WpCursorShapeDeviceV1},
+    wp_cursor_shape_manager_v1::WpCursorShapeManagerV1,
+};
 use wayland_protocols::wp::fractional_scale::v1::client::{
     wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
     wp_fractional_scale_v1::{self, WpFractionalScaleV1},
@@ -86,6 +102,8 @@ pub struct SurfaceId(u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Popped {
     Menu,
+    /// A menu that opens from a line of another: beside that line.
+    Sub,
     Hint { beside: bool },
 }
 
@@ -117,7 +135,22 @@ pub struct Control {
     drags: Vec<(SurfaceId, DragStart)>,
     /// What happened to the surfaces' drags and is not asked for yet.
     drag_news: Vec<(SurfaceId, DragEvent)>,
+    /// Surfaces to be given another level among the windows.
+    levels: Vec<(SurfaceId, Level)>,
+    /// Surfaces that are to take the keyboard another way.
+    keyboards: Vec<(SurfaceId, Keyboard)>,
+    /// The parts of surfaces behind which the desktop is shown soft.
+    blurs: Vec<(SurfaceId, Vec<BlurRegion>)>,
+    /// The compositor shows the desktop soft behind a surface that asks.
+    blur: bool,
+    /// The buttons that went down on surfaces, with the compositor's time
+    /// of each, until they are asked for (`presses`); only the last few
+    /// are kept, for the surfaces that never ask.
+    pressed: Vec<(SurfaceId, crate::Press)>,
 }
+
+/// How many presses are kept for the surfaces to ask for.
+const PRESSES_KEPT: usize = 32;
 
 impl Control {
     /// Open a surface; it is there after this handler returns.
@@ -148,6 +181,40 @@ impl Control {
         self.popups
             .push((id, parent, anchor, size, Popped::Menu, Box::new(draw)));
         id
+    }
+
+    /// Open a menu that belongs to a line of another menu (or of any
+    /// surface): as [`Control::popup`], but beside `anchor`, their tops in
+    /// line; on the other side of it where the display ends, and slid
+    /// along where it would leave the display below. The surface it
+    /// belongs to stays open, and may itself be a popup.
+    pub fn submenu(
+        &mut self,
+        parent: SurfaceId,
+        anchor: egui::Rect,
+        size: egui::Vec2,
+        draw: impl FnMut(&mut egui::Ui, &mut Control) -> Flow + 'static,
+    ) -> SurfaceId {
+        self.next_id += 1;
+        let id = SurfaceId(self.next_id);
+        self.popups
+            .push((id, parent, anchor, size, Popped::Sub, Box::new(draw)));
+        id
+    }
+
+    /// The buttons that went down on a surface since this was last asked
+    /// for it, each with the compositor's own time of the press (see
+    /// [`crate::Press`]). The same presses reach the drawing through egui;
+    /// these say when they were made.
+    pub fn presses(&mut self, id: SurfaceId) -> Vec<crate::Press> {
+        let mut mine = Vec::new();
+        self.pressed.retain(|(on, press)| {
+            if *on == id {
+                mine.push(*press);
+            }
+            *on != id
+        });
+        mine
     }
 
     /// Open a hint: as [`Control::popup`], but only to be read. It takes
@@ -251,6 +318,59 @@ impl Control {
     pub fn start_drag(&mut self, from: SurfaceId, drag: DragStart) {
         self.drags.push((from, drag));
     }
+
+    /// Put an open surface on another level among the windows, without
+    /// closing it: below them, above them, over everything, and back
+    /// (what lies below the windows and is raised over them to be looked
+    /// at for a moment). Its place, its size and what is drawn on it stay.
+    /// Not to or from [`Level::Marks`], which a surface is from the start
+    /// or never: such a change is left undone and said in the log; and
+    /// not with a compositor whose layer shell is the first version, which
+    /// knows no such change.
+    pub fn set_level(&mut self, id: SurfaceId, level: Level) {
+        self.levels.push((id, level));
+    }
+
+    /// Change how an open surface takes the keyboard: never, when it is
+    /// pressed, or always while it is shown (the compositor gives it the
+    /// keyboard then, and takes it back when this is changed again).
+    pub fn set_keyboard(&mut self, id: SurfaceId, keyboard: Keyboard) {
+        self.keyboards.push((id, keyboard));
+    }
+
+    /// Show the desktop soft (blurred) behind these parts of a surface
+    /// and nowhere else behind it; an empty list ends it. The parts are
+    /// in the surface's own points and are said again whenever they
+    /// change (a ground moved, sized, added, taken away); what was said
+    /// last holds. The surface must draw something see-through there, or
+    /// nothing of it shows. See [`crate::look`], and
+    /// [`Control::blur_available`] for when nothing will be shown.
+    ///
+    /// The compositor is told with the surface's next picture
+    /// (`ext-background-effect-v1`: a region of whole logical pixels, the
+    /// round corners as rows of it), and how soft it is, is its own to
+    /// say.
+    pub fn set_blur_regions(&mut self, id: SurfaceId, regions: &[BlurRegion]) {
+        self.blurs.retain(|(known, _)| *known != id);
+        self.blurs.push((id, regions.to_vec()));
+    }
+
+    /// Whether [`Control::set_blur_regions`] shows anything here: the
+    /// compositor has the protocol and says it blurs. Where it does not,
+    /// a drawing makes its grounds solid enough to be read on by
+    /// themselves: a plain see-through ground is what is left. (Known
+    /// from the compositor's first answers; `false` before them.)
+    pub fn blur_available(&self) -> bool {
+        self.blur
+    }
+
+    /// Leave a surface out of pictures taken of the screen, or no longer.
+    /// **Nothing is done here on Linux**: a program has no way to ask a
+    /// Wayland compositor for that. In gevrek's own it is a rule of the
+    /// configuration, by the surface's name (`exclude_from_capture` in a
+    /// layer rule), and the compositor tells when the screen is shared
+    /// (the event `screen.shared`), so that a surface can cover itself.
+    pub fn exclude_from_capture(&mut self, _id: SurfaceId, _exclude: bool) {}
 
     /// Whether a surface is open now.
     pub fn is_open(&self, id: SurfaceId) -> bool {
@@ -374,7 +494,11 @@ impl<M: 'static> Shell<M> {
             layer_shell,
             xdg_shell: XdgShell::bind(&globals, &handle).ok(),
             fractional: globals.bind(&handle, 1..=1, ()).ok(),
+            shapes: globals.bind(&handle, 1..=1, ()).ok(),
+            shape_device: None,
+            pointer_entered: None,
             viewporter: globals.bind(&handle, 1..=1, ()).ok(),
+            background_effect: globals.bind(&handle, 1..=1, ()).ok(),
             handle: handle.clone(),
             text_manager: globals.bind(&handle, 1..=1, ()).ok(),
             text_input: None,
@@ -573,6 +697,8 @@ struct Surface {
     configured: bool,
     /// What happened since the last frame, for egui.
     events: Vec<egui::Event>,
+    /// The pointer egui last wanted over it.
+    pointer: egui::CursorIcon,
     /// The surface has the keyboard.
     focused: bool,
     redraw: bool,
@@ -580,6 +706,24 @@ struct Surface {
     again_at: Option<Instant>,
     /// A frame was handed over and the compositor has not shown it yet.
     waiting_for_frame: bool,
+    /// Its level among the windows and how it takes the keyboard, as the
+    /// compositor was last told (a layer surface's alone).
+    level: Option<Level>,
+    keyboard: Option<Keyboard>,
+    /// The edge it keeps room free at, when it does: the room is as deep
+    /// as the surface, whatever size it is given later.
+    reserves: Option<Edge>,
+    /// What the compositor is told the desktop is to be soft behind, once
+    /// the surface asked for it.
+    effect: Option<ExtBackgroundEffectSurfaceV1>,
+}
+
+impl Drop for Surface {
+    fn drop(&mut self) {
+        if let Some(effect) = self.effect.take() {
+            effect.destroy();
+        }
+    }
 }
 
 struct Host {
@@ -602,6 +746,9 @@ struct Host {
     /// surface's logical size, where the compositor has both.
     fractional: Option<WpFractionalScaleManagerV1>,
     viewporter: Option<WpViewporter>,
+    /// What lies behind parts of a surface shown soft, where the
+    /// compositor has it.
+    background_effect: Option<ExtBackgroundEffectManagerV1>,
     handle: QueueHandle<Host>,
     /// Input methods (text-input v3), where the compositor has them: a
     /// text field of one of the surfaces is told to the input method,
@@ -622,6 +769,15 @@ struct Host {
     outputs: OutputState,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     pointer: Option<wl_pointer::WlPointer>,
+    /// The pointer's shape is asked of the compositor by name (the arrows
+    /// of a side that is sized, the hand of a button), where it has
+    /// shapes to ask for; without, the pointer stays as the compositor
+    /// shows it.
+    shapes: Option<WpCursorShapeManagerV1>,
+    shape_device: Option<WpCursorShapeDeviceV1>,
+    /// What the compositor called the pointer's last coming onto a
+    /// surface of ours: a shape is asked for under that number.
+    pointer_entered: Option<u32>,
     /// A touch screen's fingers, where the seat has one: each finger
     /// that is down, with the surface it came down on and where it is.
     /// The first of them is the pointer for egui (it presses, drags and
@@ -697,6 +853,7 @@ impl Host {
                 |surface| !matches!(&surface.role, Role::Popup(_, parent) if *parent == id),
             );
             self.surfaces.retain(|surface| surface.id != id);
+            self.control.pressed.retain(|(on, _)| *on != id);
             if self.keyboard_on == Some(id) {
                 self.keyboard_on = None;
             }
@@ -749,10 +906,60 @@ impl Host {
                     // makes the picture the new size.
                     if let Role::Layer(layer) = &surface.role {
                         layer.set_size(width, height);
+                        // (The room it keeps free is as deep as it is.)
+                        if let Some(depth) = reserved_depth(surface.reserves, width, height) {
+                            layer.set_exclusive_zone(depth);
+                        }
                         layer.commit();
                     }
                 }
             }
+        }
+        for (id, level) in std::mem::take(&mut self.control.levels) {
+            let Some(surface) = self.by_id(Some(id)) else {
+                continue;
+            };
+            let (Role::Layer(layer), Some(now)) = (&surface.role, surface.level) else {
+                continue;
+            };
+            if now == level {
+                continue;
+            }
+            if now == Level::Marks || level == Level::Marks {
+                log::warn!("surface {id:?} stays {now:?}: a surface is marks from the start or never");
+                continue;
+            }
+            // (The first version of the layer shell has no such request,
+            // and a compositor ends the connection of who makes it.)
+            let version = match layer.kind() {
+                smithay_client_toolkit::shell::wlr_layer::SurfaceKind::Wlr(known) => {
+                    known.version()
+                }
+                _ => 0,
+            };
+            if version < 2 {
+                log::warn!("surface {id:?} stays {now:?}: the compositor cannot change a layer");
+                continue;
+            }
+            layer.set_layer(layer_of(level));
+            layer.commit();
+            surface.level = Some(level);
+        }
+        for (id, keyboard) in std::mem::take(&mut self.control.keyboards) {
+            let Some(surface) = self.by_id(Some(id)) else {
+                continue;
+            };
+            let (Role::Layer(layer), Some(now)) = (&surface.role, surface.keyboard) else {
+                continue;
+            };
+            if now != keyboard {
+                layer.set_keyboard_interactivity(interactivity_of(keyboard));
+                layer.commit();
+                surface.keyboard = Some(keyboard);
+            }
+        }
+        for (id, regions) in std::mem::take(&mut self.control.blurs) {
+            self.tell_blur(id, &regions, handle);
         }
         for id in std::mem::take(&mut self.control.redraw) {
             if let Some(surface) = self.by_id(Some(id)) {
@@ -794,12 +1001,7 @@ impl Host {
         handle: &QueueHandle<Self>,
     ) -> anyhow::Result<Surface> {
         let surface = self.compositor.create_surface(handle);
-        let level = match place.level {
-            Level::Background => Layer::Background,
-            Level::Below => Layer::Bottom,
-            Level::Above => Layer::Top,
-            Level::Overlay | Level::Marks => Layer::Overlay,
-        };
+        let level = layer_of(place.level);
         let layer_shell = self
             .layer_shell
             .as_ref()
@@ -852,14 +1054,11 @@ impl Host {
         layer.set_size(place.width, place.height);
         layer.set_margin(place.margin, place.margin, place.margin, place.margin);
         if place.reserve {
-            let thickness = match place.edge {
-                Edge::Top | Edge::Bottom => place.height,
-                Edge::Left | Edge::Right => place.width,
-                _ => 0,
-            };
             // (Its own thickness: the room between it and the display's
             // edge is added by the compositor, as the protocol says.)
-            layer.set_exclusive_zone(thickness as i32);
+            layer.set_exclusive_zone(
+                reserved_depth(Some(place.edge), place.width, place.height).unwrap_or(0),
+            );
         } else if place.edge == Edge::Fill {
             // The whole display, the room panels keep free too: what
             // fills a display covers it (a frozen picture of it to drag
@@ -867,11 +1066,7 @@ impl Host {
             // the part taken was not the part dragged over).
             layer.set_exclusive_zone(-1);
         }
-        layer.set_keyboard_interactivity(match place.keyboard {
-            Keyboard::Never => KeyboardInteractivity::None,
-            Keyboard::OnDemand => KeyboardInteractivity::OnDemand,
-            Keyboard::Exclusive => KeyboardInteractivity::Exclusive,
-        });
+        layer.set_keyboard_interactivity(interactivity_of(place.keyboard));
         if place.level == Level::Marks {
             // Marks: the pointer goes through them.
             if let Ok(nowhere) = smithay_client_toolkit::compositor::Region::new(&self.compositor) {
@@ -880,7 +1075,53 @@ impl Host {
         }
         // The first commit has no picture: the compositor answers with the size.
         layer.commit();
-        self.finish(id, Role::Layer(layer), draw)
+        let mut made = self.finish(id, Role::Layer(layer), draw)?;
+        made.level = Some(place.level);
+        made.keyboard = Some(place.keyboard);
+        made.reserves = place.reserve.then_some(place.edge);
+        Ok(made)
+    }
+
+    /// Tell the compositor the parts of a surface the desktop is to be
+    /// soft behind. Taken up with the surface's next picture, which is
+    /// asked for.
+    fn tell_blur(&mut self, id: SurfaceId, regions: &[BlurRegion], handle: &QueueHandle<Self>) {
+        let Some(manager) = self.background_effect.clone() else {
+            return;
+        };
+        let Some(index) = self.surfaces.iter().position(|surface| surface.id == id) else {
+            return;
+        };
+        // (Nothing asked for and nothing to take back: the compositor
+        // need not hear of this surface at all.)
+        if regions.is_empty() && self.surfaces[index].effect.is_none() {
+            return;
+        }
+        let region = if regions.is_empty() {
+            None
+        } else {
+            let Ok(region) = smithay_client_toolkit::compositor::Region::new(&self.compositor)
+            else {
+                return;
+            };
+            // (A surface is measured in logical pixels, whatever its
+            // display's scale: the parts are whole ones of those.)
+            for shape in regions
+                .iter()
+                .filter_map(|part| crate::look::rounded(part, 1.0))
+            {
+                for (x, y, width, height) in crate::look::strips(shape) {
+                    region.add(x, y, width, height);
+                }
+            }
+            Some(region)
+        };
+        let surface = &mut self.surfaces[index];
+        let effect = surface.effect.get_or_insert_with(|| {
+            manager.get_background_effect(surface.role.wl_surface(), handle, ())
+        });
+        effect.set_blur_region(region.as_ref().map(|region| region.wl_region()));
+        surface.redraw = true;
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -915,7 +1156,18 @@ impl Host {
         );
         // Below the anchor, its left edges in line; flipped above, or
         // slid along, where that would leave the display.
-        if kind == (Popped::Hint { beside: true }) || self.upright.contains(&parent) {
+        if kind == Popped::Sub {
+            // Beside the line it opens from, their tops in line; on the
+            // line's other side, or slid up, where the display ends.
+            // (Over the rim of the menu it came from by a little: the
+            // pointer crosses no gap on its way.)
+            positioner.set_anchor(At::TopRight);
+            positioner.set_gravity(Gravity::BottomRight);
+            positioner.set_constraint_adjustment(
+                ConstraintAdjustment::FlipX | ConstraintAdjustment::SlideY,
+            );
+            positioner.set_offset(-3, 0);
+        } else if kind == (Popped::Hint { beside: true }) || self.upright.contains(&parent) {
             // Next to the anchor, their middles in line; flipped to the
             // other side, or slid along, where that would leave the display.
             positioner.set_anchor(At::Right);
@@ -933,18 +1185,32 @@ impl Host {
             positioner.set_offset(0, 4);
         }
         let surface = self.compositor.create_surface(handle);
-        let popup = Popup::from_surface(None, &positioner, handle, surface, xdg_shell)
-            .map_err(|error| anyhow::anyhow!("a popup: {error}"))?;
-        let Some(Role::Layer(layer)) = self
+        // What it belongs to: a surface of the desktop's layers, which is
+        // told of its popup, or another popup, which is named as its
+        // parent when it is made (a menu that opens from a menu).
+        let owner = self
             .surfaces
             .iter()
             .find(|surface| surface.id == parent)
-            .map(|surface| &surface.role)
-        else {
-            anyhow::bail!("the surface it belongs to is gone");
+            .map(|surface| &surface.role);
+        let popup = match owner {
+            Some(Role::Layer(layer)) => {
+                let popup = Popup::from_surface(None, &positioner, handle, surface, xdg_shell)
+                    .map_err(|error| anyhow::anyhow!("a popup: {error}"))?;
+                layer.get_popup(popup.xdg_popup());
+                popup
+            }
+            Some(Role::Popup(under, _)) => Popup::from_surface(
+                Some(under.xdg_surface()),
+                &positioner,
+                handle,
+                surface,
+                xdg_shell,
+            )
+            .map_err(|error| anyhow::anyhow!("a popup of a popup: {error}"))?,
+            _ => anyhow::bail!("the surface it belongs to is gone"),
         };
-        layer.get_popup(popup.xdg_popup());
-        if kind == Popped::Menu {
+        if matches!(kind, Popped::Menu | Popped::Sub) {
             // With the pointer: a click outside it then closes it.
             if let (Some(seat), Some(serial)) = (&self.seat, self.last_press) {
                 popup.xdg_popup().grab(seat, serial);
@@ -1061,10 +1327,15 @@ impl Host {
             fraction,
             configured: false,
             events: Vec::new(),
+            pointer: egui::CursorIcon::Default,
             focused: false,
             redraw: true,
             again_at: None,
             waiting_for_frame: false,
+            level: None,
+            keyboard: None,
+            reserves: None,
+            effect: None,
         })
     }
 
@@ -1138,6 +1409,16 @@ impl Host {
             let id = surface.id;
             self.control.close(id);
             return;
+        }
+        // The pointer egui wants over this surface.
+        let wanted = output.platform_output.cursor_icon;
+        if wanted != surface.pointer {
+            surface.pointer = wanted;
+            if self.pointer_on == Some(surface.id) {
+                if let (Some(device), Some(serial), Some(shape)) = (&self.shape_device, self.pointer_entered, shape_of(wanted)) {
+                    device.set_shape(serial, shape);
+                }
+            }
         }
         // When egui wants the next frame.
         if let Some(viewport) = output.viewport_output.get(&egui::ViewportId::ROOT) {
@@ -1472,6 +1753,9 @@ impl SeatHandler for Host {
         }
         if capability == Capability::Pointer && self.pointer.is_none() {
             self.pointer = self.seats.get_pointer(handle, &seat).ok();
+            if let (Some(shapes), Some(pointer)) = (&self.shapes, &self.pointer) {
+                self.shape_device = Some(shapes.get_pointer(pointer, handle, ()));
+            }
         }
         if capability == Capability::Touch && self.touch.is_none() {
             self.touch = self.seats.get_touch(handle, &seat).ok();
@@ -1511,6 +1795,14 @@ impl PointerHandler for Host {
                 PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
                     self.pointer_on = Some(surface.id);
                     surface.events.push(egui::Event::PointerMoved(at));
+                    // Come onto the surface: the pointer is as the
+                    // surface last wanted it over itself.
+                    if let PointerEventKind::Enter { serial } = event.kind {
+                        self.pointer_entered = Some(serial);
+                        if let (Some(device), Some(shape)) = (&self.shape_device, shape_of(surface.pointer)) {
+                            device.set_shape(serial, shape);
+                        }
+                    }
                 }
                 PointerEventKind::Leave { .. } => {
                     if self.pointer_on == Some(surface.id) {
@@ -1521,8 +1813,10 @@ impl PointerHandler for Host {
                 PointerEventKind::Press { button, .. }
                 | PointerEventKind::Release { button, .. } => {
                     let pressed = matches!(event.kind, PointerEventKind::Press { .. });
-                    if let PointerEventKind::Press { serial, .. } = event.kind {
+                    let mut time_ms = None;
+                    if let PointerEventKind::Press { serial, time, .. } = event.kind {
                         self.last_press = Some(serial);
+                        time_ms = Some(time);
                     }
                     // The numbers of Linux's buttons: left, right, middle.
                     let button = match button {
@@ -1534,6 +1828,13 @@ impl PointerHandler for Host {
                     self.dnd.held.retain(|held| *held != button);
                     if pressed {
                         self.dnd.held.push(button);
+                    }
+                    if let Some(time_ms) = time_ms {
+                        let press = crate::Press { button, at, time_ms };
+                        self.control.pressed.push((surface.id, press));
+                        // (A surface that never asks leaves them lying.)
+                        let over = self.control.pressed.len().saturating_sub(PRESSES_KEPT);
+                        self.control.pressed.drain(..over);
                     }
                     surface.events.push(egui::Event::PointerButton {
                         pos: at,
@@ -1688,7 +1989,20 @@ impl Host {
         let Some(surface) = self.by_id(on) else {
             return;
         };
-        if let Some(key) = key_of(event.keysym) {
+        // The key for a menu has no name in egui: it is told as Shift and
+        // F10, which asks for a menu everywhere.
+        let (key, modifiers) = if event.keysym == Keysym::Menu {
+            (
+                Some(egui::Key::F10),
+                egui::Modifiers {
+                    shift: true,
+                    ..modifiers
+                },
+            )
+        } else {
+            (key_of(event.keysym), modifiers)
+        };
+        if let Some(key) = key {
             surface.events.push(egui::Event::Key {
                 key,
                 physical_key: None,
@@ -1712,6 +2026,44 @@ impl Host {
     }
 }
 
+/// The compositor's name for the pointer egui asks for; none for a pointer
+/// that is not to be seen (which is not asked for by name).
+pub fn shape_of(icon: egui::CursorIcon) -> Option<Shape> {
+    use egui::CursorIcon as Icon;
+    Some(match icon {
+        Icon::None => return None,
+        Icon::Text => Shape::Text,
+        Icon::VerticalText => Shape::VerticalText,
+        Icon::Wait => Shape::Wait,
+        Icon::Progress => Shape::Progress,
+        Icon::Crosshair => Shape::Crosshair,
+        Icon::Cell => Shape::Cell,
+        Icon::PointingHand => Shape::Pointer,
+        Icon::Grab => Shape::Grab,
+        Icon::Grabbing => Shape::Grabbing,
+        Icon::Help => Shape::Help,
+        Icon::NotAllowed => Shape::NotAllowed,
+        Icon::NoDrop => Shape::NoDrop,
+        Icon::Move => Shape::Move,
+        Icon::AllScroll => Shape::AllScroll,
+        Icon::ResizeHorizontal => Shape::EwResize,
+        Icon::ResizeVertical => Shape::NsResize,
+        Icon::ResizeNwSe => Shape::NwseResize,
+        Icon::ResizeNeSw => Shape::NeswResize,
+        Icon::ResizeEast => Shape::EResize,
+        Icon::ResizeWest => Shape::WResize,
+        Icon::ResizeNorth => Shape::NResize,
+        Icon::ResizeSouth => Shape::SResize,
+        Icon::ResizeNorthEast => Shape::NeResize,
+        Icon::ResizeNorthWest => Shape::NwResize,
+        Icon::ResizeSouthEast => Shape::SeResize,
+        Icon::ResizeSouthWest => Shape::SwResize,
+        Icon::ResizeColumn => Shape::ColResize,
+        Icon::ResizeRow => Shape::RowResize,
+        _ => Shape::Default,
+    })
+}
+
 /// The toolkit's name for a key, for the keys a shell surface acts on.
 pub fn key_of(keysym: Keysym) -> Option<egui::Key> {
     use egui::Key;
@@ -1733,6 +2085,14 @@ pub fn key_of(keysym: Keysym) -> Option<egui::Key> {
         other => {
             // Letters and digits by their own names.
             let name = other.name()?.trim_start_matches("XK_").to_string();
+            // The keys of the top row by theirs (F2 gives a name anew,
+            // Shift and F10 asks for a menu).
+            let numbered = name
+                .strip_prefix('F')
+                .is_some_and(|number| !number.is_empty() && number.chars().all(|digit| digit.is_ascii_digit()));
+            if numbered {
+                return Key::from_name(&name);
+            }
             let mut letters = name.chars();
             match (letters.next(), letters.next()) {
                 (Some(letter), None) => Key::from_name(&letter.to_ascii_uppercase().to_string())?,
@@ -1792,8 +2152,70 @@ macro_rules! unheard {
     };
 }
 unheard!(WpFractionalScaleManagerV1);
+unheard!(WpCursorShapeManagerV1);
+unheard!(WpCursorShapeDeviceV1);
 unheard!(WpViewporter);
 unheard!(WpViewport);
+unheard!(ExtBackgroundEffectSurfaceV1);
+
+impl wayland_client::Dispatch<ExtBackgroundEffectManagerV1, ()> for Host {
+    fn event(
+        host: &mut Self,
+        _: &ExtBackgroundEffectManagerV1,
+        event: ext_background_effect_manager_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        // What the compositor does behind a surface that asks, said when
+        // it is first spoken to and whenever it is another.
+        let ext_background_effect_manager_v1::Event::Capabilities { flags } = event else {
+            return;
+        };
+        let blurs = matches!(
+            flags,
+            wayland_client::WEnum::Value(flags)
+                if flags.contains(ext_background_effect_manager_v1::Capability::Blur)
+        );
+        if host.control.blur != blurs {
+            host.control.blur = blurs;
+            // (What is drawn depends on it: a ground is more solid
+            // without.)
+            for surface in &mut host.surfaces {
+                surface.redraw = true;
+            }
+        }
+    }
+}
+
+/// The layer of the layer shell a level is.
+fn layer_of(level: Level) -> Layer {
+    match level {
+        Level::Background => Layer::Background,
+        Level::Below => Layer::Bottom,
+        Level::Above => Layer::Top,
+        Level::Overlay | Level::Marks => Layer::Overlay,
+    }
+}
+
+fn interactivity_of(keyboard: Keyboard) -> KeyboardInteractivity {
+    match keyboard {
+        Keyboard::Never => KeyboardInteractivity::None,
+        Keyboard::OnDemand => KeyboardInteractivity::OnDemand,
+        Keyboard::Exclusive => KeyboardInteractivity::Exclusive,
+    }
+}
+
+/// How much room a surface of this size keeps free at the edge it
+/// reserves at: its own thickness there. `None` for a surface that keeps
+/// none.
+fn reserved_depth(edge: Option<Edge>, width: u32, height: u32) -> Option<i32> {
+    match edge? {
+        Edge::Top | Edge::Bottom => Some(height as i32),
+        Edge::Left | Edge::Right => Some(width as i32),
+        _ => None,
+    }
+}
 
 /// A surface as screen readers and other aids know it (AT-SPI, through
 /// AccessKit). The toolkit describes what it draws as a tree of things
@@ -2169,6 +2591,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_level_is_a_layer_of_the_layer_shell() {
+        let table = [
+            (Level::Background, Layer::Background),
+            (Level::Below, Layer::Bottom),
+            (Level::Above, Layer::Top),
+            (Level::Overlay, Layer::Overlay),
+            // (Marks lie over everything too; what makes them marks is
+            // that the pointer goes through them.)
+            (Level::Marks, Layer::Overlay),
+        ];
+        for (level, layer) in table {
+            assert_eq!(layer_of(level), layer, "{level:?}");
+        }
+        assert_eq!(
+            interactivity_of(Keyboard::Never),
+            KeyboardInteractivity::None
+        );
+        assert_eq!(
+            interactivity_of(Keyboard::OnDemand),
+            KeyboardInteractivity::OnDemand
+        );
+        assert_eq!(
+            interactivity_of(Keyboard::Exclusive),
+            KeyboardInteractivity::Exclusive
+        );
+    }
+
+    #[test]
+    fn the_room_kept_free_is_as_deep_as_the_surface_at_its_edge() {
+        assert_eq!(reserved_depth(Some(Edge::Top), 0, 40), Some(40));
+        assert_eq!(reserved_depth(Some(Edge::Bottom), 800, 32), Some(32));
+        assert_eq!(reserved_depth(Some(Edge::Left), 280, 0), Some(280));
+        assert_eq!(reserved_depth(Some(Edge::Right), 64, 900), Some(64));
+        // What is at no single edge keeps none, and what does not ask.
+        assert_eq!(reserved_depth(Some(Edge::Fill), 100, 100), None);
+        assert_eq!(reserved_depth(Some(Edge::TopRight), 100, 100), None);
+        assert_eq!(reserved_depth(None, 100, 40), None);
+    }
+
+    #[test]
     fn a_wheel_is_counted_in_notches_and_a_touchpad_in_points() {
         let still = AxisScroll::default();
         // A mouse's wheel, one notch towards the user: fifteen units and
@@ -2212,5 +2674,18 @@ mod tests {
         assert_eq!(key_of(Keysym::_7), Some(egui::Key::Num7));
         assert_eq!(key_of(Keysym::Down), Some(egui::Key::ArrowDown));
         assert_eq!(key_of(Keysym::Shift_L), None);
+        // The pointers a surface asks for have the compositor's names.
+        assert_eq!(shape_of(egui::CursorIcon::Default), Some(Shape::Default));
+        assert_eq!(shape_of(egui::CursorIcon::PointingHand), Some(Shape::Pointer));
+        assert_eq!(shape_of(egui::CursorIcon::ResizeHorizontal), Some(Shape::EwResize));
+        assert_eq!(shape_of(egui::CursorIcon::ResizeVertical), Some(Shape::NsResize));
+        assert_eq!(shape_of(egui::CursorIcon::ResizeNwSe), Some(Shape::NwseResize));
+        assert_eq!(shape_of(egui::CursorIcon::ResizeNeSw), Some(Shape::NeswResize));
+        assert_eq!(shape_of(egui::CursorIcon::Move), Some(Shape::Move));
+        assert_eq!(shape_of(egui::CursorIcon::None), None);
+        assert_eq!(key_of(Keysym::F2), Some(egui::Key::F2));
+        assert_eq!(key_of(Keysym::F10), Some(egui::Key::F10));
+        // (The key for a menu is told as Shift and F10 where keys are heard.)
+        assert_eq!(key_of(Keysym::Menu), None);
     }
 }

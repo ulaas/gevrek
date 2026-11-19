@@ -1089,6 +1089,7 @@ fn zones_configured(state: &Rc<RefCell<State>>, control: &mut Control) {
     };
     let sender = shared.sender.clone();
     let look = Rc::clone(state);
+    let tell = shared.link.teller();
     crate::zones::surfaces::Running::configured(
         &mut shared.zones,
         &config,
@@ -1102,8 +1103,13 @@ fn zones_configured(state: &Rc<RefCell<State>>, control: &mut Control) {
                 (themed(&state, ui, fonts), state.settings)
             })
         },
-        // (Windows opens an item through its own shell.)
-        crate::zones::Starter::none,
+        // (Windows opens an item through its own shell; what the zones
+        // ask of the window manager, as bringing a running program's
+        // window forward, goes over the line.)
+        || crate::zones::Starter {
+            dispatch: Box::new(move |command| tell(Request::Dispatch(command))),
+            terminal: String::new(),
+        },
         // Explorer's own icons are put away while zones show, unless the
         // configuration leaves them alone.
         hide_icons,

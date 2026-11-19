@@ -65,51 +65,51 @@ impl Tally {
     }
 }
 
-fn count(counter: &AtomicUsize, by: usize) {
+pub(crate) fn count(counter: &AtomicUsize, by: usize) {
     counter.fetch_add(by, Ordering::Relaxed);
 }
 
-fn counted(counter: &AtomicUsize) -> usize {
+pub(crate) fn counted(counter: &AtomicUsize) -> usize {
     counter.load(Ordering::Relaxed)
 }
 
 static RULES: Tally = Tally::new();
 static LAYOUT: Tally = Tally::new();
 
-const START: u64 = 1_800_000_000;
+pub(crate) const START: u64 = 1_800_000_000;
 const DAY: u64 = 24 * 60 * 60;
 
 /// Numbers that look like chance and are the same in every run.
-struct Chance(u64);
+pub(crate) struct Chance(pub(crate) u64);
 
 impl Chance {
-    fn next(&mut self) -> u64 {
+    pub(crate) fn next(&mut self) -> u64 {
         self.0 ^= self.0 << 13;
         self.0 ^= self.0 >> 7;
         self.0 ^= self.0 << 17;
         self.0
     }
 
-    fn below(&mut self, count: usize) -> usize {
+    pub(crate) fn below(&mut self, count: usize) -> usize {
         (self.next() % count.max(1) as u64) as usize
     }
 
     /// True this many times in a hundred.
-    fn one_in_a_hundred(&mut self, times: usize) -> bool {
+    pub(crate) fn one_in_a_hundred(&mut self, times: usize) -> bool {
         self.below(100) < times
     }
 
-    fn between(&mut self, least: i32, most: i32) -> i32 {
+    pub(crate) fn between(&mut self, least: i32, most: i32) -> i32 {
         least + self.below((most - least + 1).max(1) as usize) as i32
     }
 
-    fn pick<'a, T>(&mut self, of: &'a [T]) -> &'a T {
+    pub(crate) fn pick<'a, T>(&mut self, of: &'a [T]) -> &'a T {
         &of[self.below(of.len())]
     }
 }
 
 /// How many times as many runs as usual, and the one seed asked for.
-fn asked() -> (u64, Option<u64>) {
+pub(crate) fn asked() -> (u64, Option<u64>) {
     let times = std::env::var("GEVREK_RUNS")
         .ok()
         .and_then(|text| text.parse::<u64>().ok())
@@ -122,7 +122,7 @@ fn asked() -> (u64, Option<u64>) {
 }
 
 /// Run `run` with many seeds and say which went wrong.
-fn many(rounds: u64, run: fn(u64) -> Result<(), String>) {
+pub(crate) fn many(rounds: u64, run: fn(u64) -> Result<(), String>) {
     let (times, seed) = asked();
     if let Some(seed) = seed {
         run(seed).expect("the run of that seed");

@@ -65,6 +65,38 @@ pub fn drag_modifiers(text: &str) -> Option<Vec<&'static str>> {
     (!names.is_empty()).then_some(names)
 }
 
+/// The modifiers held with a key or a button: Ctrl, Alt, Shift, Super.
+pub type Chord = (bool, bool, bool, bool);
+
+/// The keys (or buttons) that are held, each with the modifiers that
+/// were down when it went down and the bindings on its release that were
+/// live then.
+pub type Strokes = std::collections::HashMap<u32, (Chord, Vec<i32>)>;
+
+/// What a key or button stroke is looked up with: its modifiers, and the
+/// bindings its release runs. `now` and `on_release_now` are those of
+/// this moment. Going down: they are remembered for the key. Coming up:
+/// what was remembered when it went down is given back and the key is
+/// forgotten, so the release is the release of the stroke that was
+/// pressed, with the bindings that were live then (as on Windows,
+/// `hotkey.rs`, which keeps the press and what it matched). Where the
+/// press was never seen (the key was down before gevrek listened), this
+/// moment's count.
+pub fn stroke(
+    held: &mut Strokes,
+    code: u32,
+    pressed: bool,
+    now: Chord,
+    on_release_now: Vec<i32>,
+) -> (Chord, Vec<i32>) {
+    if pressed {
+        held.insert(code, (now, on_release_now.clone()));
+        (now, on_release_now)
+    } else {
+        held.remove(&code).unwrap_or((now, on_release_now))
+    }
+}
+
 fn drag_modifier_held(state: &smithay::input::keyboard::ModifiersState) -> bool {
     static WANTED: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
     let wanted = WANTED.get_or_init(|| {
@@ -477,26 +509,36 @@ impl State {
         // A binding on a mouse button runs first; one that consumes the
         // button keeps press and release from the client.
         if let Some(name) = button_name(button) {
-            if !pressed && self.suppressed_buttons.remove(&button) {
-                self.release_held(button);
-                self.mouse_binding(name, BindingTrigger::Release);
-                return;
-            }
-            let trigger = if pressed {
-                BindingTrigger::Press
-            } else {
-                BindingTrigger::Release
-            };
+            // A button that comes up is the stroke it was when it went
+            // down: its release runs the bindings that were live then,
+            // for the modifiers held then (as a key's does).
+            let now = self.modifiers();
+            let (on_release_now, _) =
+                self.matching_bindings(BindingDevice::Mouse, name, now, BindingTrigger::Release);
+            let (chord, on_release) = stroke(
+                &mut self.buttons_pressed_with,
+                button,
+                pressed,
+                now,
+                on_release_now,
+            );
             if pressed {
                 self.hold(button, BindingDevice::Mouse, name);
+                let (ids, consume) =
+                    self.matching_bindings(BindingDevice::Mouse, name, chord, BindingTrigger::Press);
+                self.run_mouse_bindings(name, ids, chord, BindingTrigger::Press);
+                if consume {
+                    self.suppressed_buttons.insert(button);
+                    return;
+                }
             } else {
                 self.release_held(button);
-            }
-            if self.mouse_binding(name, trigger) {
-                if pressed {
-                    self.suppressed_buttons.insert(button);
+                let ids = if self.paused { Vec::new() } else { on_release };
+                self.run_mouse_bindings(name, ids, chord, BindingTrigger::Release);
+                // (Kept from the program as its press was.)
+                if self.suppressed_buttons.remove(&button) {
+                    return;
                 }
-                return;
             }
         }
         if button == BUTTON_LEFT {
@@ -636,6 +678,19 @@ impl State {
     fn mouse_binding(&mut self, name: &str, trigger: BindingTrigger) -> bool {
         let modifiers = self.modifiers();
         let (ids, consume) = self.matching_bindings(BindingDevice::Mouse, name, modifiers, trigger);
+        self.run_mouse_bindings(name, ids, modifiers, trigger);
+        consume
+    }
+
+    /// Run these bindings of a mouse button or wheel step, as hit with
+    /// these modifiers.
+    fn run_mouse_bindings(
+        &mut self,
+        name: &str,
+        ids: Vec<i32>,
+        modifiers: Chord,
+        trigger: BindingTrigger,
+    ) {
         if !ids.is_empty() {
             self.bindings_triggered(
                 ids.clone(),
@@ -652,7 +707,6 @@ impl State {
                 },
             );
         }
-        consume
     }
 
     /// Remember a key or button that went down, if a repeat or long-press
@@ -1066,32 +1120,64 @@ impl State {
                         } else {
                             state.release_held(code.raw());
                         }
-                        if !pressed && state.suppressed_keys.remove(&code.raw()) {
-                            // The release of a key whose press was kept.
-                            let (ids, _) = state.matching_bindings(
-                                BindingDevice::Keyboard,
-                                &name,
-                                chord,
-                                BindingTrigger::Release,
-                            );
-                            return FilterResult::Intercept((
-                                ids,
-                                name,
-                                *modifiers,
-                                BindingTrigger::Release,
-                            ));
+                        // A key that comes up is the stroke it was when it
+                        // went down: its release is looked for with the
+                        // modifiers held then, whichever of them were let
+                        // go first (as on Windows, `hotkey.rs`). What runs
+                        // is told those modifiers too.
+                        // And with the bindings that were live then: a
+                        // press that goes into another set of bindings
+                        // (a submap) is let go in the one it was pressed
+                        // in.
+                        let (on_release_now, _) = state.matching_bindings(
+                            BindingDevice::Keyboard,
+                            &name,
+                            chord,
+                            BindingTrigger::Release,
+                        );
+                        let (chord, on_release) = stroke(
+                            &mut state.pressed_with,
+                            code.raw(),
+                            pressed,
+                            chord,
+                            on_release_now,
+                        );
+                        let mut told = *modifiers;
+                        (told.ctrl, told.alt, told.shift, told.logo) = chord;
+                        let modifiers = &told;
+                        if !pressed {
+                            // (Bindings rest while gevrek is paused.)
+                            let ids = if state.paused {
+                                Vec::new()
+                            } else {
+                                on_release
+                            };
+                            // The release of a key whose press was kept
+                            // is kept too; one whose press the program
+                            // saw is seen by it.
+                            if state.suppressed_keys.remove(&code.raw()) {
+                                return FilterResult::Intercept((
+                                    ids,
+                                    name,
+                                    *modifiers,
+                                    BindingTrigger::Release,
+                                ));
+                            }
+                            if !ids.is_empty() {
+                                state.pending_bindings.push((
+                                    ids,
+                                    name,
+                                    *modifiers,
+                                    BindingTrigger::Release,
+                                ));
+                            }
+                            return FilterResult::Forward;
                         }
-                        let trigger = if pressed {
-                            BindingTrigger::Press
-                        } else {
-                            BindingTrigger::Release
-                        };
+                        let trigger = BindingTrigger::Press;
                         let (ids, consume) =
                             state.matching_bindings(BindingDevice::Keyboard, &name, chord, trigger);
                         if consume {
-                            if pressed {
-                                state.suppressed_keys.insert(code.raw());
-                            }
+                            state.suppressed_keys.insert(code.raw());
                             FilterResult::Intercept((ids, name, *modifiers, trigger))
                         } else {
                             // A binding that lets the key through runs, and
@@ -1105,6 +1191,9 @@ impl State {
                         }
                     },
                 );
+                // (Ctrl or Shift, while something is dragged: what the
+                // drag does is another thing now.)
+                self.drag_keys_changed();
                 if std::mem::take(&mut self.pick_cancel_asked) {
                     self.end_pick(None);
                 }

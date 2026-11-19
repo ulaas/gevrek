@@ -10,13 +10,16 @@
 //! still move, and a reader that meets a number it does not know says so
 //! instead of guessing. See docs/zones/milestone-2-ipc.md.
 
-use crate::config::{Lock, View, ZoneKind};
-use crate::core::{Command, Effect, ZonesCore, ZonesEvent};
+use crate::config::{Lock, SmartSource, View, ZoneKind};
+use crate::core::{Command, Effect, OperationScene, ZonesCore, ZonesEvent};
+use crate::focus::Focus;
 use crate::geometry::{Display, ZoneGeometry};
 use crate::ids::{DisplayId, ItemId, ZoneId};
 use crate::item::ItemKind;
 use crate::layout;
+use crate::portal::{Listing, PortalScene};
 use crate::profile::ProfileKey;
+use crate::reserve::ReservedRegion;
 use gevrek_model::geometry::Rect;
 use serde::{Deserialize, Serialize};
 
@@ -166,9 +169,68 @@ pub struct ZoneSnapshot {
     pub front: bool,
     pub view: View,
     pub icon_size: u32,
+    /// How many items it holds, whatever its filter leaves of them.
     pub item_count: usize,
-    /// In the order the zone shows them.
+    /// In the order the zone shows them: what its filter leaves. They are
+    /// listed also while the zone is covered on the screen: a listing is
+    /// asked for by the person, on purpose, and says `masked`.
     pub items: Vec<ItemSnapshot>,
+    /// A rolled-up zone that is open for now.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub expanded: bool,
+    /// What it holds is covered on the screen.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub masked: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub private: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub reserves_space: bool,
+    /// It has the keyboard.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub focused: bool,
+    /// The workspaces it is shown on; none for all.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub workspaces: Vec<String>,
+    /// What is typed into its filter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
+    /// For a portal: where it stands and how its listing does.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub portal: Option<PortalScene>,
+    /// For a zone that fills itself: what it looks through.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<SmartSource>,
+    /// And how far the listing of that has come, where it is not the
+    /// desktop.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub listing: Option<Listing>,
+    /// The type of item it was made for by itself (`auto_create`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto: Option<String>,
+}
+
+/// A saved copy of the layout, as far as a listing tells of it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SnapshotSummary {
+    pub name: String,
+    /// When it was taken, in seconds since 1970.
+    pub taken_at: u64,
+    pub zones: usize,
+    /// Taken by the zones themselves before a layout was replaced.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub automatic: bool,
+}
+
+/// An arrangement that is kept for a set of displays.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProfileSummary {
+    pub key: ProfileKey,
+    /// How many zones have a place in it.
+    pub zones: usize,
+    /// The one in use.
+    pub current: bool,
 }
 
 /// The zones as they are told to others.
@@ -197,6 +259,49 @@ pub struct ZonesSnapshot {
     pub zones: Vec<ZoneSnapshot>,
     /// The items of the desktop that are in no zone.
     pub loose: Vec<ItemSnapshot>,
+    /// Everything is covered by hand.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub masked: bool,
+    /// The system says the screen is shown to others.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub screen_shared: bool,
+    /// The lock for all zones.
+    pub locked: Lock,
+    /// The workspace that is shown, as far as it was told.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    /// What has the keyboard.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub focus: Option<Focus>,
+    /// The chosen items.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub selection: Vec<ItemId>,
+    /// The saved copies of the layout.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub snapshots: Vec<SnapshotSummary>,
+    /// The arrangements that are kept, one for each set of displays.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<ProfileSummary>,
+    /// The room tiled windows keep off.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub reserved: Vec<ReservedRegion>,
+    /// The last application of the rules can be taken back.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub can_undo_rules: bool,
+    /// How often the rules that ask the time are tried, in seconds;
+    /// none while there is no such rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timed_rules_every: Option<u64>,
+    /// The file operations that take long and have not ended, each with
+    /// the number it is called off by.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub operations: Vec<OperationScene>,
+    /// Every icon is drawn grey.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub grey_icons: bool,
+    /// The last making of zones by type can be taken back.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub can_undo_auto: bool,
 }
 
 impl Default for ZonesSnapshot {
@@ -211,6 +316,20 @@ impl Default for ZonesSnapshot {
             displays: Vec::new(),
             zones: Vec::new(),
             loose: Vec::new(),
+            masked: false,
+            screen_shared: false,
+            locked: Lock::default(),
+            workspace: None,
+            focus: None,
+            selection: Vec::new(),
+            snapshots: Vec::new(),
+            profiles: Vec::new(),
+            reserved: Vec::new(),
+            can_undo_rules: false,
+            timed_rules_every: None,
+            operations: Vec::new(),
+            grey_icons: false,
+            can_undo_auto: false,
         }
     }
 }
@@ -252,13 +371,24 @@ impl ZonesSnapshot {
                     visible: drawn.is_some_and(|zone| zone.shown),
                     rolled_up: definition.rolled_up,
                     always_visible: definition.always_visible,
-                    locked: definition.lock,
+                    locked: core.lock_of(&definition.id),
                     tab_group: group.map(|group| group.name.clone()),
                     front: drawn.map_or(group.is_none(), |zone| zone.front),
                     view: definition.view,
                     icon_size: definition.icon_size,
-                    item_count: items.len(),
+                    item_count: core.zone_holds(&definition.id, now).len(),
                     items,
+                    expanded: core.is_expanded(&definition.id),
+                    masked: core.is_masked(&definition.id),
+                    private: definition.private || config.privacy.everything,
+                    reserves_space: definition.reserves_space,
+                    focused: core.focus().is_some_and(|focus| focus.zone == definition.id),
+                    workspaces: definition.workspaces.clone(),
+                    filter: drawn.and_then(|zone| zone.filter.clone()),
+                    portal: drawn.and_then(|zone| zone.portal.clone()),
+                    source: matches!(definition.kind, ZoneKind::Smart { .. }).then(|| definition.source.clone()),
+                    listing: drawn.and_then(|zone| zone.source.clone()),
+                    auto: definition.auto.clone(),
                 }
             })
             .collect();
@@ -275,6 +405,39 @@ impl ZonesSnapshot {
             displays: core.displays().to_vec(),
             zones,
             loose,
+            masked: scene.masked,
+            screen_shared: scene.screen_shared,
+            locked: config.lock,
+            workspace: core.workspace().map(str::to_string),
+            focus: core.focus().cloned(),
+            selection: core.selection(),
+            snapshots: core
+                .state()
+                .snapshots
+                .iter()
+                .map(|snapshot| SnapshotSummary {
+                    name: snapshot.name.clone(),
+                    taken_at: snapshot.taken_at,
+                    zones: snapshot.zones.len(),
+                    automatic: snapshot.automatic,
+                })
+                .collect(),
+            profiles: core
+                .state()
+                .profiles
+                .iter()
+                .map(|profile| ProfileSummary {
+                    key: profile.key.clone(),
+                    zones: profile.geometry.len(),
+                    current: core.profile().is_some_and(|current| current.key == profile.key),
+                })
+                .collect(),
+            reserved: scene.reserved.clone(),
+            can_undo_rules: core.state().undo.is_some(),
+            timed_rules_every: core.timed_rules_every(),
+            operations: scene.operations.clone(),
+            grey_icons: core.grey_icons(),
+            can_undo_auto: core.can_undo_auto(),
         }
     }
 

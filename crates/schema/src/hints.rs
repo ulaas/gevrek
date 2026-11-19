@@ -102,9 +102,34 @@ const PLACES: &[(&str, Hint)] = &[
         "/desktop/zones/zones/0/look/corner_radius",
         of(0.0, 32.0, 1.0, "px"),
     ),
+    (
+        "/desktop/zones/look/icon_saturation",
+        of(0.0, 100.0, 1.0, "%"),
+    ),
+    (
+        "/desktop/zones/zones/0/look/icon_saturation",
+        of(0.0, 100.0, 1.0, "%"),
+    ),
+    (
+        "/desktop/zones/roll_up/expand_delay_ms",
+        of(0.0, 2000.0, 10.0, "ms"),
+    ),
+    (
+        "/desktop/zones/roll_up/collapse_delay_ms",
+        of(0.0, 5000.0, 10.0, "ms"),
+    ),
+    // (Up to a day in the slider; the model takes a week.)
+    (
+        "/desktop/zones/timed_rules/every_minutes",
+        of(0.0, 1440.0, 5.0, "min"),
+    ),
+    ("/desktop/zones/zones/0/limit", of(0.0, 200.0, 1.0, "")),
     ("/desktop/zones/snap/distance", of(0.0, 64.0, 1.0, "px")),
     ("/desktop/zones/snap/gap", of(0.0, 64.0, 1.0, "px")),
     ("/desktop/zones/snap/grid", of(0.0, 200.0, 1.0, "px")),
+    // (How many items of a type make a zone worth making; the model
+    // takes up to a thousand.)
+    ("/desktop/zones/auto/min_items", of(1.0, 20.0, 1.0, "")),
     ("/desktop/hot_corners/size", of(1.0, 64.0, 1.0, "px")),
     ("/desktop/hot_corners/delay_ms", of(0.0, 2000.0, 10.0, "ms")),
     ("/desktop/focus/history_size", of(1.0, 256.0, 1.0, "")),
@@ -255,9 +280,17 @@ mod tests {
             ("/desktop/zones/zones/0/icon_size", 16.0, 256.0),
             ("/desktop/zones/look/opacity", 0.0, 100.0),
             ("/desktop/zones/zones/0/look/opacity", 0.0, 100.0),
+            ("/desktop/zones/look/corner_radius", 0.0, 64.0),
+            ("/desktop/zones/zones/0/look/corner_radius", 0.0, 64.0),
+            ("/desktop/zones/look/icon_saturation", 0.0, 100.0),
+            ("/desktop/zones/zones/0/look/icon_saturation", 0.0, 100.0),
+            ("/desktop/zones/roll_up/expand_delay_ms", 0.0, 10000.0),
+            ("/desktop/zones/roll_up/collapse_delay_ms", 0.0, 10000.0),
+            ("/desktop/zones/timed_rules/every_minutes", 0.0, 10080.0),
             ("/desktop/zones/snap/distance", 0.0, 200.0),
             ("/desktop/zones/snap/gap", 0.0, 200.0),
             ("/desktop/zones/snap/grid", 0.0, 1000.0),
+            ("/desktop/zones/auto/min_items", 1.0, 1000.0),
             ("/desktop/bindings/0/long_press_ms", 100.0, 10000.0),
             ("/desktop/gestures/idle_timeout_ms", 50.0, 5000.0),
             ("/desktop/gestures/axis_lock_ratio", 1.0, 3.0),

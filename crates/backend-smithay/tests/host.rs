@@ -1164,3 +1164,140 @@ fn the_overview_of_every_workspace_shows_them_all_and_goes_to_the_one_chosen() {
     );
     assert!(harness.shown(third));
 }
+
+#[test]
+fn a_binding_on_release_runs_whichever_key_of_the_chord_is_let_go_first() {
+    use smithay::backend::input::KeyState;
+    let mut on_release = binding("F9", true, DispatchCommand::CloseActive);
+    on_release.trigger = gevrek_model::settings::BindingTrigger::Release;
+    let mut harness = Harness::new(config_with(vec![on_release]));
+    let client = harness.connect();
+    let (window, _) = harness.open(client, "editor", "org.test.editor");
+    let key = |harness: &mut Harness, code: u32, state: KeyState| {
+        harness.state.key_event((code + 8).into(), state, 0);
+        harness.pump();
+    };
+
+    // Alt+F9 held: nothing yet, the binding is on the release.
+    key(&mut harness, KEY_LEFTALT, KeyState::Pressed);
+    key(&mut harness, KEY_F9, KeyState::Pressed);
+    assert!(!harness.clients[client].app.windows[window].close_requested);
+    // Alt is let go first, then F9: it was Alt+F9 that was held, and it
+    // is Alt+F9 that is let go.
+    key(&mut harness, KEY_LEFTALT, KeyState::Released);
+    assert!(!harness.clients[client].app.windows[window].close_requested);
+    key(&mut harness, KEY_F9, KeyState::Released);
+    harness.finish_transitions();
+    assert!(harness.clients[client].app.windows[window].close_requested);
+
+    // F9 first, then Alt: the same.
+    harness.clients[client].app.windows[window].close_requested = false;
+    harness.chord(&[KEY_LEFTALT, KEY_F9]);
+    assert!(harness.clients[client].app.windows[window].close_requested);
+
+    // F9 pressed alone and let go with Alt held meanwhile was never
+    // Alt+F9: nothing runs.
+    harness.clients[client].app.windows[window].close_requested = false;
+    key(&mut harness, KEY_F9, KeyState::Pressed);
+    key(&mut harness, KEY_LEFTALT, KeyState::Pressed);
+    key(&mut harness, KEY_F9, KeyState::Released);
+    key(&mut harness, KEY_LEFTALT, KeyState::Released);
+    harness.finish_transitions();
+    assert!(!harness.clients[client].app.windows[window].close_requested);
+}
+
+#[test]
+fn a_release_is_matched_in_the_submap_its_press_was_made_in() {
+    use gevrek_model::settings::BindingTrigger;
+    use smithay::backend::input::KeyState;
+    let submap = |name: &str| DispatchCommand::SetBindingSubmap {
+        name: name.to_string(),
+    };
+    // Alt+F9 goes into "held" when it goes down and back out when it
+    // comes up: both are bindings of the default set.
+    let enter = binding("F9", true, submap("held"));
+    let mut leave = binding("F9", true, DispatchCommand::ResetBindingSubmap);
+    leave.trigger = BindingTrigger::Release;
+    // In "held": a release of Alt+F9 that must not run for a press made
+    // outside it, and F10, which goes out when it comes up.
+    let mut inside = binding("F9", true, submap("wrong"));
+    inside.trigger = BindingTrigger::Release;
+    inside.submap = "held".to_string();
+    let mut out = binding("F10", false, DispatchCommand::ResetBindingSubmap);
+    out.trigger = BindingTrigger::Release;
+    out.submap = "held".to_string();
+    let mut wrong = binding("F10", false, DispatchCommand::FocusNext);
+    wrong.submap = "wrong".to_string();
+    let mut harness = Harness::new(config_with(vec![enter, leave, inside, out, wrong]));
+    let key = |harness: &mut Harness, code: u32, state: KeyState| {
+        harness.state.key_event((code + 8).into(), state, 0);
+        harness.pump();
+    };
+
+    key(&mut harness, KEY_LEFTALT, KeyState::Pressed);
+    key(&mut harness, KEY_F9, KeyState::Pressed);
+    assert_eq!(harness.state.active_submap, "held");
+    // The release is the default set's (where the press was made), not
+    // the one of the set that is live now.
+    key(&mut harness, KEY_F9, KeyState::Released);
+    key(&mut harness, KEY_LEFTALT, KeyState::Released);
+    assert_eq!(harness.state.active_submap, "default");
+
+    // A key pressed in "held" is let go in it: F10 leaves on its
+    // release.
+    harness.state.run_command(submap("held")).expect("the submap");
+    key(&mut harness, KEY_F10, KeyState::Pressed);
+    assert_eq!(harness.state.active_submap, "held");
+    key(&mut harness, KEY_F10, KeyState::Released);
+    assert_eq!(harness.state.active_submap, "default");
+}
+
+#[test]
+fn a_mouse_buttons_release_is_the_release_of_what_was_pressed() {
+    use gevrek_model::settings::{BindingDevice, BindingTrigger};
+    use smithay::backend::input::KeyState;
+    const MIDDLE: u32 = 0x112;
+    let submap = |name: &str| DispatchCommand::SetBindingSubmap {
+        name: name.to_string(),
+    };
+    // Alt+middle goes into "held" when it goes down and into "out" when
+    // it comes up.
+    let mut enter = binding("MIDDLE", true, submap("held"));
+    enter.device = BindingDevice::Mouse;
+    let mut leave = binding("MIDDLE", true, submap("out"));
+    leave.device = BindingDevice::Mouse;
+    leave.trigger = BindingTrigger::Release;
+    let mut bindings = vec![enter, leave];
+    for name in ["held", "out"] {
+        let mut marker = binding("F9", false, DispatchCommand::FocusNext);
+        marker.submap = name.to_string();
+        bindings.push(marker);
+    }
+    let mut harness = Harness::new(config_with(bindings));
+    let key = |harness: &mut Harness, code: u32, state: KeyState| {
+        harness.state.key_event((code + 8).into(), state, 0);
+        harness.pump();
+    };
+
+    // Alt let go before the button, and the set of bindings another by
+    // then: the button's release is still Alt+middle's, of the set it
+    // was pressed in.
+    key(&mut harness, KEY_LEFTALT, KeyState::Pressed);
+    harness.state.pointer_button(MIDDLE, true, 0);
+    assert_eq!(harness.state.active_submap, "held");
+    key(&mut harness, KEY_LEFTALT, KeyState::Released);
+    harness.state.pointer_button(MIDDLE, false, 0);
+    assert_eq!(harness.state.active_submap, "out");
+
+    // The button pressed alone and let go with Alt held was never
+    // Alt+middle: nothing runs.
+    harness
+        .state
+        .run_command(DispatchCommand::ResetBindingSubmap)
+        .expect("the default set");
+    harness.state.pointer_button(MIDDLE, true, 0);
+    key(&mut harness, KEY_LEFTALT, KeyState::Pressed);
+    harness.state.pointer_button(MIDDLE, false, 0);
+    key(&mut harness, KEY_LEFTALT, KeyState::Released);
+    assert_eq!(harness.state.active_submap, "default");
+}

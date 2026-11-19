@@ -907,6 +907,13 @@ mod linux {
                         control.redraw(*id);
                     }
                 }
+                // A display is shown to others, or no longer: the zones
+                // cover what is not for other eyes.
+                Event::Runtime { kind, fields, .. } if kind == "screen.shared" => {
+                    if let Some(zones) = &state.borrow().zones {
+                        zones.screen_shared(&fields);
+                    }
+                }
                 Event::Runtime { kind, fields, .. } if kind == "shell.command" => {
                     let action = fields
                         .iter()

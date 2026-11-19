@@ -289,6 +289,7 @@ impl WmCore {
                 reserved_top: reserved.top,
                 reserved_right: reserved.right,
                 reserved_bottom: reserved.bottom,
+                zones_room: self.monitor_manager.shell_room_taken(info.handle, desktop),
                 bar: self
                     .monitor_manager
                     .bar_rect(info.handle)

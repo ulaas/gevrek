@@ -90,6 +90,19 @@ impl Executor {
         Ok(true)
     }
 
+    /// The keyboard goes to the window that had it before `from`, where
+    /// one such is in sight. Returns whether it did.
+    pub fn hand_keyboard_back(
+        &mut self,
+        window_manager: &mut dyn Desktop,
+        monitor_manager: &mut MonitorManager,
+        focus_manager: &mut FocusManager,
+        from: WindowHandle,
+    ) -> Result<bool> {
+        let before = self.previous_focus_candidate(window_manager, focus_manager, from);
+        self.restore_previous_focus(window_manager, monitor_manager, focus_manager, from, before)
+    }
+
     pub fn directional_score(
         current: crate::container::Rect,
         candidate: crate::container::Rect,
@@ -614,6 +627,114 @@ impl Executor {
         self.adopt_window(window_manager, monitor_manager, window, true)
     }
 
+    /// The workspace of the window a new window belongs to, where that
+    /// workspace is not shown: the nearest window above it (a dialog's
+    /// window, or the window of the dialog it is a dialog of) that is on
+    /// a workspace. `None` where it belongs to no window, where that
+    /// window is on no workspace (a scratchpad's, one gevrek leaves alone,
+    /// one the person minimized), and where its workspace is the one its
+    /// display shows: the new window then opens as any other does.
+    fn parents_workspace_out_of_sight(
+        &self,
+        window_manager: &dyn Desktop,
+        monitor_manager: &MonitorManager,
+        window: WindowHandle,
+    ) -> Option<(MonitorHandle, usize)> {
+        // (A dialog's own dialog's dialog: enough for any program, and an
+        // end to a ring of windows that belong to one another.)
+        const DEPTH: usize = 8;
+        let mut above = queries(window_manager).parent(window);
+        for _ in 0..DEPTH {
+            let parent = above.filter(|parent| *parent != window)?;
+            if self.scratchpads.is_scratchpad_window(parent) {
+                return None;
+            }
+            if let Some((output, index)) = monitor_manager.find_window(parent) {
+                if self.window_state.get(parent).minimized {
+                    return None;
+                }
+                let shown = monitor_manager.get_workspaces(output)?.focused_idx();
+                return (shown != index).then_some((output, index));
+            }
+            above = queries(window_manager).parent(parent);
+        }
+        None
+    }
+
+    /// A window that is opening and belongs to a window whose workspace
+    /// is not shown joins that workspace, out of sight with it: a dialog
+    /// a program opens while the person works elsewhere is found with its
+    /// program, and does not come up over what the person is doing. It
+    /// floats, as what belongs to another window does, unless a rule of
+    /// the person's says it is tiled. Returns whether it was taken so.
+    ///
+    /// Not for a window a rule of the person's sends to a workspace by
+    /// name (the rule is the last word, and is carried out as for any new
+    /// window), and only for the window that is opening now: one that is
+    /// taken later (it was minimized when gevrek started, or is handed to
+    /// the graph by a key) is in sight, and stays where the person sees it.
+    pub(super) fn join_parent_out_of_sight(
+        &mut self,
+        window_manager: &mut dyn Desktop,
+        monitor_manager: &mut MonitorManager,
+        window: WindowHandle,
+    ) -> Result<bool> {
+        if self.opening != Some(window)
+            || self.is_startup_phase
+            || monitor_manager.find_window(window).is_some()
+            || self.scratchpads.is_scratchpad_window(window)
+            || self.window_state.get(window).session_unmanaged
+            || queries(window_manager).ignored_by_rules(window)
+            || queries(window_manager).is_decoration(window)
+        {
+            return Ok(false);
+        }
+        let Some((output, index)) =
+            self.parents_workspace_out_of_sight(window_manager, monitor_manager, window)
+        else {
+            return Ok(false);
+        };
+        // (Of every rule, those that are looked at again later too: one
+        // of them is carried out as soon as the window is on a workspace.)
+        let sent_by_a_rule = self
+            .resolve_rules(window_manager, window, None, None, RuleResolutionScope::All)
+            .workspace
+            .is_some();
+        if sent_by_a_rule {
+            return Ok(false);
+        }
+        let resolution = self.resolve_rules(
+            window_manager,
+            window,
+            None,
+            None,
+            RuleResolutionScope::Static,
+        );
+        let mut changes = Changes::default();
+        let adoption = lifecycle::adopt(
+            &mut World {
+                outputs: monitor_manager,
+                windows: &mut self.window_state,
+            },
+            window,
+            Placement {
+                output: Some(output),
+                floating: resolution.floating.unwrap_or(true),
+                workspace: Some(index),
+            },
+            &mut changes,
+        )?;
+        self.apply_changes(window_manager, changes);
+        if !matches!(adoption, Adoption::Adopted { .. }) {
+            return Ok(false);
+        }
+        self.opened_out_of_sight = true;
+        log::info!(
+            "New window {window:?} belongs to a window on a workspace that is not shown: it opened there"
+        );
+        Ok(true)
+    }
+
     fn adopt_window(
         &mut self,
         window_manager: &mut dyn Desktop,
@@ -631,6 +752,9 @@ impl Executor {
             || queries(window_manager).is_decoration(window)
         {
             return Ok(false);
+        }
+        if just_opened && self.join_parent_out_of_sight(window_manager, monitor_manager, window)? {
+            return Ok(true);
         }
         let resolution = self.resolve_rules(
             window_manager,
@@ -659,6 +783,7 @@ impl Executor {
                 where_it_is.or_else(|| self.active_monitor(window_manager, monitor_manager))
             },
             floating,
+            workspace: None,
         };
         let mut changes = Changes::default();
         let adoption = lifecycle::adopt(

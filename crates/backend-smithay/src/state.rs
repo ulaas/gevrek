@@ -100,6 +100,14 @@ pub struct State {
     pub(crate) xdnd_out: Option<crate::xdnd::Out>,
     /// The other way round: an X11 program's drag (`xdnd.rs`).
     pub(crate) x_drag: crate::xwayland::XDrag,
+    /// A Wayland program's drag is on, and the action the keys held
+    /// asked of it when they were last looked at (`dnd.rs`).
+    pub(crate) dnd_on: bool,
+    pub(crate) drag_asked:
+        Option<smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction>,
+    /// Which displays other programs take pictures of again and again:
+    /// the screen is shared or recorded (`sharing.rs`).
+    pub(crate) sharing: crate::sharing::Sharing<gevrek_engine::outputs::MonitorHandle>,
     /// How often each output was drawn anew (and all of them at once),
     /// for the capture sessions that wait for a change.
     pub(crate) capture_changes: std::collections::HashMap<gevrek_engine::outputs::MonitorHandle, u64>,
@@ -225,6 +233,16 @@ pub struct State {
     /// Keys whose press a binding kept from the client: their release is
     /// kept too.
     pub suppressed_keys: std::collections::HashSet<u32>,
+    /// Each key that is held, as it went down: the modifiers that were
+    /// down then (Ctrl, Alt, Shift, Super), and the bindings on its
+    /// release that were live then. Its release runs those, whatever is
+    /// still held when it comes up and whatever set of bindings is live
+    /// by then. Whoever holds Super+Z and lets go of Super first has
+    /// still let go of Super+Z; and a press that goes into another set
+    /// of bindings is let go in the set it was pressed in.
+    pub(crate) pressed_with: crate::input::Strokes,
+    /// The same for the mouse's buttons.
+    pub(crate) buttons_pressed_with: crate::input::Strokes,
     /// Bindings a key hit that let the key through to the client.
     pub pending_bindings: Vec<(
         Vec<i32>,
@@ -318,6 +336,10 @@ pub struct State {
     pub(crate) captures: Vec<crate::capture::PendingCapture>,
     /// The elements are being made for a picture without the pointer.
     pub(crate) hide_pointer: bool,
+    /// The elements are being made for a picture another program takes
+    /// of the screen: without the surfaces whose rule keeps them out of
+    /// such pictures (`sharing.rs`).
+    pub(crate) capture_pass: bool,
     /// The elements are being made for the picture of what lies behind
     /// the see-through surfaces: without those surfaces (`soft.rs`).
     pub(crate) backdrop_pass: bool,
@@ -373,8 +395,11 @@ pub struct State {
     /// that was last set (`devices.rs`).
     pub(crate) input_devices: Vec<smithay::reexports::input::Device>,
     pub(crate) applied_keymap: Option<(String, String, String, String)>,
-    /// The picture of what is being dragged, if a drag is on and has one.
+    /// The picture of what is being dragged, if a drag is on and has one;
+    /// and how far its program has moved it from the pointer (the place
+    /// of the picture that is under the pointer, taken the other way).
     pub(crate) drag_icon: Option<WlSurface>,
+    pub(crate) drag_icon_offset: (i32, i32),
     /// gevrek is the session the user logged into (`--session`): the
     /// service manager and D-Bus are told its environment.
     pub session_mode: bool,
@@ -545,6 +570,7 @@ impl State {
         crate::virtual_pointer::init(&display);
         crate::image_capture::init(&display);
         crate::toplevel_icon::init(&display);
+        crate::background_effect::init(&display);
         Self {
             compositor_state: CompositorState::new_v6::<Self>(&display),
             xdg_shell_state: XdgShellState::new::<Self>(&display),
@@ -643,6 +669,9 @@ impl State {
             dragged: None,
             xdnd_out: None,
             x_drag: Default::default(),
+            dnd_on: false,
+            drag_asked: None,
+            sharing: Default::default(),
             capture_changes: std::collections::HashMap::new(),
             capture_changes_everywhere: 0,
             icon_serial: 0,
@@ -710,6 +739,8 @@ impl State {
             config_dirty: false,
             paused: false,
             suppressed_keys: Default::default(),
+            pressed_with: Default::default(),
+            buttons_pressed_with: Default::default(),
             pending_bindings: Vec::new(),
             workspace_hooks_fired: Default::default(),
             cursor_status: smithay::input::pointer::CursorImageStatus::default_named(),
@@ -750,6 +781,7 @@ impl State {
             output_trial: None,
             virtual_sizes: Vec::new(),
             hide_pointer: false,
+            capture_pass: false,
             backdrop_pass: false,
             soft: Default::default(),
             picking: None,
@@ -775,6 +807,7 @@ impl State {
             session_mode: false,
             rescue_pressed: None,
             drag_icon: None,
+            drag_icon_offset: (0, 0),
             cursors,
             injected_time: 0,
             published_monitors: Vec::new(),
@@ -1706,6 +1739,9 @@ impl State {
         let own = self
             .own_starting_place(id)
             .filter(|_| expected.is_none() && !self.is_shortcut_list(id));
+        if let Some(window) = self.desktop.windows.get_mut(&id) {
+            window.placed_itself = own.is_some();
+        }
         if let (Some((x, y)), Some(window)) = (own, self.desktop.windows.get_mut(&id)) {
             window.rect.x = x;
             window.rect.y = y;
@@ -1921,6 +1957,13 @@ impl CompositorHandler for State {
 
     fn commit(&mut self, surface: &WlSurface) {
         on_commit_buffer_handler::<Self>(surface);
+        // The picture of what is dragged, moved by its program so that
+        // another place of it is under the pointer.
+        if self.drag_icon.as_ref() == Some(surface) {
+            let moved = buffer_moved(surface);
+            self.drag_icon_offset.0 += moved.0;
+            self.drag_icon_offset.1 += moved.1;
+        }
         if is_sync_subsurface(surface) {
             return;
         }
@@ -2330,6 +2373,32 @@ impl DataDeviceHandler for State {
     fn data_device_state(&self) -> &DataDeviceState {
         &self.data_device_state
     }
+
+    /// What a drag does where it is: what the keys held ask for (or the
+    /// X11 program whose drag it is), where both sides allow it
+    /// (`dnd.rs`).
+    fn action_choice(
+        &mut self,
+        available: smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction,
+        preferred: smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction,
+    ) -> smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction {
+        crate::dnd::choose(available, preferred, self.drag_wish())
+    }
+}
+
+/// How far a surface's program moved its picture with its last commit
+/// (`wl_surface.offset`, or the place given with the buffer): taken, so
+/// that it counts once.
+fn buffer_moved(surface: &WlSurface) -> (i32, i32) {
+    with_states(surface, |states| {
+        states
+            .cached_state
+            .get::<smithay::wayland::compositor::SurfaceAttributes>()
+            .current()
+            .buffer_delta
+            .take()
+    })
+    .map_or((0, 0), |moved| (moved.x, moved.y))
 }
 
 impl smithay::wayland::shell::xdg::dialog::XdgDialogHandler for State {
@@ -2369,16 +2438,23 @@ impl ClientDndGrabHandler for State {
         icon: Option<WlSurface>,
         _seat: Seat<Self>,
     ) {
+        // (What its program said of its place before the drag began.)
+        self.drag_icon_offset = icon.as_ref().map_or((0, 0), buffer_moved);
         self.drag_icon = icon;
         // (Kept for the case that it comes over an X11 window.)
         self.dragged = source;
         self.xdnd_out = None;
+        self.dnd_on = true;
+        self.drag_asked = crate::dnd::asked_by_keys(self.drag_keys());
         self.desktop.needs_redraw = true;
     }
 
     fn dropped(&mut self, _target: Option<WlSurface>, _validated: bool, _seat: Seat<Self>) {
         self.drag_icon = None;
+        self.drag_icon_offset = (0, 0);
         self.dragged = None;
+        self.dnd_on = false;
+        self.drag_asked = None;
         // Let go over an X11 window: dropped there.
         if let Some(mut out) = self.xdnd_out.take() {
             out.tell(if out.over.is_some() {
@@ -2395,6 +2471,16 @@ impl ServerDndGrabHandler for State {
     /// data: fetched from the X11 program.
     fn send(&mut self, mime_type: String, fd: std::os::fd::OwnedFd, _seat: Seat<Self>) {
         self.x_drag_fetch(mime_type, fd);
+    }
+
+    /// The window under an X11 program's drag and gevrek's own drag
+    /// settled on what a drop would do: the X11 program is told.
+    fn action(
+        &mut self,
+        action: smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction,
+        _seat: Seat<Self>,
+    ) {
+        self.x_drag_chose(action);
     }
 
     fn dropped(&mut self, _seat: Seat<Self>) {

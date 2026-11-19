@@ -19,7 +19,9 @@ pollster = "1"
 smithay-client-toolkit = "0.19"
 wayland-client = "0.31"
 # (And text-input, for input methods in the shell's own text fields.)
-wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+# (And what lies behind parts of a surface shown soft: a protocol that is
+# still on trial, hence "staging".)
+wayland-protocols = { version = "0.32", features = ["client", "unstable", "staging"] }
 # The system's own libwayland, loaded when the program runs: the graphics
 # library needs the display and the surface as that library knows them.
 wayland-backend = { version = "0.3", features = ["client_system", "dlopen"] }
@@ -37,6 +39,8 @@ windows = { workspace = true, features = [
     "Win32_System_Com_StructuredStorage",
     "Win32_System_DataExchange",
     "Win32_System_Memory",
+    # (The frame of a window, for what lies behind a surface: look.rs.)
+    "Win32_UI_Controls",
 ] }
 # The same crate `windows` is built on, by its own name: the drop target
 # and the drag source are written with a macro that names it so.

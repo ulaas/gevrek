@@ -213,7 +213,8 @@ writing; the files are being worked on):
   becomes the compositor's own drag over Wayland surfaces), and Wayland to
   X11 too (`xwayland.rs:332`).
 
-What is needed there for everything to behave (for whoever owns it):
+What was needed there for everything to behave. **All four are done
+since** (the same day): see "Drags" in `milestone-3-surfaces.md`.
 
 1. **Drags and layer surfaces above X11 windows.** `follow_drag_onto_x11`
    (`xwayland.rs:332`–`347`) and `follow_x11_drag` (`xwayland.rs:154`–`166`)

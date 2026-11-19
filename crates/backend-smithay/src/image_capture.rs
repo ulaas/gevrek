@@ -122,6 +122,17 @@ pub struct PendingImage {
     session: Arc<Session>,
 }
 
+impl PendingImage {
+    /// The display a program waits for a picture of with this frame, if
+    /// it is a display's and the program is still there.
+    pub(crate) fn output_waited_for(&self) -> Option<MonitorHandle> {
+        match self.source {
+            Source::Output(output) if self.frame.is_alive() => Some(output),
+            _ => None,
+        }
+    }
+}
+
 pub fn init(display: &DisplayHandle) {
     display.create_global::<State, ExtOutputImageCaptureSourceManagerV1, ()>(1, ());
     display.create_global::<State, ExtForeignToplevelImageCaptureSourceManagerV1, ()>(1, ());
@@ -369,6 +380,7 @@ impl State {
                             now.subsec_nanos(),
                         );
                         capture.frame.ready();
+                        self.picture_taken(output);
                     }
                     Err(error) => {
                         log::debug!("no picture into a program's buffer: {error}");
@@ -440,6 +452,11 @@ impl State {
                 now.subsec_nanos(),
             );
             capture.frame.ready();
+            // (A picture of a display: one of a window, or of the
+            // pointer alone, shows nothing of the desktop.)
+            if let Source::Output(output) = capture.source {
+                self.picture_taken(output);
+            }
         }
     }
 }

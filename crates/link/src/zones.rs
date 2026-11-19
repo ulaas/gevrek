@@ -95,6 +95,8 @@ pub(crate) struct ZonesSide {
     hosting: bool,
     /// The snapshot published last, told anew with every call.
     latest: Option<proto::ZonesReport>,
+    /// The window manager that is there now was sent it.
+    latest_sent: bool,
     pub call: Option<Call>,
     /// When the call is tried again.
     pub retry_at: Option<Instant>,
@@ -189,6 +191,7 @@ impl ZonesSide {
             teller,
             hosting: false,
             latest: None,
+            latest_sent: false,
             call: None,
             retry_at: None,
             said: None,
@@ -223,8 +226,12 @@ impl ZonesSide {
             }
             ZonesTell::Snapshot(snapshot) => {
                 let report = snapshot_report(&snapshot);
+                if self.is_told(&report) {
+                    return;
+                }
                 self.latest = Some(report.clone());
-                report
+                self.latest_sent = self.send(report);
+                return;
             }
             ZonesTell::Event(event) => event_report(&event),
             ZonesTell::Answer { request, answer } => answer_report(request, &answer),
@@ -232,17 +239,33 @@ impl ZonesSide {
         self.send(report);
     }
 
-    fn send(&mut self, report: proto::ZonesReport) {
+    /// Whether the window manager that is there has this very snapshot
+    /// already. The program that runs the zones publishes after everything
+    /// that may have changed them, and much of that changes nothing that
+    /// is told (a tick, a redraw, the pointer over an item); a snapshot
+    /// names every item, so the same one is not sent twice, and the
+    /// window manager's count of snapshots goes up only when something is
+    /// other than it was.
+    fn is_told(&self, report: &proto::ZonesReport) -> bool {
+        self.call.is_some() && self.latest_sent && self.latest.as_ref() == Some(report)
+    }
+
+    /// Whether it was handed to the call.
+    fn send(&mut self, report: proto::ZonesReport) -> bool {
         use tokio::sync::mpsc::error::TrySendError;
         let Some(call) = &self.call else {
-            return;
+            return false;
         };
         match call.reports.try_send(report) {
-            Ok(()) => {}
+            Ok(()) => true,
             Err(TrySendError::Full(_)) => {
-                log::warn!("the window manager is not taking what is told of the zones")
+                log::warn!("the window manager is not taking what is told of the zones");
+                false
             }
-            Err(TrySendError::Closed(_)) => self.lost("the zones' call ended".to_string()),
+            Err(TrySendError::Closed(_)) => {
+                self.lost("the zones' call ended".to_string());
+                false
+            }
         }
     }
 
@@ -258,9 +281,10 @@ impl ZonesSide {
             return self.say("this window manager does not know the zones' call (it is older)".to_string());
         }
         let (reports, outgoing) = tokio::sync::mpsc::channel(WAITING);
-        if let Some(latest) = &self.latest {
-            let _ = reports.try_send(latest.clone());
-        }
+        self.latest_sent = match &self.latest {
+            Some(latest) => reports.try_send(latest.clone()).is_ok(),
+            None => false,
+        };
         let outgoing = tokio_stream::wrappers::ReceiverStream::new(outgoing);
         let made = tokio::time::timeout(Duration::from_secs(5), client.attach_zones(outgoing)).await;
         match made {
@@ -309,7 +333,9 @@ impl ZonesSide {
     pub fn asked(&mut self, request: proto::ZonesRequest) {
         match read_request(request) {
             Ok(ask) => self.teller.tell(ZonesHeard::Asked(ask)),
-            Err(Some(refusal)) => self.send(refusal),
+            Err(Some(refusal)) => {
+                self.send(refusal);
+            }
             Err(None) => {}
         }
     }

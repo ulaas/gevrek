@@ -2271,6 +2271,88 @@ impl WindowManager {
         log::debug!("Hid {} window(s) that belong to {:?}", list.len(), owner);
     }
 
+    /// A window that is no window of gevrek's was shown just now: where
+    /// it belongs to a window gevrek has hidden with its workspace, or is
+    /// something a program shows beside its windows while all of them are
+    /// hidden, it is hidden too, and shown again with that window
+    /// (`show_owned_windows`). `hide_owned_windows` sees to what is there
+    /// at the moment a window is hidden; this is for what comes after: a
+    /// dialog a program opens while the person works on another workspace
+    /// (it came up there, with the keyboard), a notification it puts up
+    /// meanwhile. Returns the window it was hidden with.
+    ///
+    /// In the journal as every window gevrek hides, so that a gevrek that
+    /// ends, in whatever way, shows it again.
+    pub fn hide_late_arrival(&self, handle: WindowHandle) -> Option<WindowHandle> {
+        let hwnd = handle.to_hwnd();
+        // SAFETY: plain questions about a window that may be gone.
+        let in_sight = unsafe { IsWindow(hwnd).as_bool() && IsWindowVisible(hwnd).as_bool() };
+        if !in_sight {
+            return None;
+        }
+        let class = read_window_class(hwnd);
+        let owners: Vec<(WindowHandle, bool)> = owners_of(hwnd)
+            .into_iter()
+            .map(|owner| {
+                let owner = WindowHandle::from_hwnd(owner);
+                (owner, super::hidden_journal::is_hidden(owner))
+            })
+            .collect();
+        let kind = crate::window_kind::of_window(hwnd.0 as isize);
+        // (Asked only for what could go with something: most windows that
+        // are shown belong to no window, and are windows of gevrek's.)
+        let arrival = LateArrival {
+            already_hidden: super::hidden_journal::is_hidden(handle),
+            passes_in_a_moment: class.starts_with("Gevrek_")
+                || crate::window_kind::is_a_popups_class(&class),
+            gevreks_own: owners.iter().any(|(_, hidden)| *hidden)
+                && !self.should_ignore_window(handle),
+            kind,
+            sized: {
+                let mut rect = RECT::default();
+                // SAFETY: a plain question with a valid out pointer.
+                unsafe {
+                    GetWindowRect(hwnd, &mut rect).is_ok()
+                        && rect.right > rect.left
+                        && rect.bottom > rect.top
+                }
+            },
+        };
+        let with = arrival.goes_with(&owners, || {
+            let mut program = Program::default();
+            for other in thread_windows(hwnd) {
+                if other == hwnd {
+                    continue;
+                }
+                let other = WindowHandle::from_hwnd(other);
+                if !self.windows.contains_key(&other) {
+                    continue;
+                }
+                if super::hidden_journal::is_hidden(other) {
+                    program.hidden.get_or_insert(other);
+                } else {
+                    program.in_sight = true;
+                }
+            }
+            program
+        })?;
+        let mut hidden = self.hidden_with_owner.borrow_mut();
+        // What it goes with may itself have been hidden with a window (a
+        // dialog's own dialog): it comes back with that one.
+        let key = hidden
+            .iter()
+            .find(|(_, list)| list.contains(&with))
+            .map_or(with, |(key, _)| *key);
+        super::reach::show_window_async(hwnd, SW_HIDE);
+        super::hidden_journal::record_hidden(handle, false);
+        let list = hidden.entry(key).or_default();
+        if !list.contains(&handle) {
+            list.push(handle);
+        }
+        log::info!("{handle:?} was shown while {key:?} is hidden: it is hidden with it");
+        Some(key)
+    }
+
     /// Show again what was hidden with a window (`hide_owned_windows`).
     /// Also when that window is gone: Windows ends a window's dialogs with
     /// it, and one that is still there is a window of its own again.
@@ -6696,6 +6778,225 @@ fn owned_windows_on_screen(owner: HWND) -> Vec<HWND> {
     // (EnumWindows goes from the top down.)
     search.found.reverse();
     search.found
+}
+
+/// The windows above a window in its chain of owners, nearest first.
+fn owners_of(window: HWND) -> Vec<HWND> {
+    let mut owners = Vec::new();
+    let mut above = window;
+    for _ in 0..OWNER_DEPTH {
+        // SAFETY: a plain question; a window that is gone has no owner.
+        match unsafe { GetWindow(above, GW_OWNER) } {
+            Ok(next) if !next.is_invalid() && next != window && !owners.contains(&next) => {
+                owners.push(next);
+                above = next;
+            }
+            _ => break,
+        }
+    }
+    owners
+}
+
+/// Every top-level window made by the part of its program that made
+/// `window` (its thread), shown or not. None for the program that is the
+/// desktop itself.
+fn thread_windows(window: HWND) -> Vec<HWND> {
+    unsafe extern "system" fn each(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let found = &mut *(lparam.0 as *mut Vec<HWND>);
+        found.push(hwnd);
+        true.into()
+    }
+    let mut found: Vec<HWND> = Vec::new();
+    // SAFETY: the callback runs before the call returns and gets a pointer
+    // to `found`, which outlives it; the rest are plain questions.
+    unsafe {
+        let thread = GetWindowThreadProcessId(window, None);
+        let shell = GetShellWindow();
+        if thread == 0
+            || (!shell.is_invalid() && GetWindowThreadProcessId(shell, None) == thread)
+        {
+            return Vec::new();
+        }
+        let _ = EnumThreadWindows(
+            thread,
+            Some(each),
+            LPARAM(&mut found as *mut Vec<HWND> as isize),
+        );
+    }
+    found
+}
+
+/// What is known of the windows of gevrek's that the program of a window
+/// has (those made by the same part of it).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Program {
+    /// One of them is not hidden by gevrek: the program is on the screen.
+    in_sight: bool,
+    /// One that gevrek has hidden.
+    hidden: Option<WindowHandle>,
+}
+
+/// A window that was shown just now, as far as it matters for whether it
+/// is hidden with something gevrek has hidden (`hide_late_arrival`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LateArrival {
+    /// gevrek has it as hidden already (it was hidden with its owner a
+    /// moment ago, and this is word of an earlier showing).
+    already_hidden: bool,
+    /// One of gevrek's own, or of the classes menus and tooltips are made
+    /// of: gone in a moment by itself, and often kept and shown again by
+    /// its program, so that one hidden now would come back as a tooltip
+    /// of long ago.
+    passes_in_a_moment: bool,
+    /// A window gevrek has in a workspace or is about to (the engine says
+    /// where it goes: `join_parent_out_of_sight`).
+    gevreks_own: bool,
+    kind: crate::window_kind::Kind,
+    /// It has a size.
+    sized: bool,
+}
+
+impl LateArrival {
+    /// The window it is hidden with, if any. `owners` are the windows
+    /// above it, nearest first, each with whether gevrek has it hidden;
+    /// `program` is asked only where the window belongs to none.
+    ///
+    /// What belongs to a window goes with that window: hidden where the
+    /// nearest window above it that gevrek has hidden is found, whatever
+    /// else of the program is in sight (a dialog of the editor that is put
+    /// away, while another window of the same program is worked in). A
+    /// window that was shown again with its owner a moment ago is not
+    /// touched: its owner is not hidden. What belongs to no window (a
+    /// notification the program draws itself) goes only when the program
+    /// has a window gevrek has hidden and none in sight.
+    fn goes_with(
+        &self,
+        owners: &[(WindowHandle, bool)],
+        program: impl FnOnce() -> Program,
+    ) -> Option<WindowHandle> {
+        use crate::window_kind::Kind;
+        if self.already_hidden || self.passes_in_a_moment || self.gevreks_own {
+            return None;
+        }
+        if !owners.is_empty() {
+            return owners
+                .iter()
+                .find(|(_, hidden)| *hidden)
+                .map(|(owner, _)| *owner);
+        }
+        if self.kind != Kind::Passing || !self.sized {
+            return None;
+        }
+        let program = program();
+        if program.in_sight {
+            return None;
+        }
+        program.hidden
+    }
+}
+
+#[cfg(test)]
+mod late_arrival_tests {
+    use super::{LateArrival, Program, WindowHandle};
+    use crate::window_kind::Kind;
+
+    const EDITOR: WindowHandle = WindowHandle(1);
+    const FIND: WindowHandle = WindowHandle(2);
+
+    fn arrival(kind: Kind) -> LateArrival {
+        LateArrival {
+            already_hidden: false,
+            passes_in_a_moment: false,
+            gevreks_own: false,
+            kind,
+            sized: true,
+        }
+    }
+
+    fn nobody() -> Program {
+        panic!("the program is not asked about where a window has an owner")
+    }
+
+    #[test]
+    fn a_dialog_goes_with_the_hidden_window_it_belongs_to() {
+        let dialog = arrival(Kind::Owned);
+        assert_eq!(dialog.goes_with(&[(EDITOR, true)], nobody), Some(EDITOR));
+        // A dialog's own dialog: with the nearest window above that is hidden.
+        assert_eq!(
+            dialog.goes_with(&[(FIND, false), (EDITOR, true)], nobody),
+            Some(EDITOR)
+        );
+        assert_eq!(
+            dialog.goes_with(&[(FIND, true), (EDITOR, true)], nobody),
+            Some(FIND)
+        );
+        // A palette that is kept out of the taskbar and has an owner too.
+        assert_eq!(
+            arrival(Kind::Passing).goes_with(&[(EDITOR, true)], nobody),
+            Some(EDITOR)
+        );
+    }
+
+    #[test]
+    fn what_belongs_to_a_window_in_sight_stays() {
+        let dialog = arrival(Kind::Owned);
+        // Its owner is on the screen: also the moment after gevrek showed
+        // both again.
+        assert_eq!(dialog.goes_with(&[(EDITOR, false)], nobody), None);
+        assert_eq!(
+            dialog.goes_with(&[(FIND, false), (EDITOR, false)], nobody),
+            None
+        );
+    }
+
+    #[test]
+    fn what_gevrek_hid_already_or_has_as_its_own_or_passes_is_left() {
+        let hidden = [(EDITOR, true)];
+        let again = LateArrival {
+            already_hidden: true,
+            ..arrival(Kind::Owned)
+        };
+        assert_eq!(again.goes_with(&hidden, nobody), None);
+        let own = LateArrival {
+            gevreks_own: true,
+            ..arrival(Kind::Ordinary)
+        };
+        assert_eq!(own.goes_with(&hidden, nobody), None);
+        let menu = LateArrival {
+            passes_in_a_moment: true,
+            ..arrival(Kind::Passing)
+        };
+        assert_eq!(menu.goes_with(&hidden, nobody), None);
+    }
+
+    #[test]
+    fn a_notification_goes_only_when_all_of_its_program_is_hidden() {
+        let notice = arrival(Kind::Passing);
+        let away = || Program {
+            in_sight: false,
+            hidden: Some(EDITOR),
+        };
+        assert_eq!(notice.goes_with(&[], away), Some(EDITOR));
+        // Another window of the program is in sight: it stays.
+        let here = || Program {
+            in_sight: true,
+            hidden: Some(EDITOR),
+        };
+        assert_eq!(notice.goes_with(&[], here), None);
+        // The program has no window of gevrek's at all.
+        assert_eq!(notice.goes_with(&[], Program::default), None);
+        // A window of its own that belongs to none is the engine's, or
+        // nobody's: never hidden here.
+        for kind in [Kind::Ordinary, Kind::Beside, Kind::Owned] {
+            assert_eq!(arrival(kind).goes_with(&[], away), None, "{kind:?}");
+        }
+        // Nor one without a size.
+        let empty = LateArrival {
+            sized: false,
+            ..notice
+        };
+        assert_eq!(empty.goes_with(&[], away), None);
+    }
 }
 
 /// What a program shows beside its windows that belongs to none of them

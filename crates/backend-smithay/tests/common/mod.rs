@@ -117,6 +117,33 @@ impl Harness {
         (window, id)
     }
 
+    /// Open a window that belongs to another window of the same client
+    /// (its dialog: a toplevel with that one as its parent).
+    pub fn open_dialog(
+        &mut self,
+        client: usize,
+        title: &str,
+        app_id: &str,
+        parent: usize,
+    ) -> (usize, WindowHandle) {
+        let before: Vec<WindowHandle> = self.state.desktop.windows.keys().copied().collect();
+        let window = {
+            let client = &mut self.clients[client];
+            let handle = client.queue.handle();
+            client.app.open_with_parent(&handle, title, app_id, Some(parent))
+        };
+        self.pump();
+        let id = self
+            .state
+            .desktop
+            .windows
+            .keys()
+            .copied()
+            .find(|id| !before.contains(id))
+            .expect("the compositor tracks the new toplevel");
+        (window, id)
+    }
+
     pub fn rect(&self, id: WindowHandle) -> Rect {
         self.state.desktop.windows[&id].rect
     }
@@ -207,6 +234,18 @@ impl ClientApp {
 
     /// Create a toplevel and make the first, bufferless commit.
     fn open(&mut self, handle: &QueueHandle<Self>, title: &str, app_id: &str) -> usize {
+        self.open_with_parent(handle, title, app_id, None)
+    }
+
+    /// As `open`; with `parent`, the toplevel belongs to that window of
+    /// this client (it says so before it is first shown, as a dialog does).
+    fn open_with_parent(
+        &mut self,
+        handle: &QueueHandle<Self>,
+        title: &str,
+        app_id: &str,
+        parent: Option<usize>,
+    ) -> usize {
         let index = self.windows.len();
         let surface = self
             .compositor
@@ -221,6 +260,9 @@ impl ClientApp {
         let toplevel = xdg_surface.get_toplevel(handle, index);
         toplevel.set_title(title.to_string());
         toplevel.set_app_id(app_id.to_string());
+        if let Some(parent) = parent {
+            toplevel.set_parent(Some(&self.windows[parent].toplevel));
+        }
         surface.commit();
         self.windows.push(ClientWindow {
             surface,

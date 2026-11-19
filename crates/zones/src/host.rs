@@ -10,6 +10,7 @@
 use crate::backend::{
     BackendEvent, BackendRequest, IconHandle, IconRequest, Location, WatchId, ZonesBackend,
 };
+use crate::config::SmartSource;
 use crate::core::{Command, Effect, ZonesCore};
 use std::collections::{BTreeMap, VecDeque};
 
@@ -22,6 +23,7 @@ const ROUNDS: usize = 64;
 #[derive(Debug, Default)]
 pub struct Host {
     watches: BTreeMap<String, WatchId>,
+    sources: BTreeMap<SmartSource, WatchId>,
     desktop: Option<WatchId>,
     /// The backend was asked what there is, and watches.
     started: bool,
@@ -59,6 +61,12 @@ impl Host {
         }
         let effects = core.start();
         left.extend(self.carry_out(core, backend, effects, now));
+        // Where the system can say whether the screen is shown to others,
+        // it is asked once; from then on it tells by itself.
+        if let Some(shared) = backend.screen_shared() {
+            let effects = core.event(BackendEvent::ScreenShared { shared }, now);
+            left.extend(self.carry_out(core, backend, effects, now));
+        }
         left.extend(self.pump(core, backend, now));
         left
     }
@@ -145,17 +153,46 @@ impl Host {
                 BackendRequest::Watch { directory } => {
                     let location = Location::Directory { path: directory.clone() };
                     // A folder that is not there (a drive not plugged in)
-                    // shows nothing; its zone stays.
+                    // cannot be watched; its zone stays, and says so.
                     if let Ok(watch) = backend.watch(&location) {
                         self.watches.insert(directory, watch);
                     }
-                    let items = backend.list(&location).unwrap_or_default();
-                    queue.extend(core.event(BackendEvent::Listed { location, items }, now));
+                    queue.extend(Self::listing(core, backend, location, now));
+                }
+                BackendRequest::Relist { directory } => {
+                    let location = Location::Directory { path: directory.clone() };
+                    // It may be there now, where it was not before.
+                    if let std::collections::btree_map::Entry::Vacant(unwatched) = self.watches.entry(directory) {
+                        if let Ok(watch) = backend.watch(&location) {
+                            unwatched.insert(watch);
+                        }
+                    }
+                    queue.extend(Self::listing(core, backend, location, now));
+                }
+                BackendRequest::WatchSource { source } => {
+                    if let Ok(watch) = backend.watch_source(&source) {
+                        self.sources.insert(source.clone(), watch);
+                    }
+                    queue.extend(Self::source(core, backend, source, now));
+                }
+                BackendRequest::ListSource { source } => {
+                    queue.extend(Self::source(core, backend, source, now));
+                }
+                BackendRequest::UnwatchSource { source } => {
+                    if let Some(watch) = self.sources.remove(&source) {
+                        backend.unwatch(watch);
+                    }
                 }
                 BackendRequest::Unwatch { directory } => {
                     if let Some(watch) = self.watches.remove(&directory) {
                         backend.unwatch(watch);
                     }
+                }
+                BackendRequest::Cancel { request } => backend.cancel_operation(request),
+                // An operation the backend carries out by itself ends
+                // later, by an event; the core is told that it has begun.
+                BackendRequest::Perform { request, operation } if backend.begin_operation(request, &operation) => {
+                    queue.extend(core.event(BackendEvent::OperationBegun { request }, now));
                 }
                 BackendRequest::Perform { request, operation } => {
                     let done = match backend.perform(&operation) {
@@ -169,6 +206,39 @@ impl Host {
         left
     }
 
+    /// List a location for the core: at once where the backend lists so,
+    /// or begun now and told later (`drain_events`) where it may be slow.
+    /// What cannot be listed is said as that, not as an empty folder.
+    fn listing<B: ZonesBackend + ?Sized>(
+        core: &mut ZonesCore,
+        backend: &mut B,
+        location: Location,
+        now: u64,
+    ) -> Vec<Effect> {
+        if backend.begin_listing(&location) {
+            return Vec::new();
+        }
+        let event = match backend.list(&location) {
+            Ok(items) => BackendEvent::Listed { location, items },
+            Err(error) => BackendEvent::ListingFailed { location, error },
+        };
+        core.event(event, now)
+    }
+
+    /// Ask the backend what a source has, for the core.
+    fn source<B: ZonesBackend + ?Sized>(
+        core: &mut ZonesCore,
+        backend: &mut B,
+        source: SmartSource,
+        now: u64,
+    ) -> Vec<Effect> {
+        let event = match backend.list_source(&source) {
+            Ok(items) => BackendEvent::SourceListed { source, items },
+            Err(error) => BackendEvent::SourceFailed { source, error },
+        };
+        core.event(event, now)
+    }
+
     /// The pictures the backend said are ready since this was last
     /// asked, each with the request it answers; without a handle where
     /// there is none. For the renderer, which asked for them.
@@ -180,6 +250,9 @@ impl Host {
     /// ends).
     pub fn stop<B: ZonesBackend + ?Sized>(&mut self, backend: &mut B) {
         for (_, watch) in std::mem::take(&mut self.watches) {
+            backend.unwatch(watch);
+        }
+        for (_, watch) in std::mem::take(&mut self.sources) {
             backend.unwatch(watch);
         }
         if let Some(watch) = self.desktop.take() {

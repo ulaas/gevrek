@@ -5,6 +5,7 @@
 //! Linux only; on other systems the crate is empty.
 #![cfg(target_os = "linux")]
 
+pub mod background_effect;
 pub mod bar;
 pub mod border;
 pub mod capture;
@@ -13,6 +14,7 @@ pub mod cursor;
 pub mod desktop;
 pub mod devices;
 pub mod dmabuf;
+pub mod dnd;
 pub mod gestures;
 pub mod headless;
 pub mod host;
@@ -34,6 +36,7 @@ pub mod protocols;
 pub mod render;
 mod session;
 pub mod session_env;
+pub mod sharing;
 pub mod soft;
 pub mod stackbar;
 pub mod state;

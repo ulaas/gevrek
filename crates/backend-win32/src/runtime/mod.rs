@@ -695,6 +695,9 @@ impl Runtime {
         let mut input_suspended = false;
         let mut injected_fault = InjectedFault::from_env();
         let mut last_bar_check = std::time::Instant::now();
+        // The room the shell keeps for its zones, as last taken from what
+        // the server heard (`gevrek_engine::shell_room`).
+        let mut shell_room_seen = 0u64;
         let mut bar_kept = self.core.monitor_manager.bar_is_kept(&self.window_manager);
         // The loop waits for work between passes (`wait`); what used to be
         // counted in passes is therefore counted in time.
@@ -1265,6 +1268,19 @@ impl Runtime {
                         | crate::dwm::WindowEvent::Restored(_)
                 );
                 if let crate::dwm::WindowEvent::Created(handle) = event {
+                    // What a program shows while its window is put away
+                    // with its workspace (a dialog of that window, a
+                    // notification of its own) is put away with it, and
+                    // the keyboard is where it was.
+                    let had_keyboard = self.window_manager.get_active_window() == Some(handle);
+                    if self.window_manager.hide_late_arrival(handle).is_some() && had_keyboard {
+                        if let Err(error) = self
+                            .core
+                            .hand_keyboard_back(&mut self.window_manager, handle)
+                        {
+                            log::debug!("The keyboard did not go back from {handle:?}: {error:#}");
+                        }
+                    }
                     self.apply_appearance_to_window(handle);
                     // (Of gevrek's own windows only: a menu keeps the way
                     // its program lets it appear.)
@@ -1433,6 +1449,17 @@ impl Runtime {
                 ) {
                     log::error!("Error processing pending drags: {}", e);
                 }
+                // A floating window its program moved to another display,
+                // or the system did for Win+Shift+arrow, is that display's
+                // once it has come to rest; the panels hear of it now.
+                let joined = self
+                    .core
+                    .settle_moved_windows(&mut self.window_manager, std::time::Instant::now());
+                if !joined.is_empty() {
+                    self.send_debug_overlay_data(Some(
+                        "A floating window joined the display it was moved to".to_string(),
+                    ));
+                }
             }
 
             // The window registry is maintained incrementally from events; there
@@ -1544,6 +1571,26 @@ impl Runtime {
             }
 
             self.window_manager.tick_effects();
+
+            // The zones keep other room than before (one that reserves
+            // was made, moved or hidden; the shell went away): the
+            // displays it is on are laid out again, and the state says
+            // what is left for the windows.
+            if let Some((seen, rooms)) = gevrek_engine::shell_room::told_since(shell_room_seen) {
+                shell_room_seen = seen;
+                let changed = self.core.monitor_manager.set_shell_room(&rooms);
+                if !changed.is_empty() {
+                    log::info!(
+                        "The zones keep room on {} display(s); {} laid out again",
+                        gevrek_engine::shell_room::by_display(&rooms).len(),
+                        changed.len()
+                    );
+                    for monitor in changed {
+                        self.core.executor.mark_layout_dirty(monitor);
+                    }
+                    self.state_stale.set(true);
+                }
+            }
 
             // The bar came or went (or never came): its place is kept or
             // given to the windows, so they are laid out again.

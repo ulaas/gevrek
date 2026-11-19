@@ -20,7 +20,9 @@ use gevrek_zones::backend::{BackendError, FileOperation};
 use gevrek_zones::paths;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use crate::zones::operations::Watched;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use windows::core::{implement, Interface, Result as ComResult, GUID, HRESULT, HSTRING, PCWSTR};
 use windows::Win32::Foundation::{FILETIME, HANDLE, HWND};
 use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY;
@@ -56,11 +58,28 @@ struct Outcome {
     failed: Option<HRESULT>,
 }
 
-/// Listens to the shell while it works, to hear what became of the item.
+/// The system's number for "the person (or the program) called it off",
+/// as a result: what the shell is answered to make it stop.
+const CALLED_OFF: HRESULT = HRESULT(0x8007_04C7_u32 as i32);
+
+/// Listens to the shell while it works, to hear what became of the item;
+/// and, for an operation that ends later, to say how far it is and to
+/// stop it when it was called off.
 #[implement(IFileOperationProgressSink)]
-struct Listener(Rc<RefCell<Outcome>>);
+struct Listener(Rc<RefCell<Outcome>>, Option<Arc<Watched>>);
 
 impl Listener_Impl {
+    /// Whether the shell is to go on: not when the operation was called
+    /// off. (The shell asks before each item and while it copies; an
+    /// error for an answer ends the operation, and what it had begun to
+    /// write is taken away by the shell itself.)
+    fn go_on(&self) -> ComResult<()> {
+        match &self.1 {
+            Some(watched) if watched.called_off() => Err(CALLED_OFF.into()),
+            _ => Ok(()),
+        }
+    }
+
     fn heard(&self, result: HRESULT, made: Option<&IShellItem>) -> ComResult<()> {
         let mut outcome = self.0.borrow_mut();
         if result.is_err() {
@@ -84,7 +103,7 @@ impl IFileOperationProgressSink_Impl for Listener_Impl {
         Ok(())
     }
     fn PreRenameItem(&self, _: u32, _: Option<&IShellItem>, _: &PCWSTR) -> ComResult<()> {
-        Ok(())
+        self.go_on()
     }
     fn PostRenameItem(
         &self,
@@ -103,7 +122,7 @@ impl IFileOperationProgressSink_Impl for Listener_Impl {
         _: Option<&IShellItem>,
         _: &PCWSTR,
     ) -> ComResult<()> {
-        Ok(())
+        self.go_on()
     }
     fn PostMoveItem(
         &self,
@@ -123,7 +142,7 @@ impl IFileOperationProgressSink_Impl for Listener_Impl {
         _: Option<&IShellItem>,
         _: &PCWSTR,
     ) -> ComResult<()> {
-        Ok(())
+        self.go_on()
     }
     fn PostCopyItem(
         &self,
@@ -163,8 +182,12 @@ impl IFileOperationProgressSink_Impl for Listener_Impl {
     ) -> ComResult<()> {
         self.heard(result, made)
     }
-    fn UpdateProgress(&self, _: u32, _: u32) -> ComResult<()> {
-        Ok(())
+    fn UpdateProgress(&self, total: u32, so_far: u32) -> ComResult<()> {
+        // (In the shell's own count of work, which is no count of bytes.)
+        if let Some(watched) = &self.1 {
+            watched.progress(u64::from(so_far), u64::from(total));
+        }
+        self.go_on()
     }
     fn ResetTimer(&self) -> ComResult<()> {
         Ok(())
@@ -184,6 +207,7 @@ pub fn error_of(result: HRESULT, what: &str) -> BackendError {
     match result.0 as u32 {
         0x8007_0002 | 0x8007_0003 => BackendError::NotFound { what: what.to_string() },
         0x8007_0050 | 0x8007_00B7 => BackendError::Exists { what: what.to_string() },
+        0x8007_04C7 => BackendError::Cancelled,
         _ => BackendError::Refused { what: format!("{what}: {}", result.message()) },
     }
 }
@@ -192,8 +216,11 @@ fn missing(what: &str) -> BackendError {
     BackendError::NotFound { what: what.to_string() }
 }
 
-/// The file operations, and what they need to remember.
-#[derive(Debug, Default)]
+/// The file operations, and what they need to remember. A copy of this
+/// remembers the same: the one that carries operations out on a thread
+/// of its own and the one that does it at once put back each other's
+/// files.
+#[derive(Clone, Default)]
 pub struct FileOperations {
     /// Nothing of the shell's is shown while it works, not even how far
     /// a long copy is. For tests.
@@ -203,7 +230,10 @@ pub struct FileOperations {
     /// What was put into the Recycle Bin in this run, by the path it had
     /// (in small letters): where it lies there. One of several files
     /// deleted from the same place is then put back exactly.
-    recycled: HashMap<String, String>,
+    recycled: Arc<Mutex<HashMap<String, String>>>,
+    /// For an operation that ends later: where to say how far it is,
+    /// and where it is said that it was called off.
+    pub watched: Option<Arc<Watched>>,
 }
 
 impl FileOperations {
@@ -274,7 +304,7 @@ impl FileOperations {
                 });
                 match lies_at {
                     Ok(lies_at) => {
-                        self.recycled.insert(path.to_lowercase(), lies_at);
+                        self.recycled().insert(path.to_lowercase(), lies_at);
                     }
                     // (Done, and the shell named nothing it made: the
                     // file is gone for good, with the person's yes.)
@@ -286,7 +316,8 @@ impl FileOperations {
             FileOperation::Restore { path } => {
                 let path = plain(path);
                 let folder = paths::parent(&path).ok_or(BackendError::Unsupported)?.to_string();
-                let lies_at = match self.recycled.remove(&path.to_lowercase()) {
+                let remembered = self.recycled().remove(&path.to_lowercase());
+                let lies_at = match remembered {
                     Some(lies_at) if std::path::Path::new(&lies_at).exists() => lies_at,
                     _ => in_recycle_bin(&path).ok_or_else(|| missing(&path))?,
                 };
@@ -304,6 +335,10 @@ impl FileOperations {
         }
     }
 
+    fn recycled(&self) -> std::sync::MutexGuard<'_, HashMap<String, String>> {
+        self.recycled.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// Give the shell one operation and have it carried out. The answer
     /// is the parsing name of what the shell made; `Unsupported` stands
     /// for "done, and it named nothing".
@@ -314,7 +349,7 @@ impl FileOperations {
         queue: impl FnOnce(&IFileOperation, &IFileOperationProgressSink) -> ComResult<()>,
     ) -> Result<String, BackendError> {
         let outcome = Rc::new(RefCell::new(Outcome::default()));
-        let listener: IFileOperationProgressSink = Listener(Rc::clone(&outcome)).into();
+        let listener: IFileOperationProgressSink = Listener(Rc::clone(&outcome), self.watched.clone()).into();
         // No questions and no messages of the shell's: what goes wrong is
         // answered to who asked. It ends at the first thing that fails.
         let mut flags = how | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_NOCONFIRMMKDIR | FOFX_EARLYFAILURE;
@@ -572,7 +607,7 @@ mod tests {
             assert_eq!((names(&desk), names(&archive)), before, "{undo:?} did not take {operation:?} back");
             // What lies in the bin is a file there, beside its note.
             assert!(
-                shell.recycled.values().all(|lies_at| note_of(lies_at).is_some_and(|note| note.exists())),
+                shell.recycled().values().all(|lies_at| note_of(lies_at).is_some_and(|note| note.exists())),
                 "{:?}",
                 shell.recycled
             );

@@ -428,3 +428,28 @@ was also checked whole (`cargo check --workspace --exclude gevrek-win32
 - The studio and the guide do not mention any of this.
 - Whether a session that is locked should let `peek` through was not
   asked: every zones command is refused while locked.
+
+## Added with milestones 3 to 5
+
+- **The state can be asked for with less in it.** `GetZonesState` takes a
+  `ZonesStateRequest { without_items, zone }` (an older client's `Empty`
+  reads as "all of it"). `without_items` leaves the items out: each zone
+  keeps its `item_count`, the loose items become `loose_count`. `zone`
+  leaves every other zone out. The window manager trims a copy of what
+  the shell told; the shell tells one snapshot for everybody.
+  `WMClient::get_zones_state_of(without_items, zone)`. Measured in a
+  test with 5,000 items: 875,240 bytes whole, 229 bytes without the
+  items, trimmed in about 20 ms in an unoptimized build.
+  `gevrek zones list` asks without the items, `show <zone>` for the one
+  zone.
+- **The same snapshot is not sent twice.** The line compares what is
+  published with what the window manager that is there was last sent,
+  and sends nothing where they are the same, so `sequence` goes up only
+  when something is other than it was.
+- **Asking, from any program with a `Link`** (the studio):
+  `Request::Zones(json)` is answered with `Event::ZonesAnswered {
+  command, success, delivered, error, events }`, `Request::ZonesState`
+  with `Event::ZonesState { running, stale, json, message }`.
+- **The full command line** is in `user-guide.md`, with the exit codes
+  (0 done, 1 refused or not found, 3 no shell, 4 no answer) and the
+  events a status bar reads.

@@ -257,6 +257,7 @@ fn showcase_graph() -> NodeGraph {
 /// | Super+Shift+O | an empty workspace |
 /// | Super+Shift+E | quit the session |
 /// | Super+Escape | take the keys back from a program that asked for all |
+/// | Super+Z, Super+Shift+Z | the zones above the windows, or back; hidden or shown |
 ///
 /// The shell actions (launcher to brightness) are carried out by the shell
 /// that is running; without one nothing happens. Not there: niri's column
@@ -419,6 +420,31 @@ pub fn standard_bindings() -> Vec<BindingProfile> {
             "Brightness down",
             "BRIGHTNESS_DOWN",
             shell(ShellAction::BrightnessDown),
+        ),
+    ]);
+
+    // The zones on the desktop (niri has none; Z is free in its keys and
+    // in ours). Pressed, they are above the windows; pressed again (or
+    // Escape, or opening something), back below. With Shift they are
+    // hidden, and shown again. A press each, and nothing on the key's
+    // release: a release is only heard as the same key while the
+    // modifiers are still held, so "above while held" would stay above
+    // for whoever lets go of Super first. Carried out by the shell that
+    // runs the zones; without one, or with the zones switched off,
+    // nothing happens.
+    let zones = |action: serde_json::Value| DispatchCommand::Zones { action };
+    list.extend([
+        binding(
+            "Zones above the windows, or back",
+            "Z",
+            zones(serde_json::json!({"command": "toggle_peek"})),
+        ),
+        chord(
+            "Hide or show the zones",
+            "Z",
+            false,
+            true,
+            zones(serde_json::json!({"command": "quick_hide"})),
         ),
     ]);
 
@@ -2066,6 +2092,104 @@ fn example_advanced_binding_lab() -> BuiltInExample {
         ..BindingProfile::default()
     };
 
+    // The zones on the desktop by the keyboard, as a mode of its own:
+    // Super+Ctrl+Z enters it, and inside no modifier is held. The arrows
+    // go from zone to zone, H J K L walk the items of the zone, Shift
+    // with an arrow carries the chosen items to the zone on that side.
+    // "This zone" is the one that has the keyboard (`@focused`). Escape
+    // lets the zones go back below the windows as it is pressed and
+    // leaves the mode as it is let go: two things on one key, each on
+    // its own half of the stroke.
+    let in_zones = |name: &str, key: &str, action: serde_json::Value| BindingProfile {
+        name: name.to_string(),
+        key: key.to_string(),
+        submap: "zones".to_string(),
+        win: false,
+        command: DispatchCommand::Zones { action },
+        ..BindingProfile::default()
+    };
+    let mut zone_keys = vec![
+        BindingProfile {
+            ctrl: true,
+            ..binding(
+                "Enter the zones mode",
+                "Z",
+                DispatchCommand::SetBindingSubmap {
+                    name: "zones".to_string(),
+                },
+            )
+        },
+        in_zones(
+            "Zones above the windows, or back",
+            "Z",
+            serde_json::json!({"command": "toggle_peek"}),
+        ),
+        in_zones(
+            "Open what is chosen",
+            "RETURN",
+            serde_json::json!({"command": "open_focused"}),
+        ),
+        in_zones(
+            "Roll this zone up or down",
+            "R",
+            serde_json::json!({"command": "roll_up", "zone": "@focused"}),
+        ),
+        in_zones(
+            "Next tab of this zone",
+            "TAB",
+            serde_json::json!({"command": "next_tab", "zone": "@focused"}),
+        ),
+        in_zones(
+            "Hide or show the zones",
+            "SPACE",
+            serde_json::json!({"command": "quick_hide"}),
+        ),
+        in_zones(
+            "Cover what the zones hold",
+            "M",
+            serde_json::json!({"command": "mask"}),
+        ),
+        in_zones(
+            "Zones back below the windows",
+            "ESCAPE",
+            serde_json::json!({"command": "peek", "on": false}),
+        ),
+        BindingProfile {
+            name: "Leave the zones mode".to_string(),
+            key: "ESCAPE".to_string(),
+            submap: "zones".to_string(),
+            trigger: BindingTrigger::Release,
+            win: false,
+            command: DispatchCommand::ResetBindingSubmap,
+            ..BindingProfile::default()
+        },
+    ];
+    for (direction, arrow, letter) in [
+        ("left", "LEFT", "H"),
+        ("down", "DOWN", "J"),
+        ("up", "UP", "K"),
+        ("right", "RIGHT", "L"),
+    ] {
+        zone_keys.push(in_zones(
+            &format!("The zone to the {direction}"),
+            arrow,
+            serde_json::json!({"command": "focus_neighbour", "direction": direction}),
+        ));
+        zone_keys.push(in_zones(
+            &format!("The item to the {direction}"),
+            letter,
+            serde_json::json!({"command": "move_item_focus", "step": direction}),
+        ));
+        zone_keys.push(BindingProfile {
+            shift: true,
+            ..in_zones(
+                &format!("Move the chosen items to the zone on the {direction}"),
+                arrow,
+                serde_json::json!({"command": "move_focused_items", "direction": direction}),
+            )
+        });
+    }
+
     config.desktop.bindings = vec![
         enter_resize,
         release_float,
@@ -2083,6 +2207,7 @@ fn example_advanced_binding_lab() -> BuiltInExample {
         repeat_move("Keep moving right", "L", 24, 0),
         exit_resize,
     ];
+    config.desktop.bindings.extend(zone_keys);
     config.desktop.gestures.profiles = vec![
         GestureProfile {
             name: "Three-finger next workspace".to_string(),
@@ -2116,7 +2241,7 @@ fn example_advanced_binding_lab() -> BuiltInExample {
     example(
         "advanced-binding-lab",
         "Advanced Binding Lab",
-        "Press, release, repeat, long-press, mouse and pass-through bindings, global three/four-finger touchpad swipes, and a modal resize submap with an explicit escape path.",
+        "Press, release, repeat, long-press, mouse and pass-through bindings, global three/four-finger touchpad swipes, a modal resize submap with an explicit escape path, and a zones mode (Super+Ctrl+Z) that walks the desktop's zones and their items by the keyboard.",
         config,
     )
 }
@@ -2219,6 +2344,89 @@ mod tests {
         }
     }
     use std::collections::HashSet;
+
+    #[test]
+    fn the_keys_of_the_zones_are_standard_and_nobody_elses() {
+        let standard = standard_bindings();
+        // No two of the standard keys are one key pressed one way.
+        let mut chords = HashSet::new();
+        for binding in &standard {
+            assert!(
+                chords.insert((binding.normalized_submap(), binding.chord_key())),
+                "{} is on a key that is taken: {}",
+                binding.name,
+                binding.chord_key()
+            );
+        }
+        // Super+Z and Super+Shift+Z, each on the press alone.
+        let on_z: Vec<(bool, BindingTrigger, String)> = standard
+            .iter()
+            .filter(|binding| binding.normalized_key() == "Z")
+            .map(|binding| {
+                assert!(binding.win && !binding.ctrl && !binding.alt, "{}", binding.name);
+                let DispatchCommand::Zones { action } = &binding.command else {
+                    panic!("{} is on Z and is not the zones'", binding.name);
+                };
+                (binding.shift, binding.trigger, action.to_string())
+            })
+            .collect();
+        assert_eq!(
+            on_z,
+            [
+                (false, BindingTrigger::Press, r#"{"command":"toggle_peek"}"#.to_string()),
+                (true, BindingTrigger::Press, r#"{"command":"quick_hide"}"#.to_string()),
+            ]
+        );
+        // The mode of the Advanced Binding Lab: entered, walked, left.
+        let lab = built_in_examples()
+            .into_iter()
+            .find(|example| example.id == "advanced-binding-lab")
+            .unwrap();
+        let in_mode: Vec<&BindingProfile> = lab
+            .config
+            .desktop
+            .bindings
+            .iter()
+            .filter(|binding| binding.normalized_submap() == "zones")
+            .collect();
+        assert_eq!(in_mode.len(), 8 + 12);
+        assert!(in_mode.iter().all(|binding| !binding.win && !binding.ctrl && !binding.alt));
+        assert!(in_mode.iter().any(|binding| {
+            binding.normalized_key() == "ESCAPE"
+                && binding.trigger == BindingTrigger::Release
+                && binding.command == DispatchCommand::ResetBindingSubmap
+        }));
+        assert!(lab.config.desktop.bindings.iter().any(|binding| {
+            binding.normalized_key() == "Z"
+                && binding.ctrl
+                && binding.win
+                && matches!(&binding.command, DispatchCommand::SetBindingSubmap { name } if name == "zones")
+        }));
+        // In no example is Z with Super anything but the zones' (the
+        // examples with keys of their own included).
+        for example in built_in_examples() {
+            let mut chords = HashSet::new();
+            for binding in &example.config.desktop.bindings {
+                assert!(
+                    chords.insert((binding.normalized_submap(), binding.chord_key())),
+                    "{}: {} is on a key that is taken",
+                    example.id,
+                    binding.name
+                );
+                if binding.normalized_key() == "Z" && binding.win && binding.normalized_submap() == "default" {
+                    assert!(
+                        matches!(
+                            binding.command,
+                            DispatchCommand::Zones { .. } | DispatchCommand::SetBindingSubmap { .. }
+                        ),
+                        "{}: {}",
+                        example.id,
+                        binding.name
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn starter_library_has_at_least_ten_unique_valid_examples() {

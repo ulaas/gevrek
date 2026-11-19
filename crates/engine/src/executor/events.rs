@@ -240,6 +240,13 @@ impl Executor {
             }
         }
 
+        // The displays are other than they were: a window that was seen
+        // on another display than its workspace's is not taken there for
+        // what was true before.
+        for (_, state) in self.window_state.iter_mut() {
+            state.moved_across = None;
+        }
+
         for handle in &changes.windows_to_show {
             if queries(window_manager).exists(*handle) {
                 let _ = effect(
@@ -299,6 +306,8 @@ impl Executor {
         for handle in completed_drags {
             if let Some(drag_state) = self.window_state.get_mut(handle).drag.take() {
                 log::info!("Drag timeout - processing as completed drag");
+                self.window_state.get_mut(handle).dropped_at =
+                    queries(window_manager).rect(handle).ok();
 
                 // EARLY EXIT: Floating and unmanaged windows stay where dropped
                 let is_floating = monitor_manager.is_window_floating(handle);
@@ -634,6 +643,7 @@ impl Executor {
 
         // Track this window as known
         self.window_state.get_mut(handle).known = true;
+        let had_keyboard = queries(window_manager).active_window() == Some(handle);
 
         // Find all OnWindowCreated nodes and set their output values
         let mut event_nodes: Vec<NodeId> = self
@@ -646,26 +656,54 @@ impl Executor {
         // (In the order of the nodes: the same on every start.)
         event_nodes.sort_unstable();
 
+        // (While the graph runs, and the taking of the window after it,
+        // this is the window that is opening: `join_parent_out_of_sight`.)
+        self.opening = Some(handle);
+        self.opened_out_of_sight = false;
+        let mut graph_ran = Ok(());
         for node_id in event_nodes {
             // Set window handle output (output index 1)
             self.set_output_value(node_id, 1, Value::WindowHandle(handle));
             let mut visited = HashSet::new();
-            self.execute_node(window_manager, monitor_manager, node_id, &mut visited)?;
+            graph_ran = self.execute_node(window_manager, monitor_manager, node_id, &mut visited);
+            if graph_ran.is_err() {
+                break;
+            }
+        }
+        if let Err(error) = graph_ran {
+            self.opening = None;
+            return Err(error);
         }
 
         self.apply_initial_window_rules(window_manager, monitor_manager, handle)?;
         self.arm_initial_focus_suppression(window_manager, monitor_manager, focus_manager, handle)?;
         self.adopt_pending_scratchpad(window_manager, monitor_manager, handle)?;
-        if !self.scratchpads.is_scratchpad_window(handle)
-            && self.adopt_new_window(window_manager, monitor_manager, handle)?
-        {
+        let adopted = if self.scratchpads.is_scratchpad_window(handle) {
+            Ok(false)
+        } else {
+            self.adopt_new_window(window_manager, monitor_manager, handle)
+        };
+        self.opening = None;
+        if adopted? {
             // The rules were applied above, before the window was in a
             // workspace: what they say of a workspace (move it to
             // another) had nothing to act on then. Now it has.
             self.apply_initial_window_rules(window_manager, monitor_manager, handle)?;
         }
+        // A window that opened on the workspace of the window it belongs
+        // to, out of sight: the keyboard is where it was. (The window took
+        // it as it opened, as a new window does, and hiding the window
+        // gave it to nobody, or to whatever the system thought of next.)
+        let out_of_sight = std::mem::take(&mut self.opened_out_of_sight)
+            && self.window_state.get(handle).hidden_by_wm;
+        if out_of_sight && had_keyboard {
+            self.hand_keyboard_back(window_manager, monitor_manager, focus_manager, handle)?;
+        }
         // Started by `flush_pending_layouts`, once the window is tiled.
-        self.pending_window_enters.push(handle);
+        // (Not for one that opened out of sight: it does not come in.)
+        if !out_of_sight {
+            self.pending_window_enters.push(handle);
+        }
         // A window can have the keyboard before it is told of as opened
         // (Windows tells of the two in either order). What follows the
         // keyboard was then carried out for a window that was not in a
@@ -1044,6 +1082,7 @@ impl Executor {
         // events. Keep them out of user-authored move automations and
         // drag/retile handling until the transition settles.
         if window_manager.is_animation_event_suppressed(handle) {
+            self.forget_moved_across(handle);
             let _ = effect(
                 window_manager,
                 Effect::Border {
@@ -1056,6 +1095,7 @@ impl Executor {
 
         // Check if this is a suppressed window (we caused this move)
         if self.suppressed_windows.remove(&handle) {
+            self.forget_moved_across(handle);
             let _ = effect(
                 window_manager,
                 Effect::Border {
@@ -1075,6 +1115,11 @@ impl Executor {
                 change: BorderChange::Follow,
             },
         );
+
+        // A floating window that nobody is dragging and that lies on
+        // another display now is that display's once it has come to rest
+        // (`settle_moved_windows`).
+        self.note_moved_across(window_manager, monitor_manager, handle);
 
         // Note: Drag tracking is now handled via WM_ENTERSIZEMOVE/WM_EXITSIZEMOVE events
         // We no longer track drags based on move events (was too aggressive)
@@ -1266,6 +1311,9 @@ impl Executor {
             .map_err(anyhow::Error::msg)
             .ok();
 
+        // (Where it goes is the drag's end to say from here on.)
+        self.forget_moved_across(handle);
+
         // Start tracking this drag
         self.window_state.get_mut(handle).drag = Some(DragState {
             window: handle,
@@ -1307,6 +1355,153 @@ impl Executor {
         monitor_of(window_manager, monitor_manager, handle)
     }
 
+    /// The display a floating window has gone to without a drag, where it
+    /// is to join that display's workspace: it is a floating window of a
+    /// workspace that is shown, in sight (not hidden by gevrek, not
+    /// minimized), neither maximized nor fullscreen, not put out of the
+    /// way and not in an overview, and most of it lies on another display
+    /// than its workspace's (`display_gone_to`). `None` for every other
+    /// window: a tiled one is where its tile is, and what a hidden window
+    /// says of its place is where it was put away.
+    fn display_moved_to(
+        &self,
+        window_manager: &dyn Desktop,
+        monitor_manager: &MonitorManager,
+        handle: WindowHandle,
+    ) -> Option<MonitorHandle> {
+        let (home, index) = monitor_manager.find_window(handle)?;
+        let workspaces = monitor_manager.get_workspaces(home)?;
+        if workspaces.focused_idx() != index {
+            return None;
+        }
+        let workspace = workspaces.focused()?;
+        if !workspace.floats(handle)
+            || workspace.aside.contains_key(&handle)
+            || self.expose_workspaces.contains(&workspace.id)
+        {
+            return None;
+        }
+        let state = self.window_state.get(handle);
+        if state.hidden_by_wm || state.minimized || window_manager.is_hidden_by_backend(handle) {
+            return None;
+        }
+        let window = queries(window_manager);
+        if !window.is_visible(handle)
+            || window.is_minimized(handle)
+            || window.is_maximized(handle)
+            || window.is_fullscreen(handle)
+        {
+            return None;
+        }
+        let rect = window.rect(handle).ok()?;
+        display_gone_to(monitor_manager, &rect, home)
+            .filter(|to| monitor_manager.get_focused_workspace(*to).is_some())
+    }
+
+    /// A window was told of as moved: where it is a floating window that
+    /// lies on another display than its workspace's now, and nobody holds
+    /// it (a drag's end says where a dragged window went, by where the
+    /// pointer is), the moment is kept. `settle_moved_windows` takes it to
+    /// that display once it has stayed there.
+    fn note_moved_across(
+        &mut self,
+        window_manager: &dyn Desktop,
+        monitor_manager: &MonitorManager,
+        handle: WindowHandle,
+    ) {
+        let held =
+            self.window_state.get(handle).drag.is_some() || window_manager.primary_button_down();
+        // (Told of once more where a drag left it: nothing new.)
+        if let Some(dropped_at) = self.window_state.get(handle).dropped_at {
+            if queries(window_manager).rect(handle).ok() == Some(dropped_at) {
+                self.forget_moved_across(handle);
+                return;
+            }
+            self.window_state.get_mut(handle).dropped_at = None;
+        }
+        if !held
+            && self
+                .display_moved_to(window_manager, monitor_manager, handle)
+                .is_some()
+        {
+            self.window_state.get_mut(handle).moved_across = Some(Instant::now());
+        } else {
+            self.forget_moved_across(handle);
+        }
+    }
+
+    /// The window is not waited for any longer (it was moved by gevrek, or
+    /// is on its workspace's display again).
+    fn forget_moved_across(&mut self, handle: WindowHandle) {
+        if self.window_state.get(handle).moved_across.is_some() {
+            self.window_state.get_mut(handle).moved_across = None;
+        }
+    }
+
+    /// How long a window has to have stayed where it was moved to before
+    /// it is taken as having come to rest there.
+    const AT_REST: Duration = Duration::from_millis(250);
+
+    /// The floating windows that were moved to another display without a
+    /// drag (by their program, or by the system for a key: Win+Shift+arrow)
+    /// and have come to rest there join the workspace that display shows,
+    /// as one that was dragged there does: listed there, hidden and shown
+    /// with it. Returns them: their host publishes the state, and the
+    /// panels hear of it (`window.workspace_changed`).
+    ///
+    /// Called every now and then with the time (the hosts do, beside
+    /// `process_pending_drags`). A window that is still on its way (it was
+    /// told of as moved a moment ago, or the desktop is moving it itself)
+    /// waits for the next time; one that is held by the pointer is left to
+    /// the drag's end.
+    pub fn settle_moved_windows(
+        &mut self,
+        window_manager: &mut dyn Desktop,
+        monitor_manager: &mut MonitorManager,
+        now: Instant,
+    ) -> Vec<WindowHandle> {
+        let mut waiting: Vec<(WindowHandle, Instant)> = self
+            .window_state
+            .iter()
+            .filter_map(|(handle, state)| state.moved_across.map(|since| (handle, since)))
+            .collect();
+        if waiting.is_empty() {
+            return Vec::new();
+        }
+        waiting.sort_by_key(|(handle, _)| handle.0);
+        let button_down = window_manager.primary_button_down();
+        let mut joined = Vec::new();
+        for (handle, since) in waiting {
+            if !queries(window_manager).exists(handle)
+                || button_down
+                || self.window_state.get(handle).drag.is_some()
+            {
+                self.forget_moved_across(handle);
+                continue;
+            }
+            if window_manager.is_animation_event_suppressed(handle)
+                || now.saturating_duration_since(since) < Self::AT_REST
+            {
+                continue;
+            }
+            self.forget_moved_across(handle);
+            let Some(to) = self.display_moved_to(window_manager, monitor_manager, handle) else {
+                continue;
+            };
+            self.floating_window_is_on(window_manager, monitor_manager, handle, Some(to));
+            if monitor_manager.find_window(handle).map(|(output, _)| output) != Some(to) {
+                continue;
+            }
+            joined.push(handle);
+            if let Err(error) =
+                self.reevaluate_dynamic_rules(window_manager, monitor_manager, handle)
+            {
+                log::debug!("The rules of {handle:?} after it changed display: {error:#}");
+            }
+        }
+        joined
+    }
+
     /// A floating window that was put on another output than the one
     /// its workspace is on belongs to the workspace that output shows
     /// from now on: it is listed there (by that output's panel, and by no
@@ -1333,7 +1528,7 @@ impl Executor {
         if let Some(workspace) = monitor_manager.get_focused_workspace_mut(to) {
             workspace.add_floating_window(handle);
             log::info!(
-                "Floating window dropped on another output: now on workspace '{}'",
+                "Floating window on another output: now on workspace '{}'",
                 workspace.name
             );
         }
@@ -1359,6 +1554,7 @@ impl Executor {
         }
 
         if let Some(drag_state) = self.window_state.get_mut(handle).drag.take() {
+            self.window_state.get_mut(handle).dropped_at = queries(window_manager).rect(handle).ok();
             // EARLY EXIT: Floating and unmanaged windows just stay where the user dropped them.
             // No retiling, no zone snapping, no resize ratio updates.
             let is_floating = monitor_manager.is_window_floating(handle);

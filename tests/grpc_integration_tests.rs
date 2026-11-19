@@ -1809,3 +1809,373 @@ async fn the_command_line_lists_shows_and_asks_the_zones() {
     assert!(ok, "{said}");
     assert_eq!(printed, "The system's own desktop icons were put back\n");
 }
+
+/// A "shell" for the command line to talk to: a real core behind the
+/// real line. `run` carries out what is asked while a command line runs,
+/// as the shell's zones component does: the core's answer back, what
+/// happened to the listeners, and the zones as they are now.
+struct ScriptedZones {
+    link: gevrek_link::Link,
+    core: gevrek_zones::ZonesCore,
+    address: String,
+    /// Every command the core was given, as it was written.
+    asked: Vec<serde_json::Value>,
+}
+
+impl ScriptedZones {
+    const NOW: u64 = 1_800_000_000;
+
+    fn publish(&self) {
+        self.link
+            .publish_zones(gevrek_zones::ipc::ZonesSnapshot::of(&self.core, Self::NOW));
+    }
+
+    fn serve(&mut self) {
+        use gevrek_link::{ZonesAsk, ZonesHeard};
+        use gevrek_zones::ipc::{self, Answer, Request};
+        for heard in self.link.poll_zones() {
+            let ZonesHeard::Asked(ZonesAsk { request, ask }) = heard else {
+                continue;
+            };
+            let answer = match ask {
+                Request::Command(command) => {
+                    self.asked.push(serde_json::to_value(&command).unwrap());
+                    let effects = self.core.command(command, Self::NOW);
+                    for event in ipc::events_of(&effects) {
+                        self.link.publish_zones_event(event);
+                    }
+                    Answer::of(&effects)
+                }
+                Request::RestoreSystemIcons => Answer::done(),
+            };
+            if let Some(request) = request {
+                self.link.answer_zones(request, answer);
+            }
+            self.publish();
+        }
+    }
+
+    /// Run `gevrek zones <words>` against the server while serving what
+    /// it asks: whether it ended well (its exit code), what it printed,
+    /// and what it said went wrong.
+    async fn run(&mut self, words: &[&str]) -> (i32, String, String) {
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_gevrek"));
+        command.arg("--address").arg(&self.address).arg("zones").args(words);
+        let running = tokio::task::spawn_blocking(move || command.output().expect("the command line runs"));
+        while !running.is_finished() {
+            self.serve();
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let output = running.await.unwrap();
+        // What the last command changed is told before the next one asks.
+        self.serve();
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        let printed = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        let said = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
+        println!("$ gevrek zones {}\n{printed}{said}", words.join(" "));
+        (output.status.code().unwrap_or(-1), printed, said)
+    }
+
+    /// The same for a command that is to end well: what it printed.
+    async fn done(&mut self, words: &[&str]) -> String {
+        let (code, printed, said) = self.run(words).await;
+        assert_eq!(code, 0, "{words:?}: {said}");
+        printed
+    }
+
+    /// The same with --json, read.
+    async fn json(&mut self, words: &[&str]) -> (i32, serde_json::Value) {
+        let mut words = words.to_vec();
+        words.push("--json");
+        let (code, printed, said) = self.run(&words).await;
+        let read = serde_json::from_str(&printed)
+            .unwrap_or_else(|error| panic!("{words:?} printed no JSON ({error}): {printed}{said}"));
+        (code, read)
+    }
+}
+
+/// A desktop with two zones, a few files and two rules, run by a core
+/// behind the real line of a test server.
+async fn scripted_zones(server: &TestServer) -> ScriptedZones {
+    use gevrek_zones::backend::{BackendEvent, Location};
+    use gevrek_zones::config::{Matcher, Rule, RuleAction, ZoneDefinition, ZonesConfig};
+    use gevrek_zones::geometry::Display;
+    use gevrek_zones::{Item, Rect, ZoneId, ZonesCore, ZonesState};
+
+    let config = ZonesConfig {
+        enabled: true,
+        rules_on_arrival: false,
+        zones: vec![
+            ZoneDefinition::manual("work", "Work"),
+            ZoneDefinition::manual("pictures", "Pictures"),
+        ],
+        rules: vec![
+            Rule {
+                name: "Papers".to_string(),
+                matchers: vec![Matcher::Extension { any_of: vec!["pdf".to_string()] }],
+                action: RuleAction::AssignToZone { zone: ZoneId::new("work") },
+                ..Rule::default()
+            },
+            Rule {
+                name: "Images".to_string(),
+                matchers: vec![Matcher::Extension { any_of: vec!["png".to_string()] }],
+                action: RuleAction::AssignToZone { zone: ZoneId::new("pictures") },
+                ..Rule::default()
+            },
+        ],
+        ..ZonesConfig::default()
+    };
+    let mut core = ZonesCore::new(config, ZonesState::default());
+    core.event(
+        BackendEvent::Displays {
+            displays: vec![Display {
+                primary: true,
+                ..Display::new("DEL-A1B2-77", Rect::new(0, 0, 1920, 1080))
+            }],
+            reserved: Vec::new(),
+        },
+        ScriptedZones::NOW,
+    );
+    core.event(
+        BackendEvent::Listed {
+            location: Location::Desktop,
+            items: ["report.pdf", "invoice.pdf", "cat.png", "notes.txt"]
+                .iter()
+                .map(|name| Item::file(&format!("/home/ada/Desktop/{name}")))
+                .collect(),
+        },
+        ScriptedZones::NOW,
+    );
+    let link = gevrek_link::Link::start(server.address.clone(), || {});
+    link.host_zones();
+    let zones = ScriptedZones {
+        link,
+        core,
+        address: server.address.clone(),
+        asked: Vec::new(),
+    };
+    zones.publish();
+    assert_eq!(zones_heard(&zones.link).await, gevrek_link::ZonesHeard::Attached);
+    let mut client = WMClient::connect(server.address.clone()).await.unwrap();
+    zones_state_when(&mut client, |state| state.sequence == 1).await;
+    zones
+}
+
+#[tokio::test]
+async fn the_command_lines_words_drive_the_zones_from_end_to_end() {
+    let server = start_test_server().await;
+    let mut zones = scripted_zones(&server).await;
+    let mut client = WMClient::connect(server.address.clone()).await.unwrap();
+
+    // Made, and named by its title from then on.
+    let printed = zones.done(&["create", "--title", "Play", "--at", "600,40", "--size", "400x300"]).await;
+    assert_eq!(printed, "Zone 'zone-1' was made\n");
+    assert_eq!(zones.asked.last().unwrap()["rect"]["width"], 400);
+    assert_eq!(zones.done(&["rename", "play", "Games"]).await, "Zone 'zone-1' is called \"Games\" now\n");
+    assert_eq!(zones.done(&["roll-up", "games"]).await, "Zone 'zone-1' is rolled up\n");
+    zones.done(&["lock", "games", "geometry"]).await;
+    zones.done(&["set", "games", "view=list", "opacity=70", "always-visible=on"]).await;
+    let (code, shown) = zones.json(&["show", "Games"]).await;
+    assert_eq!(code, 0);
+    assert_eq!(shown["zone"]["id"], "zone-1");
+    assert_eq!(shown["zone"]["title"], "Games");
+    assert_eq!(shown["zone"]["rolled_up"], true);
+    assert_eq!(shown["zone"]["view"], "list");
+    assert_eq!(shown["zone"]["always_visible"], true);
+    assert_eq!(shown["zone"]["locked"]["geometry"], true);
+    assert_eq!(zones.core.config().zones[2].look.opacity, Some(70));
+
+    // Items by their names; what is wrong is said before anything is sent.
+    let asked_before = zones.asked.len();
+    let printed = zones.done(&["add", "games", "notes", "cat.png"]).await;
+    assert_eq!(printed, "2 items put into zone 'zone-1'\n");
+    assert_eq!(zones.asked.len(), asked_before + 2);
+    let (code, printed, said) = zones.run(&["add", "games", "nothing.bin"]).await;
+    assert_eq!((code, printed.as_str()), (1, ""));
+    assert_eq!(said, "Error: There is no item 'nothing.bin' on the desktop or in a zone\n");
+    let (code, _, said) = zones.run(&["delete", "nowhere"]).await;
+    assert_eq!(code, 1);
+    assert!(said.contains("There is no zone 'nowhere'. The zones are: work, pictures, zone-1"), "{said}");
+    assert_eq!(zones.asked.len(), asked_before + 2, "neither reached the zones");
+    // What the zones themselves refuse: their reason, and 1.
+    let (code, answer) = zones.json(&["move", "games", "10,10"]).await;
+    assert_eq!(code, 1);
+    assert_eq!(answer["success"], false);
+    assert_eq!(answer["delivered"], true);
+    assert!(answer["error"].as_str().unwrap().contains("locked"), "{answer}");
+    zones.done(&["unlock", "games"]).await;
+    zones.done(&["remove", "cat"]).await;
+
+    // The rules: what they would do, then done, then taken back.
+    let printed = zones.done(&["rules", "dry-run"]).await;
+    let lines: Vec<&str> = printed.lines().collect();
+    assert_eq!(lines[0], "The rules would sort 3 items (asked of the items that are in no zone):");
+    assert_eq!(lines[1].split_whitespace().collect::<Vec<_>>(), ["ITEM", "FROM", "GOES", "TO", "BY"]);
+    assert!(printed.contains("  cat.png      loose  zone pictures (Pictures)  rule 2 \"Images\"\n"), "{printed}");
+    assert!(printed.contains("  report.pdf   loose  zone work (Work)          rule 1 \"Papers\"\n"), "{printed}");
+    assert!(printed.ends_with("Nothing was changed. `gevrek zones rules apply` carries it out.\n"));
+    assert_eq!(zones.core.zone_items(&gevrek_zones::ZoneId::new("work"), ScriptedZones::NOW).len(), 0);
+    let (code, answer) = zones.json(&["rules", "apply"]).await;
+    assert_eq!(code, 0);
+    assert_eq!(answer["success"], true);
+    assert_eq!(answer["lines"].as_array().unwrap().len(), 3);
+    assert_eq!(answer["lines"][0]["rule"], "Images");
+    assert_eq!(zones.core.zone_items(&gevrek_zones::ZoneId::new("work"), ScriptedZones::NOW).len(), 2);
+    let printed = zones.done(&["rules", "dry-run", "--scope", "all"]).await;
+    assert_eq!(printed, "The rules would change nothing (asked of every item of the desktop)\n");
+    assert_eq!(
+        zones.done(&["rules", "undo"]).await,
+        "The last application of the rules was taken back\n"
+    );
+    assert_eq!(zones.core.zone_items(&gevrek_zones::ZoneId::new("work"), ScriptedZones::NOW).len(), 0);
+    zones.done(&["rules", "apply"]).await;
+
+    // Found across the zones.
+    let printed = zones.done(&["search", "inv"]).await;
+    assert!(printed.starts_with("1 item fits 'inv':\n"), "{printed}");
+    assert!(printed.contains("  invoice.pdf  zone work (Work)  /home/ada/Desktop/invoice.pdf\n"), "{printed}");
+    let (_, answer) = zones.json(&["search", "zzz"]).await;
+    assert_eq!(answer["hits"].as_array().unwrap().len(), 0);
+
+    // Hidden and shown, and what a status bar asks.
+    assert_eq!(zones.done(&["hide"]).await, "The zones are hidden\n");
+    let (_, listed) = zones.json(&["list"]).await;
+    assert_eq!(listed["state"]["quick_hidden"], true);
+    assert_eq!(listed["state"]["loose_count"], 0);
+    assert!(listed["state"].get("loose").is_none(), "the items are left out");
+    assert!(listed["state"]["zones"][0].get("items").is_none());
+    assert_eq!(listed["state"]["zones"][0]["item_count"], 2);
+    // The one that stays when the others are hidden.
+    assert_eq!(listed["state"]["zones"][2]["visible"], true);
+    assert_eq!(listed["state"]["zones"][0]["visible"], false);
+    let (_, listed) = zones.json(&["list", "--items"]).await;
+    assert_eq!(listed["state"]["zones"][0]["items"].as_array().unwrap().len(), 2);
+    assert_eq!(zones.done(&["toggle"]).await, "The zones are shown\n");
+    assert_eq!(zones.done(&["peek", "on"]).await, "The zones are above the windows\n");
+    let printed = zones.done(&["list"]).await;
+    assert!(printed.starts_with("Zones are shown above the windows (peek)\nZones: 3 · profile: "), "{printed}");
+    zones.done(&["peek", "off"]).await;
+    assert_eq!(zones.done(&["focus", "work"]).await, "Zone 'work' has the keyboard\n");
+    assert_eq!(zones.done(&["roll-up", "@focused", "on"]).await, "Zone 'work' is rolled up\n");
+
+    // A layout kept, written to a file, taken in again, and put in force.
+    assert_eq!(zones.done(&["snapshot", "save", "Tidy"]).await, "The layout was saved as 'Tidy'\n");
+    let printed = zones.done(&["snapshot", "list"]).await;
+    assert!(printed.starts_with("Saved copies of the layout: 1\n"), "{printed}");
+    assert!(printed.contains("  Tidy  2027-01-15 08:00 UTC  3\n"), "{printed}");
+    let file = std::env::temp_dir().join(format!("gevrek-zones-layout-{}.json", std::process::id()));
+    let file = file.to_str().unwrap();
+    let printed = zones.done(&["snapshot", "export", "Tidy", file]).await;
+    assert_eq!(printed, format!("The layout 'Tidy' was written to {file}\n"));
+    let document: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+    assert_eq!(document["format"], "gevrek-zones-layout");
+    assert_eq!(document["layout"]["zones"].as_array().unwrap().len(), 3);
+    zones.done(&["delete", "games"]).await;
+    let printed = zones.done(&["layout", "import", file]).await;
+    let _ = std::fs::remove_file(file);
+    assert!(printed.starts_with("The layout was taken in as 'Tidy (2)'"), "{printed}");
+    assert_eq!(zones.core.config().zones.len(), 2, "taken in, not put in force");
+    zones.done(&["layout", "apply", "Tidy"]).await;
+    assert_eq!(zones.core.config().zones.len(), 3);
+    let (code, _, said) = zones.run(&["snapshot", "restore", "Nowhere"]).await;
+    assert_eq!(code, 1);
+    assert!(said.starts_with("Error: "), "{said}");
+    let (code, _, said) = zones.run(&["snapshot", "import", "no-such-file.json"]).await;
+    assert_eq!(code, 1);
+    assert!(said.contains("no-such-file.json could not be read"), "{said}");
+    let printed = zones.done(&["profile", "list"]).await;
+    assert!(printed.starts_with("Arrangements remembered: 1\n  * 1  DEL-A1B2-77 1920x1080@1.00"), "{printed}");
+    let printed = zones.done(&["profile", "show"]).await;
+    assert!(printed.starts_with("In use: DEL-A1B2-77 1920x1080@1.00\n"), "{printed}");
+    // The rules as the running configuration has them (the test server's
+    // has none; the zones' own are the scripted shell's).
+    let printed = zones.done(&["rules", "list"]).await;
+    assert!(printed.starts_with("Rules: 0 · on arrival: yes"), "{printed}");
+
+    // The same snapshot told again is not told again: the number of
+    // snapshots only goes up when something is other than it was.
+    let before = client.get_zones_state().await.unwrap().sequence;
+    zones.publish();
+    zones.publish();
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(client.get_zones_state().await.unwrap().sequence, before);
+    // Asked for one zone, and without the items.
+    let one = client.get_zones_state_of(true, "work").await.unwrap();
+    let one: serde_json::Value = serde_json::from_str(&one.json).unwrap();
+    assert_eq!(one["zones"].as_array().unwrap().len(), 1);
+    assert!(one["zones"][0].get("items").is_none());
+
+    // Without a shell: 3, in words and for a script.
+    let address = zones.address.clone();
+    drop(zones);
+    zones_state_when(&mut client, |state| !state.running).await;
+    let run = |words: &'static [&'static str]| {
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_gevrek"));
+        command.arg("--address").arg(&address).arg("zones").args(words);
+        tokio::task::spawn_blocking(move || command.output().expect("the command line runs"))
+    };
+    let output = run(&["hide"]).await.unwrap();
+    assert_eq!(output.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&output.stderr).contains(NO_SHELL));
+    let output = run(&["roll-up", "work", "--json"]).await.unwrap();
+    assert_eq!(output.status.code(), Some(3));
+    let answer: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(answer["success"], false);
+    assert_eq!(answer["delivered"], false);
+    assert_eq!(answer["error"], NO_SHELL);
+    let output = run(&["send", r#"{"command":"quick_hide"}"#]).await.unwrap();
+    assert_eq!(output.status.code(), Some(3));
+    // What a shell that is gone last told is still listed, marked.
+    let output = run(&["list"]).await.unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("Stale: "));
+}
+
+#[tokio::test]
+async fn the_events_of_the_zones_are_one_json_object_a_line_as_they_happen() {
+    use std::io::{BufRead, BufReader};
+    let server = start_test_server().await;
+    let mut zones = scripted_zones(&server).await;
+
+    let mut listening = std::process::Command::new(env!("CARGO_BIN_EXE_gevrek"))
+        .arg("--address")
+        .arg(&zones.address)
+        .args(["zones", "events", "--json"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("the command line runs");
+    // Its lines, read on a thread of their own: each must come through
+    // the pipe when it is written, not when a buffer is full.
+    let (lines, read) = std::sync::mpsc::channel::<String>();
+    let output = listening.stdout.take().unwrap();
+    std::thread::spawn(move || {
+        for line in BufReader::new(output).lines().map_while(Result::ok) {
+            if lines.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    // (Until it listens: a command is repeated until its event is heard.)
+    let mut heard: Vec<serde_json::Value> = Vec::new();
+    for _ in 0..40 {
+        zones.done(&["toggle"]).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        heard.extend(read.try_iter().map(|line| serde_json::from_str(&line).expect("a line is JSON")));
+        if !heard.is_empty() {
+            break;
+        }
+    }
+    let _ = listening.kill();
+    let _ = listening.wait();
+    let event = heard
+        .iter()
+        .find(|event| event["event"] == "zones.visibility_changed")
+        .unwrap_or_else(|| panic!("no visibility event among {heard:?}"));
+    println!("$ gevrek zones events --json\n{event}");
+    assert!(event["timestamp_ms"].as_i64().unwrap() > 0);
+    assert!(event["sequence"].as_u64().unwrap() >= 1);
+    assert_eq!(event["data"]["event"], "visibility_changed");
+    assert!(event["data"]["quick_hidden"].is_boolean());
+    assert_eq!(event["data"]["peeking"], false);
+}

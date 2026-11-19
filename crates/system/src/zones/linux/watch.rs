@@ -149,6 +149,9 @@ pub struct Folders {
     watches: BTreeMap<WatchId, Watched>,
     /// The paths of the items each folder was last known to hold.
     known: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
+    /// The folders that were read anew since this was last asked: the
+    /// kernel lost track of them, or they changed or went themselves.
+    shaken: Vec<PathBuf>,
 }
 
 /// What reading the system gives [`Folders`]: the item at a path (none
@@ -171,6 +174,20 @@ impl Folders {
         }
         self.watches.insert(watch, Watched { location, folder });
         new
+    }
+
+    /// Note a watch of a folder that was just read (off this thread):
+    /// `items` is what the reading found.
+    pub fn adopt(&mut self, watch: WatchId, location: Location, folder: PathBuf, items: &[Item]) {
+        let there = items.iter().filter_map(|item| item.path.as_ref().map(PathBuf::from)).collect();
+        self.known.insert(folder.clone(), there);
+        self.watches.insert(watch, Watched { location, folder });
+    }
+
+    /// The folders that were read anew since this was last asked. One of
+    /// them may be gone: whoever watches it for a portal goes to it again.
+    pub fn take_shaken(&mut self) -> Vec<PathBuf> {
+        std::mem::take(&mut self.shaken)
     }
 
     /// Forget a watch. The answer is its folder when nobody watches that
@@ -310,6 +327,9 @@ impl Folders {
         let items = look.list(folder);
         let there = items.iter().filter_map(|item| item.path.as_ref().map(PathBuf::from)).collect();
         self.known.insert(folder.to_path_buf(), there);
+        if !self.shaken.iter().any(|known| known == folder) {
+            self.shaken.push(folder.to_path_buf());
+        }
         for location in self.locations(folder) {
             out.push(BackendEvent::Listed { location, items: items.clone() });
         }

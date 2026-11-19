@@ -47,6 +47,12 @@ pub fn key_of(key: u16) -> Option<egui::Key> {
     })
 }
 
+/// Whether a key is the one that asks for a menu (between the right
+/// Windows key and Ctrl on most keyboards).
+pub fn is_menu_key(key: u16) -> bool {
+    key == keys::VK_APPS.0
+}
+
 /// The keys held with a key or a click. Windows has no key of its own
 /// for commands: Ctrl is it, as on Linux.
 pub fn modifiers(shift: bool, ctrl: bool, alt: bool) -> egui::Modifiers {
@@ -105,6 +111,30 @@ pub fn button(message: u32, wparam: usize) -> Option<(egui::PointerButton, bool)
         messages::WM_XBUTTONUP => (side, false),
         _ => return None,
     })
+}
+
+/// What egui counts as a double click, from what the person set in
+/// Windows: the longest time between the two presses in seconds, and how
+/// far apart they may be in points.
+///
+/// The toolkit's own values are a third of a second and six points,
+/// whatever the system says; Windows' time is half a second unless the
+/// person chose another, and a double press that Explorer takes must be
+/// one on a surface of the shell too. `time_ms` is `GetDoubleClickTime`,
+/// `across` and `down` the sides of Windows' rectangle around the first
+/// press (`SM_CXDOUBLECLK`, `SM_CYDOUBLECLK`, in pixels), `scale` the
+/// pixels to a point on the surface's display.
+///
+/// The distance is never less than the toolkit's own six points: the
+/// toolkit uses the same number for how far a press may move before it
+/// is a drag, and Windows' rectangle (two pixels to each side) would
+/// make every unsteady click one.
+pub fn double_click(time_ms: u32, across: i32, down: i32, scale: f32) -> (f64, f32) {
+    // (A time of nothing, or of minutes, is no setting anyone made.)
+    let delay = f64::from(time_ms.clamp(100, 5000)) / 1000.0;
+    let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    let half = across.max(down).max(0) as f32 / 2.0 / scale;
+    (delay, half.max(6.0))
 }
 
 /// How far a wheel message scrolls, in lines: a notch of the wheel is
@@ -196,6 +226,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_double_click_is_as_slow_as_windows_lets_it_be() {
+        // As Windows comes: half a second, a rectangle of four pixels.
+        assert_eq!(double_click(500, 4, 4, 1.0), (0.5, 6.0));
+        // The person made it slower, or faster.
+        assert_eq!(double_click(900, 4, 4, 1.0).0, 0.9);
+        assert_eq!(double_click(200, 4, 4, 1.0).0, 0.2);
+        // No setting at all, and one nobody made.
+        assert_eq!(double_click(0, 4, 4, 1.0).0, 0.1);
+        assert_eq!(double_click(u32::MAX, 4, 4, 1.0).0, 5.0);
+    }
+
+    #[test]
+    fn the_two_presses_may_be_as_far_apart_as_windows_says_and_never_less_than_six_points() {
+        // A wide rectangle (a setting for unsteady hands): half of its
+        // longer side, in points of the display.
+        assert_eq!(double_click(500, 40, 24, 1.0).1, 20.0);
+        assert_eq!(double_click(500, 40, 24, 2.0).1, 10.0);
+        assert_eq!(double_click(500, 30, 60, 1.5).1, 20.0);
+        // Windows' own small one: the toolkit's six points stay.
+        assert_eq!(double_click(500, 4, 4, 1.5).1, 6.0);
+        assert_eq!(double_click(500, -4, 0, 1.0).1, 6.0);
+        // A scale that is none counts as one.
+        assert_eq!(double_click(500, 40, 40, 0.0).1, 20.0);
+        assert_eq!(double_click(500, 40, 40, f32::NAN).1, 20.0);
+    }
+
+    #[test]
     fn keys_a_shell_surface_acts_on_have_the_toolkits_names() {
         assert_eq!(key_of(keys::VK_RETURN.0), Some(egui::Key::Enter));
         assert_eq!(key_of(keys::VK_ESCAPE.0), Some(egui::Key::Escape));
@@ -217,6 +274,14 @@ mod tests {
         assert_eq!(key_of(keys::VK_CONTROL.0), None);
         assert_eq!(key_of(keys::VK_MENU.0), None);
         assert_eq!(key_of(keys::VK_LWIN.0), None);
+    }
+
+    #[test]
+    fn the_key_for_a_menu_is_known_and_is_no_key_of_egui_s() {
+        assert!(is_menu_key(keys::VK_APPS.0));
+        assert!(!is_menu_key(keys::VK_F10.0));
+        assert_eq!(key_of(keys::VK_APPS.0), None);
+        assert_eq!(key_of(keys::VK_F10.0), Some(egui::Key::F10));
     }
 
     #[test]
@@ -266,7 +331,8 @@ mod tests {
             button(messages::WM_MBUTTONUP, 0),
             Some((PointerButton::Middle, false))
         );
-        // The second press of a double click is a press like any other.
+        // The second press of a double click is a press like any other
+        // (the toolkit counts double clicks itself, by `double_click`).
         assert_eq!(
             button(messages::WM_LBUTTONDBLCLK, 1),
             Some((PointerButton::Primary, true))
@@ -365,6 +431,11 @@ mod tests {
         assert_eq!(pointer_of(egui::CursorIcon::Text), Some(32513));
         assert_eq!(pointer_of(egui::CursorIcon::PointingHand), Some(32649));
         assert_eq!(pointer_of(egui::CursorIcon::ResizeHorizontal), Some(32644));
+        // The four ways a side or a corner is sized by.
+        assert_eq!(pointer_of(egui::CursorIcon::ResizeVertical), Some(32645));
+        assert_eq!(pointer_of(egui::CursorIcon::ResizeNwSe), Some(32642));
+        assert_eq!(pointer_of(egui::CursorIcon::ResizeNeSw), Some(32643));
+        assert_eq!(pointer_of(egui::CursorIcon::Move), Some(32646));
         assert_eq!(pointer_of(egui::CursorIcon::None), None);
     }
 }

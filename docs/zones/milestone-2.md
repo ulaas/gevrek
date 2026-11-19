@@ -12,6 +12,13 @@ test's own process. The first time zones are shown on a real desktop will
 be the first time. The switch is off by default and the order under
 "Trying it" is there for that first time.
 
+(Since 2026-11-20 the switch is **on** by default: a configuration that
+does not say `desktop.zones.enabled: false` has zones, and on Windows
+Explorer's desktop icons are then put away while gevrek's shell runs,
+unless `desktop.platform.windows.hide_desktop_icons` is `false`. A file
+that says `false` stays off. See the user guide, "They are on; turning
+them off".)
+
 ## The parts
 
 | Part | Where | Note |
@@ -107,6 +114,17 @@ Nothing here was done by whoever wrote this. In this order:
    display. Look at: the loose items, a zone made from the desktop's
    menu, moving and sizing it, an item dragged into it, a double click.
    `gevrek zones list` should name what is seen.
+
+   **Every icon is seen twice in this step, and that is as it is
+   meant.** Explorer's icons are left alone, so Explorer goes on drawing
+   them; the zones' surface lies over them, lets them show through where
+   nothing of ours is, and draws the same things as its loose items (a
+   desktop of 26 icons shows 52). Explorer's cannot be reached: every
+   press is the surface's. Hidden with "Hide the zones", ours go and
+   Explorer's stay, so the desktop looks as it did before zones, and is
+   still ours to press on: twice on it, or "Show the zones" in its menu
+   (the other button), brings ours back. Step 3 is the one in which
+   each icon is there once.
 3. **Zones as they are meant.** `hide_desktop_icons: true`. Explorer's
    icons go, ours stay. Then `desktop.zones.enabled: false`: Explorer's
    are back, each where it was.

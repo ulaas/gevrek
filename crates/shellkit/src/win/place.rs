@@ -2,7 +2,7 @@
 //! the rectangle a [`Place`] means, the strip an edge panel keeps free,
 //! where a popup finds room, and the names windows and displays go by.
 
-use crate::{Edge, Place};
+use crate::{Edge, Keyboard, Level, Place};
 
 /// A rectangle on the desktop, in the pixels of the screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -248,6 +248,69 @@ pub fn beside(anchor: Area, size: (i32, i32), display: Area, gap: i32) -> Area {
     }
 }
 
+/// Where a menu goes that opens from a line of another: to the right of
+/// the line, their tops in line; to its left where it would leave the
+/// display at the right, and slid up where it would leave it below. `gap`
+/// is the room between the two (less than nothing: over each other by
+/// that much).
+pub fn beside_line(anchor: Area, size: (i32, i32), display: Area, gap: i32) -> Area {
+    let (width, height) = (size.0.max(1), size.1.max(1));
+    let right = anchor.right() + gap;
+    let left = anchor.x - gap - width;
+    let x = if right + width <= display.right() || left < display.x {
+        right.min(display.right() - width).max(display.x)
+    } else {
+        left
+    };
+    let y = anchor.y.min(display.bottom() - height).max(display.y);
+    Area {
+        x,
+        y,
+        width,
+        height,
+    }
+}
+
+/// Where a window stands among the others.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Order {
+    /// Below every window.
+    Bottom,
+    /// Above every window that is not itself kept above.
+    Topmost,
+}
+
+/// Where a surface of this level stands. `covered`: a window fills its
+/// display (a film, a game), which a bar steps down for; what is meant
+/// to lie over everything does not.
+pub fn order_of(level: Level, covered: bool) -> Order {
+    match level {
+        Level::Background | Level::Below => Order::Bottom,
+        Level::Above if covered => Order::Bottom,
+        Level::Above | Level::Overlay | Level::Marks => Order::Topmost,
+    }
+}
+
+/// Whether a window of this level keeps itself below the others,
+/// whatever tries to raise it (a click, another program).
+pub fn stays_below(level: Level) -> bool {
+    order_of(level, false) == Order::Bottom
+}
+
+/// Whether an open surface can go from one level to another. Marks are
+/// made as a window of another kind (the pointer goes through it), which
+/// a window does not become while it is shown: a surface is marks from
+/// the start or never.
+pub fn can_change_level(from: Level, to: Level) -> bool {
+    from == to || (from != Level::Marks && to != Level::Marks)
+}
+
+/// Whether a press on a surface leaves the keyboard where it is: one
+/// that takes no keyboard, and marks, which take nothing at all.
+pub fn never_active(keyboard: Keyboard, level: Level) -> bool {
+    keyboard == Keyboard::Never || level == Level::Marks
+}
+
 /// Every window class of the shell's surfaces begins with this; the
 /// window manager leaves such windows alone (its rules match the start).
 pub const CLASS_PREFIX: &str = "Gevrek_Shell";
@@ -255,6 +318,19 @@ pub const CLASS_PREFIX: &str = "Gevrek_Shell";
 const SURFACE_CLASS: &str = "Gevrek_Shell_";
 const POPUP_CLASS: &str = "Gevrek_ShellPopup_";
 const HINT_CLASS: &str = "Gevrek_ShellHint_";
+const BACKDROP_CLASS: &str = "Gevrek_ShellBackdrop_";
+
+/// The window class of the window that lies under the surface with this
+/// name and shows the desktop soft (`win::look`). Not a surface's class:
+/// who looks for the panel or the zones by their class does not find it.
+pub fn backdrop_class_of(name: &str) -> String {
+    let name: String = name
+        .chars()
+        .map(|letter| if letter.is_control() { '_' } else { letter })
+        .take(200)
+        .collect();
+    format!("{BACKDROP_CLASS}{name}")
+}
 
 /// The window class of a hint of the surface with this name.
 pub fn hint_class_of(name: &str) -> String {
@@ -302,7 +378,6 @@ pub fn is_display(wanted: &str, device: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Keyboard, Level};
 
     const DISPLAY: Area = Area {
         x: 0,
@@ -323,6 +398,70 @@ mod tests {
             margin,
             output: None,
         }
+    }
+
+    #[test]
+    fn a_level_is_a_place_below_or_above_the_windows() {
+        let table = [
+            (Level::Background, false, Order::Bottom),
+            (Level::Below, false, Order::Bottom),
+            (Level::Above, false, Order::Topmost),
+            (Level::Overlay, false, Order::Topmost),
+            (Level::Marks, false, Order::Topmost),
+            // A window fills the display: a bar steps down, and only a bar.
+            (Level::Background, true, Order::Bottom),
+            (Level::Below, true, Order::Bottom),
+            (Level::Above, true, Order::Bottom),
+            (Level::Overlay, true, Order::Topmost),
+            (Level::Marks, true, Order::Topmost),
+        ];
+        for (level, covered, order) in table {
+            assert_eq!(order_of(level, covered), order, "{level:?}, {covered}");
+        }
+        assert!(stays_below(Level::Background) && stays_below(Level::Below));
+        assert!(!stays_below(Level::Above) && !stays_below(Level::Overlay));
+        assert!(!stays_below(Level::Marks));
+    }
+
+    #[test]
+    fn an_open_surface_goes_to_any_level_but_to_or_from_marks() {
+        let all = [
+            Level::Background,
+            Level::Below,
+            Level::Above,
+            Level::Overlay,
+            Level::Marks,
+        ];
+        for from in all {
+            for to in all {
+                let marks = from == Level::Marks || to == Level::Marks;
+                assert_eq!(
+                    can_change_level(from, to),
+                    from == to || !marks,
+                    "{from:?} to {to:?}"
+                );
+            }
+        }
+        // What peek does: below the windows, over them, and back.
+        assert!(can_change_level(Level::Below, Level::Overlay));
+        assert!(can_change_level(Level::Overlay, Level::Below));
+    }
+
+    #[test]
+    fn a_surface_without_the_keyboard_and_marks_are_never_the_active_window() {
+        assert!(never_active(Keyboard::Never, Level::Below));
+        assert!(!never_active(Keyboard::OnDemand, Level::Below));
+        assert!(!never_active(Keyboard::Exclusive, Level::Overlay));
+        assert!(never_active(Keyboard::Exclusive, Level::Marks));
+        assert!(never_active(Keyboard::OnDemand, Level::Marks));
+    }
+
+    #[test]
+    fn a_backdrops_window_class_is_no_surfaces() {
+        let class = backdrop_class_of("gevrek-zones");
+        assert_eq!(class, "Gevrek_ShellBackdrop_gevrek-zones");
+        assert!(class.starts_with(CLASS_PREFIX));
+        assert_eq!(name_of(&class), None);
     }
 
     #[test]
@@ -512,6 +651,26 @@ mod tests {
             settled(Side::Left, answered, 50),
             Area::new(60, 0, 50, 1080)
         );
+    }
+
+    #[test]
+    fn a_menu_from_a_line_of_another_opens_beside_that_line() {
+        let display = Area::new(0, 0, 1920, 1080);
+        // The line: 224 wide at 500, 300 (of a menu that begins at 494).
+        let line = Area::new(500, 300, 224, 28);
+        // To its right, their tops in line, three pixels over the rim.
+        assert_eq!(beside_line(line, (236, 200), display, -3), Area::new(721, 300, 236, 200));
+        // No room at the right: to the left of the line.
+        let far = Area::new(1650, 300, 224, 28);
+        assert_eq!(beside_line(far, (236, 200), display, -3), Area::new(1417, 300, 236, 200));
+        // No room below: slid up until it ends with the display.
+        let low = Area::new(500, 1000, 224, 28);
+        assert_eq!(beside_line(low, (236, 200), display, -3).y, 880);
+        // On a display that begins elsewhere, and one too narrow for
+        // either side: it stays on the display.
+        let second = Area::new(1920, 0, 400, 600);
+        let there = beside_line(Area::new(2000, 100, 224, 28), (236, 200), second, -3);
+        assert!(there.x >= 1920 && there.right() <= 2320, "{there:?}");
     }
 
     #[test]

@@ -5,7 +5,7 @@
 //! last its letters in order with others between.
 
 use crate::ids::{ItemId, ZoneId};
-use crate::item::Item;
+use crate::item::{Item, ItemKind};
 use crate::layout::compare_names;
 use serde::{Deserialize, Serialize};
 
@@ -53,6 +53,14 @@ pub struct Hit {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zone: Option<ZoneId>,
     pub score: u32,
+    /// The zones that fill themselves and show it as well.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub also_in: Vec<ZoneId>,
+    #[serde(default)]
+    pub kind: ItemKind,
+    /// Where it is in the file system, for what is there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 /// The items that fit what was typed, the best first; equally good ones
@@ -72,6 +80,9 @@ pub fn search<'a>(
                 name: item.name.clone(),
                 zone: zone.cloned(),
                 score: score(&item.name, typed)?,
+                also_in: Vec::new(),
+                kind: item.kind,
+                path: item.path.clone(),
             })
         })
         .collect();

@@ -16,6 +16,7 @@ pub enum Page {
     Animations,
     Wallpaper,
     Bar,
+    Zones,
     Bindings,
     Gestures,
     Rules,
@@ -75,7 +76,7 @@ impl Page {
         matches!(self, Page::Bindings | Page::Events | Page::Log | Page::Raw)
     }
 
-    pub const ALL: [Page; 26] = [
+    pub const ALL: [Page; 27] = [
         Page::Overview,
         Page::Displays,
         Page::Workspaces,
@@ -83,6 +84,7 @@ impl Page {
         Page::Animations,
         Page::Wallpaper,
         Page::Bar,
+        Page::Zones,
         Page::Bindings,
         Page::Gestures,
         Page::Rules,
@@ -114,6 +116,7 @@ impl Page {
             Page::Animations => "animations",
             Page::Wallpaper => "wallpaper",
             Page::Bar => "bar",
+            Page::Zones => "zones",
             Page::Bindings => "bindings",
             Page::Gestures => "gestures",
             Page::Rules => "rules",
@@ -149,6 +152,7 @@ impl Page {
             Page::Animations => "Animations",
             Page::Wallpaper => "Wallpaper",
             Page::Bar => "Panel",
+            Page::Zones => "Zones on the desktop",
             Page::Bindings => "Key bindings",
             Page::Gestures => "Mouse and gestures",
             Page::Rules => "Window rules",
@@ -180,11 +184,12 @@ impl Page {
             Page::Animations => "How windows and workspaces move.",
             Page::Wallpaper => "The picture, or the colour, behind the windows. A display can have its own.",
             Page::Bar => "The panel at the edge of each display, and what stands on it.",
+            Page::Zones => "Containers on the desktop that hold its icons: the zones there are, the rules that sort items into them, and how they look. (Not the places windows snap to.)",
             Page::Bindings => "What the keys do.",
             Page::Gestures => "What the corners of a display do, and touchpad gestures.",
             Page::Rules => "What happens to a window when it opens, by what it is.",
             Page::Scratchpads => "Programs that come and go on a key.",
-            Page::SnapZones => "Places on a display that windows snap to.",
+            Page::SnapZones => "Places on a display that windows snap to. (Not the zones that hold the desktop's icons: those are Zones on the desktop.)",
             Page::Focus => "Which window has the keyboard, and when that changes.",
             Page::Input => "Keyboard layouts, mouse and touchpad.",
             Page::Startup => "Programs started with the session.",
@@ -211,6 +216,7 @@ impl Page {
             Page::Animations => icons::WAVE_SINE,
             Page::Wallpaper => icons::IMAGE,
             Page::Bar => icons::ROWS,
+            Page::Zones => icons::FOLDERS,
             Page::Bindings => icons::KEYBOARD,
             Page::Gestures => icons::HAND_SWIPE_RIGHT,
             Page::Rules => icons::FUNNEL,
@@ -242,7 +248,8 @@ impl Page {
             | Page::Appearance
             | Page::Animations
             | Page::Wallpaper
-            | Page::Bar => "Desktop",
+            | Page::Bar
+            | Page::Zones => "Desktop",
             Page::Bindings
             | Page::Gestures
             | Page::Rules
@@ -385,6 +392,37 @@ impl Page {
             "/desktop/snap_zones",
             Show::Rest(&["default_layout", "monitor_layouts"]),
         )];
+        // (The zones of the desktop, which hold its icons. The switch
+        // first, then what there is to make: the zones and the rules, each
+        // drawn by the page of its own, `crate::zones_page`. Then how all
+        // of them look and behave. The last card takes whatever the
+        // section holds that the others do not name, so that a setting
+        // the model gains is on the page at once.)
+        const ZONES: &[Card] = &[
+            card("Zones on the desktop", "/desktop/zones", Show::Only(&["enabled"])),
+            card("The zones", "/desktop/zones/zones", Show::Place),
+            card(
+                "Rules that sort the desktop",
+                "/desktop/zones",
+                Show::Only(&["rules", "catch_all", "rules_on_arrival", "timed_rules"]),
+            ),
+            card("How every zone looks", "/desktop/zones/look", Show::AllBut(&[])),
+            card("Moving and sizing a zone", "/desktop/zones/snap", Show::AllBut(&[])),
+            card(
+                "How they behave",
+                "/desktop/zones",
+                Show::AllBut(&[
+                    "enabled",
+                    "zones",
+                    "rules",
+                    "catch_all",
+                    "rules_on_arrival",
+                    "timed_rules",
+                    "look",
+                    "snap",
+                ]),
+            ),
+        ];
         const FOCUS: &[Card] = &[card("Focus", "/desktop/focus", Show::AllBut(&[]))];
         const INPUT: &[Card] = &[
             // (Its layouts are chosen by name in the card above.)
@@ -435,6 +473,7 @@ impl Page {
             Page::Rules => RULES,
             Page::Scratchpads => SCRATCHPADS,
             Page::SnapZones => SNAP_ZONES,
+            Page::Zones => ZONES,
             Page::Focus => FOCUS,
             Page::Input => INPUT,
             Page::Startup => STARTUP,
@@ -505,12 +544,6 @@ mod tests {
         {
             // Written by gevrek, not set by a person.
             if setting.pointer == "/desktop/schema_version" {
-                continue;
-            }
-            // The zones of the desktop are switched off and have nothing
-            // to show them yet; their page comes with what draws them.
-            if setting.pointer.starts_with("/desktop/zones/") {
-                assert!(Page::ALL.into_iter().all(|page| !page.shows(&setting.pointer)));
                 continue;
             }
             let pages: Vec<Page> = Page::ALL

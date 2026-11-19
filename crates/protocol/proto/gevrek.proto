@@ -82,7 +82,7 @@ service WindowManager {
   rpc AttachZones(stream ZonesReport) returns (stream ZonesRequest);
 
   // How the zones are, as the shell last reported it.
-  rpc GetZonesState(Empty) returns (ZonesStateResponse);
+  rpc GetZonesState(ZonesStateRequest) returns (ZonesStateResponse);
 
   // Ask something of the zones and wait for the shell's answer.
   rpc SendZonesCommand(ZonesCommandDocument) returns (ZonesCommandReply);
@@ -812,6 +812,16 @@ message MonitorInfo {
   // (`GSM-5B7F-0004E2A1`: maker, product code, serial number);
   // `port:<connector>` for a display without one.
   string stable_id = 15;
+  // As in MonitorOverlayData.
+  Sides zones_room = 16;
+}
+
+// So much at each side of a rectangle, in the units of that rectangle.
+message Sides {
+  int32 left = 1;
+  int32 top = 2;
+  int32 right = 3;
+  int32 bottom = 4;
 }
 
 message Size {
@@ -962,6 +972,11 @@ message MonitorOverlayData {
   repeated OutputModeInfo modes = 22;
   // As in MonitorInfo.
   string stable_id = 23;
+  // How much of what the work area leaves free at each side is the room
+  // the shell's zones keep (those that reserve), as it was taken off for
+  // this very work area, in its units. The rest of the room at a side is
+  // the panel's and the system's. Absent or all 0: none.
+  Sides zones_room = 24;
 }
 
 // One mode a display offers.
@@ -1080,6 +1095,19 @@ message ZonesRequest {
   uint32 version = 2;
   // A zones command (`{"command": "quick_hide"}`).
   string json = 3;
+}
+
+// What of the zones' state is asked for. Empty asks for all of it, and
+// is what an older client sends (it sent `Empty`).
+message ZonesStateRequest {
+  // Leave the items out: each zone keeps its `item_count`, the loose
+  // items become `loose_count`. A desktop of thousands of items makes a
+  // snapshot of a megabyte, and a status bar wants the zones only.
+  bool without_items = 1;
+  // Only this zone, by its id, with its items (unless they are left
+  // out). The other zones are not in the answer; one that is not there
+  // leaves `zones` empty.
+  string zone = 2;
 }
 
 message ZonesStateResponse {

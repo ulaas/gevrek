@@ -612,7 +612,7 @@
       "monitor_layouts": []
     },
     "zones": {
-      "enabled": false,
+      "enabled": true,
       "zones": [],
       "rules": [],
       "catch_all": null,
@@ -625,13 +625,211 @@
         "blur": null,
         "corner_radius": null,
         "title_colour": null,
-        "title_on_hover": null
+        "title_on_hover": null,
+        "title_bar": null,
+        "labels": null,
+        "icon_tint": null,
+        "icon_saturation": null
       },
       "snap": {
         "enabled": true,
         "distance": 12,
         "gap": 8,
         "grid": 0
+      },
+      "roll_up": {
+        "expand_on": "hover",
+        "expand_delay_ms": 150,
+        "collapse_delay_ms": 400
+      },
+      "lock": {
+        "geometry": false,
+        "members": false
+      },
+      "privacy": {
+        "everything": false,
+        "when_shared": "private"
+      },
+      "timed_rules": {
+        "every_minutes": 60,
+        "move_files": false
+      },
+      "gestures": {
+        "double_middle_click": "grey_icons"
+      },
+      "auto": {
+        "min_items": 2,
+        "add_rules": true,
+        "categories": [
+          {
+            "id": "folders",
+            "title": "Folders",
+            "extensions": [],
+            "mime_prefixes": [],
+            "kinds": [
+              "folder"
+            ]
+          },
+          {
+            "id": "programs",
+            "title": "Programs",
+            "extensions": [
+              "lnk",
+              "url",
+              "exe",
+              "msi",
+              "bat",
+              "cmd",
+              "desktop",
+              "appimage"
+            ],
+            "mime_prefixes": [],
+            "kinds": [
+              "shortcut",
+              "launcher"
+            ]
+          },
+          {
+            "id": "documents",
+            "title": "Documents",
+            "extensions": [
+              "pdf",
+              "doc",
+              "docx",
+              "odt",
+              "rtf",
+              "txt",
+              "md",
+              "xls",
+              "xlsx",
+              "ods",
+              "csv",
+              "ppt",
+              "pptx",
+              "odp",
+              "epub"
+            ],
+            "mime_prefixes": [
+              "text/",
+              "application/pdf",
+              "application/msword",
+              "application/vnd."
+            ],
+            "kinds": []
+          },
+          {
+            "id": "pictures",
+            "title": "Pictures",
+            "extensions": [
+              "png",
+              "jpg",
+              "jpeg",
+              "gif",
+              "webp",
+              "bmp",
+              "svg",
+              "tif",
+              "tiff",
+              "heic",
+              "ico"
+            ],
+            "mime_prefixes": [
+              "image/"
+            ],
+            "kinds": []
+          },
+          {
+            "id": "video",
+            "title": "Video",
+            "extensions": [
+              "mp4",
+              "mkv",
+              "mov",
+              "avi",
+              "webm",
+              "wmv",
+              "m4v"
+            ],
+            "mime_prefixes": [
+              "video/"
+            ],
+            "kinds": []
+          },
+          {
+            "id": "audio",
+            "title": "Audio",
+            "extensions": [
+              "mp3",
+              "flac",
+              "wav",
+              "ogg",
+              "m4a",
+              "aac",
+              "opus",
+              "wma"
+            ],
+            "mime_prefixes": [
+              "audio/"
+            ],
+            "kinds": []
+          },
+          {
+            "id": "archives",
+            "title": "Archives",
+            "extensions": [
+              "zip",
+              "7z",
+              "rar",
+              "tar",
+              "gz",
+              "bz2",
+              "xz",
+              "zst",
+              "iso",
+              "cab"
+            ],
+            "mime_prefixes": [],
+            "kinds": []
+          },
+          {
+            "id": "code",
+            "title": "Code",
+            "extensions": [
+              "rs",
+              "py",
+              "js",
+              "ts",
+              "c",
+              "h",
+              "cpp",
+              "hpp",
+              "cs",
+              "java",
+              "go",
+              "rb",
+              "php",
+              "sh",
+              "ps1",
+              "json",
+              "toml",
+              "yaml",
+              "yml",
+              "xml",
+              "html",
+              "css",
+              "sql"
+            ],
+            "mime_prefixes": [],
+            "kinds": []
+          },
+          {
+            "id": "other",
+            "title": "Other",
+            "extensions": [],
+            "mime_prefixes": [],
+            "kinds": []
+          }
+        ]
       }
     },
     "startup": [],
@@ -1190,6 +1388,46 @@
         "command": {
           "command": "shell",
           "action": "brightness_down"
+        }
+      },
+      {
+        "name": "Zones above the windows, or back",
+        "enabled": true,
+        "key": "Z",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "toggle_peek"
+          }
+        }
+      },
+      {
+        "name": "Hide or show the zones",
+        "enabled": true,
+        "key": "Z",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "quick_hide"
+          }
         }
       },
       {

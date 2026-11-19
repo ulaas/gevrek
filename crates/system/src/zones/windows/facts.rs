@@ -106,14 +106,50 @@ pub const RECYCLE_BIN: &str = "::{645FF040-5081-101B-9F08-00AA002F954E}";
 /// and more): that is where its tree of folders begins. Which of them lie
 /// on the desktop as icons is a setting ("Desktop icon settings"), kept
 /// in the registry per class: 1 for hidden, 0 for shown, the person's own
-/// value (`user`) before the machine's (`machine`). A thing neither says
-/// anything about is not shown, except the Recycle Bin, which is there
-/// unless it is switched off.
-pub fn shown_on_desktop(id: &str, user: Option<u32>, machine: Option<u32>) -> bool {
+/// value (`user`) before the machine's (`machine`). Where neither says
+/// anything, a thing is shown when it is the Recycle Bin (which is there
+/// unless it is switched off) or one a program of its own put there
+/// (`registered`: it stands under Explorer's `Desktop\NameSpace` key,
+/// and is none of Windows' own places, which stand there too and are
+/// shown by the setting alone).
+pub fn shown_on_desktop(id: &str, user: Option<u32>, machine: Option<u32>, registered: bool) -> bool {
     match user.or(machine) {
         Some(hidden) => hidden == 0,
-        None => id.eq_ignore_ascii_case(RECYCLE_BIN),
+        None => id.eq_ignore_ascii_case(RECYCLE_BIN) || registered && !of_windows(id),
     }
+}
+
+/// The places of Windows' own that stand directly under the desktop in
+/// the shell's namespace and are registered there like a program's
+/// thing, but lie on the desktop only when "Desktop icon settings" (or
+/// the registry value behind it) says so: This PC, the person's folder,
+/// Network, Control Panel, Libraries, and the roots Explorer's tree got
+/// later (Home, Gallery, OneDrive, removable drives, Linux, and others).
+const OF_WINDOWS: [&str; 20] = [
+    "{20D04FE0-3AEA-1069-A2D8-08002B30309D}",
+    "{59031A47-3F72-44A7-89C5-5595FE6B30EE}",
+    "{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}",
+    "{208D2C60-3AEA-1069-A2D7-08002B30309D}",
+    "{5399E694-6CE5-4D6C-8FCE-1D8870FDCBA0}",
+    "{26EE0668-A00A-44D7-9371-BEB064C98683}",
+    "{21EC2020-3AEA-1069-A2DD-08002B30309D}",
+    "{031E4825-7B94-4DC3-B131-E946B44C8DD5}",
+    "{F874310E-B6B7-47DC-BC84-B9E6B38F5903}",
+    "{E88865EA-0E1C-4E20-9AA6-EDCD0212C87C}",
+    "{018D5C66-4533-4307-9B53-224DE2ED1FE6}",
+    "{B2B4A4D1-2754-4140-A2EB-9A76D9D7CDC6}",
+    "{B4FB3F98-C1EA-428D-A78A-D1F5659CBA93}",
+    "{450D8FBA-AD25-11D0-98A8-0800361B1103}",
+    "{1CF1260C-4DD0-4EBB-811F-33C572699FDE}",
+    "{679F85CB-0220-4080-B29B-5540CC05AAB6}",
+    "{3936E9E4-D92C-4EEE-A85A-BC16D5EA0819}",
+    "{04731B67-D933-450A-90E6-4ACD2E9408FE}",
+    "{9343812E-1C37-4A49-A12E-4B2D810D956B}",
+    "{871C5380-42A0-1069-A2EA-08002B30309D}",
+];
+
+fn of_windows(id: &str) -> bool {
+    class_of(id).is_some_and(|class| OF_WINDOWS.iter().any(|known| known.eq_ignore_ascii_case(class)))
 }
 
 /// The class of a thing of the shell's that lies directly under the
@@ -196,15 +232,25 @@ mod tests {
     fn what_is_no_file_lies_on_the_desktop_when_the_settings_say_so() {
         let this_pc = "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}";
         // The person's value counts before the machine's.
-        assert!(shown_on_desktop(this_pc, Some(0), Some(1)));
-        assert!(!shown_on_desktop(this_pc, Some(1), Some(0)));
-        assert!(!shown_on_desktop(this_pc, None, Some(1)));
-        assert!(shown_on_desktop(this_pc, None, Some(0)));
+        assert!(shown_on_desktop(this_pc, Some(0), Some(1), false));
+        assert!(!shown_on_desktop(this_pc, Some(1), Some(0), false));
+        assert!(!shown_on_desktop(this_pc, None, Some(1), false));
+        assert!(shown_on_desktop(this_pc, None, Some(0), false));
         // Nothing said: only the Recycle Bin is there.
-        assert!(!shown_on_desktop(this_pc, None, None));
-        assert!(shown_on_desktop(RECYCLE_BIN, None, None));
-        assert!(shown_on_desktop(&RECYCLE_BIN.to_lowercase(), None, None));
-        assert!(!shown_on_desktop(RECYCLE_BIN, Some(1), None));
+        assert!(!shown_on_desktop(this_pc, None, None, false));
+        assert!(shown_on_desktop(RECYCLE_BIN, None, None, true));
+        assert!(shown_on_desktop(&RECYCLE_BIN.to_lowercase(), None, None, false));
+        assert!(!shown_on_desktop(RECYCLE_BIN, Some(1), None, true));
+        // A thing another program registered on the desktop is there
+        // unless it is switched off; Windows' own places are registered
+        // too, and are there only when switched on.
+        let of_a_program = "::{0E270DAA-1BE6-48F2-AC49-960EE002A5BD}";
+        assert!(shown_on_desktop(of_a_program, None, None, true));
+        assert!(!shown_on_desktop(of_a_program, None, None, false));
+        assert!(!shown_on_desktop(of_a_program, Some(1), None, true));
+        assert!(!shown_on_desktop(this_pc, None, None, true));
+        assert!(!shown_on_desktop("::{f874310e-b6b7-47dc-bc84-b9e6b38f5903}", None, None, true));
+        assert!(shown_on_desktop(this_pc, Some(0), None, true));
 
         assert_eq!(class_of(this_pc), Some("{20D04FE0-3AEA-1069-A2D8-08002B30309D}"));
         assert_eq!(class_of("::{A}\\::{B}"), None);

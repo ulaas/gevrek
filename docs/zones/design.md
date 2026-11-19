@@ -191,6 +191,12 @@ No mechanism exists. Proposed: `desktop.zones.enabled`, false by default
 until milestone 3, and the server's capability string `zones_v1`. No cargo
 feature: the code is built and tested on every run of CI.
 
+(As built: `desktop.zones.enabled` was false by default through
+milestone 5 and is **true by default since 2026-11-20**. On Windows that
+puts Explorer's desktop icons away while the shell runs, unless
+`desktop.platform.windows.hide_desktop_icons` is false; a file that says
+`"enabled": false` stays off.)
+
 ## Milestones
 
 As in the brief, with what this repository adds:

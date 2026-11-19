@@ -289,6 +289,13 @@ pub struct Outputs {
     /// Global work-area offset applied to every monitor after the Windows
     /// work area and the per-monitor reservations.
     global_work_area_offset: ReservedArea,
+    /// Room the shell keeps for what it draws on the desktop (zones that
+    /// tiled windows keep off), by the display's lasting id, in the
+    /// lengths of the configuration. Apart from the person's own
+    /// reservations above, which it must not overwrite; taken off after
+    /// the panel's room. Empty where the shell's surfaces ask the
+    /// compositor for their room themselves (`shell_room.rs`).
+    shell_room: HashMap<String, ReservedArea>,
     /// Monitor index preferences: stable display name → desired index in
     /// the ordered monitor ring, applied after discovery ordering.
     index_preferences: Vec<(String, usize)>,
@@ -373,6 +380,29 @@ impl Outputs {
         monitor: MonitorHandle,
         desktop: &dyn crate::contract::Desktop,
     ) -> Option<Rect> {
+        self.work_area_and_shell_room(monitor, desktop)
+            .map(|(work_area, _)| work_area)
+    }
+
+    /// How much the shell's room takes off each side of a display's work
+    /// area, in the work area's own units (pixels where displays are
+    /// measured in them), and never more than was there to take: what
+    /// [`Outputs::get_adjusted_work_area`] is smaller by for it.
+    pub fn shell_room_taken(
+        &self,
+        monitor: MonitorHandle,
+        desktop: &dyn crate::contract::Desktop,
+    ) -> ReservedArea {
+        self.work_area_and_shell_room(monitor, desktop)
+            .map_or(ReservedArea::default(), |(_, taken)| taken)
+    }
+
+    /// The work area of an output, and what the shell's room took of it.
+    fn work_area_and_shell_room(
+        &self,
+        monitor: MonitorHandle,
+        desktop: &dyn crate::contract::Desktop,
+    ) -> Option<(Rect, ReservedArea)> {
         // The bar's place comes from the configuration (`set_bar`), so it is
         // free before the bar is there.
         let mut work_area = self.work_area_excluding_overlays(monitor, &[])?;
@@ -394,7 +424,55 @@ impl Outputs {
                 work_area.height -= reserved;
             }
         }
-        Some(work_area)
+        // What the shell keeps for its zones, from the sides of what the
+        // panel leaves (as many pixels as it is on this display).
+        let room = self.shell_room_of(monitor);
+        let left = ReservedArea {
+            left: self.bar_pixels(monitor, room.left),
+            top: self.bar_pixels(monitor, room.top),
+            right: self.bar_pixels(monitor, room.right),
+            bottom: self.bar_pixels(monitor, room.bottom),
+        }
+        .apply_to(work_area);
+        let taken = ReservedArea {
+            left: left.x - work_area.x,
+            top: left.y - work_area.y,
+            right: work_area.x + work_area.width - left.x - left.width,
+            bottom: work_area.y + work_area.height - left.y - left.height,
+        };
+        Some((left, taken))
+    }
+
+    /// The room the shell keeps on a display now, in the lengths of the
+    /// configuration. Nothing for a display it named no room on.
+    pub fn shell_room_of(&self, monitor: MonitorHandle) -> ReservedArea {
+        self.get_monitor(monitor)
+            .filter(|display| !display.stable_id.is_empty())
+            .and_then(|display| self.shell_room.get(&display.stable_id))
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// The shell keeps this room now, and no other (an empty list gives
+    /// all of it back: the shell is gone, or what it last said is no
+    /// longer to be trusted). Room on a display that is not there is
+    /// kept in mind and counts for nothing until that display comes.
+    /// The answer: the displays whose room is another than it was, which
+    /// are to be laid out again.
+    pub fn set_shell_room(&mut self, rooms: &[crate::shell_room::ShellRoom]) -> Vec<MonitorHandle> {
+        let before: Vec<(MonitorHandle, ReservedArea)> = self
+            .monitors
+            .keys()
+            .map(|handle| (*handle, self.shell_room_of(*handle)))
+            .collect();
+        self.shell_room = crate::shell_room::by_display(rooms);
+        let mut changed: Vec<MonitorHandle> = before
+            .into_iter()
+            .filter(|(handle, room)| self.shell_room_of(*handle) != *room)
+            .map(|(handle, _)| handle)
+            .collect();
+        changed.sort_by_key(|handle| handle.0);
+        changed
     }
 
     /// Whether the bar's place is kept now: the configuration has a bar, and
@@ -572,6 +650,7 @@ impl Outputs {
             bar_expected_until: None,
             panel_seen: false,
             global_work_area_offset: ReservedArea::default(),
+            shell_room: HashMap::new(),
             index_preferences: Vec::new(),
             detached: HashMap::new(),
         }
@@ -1794,6 +1873,132 @@ mod tests {
             manager.get_configured_work_area(handle),
             Some(Rect::new(120, 80, 1700, 1000))
         );
+    }
+
+    fn shell_room(display: &str, side: crate::shell_room::Side, depth: i32) -> crate::shell_room::ShellRoom {
+        crate::shell_room::ShellRoom {
+            display: display.to_string(),
+            side,
+            depth,
+        }
+    }
+
+    /// Two displays with lasting ids, the second at one and a half.
+    fn two_displays() -> Outputs {
+        let mut outputs = Outputs::new();
+        let mut first = named(1, "Monitor A", "DP-1", 0);
+        first.stable_id = "edid:DEL-A1".to_string();
+        let mut second = named(2, "Monitor B", "DP-2", 1920);
+        second.stable_id = "edid:SAM-B2".to_string();
+        second.dpi_scale = 1.5;
+        outputs.set_monitors_only(vec![first, second]);
+        outputs
+    }
+
+    #[test]
+    fn room_the_shell_keeps_is_taken_off_the_display_it_names_and_given_back() {
+        use crate::shell_room::Side;
+        let desktop = crate::testing::FakeDesktop::new(MonitorHandle(1));
+        let mut outputs = two_displays();
+        let (first, second) = (MonitorHandle(1), MonitorHandle(2));
+        let whole = |outputs: &Outputs, monitor| outputs.get_adjusted_work_area(monitor, &desktop).unwrap();
+        let (first_whole, second_whole) = (whole(&outputs, first), whole(&outputs, second));
+
+        // A zone at the right of the second display: that display's
+        // windows keep off it, and the first is as it was.
+        let changed = outputs.set_shell_room(&[shell_room("edid:SAM-B2", Side::Right, 280)]);
+        assert_eq!(changed, [second]);
+        assert_eq!(whole(&outputs, first), first_whole);
+        let kept = whole(&outputs, second);
+        assert_eq!((kept.x, kept.y, kept.height), (second_whole.x, second_whole.y, second_whole.height));
+        assert_eq!(kept.width, second_whole.width - 280);
+        assert_eq!(outputs.shell_room_of(second).right, 280);
+        // What was taken is said, for the shell to read back.
+        assert_eq!(
+            outputs.shell_room_taken(second, &desktop),
+            ReservedArea {
+                right: 280,
+                ..ReservedArea::default()
+            }
+        );
+        assert_eq!(outputs.shell_room_taken(first, &desktop), ReservedArea::default());
+
+        // The same told again changes nothing; another side does.
+        assert!(outputs
+            .set_shell_room(&[shell_room("edid:SAM-B2", Side::Right, 280)])
+            .is_empty());
+        let changed = outputs.set_shell_room(&[
+            shell_room("edid:SAM-B2", Side::Right, 280),
+            shell_room("edid:DEL-A1", Side::Top, 96),
+        ]);
+        assert_eq!(changed, [first]);
+        let kept = whole(&outputs, first);
+        assert_eq!((kept.y, kept.height), (first_whole.y + 96, first_whole.height - 96));
+
+        // The shell is gone, or what it said is stale: all given back.
+        let changed = outputs.set_shell_room(&[]);
+        assert_eq!(changed, [first, second]);
+        assert_eq!(whole(&outputs, first), first_whole);
+        assert_eq!(whole(&outputs, second), second_whole);
+    }
+
+    #[test]
+    fn room_on_a_display_that_is_not_there_counts_for_nothing() {
+        use crate::shell_room::Side;
+        let desktop = crate::testing::FakeDesktop::new(MonitorHandle(1));
+        let mut outputs = two_displays();
+        let before: Vec<Rect> = [1, 2]
+            .map(|handle| outputs.get_adjusted_work_area(MonitorHandle(handle), &desktop).unwrap())
+            .to_vec();
+        let changed = outputs.set_shell_room(&[
+            shell_room("edid:GONE-9", Side::Left, 400),
+            shell_room("", Side::Top, 400),
+        ]);
+        assert!(changed.is_empty());
+        let after: Vec<Rect> = [1, 2]
+            .map(|handle| outputs.get_adjusted_work_area(MonitorHandle(handle), &desktop).unwrap())
+            .to_vec();
+        assert_eq!(after, before);
+        // A display without a lasting id is never the one that is meant.
+        let mut nameless = Outputs::new();
+        nameless.set_monitors_only(vec![named(1, "Monitor A", "DP-1", 0)]);
+        assert!(nameless.set_shell_room(&[shell_room("", Side::Top, 400)]).is_empty());
+        assert_eq!(nameless.shell_room_of(MonitorHandle(1)), ReservedArea::default());
+    }
+
+    #[test]
+    fn the_shells_room_lies_inside_the_panels_and_is_as_many_pixels_as_the_display_makes_it() {
+        use crate::shell_room::Side;
+        use gevrek_model::settings::PanelProfile;
+        let desktop = crate::testing::FakeDesktop::new(MonitorHandle(1));
+        let mut outputs = two_displays();
+        outputs.set_bar(Some(PanelProfile::default()));
+        outputs.set_panel_seen(true);
+        let (first, second) = (MonitorHandle(1), MonitorHandle(2));
+        let with_panel = outputs.get_adjusted_work_area(first, &desktop).unwrap();
+        outputs.set_shell_room(&[
+            shell_room("edid:DEL-A1", Side::Top, 100),
+            shell_room("edid:SAM-B2", Side::Left, 100),
+        ]);
+        // From the side of what the panel leaves, not from the display's.
+        let kept = outputs.get_adjusted_work_area(first, &desktop).unwrap();
+        assert_eq!(kept.y, with_panel.y + 100);
+        assert_eq!(kept.height, with_panel.height - 100);
+        // Where displays are measured in their own pixels, a hundred of
+        // the configuration's are a hundred and fifty on the second.
+        let logical = outputs.get_adjusted_work_area(second, &desktop).unwrap();
+        outputs.set_lengths_in_display_pixels(true);
+        let pixels = outputs.get_adjusted_work_area(second, &desktop).unwrap();
+        assert_eq!(logical.x, 1920 + 100);
+        assert_eq!(pixels.x, 1920 + 150);
+        // (Said in the work area's units: pixels there.)
+        assert_eq!(outputs.shell_room_taken(second, &desktop).left, 150);
+        // Never more than leaves the windows a pixel.
+        outputs.set_shell_room(&[shell_room("edid:DEL-A1", Side::Left, 100_000)]);
+        let least = outputs.get_adjusted_work_area(first, &desktop).unwrap();
+        assert!(least.width >= 1 && least.height >= 1);
+        // And no more is said to be taken than was there.
+        assert_eq!(outputs.shell_room_taken(first, &desktop).left, 1920 - least.width);
     }
 
     #[test]

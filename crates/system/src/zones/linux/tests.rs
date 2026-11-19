@@ -189,7 +189,11 @@ fn the_desktop_is_listed_with_what_rules_ask_about() {
     assert_eq!(listed.len(), 1);
     let gone = Location::Directory { path: session.path("Nowhere") };
     assert!(matches!(session.backend.list(&gone), Err(BackendError::NotFound { .. })));
-    assert!(matches!(session.backend.watch(&gone), Err(BackendError::NotFound { .. })));
+    // Watched, it is told as away instead (see the test of that), and
+    // listing it goes nowhere.
+    let watching = session.backend.watch(&gone).expect("watched");
+    assert_eq!(session.backend.list(&gone).expect("known"), []);
+    session.backend.unwatch(watching);
     assert_eq!(session.backend.facts(&session.id("nothing.txt")), None);
     session.end();
 }
@@ -597,4 +601,448 @@ fn the_core_runs_on_the_backend_through_the_host() {
     assert!(known(&core, &session.id("new.txt")));
     host.stop(&mut session.backend);
     session.end();
+}
+
+impl Session {
+    /// Drain until `wanted` holds of everything told so far (kept in
+    /// `all`). The wait ends when the backend wakes its host.
+    fn until(&mut self, all: &mut Vec<BackendEvent>, wanted: impl Fn(&[BackendEvent]) -> bool) {
+        let end = std::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            all.extend(self.backend.drain_events());
+            if wanted(all) {
+                return;
+            }
+            let left = end.saturating_duration_since(std::time::Instant::now());
+            assert!(!left.is_zero(), "not told in time; told so far: {:?}", said(all));
+            let _ = self.woken.recv_timeout(left);
+        }
+    }
+}
+
+/// The names in the listing of `at` that was told last; nothing in it
+/// where the last word was that the folder is away.
+fn last_listing(all: &[BackendEvent], at: &Location) -> Option<Vec<String>> {
+    all.iter().rev().find_map(|event| match event {
+        BackendEvent::Listed { location, items } if location == at => {
+            Some(items.iter().map(|item| item.name.clone()).collect())
+        }
+        BackendEvent::ListingFailed { location, .. } if location == at => Some(Vec::new()),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_watched_folder_is_read_off_this_thread_and_followed_when_it_goes_and_comes() {
+    let mut session = session("backend-portal");
+    let shown = session.root.join("deep/shown");
+    let at = Location::Directory { path: text(&shown) };
+    let mut all = Vec::new();
+
+    // Not there yet: watched all the same, and told as away.
+    let watch = session.backend.watch(&at).expect("watched");
+    assert_eq!(session.backend.list(&at).expect("known"), []);
+    session.until(&mut all, |all| all.iter().any(|event| matches!(event, BackendEvent::ListingFailed { location, .. } if location == &at)));
+    assert_eq!(session.backend.unreachable().len(), 1);
+
+    // Made one step at a time: followed down, and told whole.
+    std::fs::create_dir(session.root.join("deep")).expect("made");
+    std::fs::create_dir(&shown).expect("made");
+    write(&shown.join("a.txt"), "a");
+    session.until(&mut all, |all| {
+        last_listing(all, &at) == Some(vec!["a.txt".to_string()])
+            || all.iter().any(|event| matches!(event, BackendEvent::ItemAdded { item, .. } if item.name == "a.txt"))
+    });
+    assert_eq!(session.backend.unreachable(), []);
+    assert_eq!(session.backend.list(&at).expect("listed").len(), 1);
+    // What changes in it is told as for any folder.
+    write(&shown.join("b.txt"), "b");
+    session.until(&mut all, |all| all.iter().any(|event| matches!(event, BackendEvent::ItemAdded { item, .. } if item.name == "b.txt")));
+
+    // Moved away: nothing is in it any more.
+    all.clear();
+    std::fs::rename(&shown, session.root.join("deep/elsewhere")).expect("renamed");
+    session.until(&mut all, |all| all.iter().any(|event| matches!(event, BackendEvent::ListingFailed { location, .. } if location == &at)));
+    assert_eq!(session.backend.unreachable().len(), 1);
+    // What happens where it went is nobody's business here.
+    write(&session.root.join("deep/elsewhere/c.txt"), "c");
+
+    // Another folder of that name, with other things in it.
+    all.clear();
+    std::fs::create_dir(&shown).expect("made");
+    write(&shown.join("new.txt"), "new");
+    session.until(&mut all, |all| {
+        last_listing(all, &at) == Some(vec!["new.txt".to_string()])
+            || all.iter().any(|event| matches!(event, BackendEvent::ItemAdded { item, .. } if item.name == "new.txt"))
+    });
+    assert!(!said(&all).iter().any(|word| word.contains("c.txt")), "{:?}", said(&all));
+
+    // Deleted with everything in it; asked to try again while it is
+    // away, it is still away.
+    all.clear();
+    std::fs::remove_dir_all(&shown).expect("removed");
+    session.until(&mut all, |all| all.iter().any(|event| matches!(event, BackendEvent::ListingFailed { .. })));
+    all.clear();
+    assert!(session.backend.begin_listing(&at));
+    session.until(&mut all, |all| all.iter().any(|event| matches!(event, BackendEvent::ListingFailed { .. })));
+
+    // A folder nobody watches is read once, off this thread too.
+    let other = Location::Directory { path: session.path("Folder") };
+    assert!(session.backend.begin_listing(&other));
+    session.until(&mut all, |all| last_listing(all, &other) == Some(Vec::new()));
+    let nowhere = Location::Directory { path: session.path("Nowhere") };
+    assert!(session.backend.begin_listing(&nowhere));
+    session.until(&mut all, |all| {
+        all.iter().any(|event| matches!(event, BackendEvent::ListingFailed { location, error: BackendError::NotFound { .. } } if location == &nowhere))
+    });
+    // The desktop is this machine's own and is listed at once.
+    assert!(!session.backend.begin_listing(&Location::Desktop));
+    session.backend.unwatch(watch);
+    session.end();
+}
+
+#[test]
+fn a_folder_that_does_not_answer_holds_nobody_and_is_shown_when_it_does() {
+    let mut session = session("backend-slow");
+    let shown = session.path("Folder");
+    write(&Path::new(&shown).join("inner.txt"), "x");
+    let at = Location::Directory { path: shown.clone() };
+    // A mount that takes its time: the going to it waits until the test
+    // lets it through.
+    let (let_through, gate) = std::sync::mpsc::channel::<()>();
+    let gate = Mutex::new(gate);
+    session.backend.set_reach(portal::How {
+        patience: Duration::from_millis(100),
+        reach: Box::new(move |path| {
+            let _ = gate.lock().expect("the gate").recv();
+            path.is_dir()
+        }),
+    });
+    let asked = std::time::Instant::now();
+    session.backend.watch(&at).expect("watched");
+    assert_eq!(session.backend.list(&at).expect("known"), []);
+    assert!(asked.elapsed() < Duration::from_millis(50), "{:?}", asked.elapsed());
+    let mut all = Vec::new();
+    session.until(&mut all, |all| {
+        all.iter().any(|event| matches!(event, BackendEvent::ListingFailed { error: BackendError::NotFound { what }, .. } if what.contains("does not answer")))
+    });
+    assert_eq!(session.backend.unreachable().len(), 1);
+    drop(let_through);
+    session.until(&mut all, |all| last_listing(all, &at) == Some(vec!["inner.txt".to_string()]));
+    assert_eq!(session.backend.unreachable(), []);
+    session.end();
+}
+
+/// A folder of five thousand files: the caller is not held, and the
+/// listing comes in one piece. How long it took is printed (and written
+/// into the notes); only a bound far above it is asserted.
+#[test]
+fn five_thousand_files_are_listed_without_holding_the_caller() {
+    let mut session = session("backend-many");
+    let many = session.root.join("many");
+    std::fs::create_dir_all(&many).expect("made");
+    for number in 0..5000 {
+        std::fs::write(many.join(format!("file {number:04}.txt")), b"x").expect("written");
+    }
+    let at = Location::Directory { path: text(&many) };
+    let asked = std::time::Instant::now();
+    session.backend.watch(&at).expect("watched");
+    let held = asked.elapsed();
+    let mut all = Vec::new();
+    session.until(&mut all, |all| last_listing(all, &at).is_some_and(|names| names.len() == 5000));
+    let took = asked.elapsed();
+    println!("5000 files: the caller was held {held:?}; listed after {took:?}");
+    assert!(held < Duration::from_millis(100), "{held:?}");
+    assert!(took < Duration::from_secs(60), "{took:?}");
+    session.end();
+}
+
+#[test]
+fn recent_files_and_downloads_are_told_whole_from_the_sessions_own_folders() {
+    let mut session = session("backend-smart");
+    let mut all = Vec::new();
+    let listed = |all: &[BackendEvent], of: &SmartSource| -> Option<Vec<String>> {
+        all.iter().rev().find_map(|event| match event {
+            BackendEvent::SourceListed { source, items } if source == of => {
+                Some(items.iter().map(|item| item.name.clone()).collect())
+            }
+            _ => None,
+        })
+    };
+    assert_eq!(session.backend.watch_source(&SmartSource::Desktop), Err(BackendError::Unsupported));
+    assert_eq!(
+        session.backend.list_source(&SmartSource::Folder { directory: session.path("Folder") }),
+        Err(BackendError::Unsupported)
+    );
+
+    // Recent files: no record yet, so none.
+    let data = session.backend.system().places.data_home.clone();
+    std::fs::create_dir_all(&data).expect("folders");
+    let recent = session.backend.watch_source(&SmartSource::Recent).expect("watched");
+    session.until(&mut all, |all| listed(all, &SmartSource::Recent) == Some(Vec::new()));
+    // A program writes the record anew (beside it, then in its place,
+    // as GTK does): the list follows.
+    let record = format!(
+        "<xbel>\n<bookmark href=\"{}\" visited=\"2026-11-19T09:00:00Z\"/>\n<bookmark href=\"{}\" visited=\"2026-11-18T09:00:00Z\"/>\n</xbel>\n",
+        session.id("çay ☕.txt"),
+        session.id("a.txt"),
+    );
+    write(&data.join("recently-used.xbel.tmp"), &record);
+    std::fs::rename(data.join("recently-used.xbel.tmp"), data.join("recently-used.xbel")).expect("in place");
+    session.until(&mut all, |all| listed(all, &SmartSource::Recent) == Some(vec!["çay ☕.txt".to_string(), "a.txt".to_string()]));
+    let known = session.backend.list_source(&SmartSource::Recent).expect("known");
+    assert_eq!(known[0].facts.accessed, Some(1_795_078_800));
+    assert_eq!(known[0].id, session.id("çay ☕.txt"));
+
+    // Downloads: the folder `user-dirs.dirs` names, the newest first.
+    assert!(matches!(session.backend.watch_source(&SmartSource::Downloads), Err(BackendError::NotFound { .. })));
+    let home = session.backend.system().places.home.clone();
+    write(&home.join(".config/user-dirs.dirs"), "XDG_DOWNLOAD_DIR=\"$HOME/Incoming\"\n");
+    std::fs::create_dir_all(home.join("Incoming")).expect("made");
+    let downloads = session.backend.watch_source(&SmartSource::Downloads).expect("watched");
+    session.until(&mut all, |all| listed(all, &SmartSource::Downloads) == Some(Vec::new()));
+    write(&home.join("Incoming/setup.run"), "#!/bin/sh\n");
+    session.until(&mut all, |all| listed(all, &SmartSource::Downloads) == Some(vec!["setup.run".to_string()]));
+
+    // Let go of, nothing more is told of either.
+    session.backend.unwatch(recent);
+    session.backend.unwatch(downloads);
+    std::thread::sleep(Duration::from_millis(300));
+    let _ = session.backend.drain_events();
+    write(&home.join("Incoming/late.txt"), "late");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!session.backend.drain_events().iter().any(|event| matches!(event, BackendEvent::SourceListed { .. })));
+    session.end();
+}
+
+#[test]
+fn programs_are_items_that_start_or_come_to_the_front() {
+    let mut session = session("backend-programs");
+    let mut all = Vec::new();
+    let listed = |all: &[BackendEvent], of: &SmartSource| -> Option<Vec<String>> {
+        all.iter().rev().find_map(|event| match event {
+            BackendEvent::SourceListed { source, items } if source == of => {
+                Some(items.iter().map(|item| item.id.to_string()).collect())
+            }
+            _ => None,
+        })
+    };
+    // The launcher counted two starts of the viewer; the editor is
+    // pinned. (The programs are the session's own four.)
+    let state = session.backend.system().state.clone();
+    write(&state.join("launcher-usage.json"), r#"{"viewer":2}"#);
+    session.backend.pin_launcher("editor", true).expect("pinned");
+    assert_eq!(session.backend.pinned_launchers(), ["editor"]);
+    session.backend.watch_source(&SmartSource::Pinned).expect("watched");
+    session.until(&mut all, |all| listed(all, &SmartSource::Pinned) == Some(vec!["app:editor".to_string(), "app:viewer".to_string()]));
+    let names: Vec<String> = session.backend.installed_programs().into_iter().map(|item| item.name).collect();
+    assert_eq!(names, ["Browser", "Editor", "Files", "Viewer"]);
+
+    // Opening a launcher starts its program, by the shell's own way.
+    let editor = ItemId::new("app:editor");
+    assert_eq!(session.backend.facts(&editor).and_then(|facts| facts.shortcut_target).as_deref(), Some("editor"));
+    session.backend.open(&editor).expect("started");
+    let launch = session.started.borrow_mut().pop().expect("started");
+    assert_eq!((launch.name.as_str(), launch.program.as_str(), launch.args.len()), ("Editor", "editor", 0));
+    assert!(matches!(session.backend.open(&ItemId::new("app:nothing")), Err(BackendError::NotFound { .. })));
+    assert_eq!(session.backend.open_with(&editor, None), Err(BackendError::Unsupported));
+    assert_eq!(session.backend.context_menu(std::slice::from_ref(&editor), Point { x: 0, y: 0 }), Err(BackendError::Unsupported));
+    assert!(session.backend.start_drag(std::slice::from_ref(&editor), DragActions::ALL).is_err());
+
+    // The programs that run, out of the window manager's state; opening
+    // one is a command for the window manager.
+    session.backend.watch_source(&SmartSource::RunningApps).expect("watched");
+    session.backend.set_wm_state(&serde_json::json!({"monitors": [{"workspaces": [{"detailed_windows": [
+        {"window_id": 31, "title": "a.txt", "app_id": "editor"},
+        {"window_id": 32, "title": "b.txt", "app_id": "editor", "is_focused": true}]}]}]}));
+    session.until(&mut all, |all| listed(all, &SmartSource::RunningApps) == Some(vec!["running:editor".to_string()]));
+    let running = ItemId::new("running:editor");
+    assert_eq!(session.backend.open(&running), Err(BackendError::Unsupported));
+    let (sent, commands) = std::sync::mpsc::channel();
+    session.backend.set_commander(move |command| {
+        let _ = sent.send(command);
+    });
+    session.backend.open(&running).expect("sent");
+    assert_eq!(commands.try_recv().expect("a command"), crate::zones::programs::focus_command(32));
+    session.end();
+}
+
+/// Reading a file for its kind or its small picture is not the person
+/// using it: where the kernel allows, the time of last access stays.
+#[test]
+fn a_file_read_for_the_zones_own_purposes_keeps_its_time_of_last_access() {
+    use std::io::Read;
+    let root = testing::folder("quiet");
+    let file = root.join("read.bin");
+    std::fs::write(&file, vec![7u8; 4096]).expect("written");
+    // Last used long ago, and written before that (so that a kernel
+    // which moves the time only once a day would move it now).
+    let long_ago = std::time::UNIX_EPOCH + Duration::from_secs(1_500_000_000);
+    let times = std::fs::FileTimes::new().set_accessed(long_ago).set_modified(long_ago - Duration::from_secs(60));
+    std::fs::File::options().write(true).open(&file).expect("opened").set_times(times).expect("times");
+    let mut read = Vec::new();
+    open_quietly(&file).expect("opened").read_to_end(&mut read).expect("read");
+    assert_eq!(read.len(), 4096);
+    let accessed = std::fs::metadata(&file).expect("there").accessed().expect("a time");
+    assert_eq!(accessed, long_ago, "reading moved the time of last access");
+    // A file that is not there is said to be not there.
+    assert!(open_quietly(&root.join("gone")).is_err());
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// What rules by "where a shortcut leads" and by type are asked of, on
+/// real links: to a folder, to nothing, and an entry that is a link to
+/// an address.
+#[test]
+fn links_say_where_they_lead_also_when_that_is_gone() {
+    let mut session = session("backend-links");
+    std::os::unix::fs::symlink(session.path("Folder"), session.desktop.join("to folder")).expect("a link");
+    std::os::unix::fs::symlink("nowhere.txt", session.desktop.join("broken")).expect("a link");
+    write(&session.desktop.join("site.desktop"), "[Desktop Entry]\nType=Link\nName=Site\nURL=https://example.org/page\n");
+    let site = session.id("site.desktop");
+    session.backend.allow_launching(&site).expect("allowed");
+    let items = session.backend.list(&Location::Desktop).expect("listed");
+    let by_name = |name: &str| items.iter().find(|item| item.id == session.id(name)).unwrap_or_else(|| panic!("{name}"));
+
+    // A link to a folder is a shortcut of a folder's type.
+    let folder = by_name("to folder");
+    assert_eq!(folder.kind, ItemKind::Shortcut);
+    assert_eq!(folder.facts.shortcut_target.as_deref(), Some(session.path("Folder").as_str()));
+    assert_eq!(folder.facts.mime.as_deref(), Some("inode/directory"));
+    // A link to nothing is still a shortcut, and says where it would
+    // lead; what it has no type of its own.
+    let broken = by_name("broken");
+    assert_eq!(broken.kind, ItemKind::Shortcut);
+    assert_eq!(broken.facts.shortcut_target.as_deref(), Some(session.path("nowhere.txt").as_str()));
+    assert_eq!(broken.facts.size, None);
+    assert!(broken.facts.modified.is_some());
+    // An entry that is a link leads to its address, under its own name.
+    let link = by_name("site.desktop");
+    assert_eq!((link.kind, link.name.as_str()), (ItemKind::Shortcut, "Site"));
+    assert_eq!(link.facts.shortcut_target.as_deref(), Some("https://example.org/page"));
+    assert_eq!(link.facts.mime.as_deref(), Some("application/x-desktop"));
+    assert_eq!(link.facts.extension.as_deref(), Some("desktop"));
+    session.end();
+}
+
+#[test]
+fn an_operation_that_ends_later_is_told_when_it_ends_and_can_be_called_off() {
+    let mut session = session("backend-later");
+    let archive = session.root.join("archive");
+    std::fs::create_dir_all(&archive).expect("made");
+    // Large enough to be copied in several pieces.
+    std::fs::write(session.desktop.join("large.bin"), vec![3u8; 5 << 20]).expect("written");
+    let mut all = Vec::new();
+    let done = |all: &[BackendEvent], wanted: u64| {
+        all.iter().find_map(|event| match event {
+            BackendEvent::OperationDone { request, undo, error } if *request == wanted => Some((undo.clone(), error.clone())),
+            _ => None,
+        })
+    };
+
+    // Begun: the caller is answered at once; how far it is, is told on
+    // the way, and its end with what takes it back.
+    let copy = FileOperation::Copy { from: session.path("large.bin"), to_folder: text(&archive) };
+    assert!(session.backend.begin_operation(7, &copy));
+    session.until(&mut all, |all| done(all, 7).is_some());
+    assert_eq!(done(&all, 7), Some((Some(FileOperation::Trash { path: text(&archive.join("large.bin")) }), None)));
+    let total = 5u64 << 20;
+    assert!(all.iter().any(|event| matches!(event, BackendEvent::OperationProgress { request: 7, done, total: of } if *of == total && *done == total)), "{:?}", said(&all));
+    assert_eq!(std::fs::metadata(archive.join("large.bin")).expect("copied").len(), total);
+
+    // What goes wrong is told the same way.
+    let gone = FileOperation::Copy { from: session.path("gone.bin"), to_folder: text(&archive) };
+    assert!(session.backend.begin_operation(8, &gone));
+    session.until(&mut all, |all| done(all, 8).is_some());
+    assert!(matches!(done(&all, 8), Some((None, Some(BackendError::NotFound { .. })))));
+
+    // Called off before it began: told as called off, and nothing of
+    // it is there.
+    assert!(session.backend.begin_operation(9, &copy));
+    assert!(session.backend.begin_operation(10, &copy));
+    session.backend.cancel_operation(10);
+    session.until(&mut all, |all| done(all, 10).is_some());
+    assert!(done(&all, 9).is_some_and(|(undo, _)| undo.is_some()));
+    if done(&all, 10) == Some((None, Some(BackendError::Cancelled))) {
+        let copies = std::fs::read_dir(&archive).expect("listed").count();
+        assert_eq!(copies, 2, "half a copy was left");
+    }
+    session.end();
+}
+
+/// A copy that is called off half way leaves nothing behind.
+#[test]
+fn a_copy_that_is_called_off_half_way_leaves_nothing() {
+    let root = testing::folder("called-off");
+    let (from, into) = (root.join("large.bin"), root.join("into"));
+    std::fs::create_dir_all(&into).expect("made");
+    std::fs::write(&from, vec![5u8; 3 << 20]).expect("written");
+    let names = |folder: &Path| -> Vec<String> {
+        let mut names: Vec<String> =
+            std::fs::read_dir(folder).expect("listed").flatten().map(|entry| entry.file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        names
+    };
+    let called_off = || std::io::Error::new(std::io::ErrorKind::Interrupted, "called off");
+    let mut told = Vec::new();
+    let mut while_copying = Vec::new();
+    let copied = files::copy_told(&from, &into, &mut |done, total| {
+        told.push((done, total));
+        // While it is written it has no real name: only one that begins
+        // with a dot, which nothing shows.
+        while_copying = names(&into);
+        if done < 2 << 20 { Ok(()) } else { Err(called_off()) }
+    });
+    assert_eq!(copied.expect_err("called off").kind(), std::io::ErrorKind::Interrupted);
+    assert_eq!(told, [(1 << 20, 3 << 20), (2 << 20, 3 << 20)]);
+    assert_eq!(while_copying.len(), 1);
+    assert!(while_copying[0].starts_with(".large.bin.gevrek-part-"), "{while_copying:?}");
+    assert_eq!(names(&into), Vec::<String>::new());
+    assert!(from.is_file());
+
+    // The disk runs full half way (played): the same, with that error.
+    let full = files::copy_told(&from, &into, &mut |done, _| {
+        if done < 2 << 20 { Ok(()) } else { Err(std::io::Error::new(std::io::ErrorKind::StorageFull, "no room")) }
+    });
+    assert_eq!(full.expect_err("no room").kind(), std::io::ErrorKind::StorageFull);
+    assert_eq!(names(&into), Vec::<String>::new());
+
+    // The folder it was going to is taken away half way: an error, and
+    // the file is where it was.
+    let leaving = root.join("leaving");
+    std::fs::create_dir_all(&leaving).expect("made");
+    let vanished = files::move_into_told(&from, &leaving, &mut |_, _| Ok(())).map(|_| ());
+    // (Within one file system a move is a renaming and cannot be caught
+    // half way; a copy can.)
+    assert!(vanished.is_ok());
+    let back = files::move_into(&leaving.join("large.bin"), &root).expect("back");
+    assert_eq!(back, from);
+    let vanished = files::copy_told(&from, &leaving, &mut |_, _| {
+        let _ = std::fs::remove_dir_all(&leaving);
+        Ok(())
+    });
+    assert!(vanished.is_err());
+    assert!(!leaving.exists());
+    assert!(from.is_file());
+
+    // A folder of many files is called off between two of them, and
+    // nothing of it is left; let through, it arrives whole and a second
+    // one beside it under the next free name.
+    let tree = root.join("tree");
+    for number in 0..20 {
+        std::fs::create_dir_all(tree.join("inner")).expect("made");
+        std::fs::write(tree.join(format!("inner/{number}.txt")), b"").expect("written");
+    }
+    let mut asked = 0;
+    let stopped = files::copy_told(&tree, &into, &mut |_, _| {
+        asked += 1;
+        if asked < 10 { Ok(()) } else { Err(called_off()) }
+    });
+    assert_eq!(stopped.expect_err("called off").kind(), std::io::ErrorKind::Interrupted);
+    assert_eq!(names(&into), Vec::<String>::new());
+    assert_eq!(files::copy(&tree, &into).expect("copied"), into.join("tree"));
+    assert_eq!(files::copy(&tree, &into).expect("copied"), into.join("tree (2)"));
+    assert_eq!(names(&into.join("tree (2)/inner")).len(), 20);
+    assert_eq!(names(&into), ["tree", "tree (2)"]);
+    let _ = std::fs::remove_dir_all(&root);
 }

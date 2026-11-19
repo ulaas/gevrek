@@ -432,10 +432,94 @@ nothing broken on the way. Nothing new is built in this pass.
 - [ ] **person, W** The above seen on the desktop: a window dragged to
       the other display leaves the first panel's taskbar and stands on
       the second's as it is let go of, tiled and floating, both ways.
-      Left as it is, to be decided: a floating window that its program
-      or Windows itself moves across (Win+Shift+arrow) with no drag
-      stays its workspace's, and so on the panel of the display it
-      left, until it is dragged or sent.
+      (What was left to be decided here, a floating window moved across
+      with no drag, was decided on 2026-11-19: the next entry.)
+- [x] **any** A floating window that has moved to another display
+      without a drag joins that display (decided by the person
+      2026-11-19). Its program moved it, or Windows did for
+      Win+Shift+arrow: it stayed its old workspace's, and on the panel
+      of the display it had left, until it was dragged or sent. Now a
+      floating window of a workspace that is shown, in sight, neither
+      maximized nor fullscreen, that is told of as moved and lies with
+      more than half of it on another display (or, where part of it is
+      beyond them all, with its middle there) is that display's
+      workspace's once it has stayed there for a quarter of a second,
+      by the same step a drag's end takes (`floating_window_is_on`), and
+      `window.workspace_changed` tells the panels
+      (`executor/events.rs`: `note_moved_across`,
+      `settle_moved_windows`, looked at by both hosts beside the drags,
+      every half second on Windows and every quarter on Linux). One
+      that lies half and half stays with whichever display has it. Not
+      for a window the desktop is moving itself (a workspace that
+      slides), one that is hidden or on a workspace that is put away
+      (what it says of its place is where it was put away), one that
+      is held (the drag's end says, by where the pointer is), one
+      gevrek has just placed, one put out of the way, a tiled one, and
+      nothing is carried over a change of the displays. Held by tests:
+      `core_scenarios.rs` (moved and rested, told once, back again;
+      across the edge; every case in which it must not happen) and the
+      seeded runs, which now move windows as their programs do
+      (2026-11-19, tested on both systems, not committed yet).
+- [x] **any** A window that belongs to another window opens on that
+      window's workspace (decided by the person 2026-11-19; reported: a
+      dialog Unreal Editor opens while one works on another workspace
+      comes up there, with the keyboard). The backends say which window
+      a window belongs to (`WindowQueries::parent`: the parent of a
+      Wayland toplevel, the window an X11 window is transient for, the
+      owner on Windows). Where the nearest such window that is on a
+      workspace is on one that is not shown, the new window joins that
+      workspace, floating, out of sight with it, and the keyboard stays
+      where it was; it is there with its window when the workspace is
+      shown (`executor/window.rs`: `join_parent_out_of_sight`, for a
+      window gevrek takes itself and for one the graph arranges). A
+      rule of the person's that sends the window to a workspace wins;
+      a window whose window is in sight, minimized by the person, a
+      scratchpad's, or on no workspace opens as before. On Linux a
+      window with a parent was no window of gevrek's at all until now:
+      it was told to the rules as a "child window", which the system
+      filters leave alone, so it stood on every workspace; it is told
+      as a window with an owner now (`backend-smithay/desktop.rs`,
+      `facts`) and is a floating window of a workspace like any other
+      dialog (with a button of its own on the panel's taskbar, as those
+      have; menus, tooltips and notifications are no toplevels, or are
+      left to their program as before). On Windows most windows that
+      belong to another are no windows of gevrek's (`window_kind`), and
+      were hidden with their owner only if they were there when it was
+      hidden: one that opened afterwards came up where the person was.
+      Such a window, shown while a window above it in its chain of
+      owners is hidden by gevrek, is hidden with it now, and shown
+      again with it; so is what a program puts up beside its windows (a
+      notification it draws itself) while all its windows are hidden,
+      never while one of them is in sight; and the keyboard goes back
+      to the window that had it (`WindowManager::hide_late_arrival`,
+      asked by the runtime as each window is shown; in the journal of
+      hidden windows like every other). Held by tests: the decision
+      (`late_arrival_tests`), `core_scenarios.rs`, the seeded runs
+      (windows open belonging to others, wherever those are), and two
+      real Wayland clients (`backend-smithay/tests/tiling.rs`)
+      (2026-11-19, tested on both systems, not committed yet).
+- [x] **any** Under the Floating layout a window that belongs to
+      another, or that stands where its program put it, keeps its place
+      (decided by the person 2026-11-19): only a program's own window
+      is brought to the middle of the display as it comes. The backend
+      says which windows stand at a place of their own
+      (`WindowQueries::placed_itself`: on Linux an X11 window that names
+      its place, and a dialog put over its window); such a window is
+      only brought to the middle where less than 32 by 16 of it would
+      be on the display (`executor/layout.rs`, `settle_floating_layout`;
+      the measure is the one a workspace that is shown goes by,
+      `executor::reaches`). Held by tests: `core_scenarios.rs` and a
+      real Wayland client whose dialog stays over its window
+      (2026-11-19, tested on both systems, not committed yet).
+- [ ] **person, W L** The three above seen on the desktop. A floating
+      window sent across with Win+Shift+arrow, and one a program moves
+      across, stands on the other panel's taskbar within a second, and
+      back; nothing changes panel while a workspace slides. A program
+      on a workspace that is put away opens a dialog (Unreal Editor
+      while one works elsewhere): nothing comes up, the keyboard stays,
+      and the dialog is over the editor when its workspace is shown. On
+      a workspace with the Floating layout a dialog opens over its
+      window, and a program's first window in the middle.
 - [x] **any** The notes of the kind TODO and FIXME in the code: there
       are none. The 64 that were counted are a variable called `todo`
       (what the tutorial is to do next) and one `XXX` in the words for a

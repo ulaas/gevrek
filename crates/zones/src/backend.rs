@@ -11,6 +11,7 @@
 //! handle the renderer gives to whatever draws. Surfaces and their effects
 //! (blur, levels) are not here either; they are the shell's.
 
+use crate::config::SmartSource;
 use crate::geometry::{Display, ReservedArea};
 use crate::ids::ItemId;
 use crate::item::{Item, ItemFacts};
@@ -133,6 +134,8 @@ pub enum BackendError {
     Refused { what: String },
     /// This system cannot do it at all.
     Unsupported,
+    /// It was called off before it ended (`BackendRequest::Cancel`).
+    Cancelled,
 }
 
 impl std::fmt::Display for BackendError {
@@ -142,6 +145,7 @@ impl std::fmt::Display for BackendError {
             BackendError::Exists { what } => write!(formatter, "{what} is there already"),
             BackendError::Refused { what } => write!(formatter, "the system refused: {what}"),
             BackendError::Unsupported => write!(formatter, "not possible on this system"),
+            BackendError::Cancelled => write!(formatter, "called off"),
         }
     }
 }
@@ -183,6 +187,28 @@ pub enum BackendEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         icon: Option<IconHandle>,
     },
+    /// A location could not be listed: the folder is not there, a share
+    /// does not answer, the system said no. Its zone stays and says so;
+    /// a later `Listed` for the same location makes it good again.
+    ListingFailed { location: Location, error: BackendError },
+    /// Everything a smart zone's source has, as it is now, in the
+    /// source's own order (the files used last: the newest first). Told
+    /// whole each time it changes. The programs that run are known to
+    /// whoever hosts the core rather than to the backend, and may be told
+    /// by them with this same event.
+    SourceListed { source: SmartSource, items: Vec<Item> },
+    /// A source could not be asked.
+    SourceFailed { source: SmartSource, error: BackendError },
+    /// The screen is shown to others or recorded, or no longer is. From
+    /// whoever knows: the compositor, where gevrek is one.
+    ScreenShared { shared: bool },
+    /// A file operation was begun and ends later (`begin_operation`
+    /// said so). Told by whoever carries the request to the backend; its
+    /// end is the `OperationDone` of the same request.
+    OperationBegun { request: u64 },
+    /// How far an operation that ends later has come, in whatever the
+    /// backend counts (bytes, files); a `total` of 0 is "not known".
+    OperationProgress { request: u64, done: u64, total: u64 },
 }
 
 /// What the core wants of the backend.
@@ -194,6 +220,17 @@ pub enum BackendRequest {
     Unwatch { directory: String },
     /// Carry out a file operation and answer with `OperationDone`.
     Perform { request: u64, operation: FileOperation },
+    /// List a watched folder again (it was not there, and may be now).
+    Relist { directory: String },
+    /// Say what a source has, and tell again whenever that changes.
+    WatchSource { source: SmartSource },
+    UnwatchSource { source: SmartSource },
+    /// Say again what a watched source has.
+    ListSource { source: SmartSource },
+    /// Call off a file operation that has not ended. The backend answers
+    /// with `OperationDone` all the same: with `Cancelled`, or with its
+    /// result if it had ended already.
+    Cancel { request: u64 },
 }
 
 /// The system, as far as zones need it.
@@ -271,6 +308,51 @@ pub trait ZonesBackend {
     fn restore_system_icons(&mut self) -> Result<(), BackendError> {
         Ok(())
     }
+
+    /// List a location without making the caller wait: the answer comes
+    /// later through `drain_events`, as `Listed` or `ListingFailed`. For
+    /// folders that may be slow (a share, a drive that sleeps). A backend
+    /// that does not do this says `false`, and is asked with `list`
+    /// instead.
+    fn begin_listing(&mut self, _location: &Location) -> bool {
+        false
+    }
+
+    /// What a smart zone's source has now, in the source's own order.
+    /// The desktop and plain folders are never asked for here (they are
+    /// locations); a backend that does not know a source says so.
+    fn list_source(&mut self, _source: &SmartSource) -> Result<Vec<Item>, BackendError> {
+        Err(BackendError::Unsupported)
+    }
+
+    /// Tell whenever what a source has changes, as
+    /// `BackendEvent::SourceListed` with all of it.
+    fn watch_source(&mut self, _source: &SmartSource) -> Result<WatchId, BackendError> {
+        Err(BackendError::Unsupported)
+    }
+
+    /// Begin a file operation that may take long (a large copy, a move to
+    /// another drive) without making the caller wait: it is carried out
+    /// off the caller's thread and its end comes through `drain_events`
+    /// as `BackendEvent::OperationDone` with this `request`, as `perform`
+    /// would have answered; `OperationProgress` may come before. A
+    /// backend that does not do this says `false` and is asked with
+    /// `perform` instead.
+    fn begin_operation(&mut self, _request: u64, _operation: &FileOperation) -> bool {
+        false
+    }
+
+    /// Call off an operation that was begun. Its `OperationDone` still
+    /// comes: with `BackendError::Cancelled`, having put back what it
+    /// could, or with its result if it was too late.
+    fn cancel_operation(&mut self, _request: u64) {}
+
+    /// Whether the screen is shown to others or recorded now; `None`
+    /// where the system gives no sign of it (then only
+    /// `BackendEvent::ScreenShared` from elsewhere, or the person, says).
+    fn screen_shared(&mut self) -> Option<bool> {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -330,5 +412,20 @@ mod tests {
         };
         let text = serde_json::to_string(&request).unwrap();
         assert_eq!(serde_json::from_str::<BackendRequest>(&text).unwrap(), request);
+        let source = BackendRequest::WatchSource { source: SmartSource::Recent };
+        assert_eq!(
+            serde_json::to_string(&source).unwrap(),
+            r#"{"ask":"watch_source","source":{"from":"recent"}}"#
+        );
+        let failed = BackendEvent::ListingFailed {
+            location: Location::Directory { path: "//share/films".to_string() },
+            error: BackendError::NotFound { what: "//share/films".to_string() },
+        };
+        let text = serde_json::to_string(&failed).unwrap();
+        assert_eq!(serde_json::from_str::<BackendEvent>(&text).unwrap(), failed);
+        assert_eq!(
+            serde_json::to_string(&BackendEvent::ScreenShared { shared: true }).unwrap(),
+            r#"{"event":"screen_shared","shared":true}"#
+        );
     }
 }

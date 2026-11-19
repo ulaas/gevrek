@@ -324,6 +324,22 @@ impl Executor {
                         return Ok(NodeDone::Early);
                     }
 
+                    // A window that is opening and belongs to a window on
+                    // a workspace that is not shown opens there, whatever
+                    // arrangement is asked for here: not on the workspace
+                    // the person is looking at.
+                    if self.join_parent_out_of_sight(window_manager, monitor_manager, handle)? {
+                        self.set_output_value(node_id, 1, Value::WindowHandle(handle));
+                        self.trigger_output_execution(
+                            window_manager,
+                            monitor_manager,
+                            node_id,
+                            0,
+                            visited,
+                        )?;
+                        return Ok(NodeDone::Early);
+                    }
+
                     // Get window title for better logging
                     let window_title = queries(window_manager)
                         .windows()

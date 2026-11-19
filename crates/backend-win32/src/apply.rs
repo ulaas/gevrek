@@ -267,6 +267,22 @@ impl gevrek_engine::contract::WindowQueries for WindowManager {
     fn floats_by_rules(&self, id: crate::dwm::WindowHandle) -> bool {
         self.should_float_window(id)
     }
+
+    /// The window's owner, whatever it is: the engine looks whether that
+    /// is a window on a workspace. (Most windows that have an owner are no
+    /// windows to gevrek at all, `window_kind::Kind::Owned`, and are never
+    /// asked about here: they are hidden and shown with their owner. This
+    /// is for the ones that are windows of their own all the same: a
+    /// dialog that asks for its own place in the taskbar.)
+    fn parent(&self, id: crate::dwm::WindowHandle) -> Option<crate::dwm::WindowHandle> {
+        use crate::dwm::HwndExt;
+        use windows::Win32::UI::WindowsAndMessaging::{GetWindow, GW_OWNER};
+        // SAFETY: a plain question; a window that is gone has no owner.
+        let owner = unsafe { GetWindow(id.to_hwnd(), GW_OWNER) }
+            .ok()
+            .filter(|owner| !owner.is_invalid())?;
+        Some(crate::dwm::WindowHandle::from_hwnd(owner)).filter(|owner| *owner != id)
+    }
 }
 
 impl gevrek_engine::contract::Desktop for WindowManager {

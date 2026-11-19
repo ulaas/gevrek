@@ -5,8 +5,9 @@
 //!
 //! The commands are those of gevrek's own example configurations (what
 //! keys are bound to) and some more with numbers a person would not
-//! choose; the events are windows that open, close, are minimized, moved
-//! and get the keyboard. The runs are the same every time (the numbers
+//! choose; the events are windows that open (dialogs of other windows
+//! among them), close, are minimized, moved (by the person and by their
+//! programs) and get the keyboard. The runs are the same every time (the numbers
 //! come from a seed); `GEVREK_RUNS=<n>` makes n times as many, others.
 
 use crate::core::WmCore;
@@ -385,7 +386,7 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
     for step in 0..steps {
         let windows: Vec<WindowHandle> = desktop.windows.keys().copied().collect();
         let some = |chance: &mut Chance| windows.get(chance.below(windows.len())).copied();
-        let said = match chance.below(20) {
+        let said = match chance.below(23) {
             // A window opens (not for ever more of them).
             0..=3 if windows.len() < 12 => {
                 opened += 1;
@@ -513,6 +514,67 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
                 );
                 format!("the graph's key {} is pressed", key.key)
             }
+            // A window opens that belongs to another (its dialog, or a
+            // window of its own that names it), wherever that one is:
+            // in sight, put away, minimized, a scratchpad's, or gone.
+            20 if windows.len() < 12 => match some(&mut chance) {
+                Some(parent) => {
+                    opened += 1;
+                    let rect = Rect::new(
+                        chance.below(4400) as i32 - 200,
+                        chance.below(1300) as i32 - 100,
+                        chance.below(900) as i32 + 60,
+                        chance.below(700) as i32 + 40,
+                    );
+                    let title = format!("{} {opened}", TITLES[chance.below(TITLES.len())]);
+                    let id = desktop.open_dialog(&title, parent, rect);
+                    if let Some(window) = desktop.windows.get_mut(&id) {
+                        window.floats = chance.below(4) != 0;
+                        window.placed_itself = chance.below(2) == 0;
+                    }
+                    known.insert(id);
+                    let _ = core.handle_window_event(&mut desktop, WindowEvent::Created(id));
+                    format!("{id:?} ({title}) opens at {rect:?}, belonging to {parent:?}")
+                }
+                None => "nothing".to_string(),
+            },
+            // A window is moved by its program (nobody holds it), now
+            // and then while the desktop is moving it itself; and the
+            // look that is taken every now and then follows, at once or
+            // when the window has come to rest.
+            21 | 22 => match some(&mut chance) {
+                Some(id) => {
+                    let was = desktop.window(id).rect;
+                    let rect = Rect::new(
+                        chance.below(4700) as i32 - 300,
+                        chance.below(1500) as i32 - 200,
+                        was.width,
+                        was.height,
+                    );
+                    let sliding = chance.below(5) == 0;
+                    if sliding {
+                        desktop.animating.insert(id);
+                    }
+                    if let Some(window) = desktop.windows.get_mut(&id) {
+                        window.rect = rect;
+                    }
+                    let _ = core.handle_window_event(
+                        &mut desktop,
+                        WindowEvent::Moved(id, rect.x, rect.y),
+                    );
+                    desktop.animating.clear();
+                    let rested = chance.below(4) != 0;
+                    let now = std::time::Instant::now();
+                    let joined = core.settle_moved_windows(
+                        &mut desktop,
+                        if rested { now + std::time::Duration::from_secs(1) } else { now },
+                    );
+                    format!(
+                        "{id:?} moved by its program to {rect:?} (sliding: {sliding}, at rest: {rested}); joined another display: {joined:?}"
+                    )
+                }
+                None => "nothing".to_string(),
+            },
             8 if two && chance.below(4) == 0 => {
                 second_there = !second_there;
                 display_changed(&mut core, &mut desktop, second_there);

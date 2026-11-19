@@ -510,7 +510,8 @@ fn fits_from(pattern: &[char], name: &[char]) -> bool {
 /// The first bytes of a file, as many as are asked for at most.
 fn start_of(path: &Path, most: usize) -> Vec<u8> {
     let mut start = Vec::new();
-    if let Ok(file) = std::fs::File::open(path) {
+    // (Read without the file counting as used: see `open_quietly`.)
+    if let Ok(file) = super::open_quietly(path) {
         let _ = file.take(most as u64).read_to_end(&mut start);
     }
     start

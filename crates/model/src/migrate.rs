@@ -548,8 +548,19 @@ mod tests {
                 .collect();
             assert!(errors.is_empty(), "{errors:?}");
         }
-        // Off, unless a file says otherwise.
-        assert!(!Config::new().desktop.zones.enabled);
+        // On, unless a file says otherwise; and a file that says they are
+        // off keeps them off, whatever else it leaves unsaid.
+        assert!(Config::new().desktop.zones.enabled);
+        let unsaid = serde_json::json!({ "desktop": { "schema_version": 26 } });
+        assert!(Config::from_json(&unsaid.to_string()).expect("read").desktop.zones.enabled);
+        // (Also a file from before there were zones: it never said.)
+        let old = serde_json::json!({ "desktop": { "schema_version": 25 } });
+        assert!(Config::from_json(&old.to_string()).expect("read").desktop.zones.enabled);
+        let off = serde_json::json!({ "desktop": { "schema_version": 26, "zones": { "enabled": false } } });
+        let read = Config::from_json(&off.to_string()).expect("read");
+        assert!(!read.desktop.zones.enabled);
+        let written: Value = serde_json::from_str(&serde_json::to_string(&read).unwrap()).unwrap();
+        assert_eq!(written["desktop"]["zones"]["enabled"], false, "and it is written back as off");
         // The old shape under the new version is refused all the same, also
         // beside keys that are of the new zones.
         let mixed = serde_json::json!({ "desktop": { "schema_version": 26, "zones": {

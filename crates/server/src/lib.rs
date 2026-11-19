@@ -185,6 +185,12 @@ fn overlay_state_to_proto(data: &gevrek_engine::overlay_data::OverlayData) -> St
             reserved_top: monitor.reserved_top,
             reserved_right: monitor.reserved_right,
             reserved_bottom: monitor.reserved_bottom,
+            zones_room: Some(Sides {
+                left: monitor.zones_room.left,
+                top: monitor.zones_room.top,
+                right: monitor.zones_room.right,
+                bottom: monitor.zones_room.bottom,
+            }),
             is_focused: monitor.is_focused,
         });
 
@@ -290,6 +296,12 @@ pub fn overlay_response(
             reserved_top: m.reserved_top,
             reserved_right: m.reserved_right,
             reserved_bottom: m.reserved_bottom,
+            zones_room: Some(Sides {
+                left: m.zones_room.left,
+                top: m.zones_room.top,
+                right: m.zones_room.right,
+                bottom: m.zones_room.bottom,
+            }),
             workspace: Some(workspace_overlay_to_proto(&m.workspace)),
             workspaces: m
                 .workspaces
@@ -2473,9 +2485,13 @@ impl WMService for WMServer {
 
     async fn get_zones_state(
         &self,
-        _request: Request<Empty>,
+        request: Request<ZonesStateRequest>,
     ) -> Result<Response<ZonesStateResponse>, Status> {
-        Ok(Response::new(self.zones.state()))
+        let ZonesStateRequest {
+            without_items,
+            zone,
+        } = request.into_inner();
+        Ok(Response::new(self.zones.state_of(without_items, &zone)))
     }
 
     async fn send_zones_command(
@@ -2839,6 +2855,7 @@ mod overlay_conversion_tests {
                 reserved_top: 0,
                 reserved_right: 0,
                 reserved_bottom: 40,
+                zones_room: Default::default(),
                 bar: Some((6, 6, 1908, 36)),
             }],
             graph_node_count: 0,

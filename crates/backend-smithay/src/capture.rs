@@ -50,9 +50,9 @@ pub struct FrameData {
 
 /// A frame whose buffer waits for the next drawing of its output.
 pub struct PendingCapture {
-    frame: ZwlrScreencopyFrameV1,
+    pub(crate) frame: ZwlrScreencopyFrameV1,
     buffer: WlBuffer,
-    output: MonitorHandle,
+    pub(crate) output: MonitorHandle,
     region: (i32, i32, i32, i32),
     with_pointer: bool,
     with_damage: bool,
@@ -364,6 +364,7 @@ impl State {
                     (now.as_secs() & 0xffff_ffff) as u32,
                     now.subsec_nanos(),
                 );
+                self.picture_taken(capture.output);
                 continue;
             }
             let key = (capture.output, capture.with_pointer);
@@ -400,6 +401,7 @@ impl State {
                 (now.as_secs() & 0xffff_ffff) as u32,
                 now.subsec_nanos(),
             );
+            self.picture_taken(capture.output);
         }
     }
 
@@ -538,7 +540,10 @@ impl State {
             "the buffer is not of the output's size"
         );
         self.hide_pointer = !with_pointer;
+        // (Another program's picture: without what is kept out of those.)
+        self.capture_pass = true;
         let elements = self.scaled_elements(renderer, output);
+        self.capture_pass = false;
         self.hide_pointer = false;
         let mut framebuffer = renderer
             .bind_card(dmabuf)
@@ -593,7 +598,10 @@ impl State {
         }
         let (_, image) = target.image.as_mut().expect("just made");
         self.hide_pointer = !with_pointer;
+        // (Another program's picture: without what is kept out of those.)
+        self.capture_pass = true;
         let elements = self.scaled_elements(renderer, output);
+        self.capture_pass = false;
         self.hide_pointer = false;
         let mut framebuffer = renderer
             .bind(image)

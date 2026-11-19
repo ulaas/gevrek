@@ -168,11 +168,53 @@ pub fn sorted(mut items: Vec<&Item>, sort: Sort, descending: bool) -> Vec<&Item>
 
 /// One item, where it is drawn. The rectangle is the item's whole cell,
 /// from the top left corner of what it is laid out in.
+///
+/// What follows the cell is what a screen reader says of the item, and
+/// what a renderer needs to know of it without asking again: laying out
+/// leaves it empty, and the core fills it in for the scene.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlacedItem {
     pub item: ItemId,
     pub rect: Rect,
     pub cell: Cell,
+    /// The name as it is shown.
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub kind: ItemKind,
+    /// Which one it is among those shown with it, counted from 1.
+    #[serde(default)]
+    pub position: u32,
+    /// How many are shown with it, itself among them.
+    #[serde(default)]
+    pub of: u32,
+    /// It is among the chosen ones.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub selected: bool,
+    /// The keyboard is on it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub focused: bool,
+    /// It stays when the rest is put away with the one key.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub always_visible: bool,
+}
+
+impl PlacedItem {
+    /// An item at a place, with nothing said of it yet.
+    pub fn at(item: ItemId, rect: Rect, cell: Cell) -> Self {
+        Self {
+            item,
+            rect,
+            cell,
+            name: String::new(),
+            kind: ItemKind::File,
+            position: 0,
+            of: 0,
+            selected: false,
+            focused: false,
+            always_visible: false,
+        }
+    }
 }
 
 /// The items of a zone, laid out.
@@ -230,16 +272,16 @@ pub fn lay_out(
             }
         });
         rows = rows.max(cell.row + 1);
-        placed.push(PlacedItem {
-            item: item.clone(),
-            rect: Rect::new(
+        placed.push(PlacedItem::at(
+            item.clone(),
+            Rect::new(
                 cell.column as i32 * step_x,
                 (cell.row as i32).saturating_mul(step_y),
                 cell_width,
                 cell_height,
             ),
             cell,
-        });
+        ));
     }
     let content_height = if rows == 0 {
         0
@@ -284,11 +326,7 @@ pub fn lay_out_loose(
             let y = (*y).min(height - cell_height).max(0);
             let cell = cell_at(x, y);
             taken.insert(cell);
-            placed[index] = Some(PlacedItem {
-                item: item.clone(),
-                rect: Rect::new(x, y, cell_width, cell_height),
-                cell,
-            });
+            placed[index] = Some(PlacedItem::at(item.clone(), Rect::new(x, y, cell_width, cell_height), cell));
         }
     }
     let mut next = 0u32;
@@ -304,16 +342,16 @@ pub fn lay_out_loose(
                         break cell;
                     }
                 };
-                PlacedItem {
-                    item: item.clone(),
-                    rect: Rect::new(
+                PlacedItem::at(
+                    item.clone(),
+                    Rect::new(
                         (cell.column as i32).saturating_mul(step_x),
                         cell.row as i32 * step_y,
                         cell_width,
                         cell_height,
                     ),
                     cell,
-                }
+                )
             })
         })
         .collect()

@@ -14,6 +14,8 @@
 //! | [`trash`] | throwing away and putting back | Trash |
 //! | [`files`] | copy, move, rename, new folder | |
 //! | [`watch`] | what changes in a folder, told by the kernel | inotify |
+//! | [`portal`] | a folder a portal shows, gone to off the caller's thread | |
+//! | [`recent`] | the files opened lately | Desktop Bookmark (`recently-used.xbel`) |
 //!
 //! [`System`] is what is known of the session (its places, its MIME
 //! database, its icon themes) and reads items and pictures; it is shared
@@ -59,6 +61,8 @@ pub mod files;
 pub mod md5;
 pub mod mime;
 pub mod places;
+pub mod portal;
+pub mod recent;
 pub mod thumbs;
 pub mod trash;
 pub mod uris;
@@ -68,8 +72,12 @@ pub use associations::{Associations, Program};
 pub use places::Places;
 
 use crate::apps::{self, App, Opened};
-use crate::icons::{Cache, Picture};
+use crate::icons::Picture;
+use crate::zones::reach::Reach;
+use crate::zones::smart::Smart;
+use crate::zones::sources::Source;
 use entries::{DesktopFile, Entry};
+use gevrek_zones::config::SmartSource;
 use gevrek_model::geometry::{Point, Rect};
 use gevrek_zones::backend::{
     BackendError, BackendEvent, DragActions, DropPayload, FileOperation, IconHandle, IconRequest,
@@ -78,7 +86,7 @@ use gevrek_zones::backend::{
 use gevrek_zones::geometry::{Display, Edge, ReservedArea};
 use gevrek_zones::ids::ItemId;
 use gevrek_zones::item::{Item, ItemFacts, ItemKind};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -113,6 +121,28 @@ pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     written
 }
 
+/// Open a file to read it for the zones' own purposes (to tell what kind
+/// of file it is, to make a small picture of it) without that counting
+/// as the file being used: the kernel is asked not to move the file's
+/// time of last access (`O_NOATIME`). A rule that asks whether a file
+/// was left untouched for some days asks about the person, not about a
+/// zone that drew it.
+///
+/// The kernel only grants this to the file's owner; for anybody else's
+/// file it is opened in the plain way.
+pub(crate) fn open_quietly(path: &Path) -> std::io::Result<std::fs::File> {
+    // (The number of `O_NOATIME` on the processors gevrek is built for;
+    // on any other the plain way is taken.)
+    #[cfg(any(target_arch = "x86_64", target_arch = "x86", target_arch = "aarch64", target_arch = "arm", target_arch = "riscv64"))]
+    {
+        const NO_ACCESS_TIME: i32 = 0o1000000;
+        if let Ok(file) = std::fs::OpenOptions::new().read(true).custom_flags(NO_ACCESS_TIME).open(path) {
+            return Ok(file);
+        }
+    }
+    std::fs::File::open(path)
+}
+
 /// A time as seconds since 1970.
 pub(crate) fn seconds(time: Option<std::time::SystemTime>) -> Option<u64> {
     time?.duration_since(std::time::UNIX_EPOCH).ok().map(|since| since.as_secs())
@@ -143,6 +173,9 @@ pub struct Described {
 /// it.
 pub struct System {
     pub places: Places,
+    /// gevrek's own folder for what it keeps (the launcher's counts, the
+    /// zones' pins).
+    pub state: PathBuf,
     pub mimes: mime::MimeDatabase,
     /// The person's languages for names, the most wanted first.
     pub locales: Vec<String>,
@@ -162,6 +195,7 @@ impl System {
     /// The session this program runs in.
     pub fn of_session() -> Self {
         let mut system = Self::at(Places::of_session());
+        system.state = gevrek_model::paths::state_dir();
         system.locales = apps::locales();
         system.icon_theme = crate::icons::desktop_theme();
         system
@@ -181,6 +215,7 @@ impl System {
             icon_dirs,
             pixmaps: data.iter().map(|dir| dir.join("pixmaps")).collect(),
             found_icons: Mutex::new(HashMap::new()),
+            state: places.state_home.join("gevrek"),
             places,
         }
     }
@@ -526,119 +561,37 @@ pub fn displays_of_state(state: &serde_json::Value) -> (Vec<Display>, Vec<Reserv
     (displays, reserved)
 }
 
-/// What a picture is known by to the cache: `i` or `t` (icon, small
-/// picture), how often the item changed since the start, and its id. The
-/// count makes a picture asked for after a change another one than the
-/// picture from before it.
-fn picture_key(thumbnail: bool, change: u32, id: &str) -> String {
-    format!("{}{change}|{id}", if thumbnail { 't' } else { 'i' })
-}
+/// The pictures of items by handle: what is common to both systems
+/// (`super::pictures`), with the icon themes and the thumbnail store
+/// asked for each.
+type Pictures = super::pictures::Pictures;
 
-/// A key taken apart again: whether it is a small picture, and the id.
-fn key_parts(key: &str) -> Option<(bool, &str)> {
-    let (head, id) = key.split_once('|')?;
-    match head.chars().next()? {
-        'i' => Some((false, id)),
-        't' => Some((true, id)),
-        _ => None,
-    }
-}
-
-/// Pictures by handle, over the cache the panel and the launcher use
-/// (`crate::icons::Cache`): made on the cache's own thread, each once.
-struct Pictures {
-    cache: Cache,
+fn pictures_of(
+    system: Arc<System>,
+    programs: Arc<Mutex<crate::zones::programs::Known>>,
     wake: Arc<dyn Fn() + Send + Sync>,
-    handles: HashMap<(String, u32), IconHandle>,
-    keys: HashMap<IconHandle, (String, u32)>,
-    /// How often each item changed.
-    changes: HashMap<String, u32>,
-    /// Asked for and not answered yet.
-    waiting: Vec<(IconRequest, IconHandle)>,
-    numbers: u64,
-}
-
-impl Pictures {
-    fn new(system: Arc<System>, wake: Arc<dyn Fn() + Send + Sync>) -> Self {
-        let woken = Arc::clone(&wake);
-        let look = move |key: &str, pixels: u32| {
-            let (thumbnail, id) = key_parts(key)?;
+) -> Pictures {
+    Pictures::with(
+        move |id, pixels, thumbnail| {
+            if Smart::is_program(&ItemId::new(id)) {
+                // (A program holds no picture of what is in it. Its icon
+                // is the one it names: a file, or a name in the themes.)
+                if thumbnail {
+                    return None;
+                }
+                let icon = programs.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).icon_of(id)?;
+                let file = if icon.starts_with('/') { PathBuf::from(icon) } else { system.icon_file(&[icon], pixels)? };
+                return crate::icons::load(&file, pixels);
+            }
             let path = uris::path_of(id)?;
             if thumbnail {
                 system.thumbnail(&path, pixels)
             } else {
                 system.icon(&path, pixels)
             }
-        };
-        Self {
-            cache: Cache::with(look, move || woken()),
-            wake,
-            handles: HashMap::new(),
-            keys: HashMap::new(),
-            changes: HashMap::new(),
-            waiting: Vec::new(),
-            numbers: 0,
-        }
-    }
-
-    fn request(&mut self, item: &ItemId, size: IconSize, thumbnail: bool) -> IconRequest {
-        self.numbers += 1;
-        let request = IconRequest(self.numbers);
-        let change = self.changes.get(item.as_str()).copied().unwrap_or(0);
-        let wanted = (picture_key(thumbnail, change, item.as_str()), pixels(size));
-        let handle = match self.handles.get(&wanted) {
-            Some(handle) => *handle,
-            None => {
-                self.numbers += 1;
-                let handle = IconHandle(self.numbers);
-                self.handles.insert(wanted.clone(), handle);
-                self.keys.insert(handle, wanted.clone());
-                handle
-            }
-        };
-        self.waiting.push((request, handle));
-        // A picture that is there already wakes nobody by itself.
-        if self.cache.answer(&wanted.0, wanted.1).is_some() {
-            (self.wake)();
-        }
-        request
-    }
-
-    /// The answers that are there by now.
-    fn drain(&mut self) -> Vec<BackendEvent> {
-        let mut ready = Vec::new();
-        for (request, handle) in std::mem::take(&mut self.waiting) {
-            let answer = match self.keys.get(&handle) {
-                Some((key, size)) => self.cache.answer(key, *size).map(|found| found.is_some()),
-                // (Let go of while it was asked for: the item changed or
-                // went. Who asked asks again when told so.)
-                None => Some(false),
-            };
-            match answer {
-                Some(found) => ready.push(BackendEvent::IconReady { request, icon: found.then_some(handle) }),
-                None => self.waiting.push((request, handle)),
-            }
-        }
-        ready
-    }
-
-    fn picture(&mut self, handle: IconHandle) -> Option<&Picture> {
-        let (key, size) = self.keys.get(&handle)?;
-        self.cache.get(key, *size)
-    }
-
-    /// An item changed or went: its pictures are let go of. Asked for
-    /// again, they are made again and have other handles.
-    fn forget(&mut self, item: &ItemId) {
-        let id = item.as_str();
-        let change = self.changes.entry(id.to_string()).or_insert(0);
-        for thumbnail in [false, true] {
-            self.cache.forget(&picture_key(thumbnail, *change, id));
-        }
-        *change += 1;
-        self.handles.retain(|(key, _), _| key_parts(key).is_none_or(|(_, of)| of != id));
-        self.keys.retain(|_, (key, _)| key_parts(key).is_none_or(|(_, of)| of != id));
-    }
+        },
+        wake,
+    )
 }
 
 /// How the shell starts a program.
@@ -651,6 +604,20 @@ pub struct SystemBackend {
     /// Made when the first folder is watched.
     watcher: Option<watch::Watcher>,
     folders: watch::Folders,
+    /// The folders portals show, each gone to on threads of its own.
+    portals: BTreeMap<WatchId, portal::Portal>,
+    /// How a folder is gone to.
+    how: Arc<portal::How>,
+    /// What the threads that go to folders found, and how they say it.
+    answers: std::sync::mpsc::Receiver<portal::Answer>,
+    answer: std::sync::mpsc::Sender<portal::Answer>,
+    /// What smart zones look through that is no plain folder.
+    smart: Smart,
+    /// What the lists of smart zones told since the last drain, and the
+    /// file operations that end later.
+    told: Arc<Mutex<Vec<BackendEvent>>>,
+    /// The file operations that end later, on a thread of their own.
+    operations: crate::zones::operations::Operations,
     /// What is to be told besides what the kernel and the pictures tell.
     events: Vec<BackendEvent>,
     numbers: u64,
@@ -665,12 +632,57 @@ pub struct SystemBackend {
     dragged_out: Option<DragOut>,
 }
 
+/// Carry out one file operation; the answer is what takes it back, with
+/// the names the files really got. `tick` is told how far a copy is (in
+/// bytes) and may call it off; nothing of a copy that was called off is
+/// left, and a file that was being moved is where it was.
+fn carry_out(
+    trash: Option<&trash::Trash>,
+    operation: &FileOperation,
+    tick: files::Tick<'_>,
+) -> Result<FileOperation, BackendError> {
+    // (Without knowing who the person is, no trash can is theirs.)
+    let can = || trash.ok_or(BackendError::Unsupported);
+    match operation {
+        FileOperation::Copy { from, to_folder } => files::copy_told(Path::new(from), Path::new(to_folder), tick)
+            .map(|copy| FileOperation::Trash { path: text(&copy) })
+            .map_err(|error| refusal(error, from)),
+        FileOperation::Move { from, to_folder } => {
+            let back = Path::new(from).parent().map(text).ok_or_else(|| BackendError::NotFound { what: from.clone() })?;
+            files::move_into_told(Path::new(from), Path::new(to_folder), tick)
+                .map(|moved| FileOperation::Move { from: text(&moved), to_folder: back })
+                .map_err(|error| refusal(error, from))
+        }
+        FileOperation::Rename { path, new_name } => {
+            let old = Path::new(path).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+            files::rename(Path::new(path), new_name)
+                .map(|renamed| FileOperation::Rename { path: text(&renamed), new_name: old })
+                .map_err(|error| match error.kind() {
+                    std::io::ErrorKind::AlreadyExists => BackendError::Exists { what: new_name.clone() },
+                    _ => refusal(error, path),
+                })
+        }
+        FileOperation::NewFolder { parent, name } => files::new_folder(Path::new(parent), name)
+            .map(|made| FileOperation::Trash { path: text(&made) })
+            .map_err(|error| refusal(error, parent)),
+        FileOperation::Trash { path } => can()?
+            .put(Path::new(path))
+            .map(|_| FileOperation::Restore { path: path.clone() })
+            .map_err(|error| refusal(error, path)),
+        FileOperation::Restore { path } => can()?
+            .restore(Path::new(path))
+            .map(|_| FileOperation::Trash { path: path.clone() })
+            .map_err(|error| refusal(error, path)),
+    }
+}
+
 /// What an error of the file system is to the core.
 fn refusal(error: std::io::Error, what: &str) -> BackendError {
     match error.kind() {
         std::io::ErrorKind::NotFound => BackendError::NotFound { what: what.to_string() },
         std::io::ErrorKind::AlreadyExists => BackendError::Exists { what: what.to_string() },
         std::io::ErrorKind::Unsupported => BackendError::Unsupported,
+        std::io::ErrorKind::Interrupted => BackendError::Cancelled,
         _ => BackendError::Refused { what: format!("{what}: {error}") },
     }
 }
@@ -695,12 +707,38 @@ impl SystemBackend {
         let trash = system
             .uid
             .map(|uid| trash::Trash::new(system.places.data_home.join("Trash"), uid));
+        let told: Arc<Mutex<Vec<BackendEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let (telling, woken) = (Arc::clone(&told), Arc::clone(&wake));
+        let reading = Arc::clone(&system);
+        let data = system.places.all_data_dirs();
+        let smart = Smart::new(
+            &system.state,
+            Arc::new(move || apps::installed_in(&reading.places.all_data_dirs(), &reading.locales)),
+            data.iter().map(|dir| dir.join("applications")).collect(),
+            Arc::new(move |events| {
+                telling.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).extend(events);
+                woken();
+            }),
+        );
+        let (answer, answers) = std::sync::mpsc::channel();
+        let (telling, woken) = (Arc::clone(&told), Arc::clone(&wake));
+        let operations = crate::zones::operations::Operations::new(Arc::new(move |events| {
+            telling.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).extend(events);
+            woken();
+        }));
         Self {
-            pictures: Pictures::new(Arc::clone(&system), Arc::clone(&wake)),
+            operations,
+            pictures: pictures_of(Arc::clone(&system), Arc::clone(&smart.known), Arc::clone(&wake)),
             system,
             wake,
             watcher: None,
             folders: watch::Folders::default(),
+            portals: BTreeMap::new(),
+            how: Arc::new(portal::How::default()),
+            answers,
+            answer,
+            smart,
+            told,
             events: Vec::new(),
             numbers: 0,
             displays: Vec::new(),
@@ -740,6 +778,205 @@ impl SystemBackend {
         self.displays = displays.clone();
         self.reserved = reserved.clone();
         self.events.push(BackendEvent::Displays { displays, reserved });
+    }
+
+    /// The watched folders that cannot be reached now, each with why:
+    /// for a word to the person in the zone that shows it.
+    pub fn unreachable(&self) -> Vec<(Location, String)> {
+        self.portals
+            .values()
+            .filter_map(|portal| match &portal.reach {
+                Reach::Away { why } => Some((portal.location.clone(), why.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Go once more to every watched folder that is away. For when
+    /// something happened that no folder can tell of (a mount that came
+    /// back), and for the person's own "try again". Returns at once; a
+    /// folder that is back is told whole.
+    pub fn retry_unreachable(&mut self) {
+        let away: Vec<WatchId> =
+            self.portals.iter().filter(|(_, portal)| portal.reach.is_away()).map(|(watch, _)| *watch).collect();
+        for watch in away {
+            self.go_to(watch);
+        }
+    }
+
+    /// Go to folders in another way than the system's own (a test that
+    /// plays a mount which does not answer). For folders watched from
+    /// now on.
+    pub fn set_reach(&mut self, how: portal::How) {
+        self.how = Arc::new(how);
+    }
+
+    /// Keep at most this many bytes of pictures in memory
+    /// (`crate::zones::pictures`).
+    pub fn set_picture_budget(&mut self, bytes: usize) {
+        self.pictures.set_budget(bytes);
+    }
+
+    /// The window manager's state is this now (the JSON the shell has
+    /// from it, the same it reads the displays out of). The programs
+    /// that run are worked out of it for a zone that shows them
+    /// (`SmartSource::RunningApps`), and told when they are others.
+    pub fn set_wm_state(&mut self, state: &serde_json::Value) {
+        self.smart.set_wm_state(state);
+    }
+
+    /// How a command reaches the window manager: the shell's line to
+    /// it. Opening an item that is a program which runs sends the
+    /// command that gives its window the keyboard.
+    pub fn set_commander(&mut self, commander: impl FnMut(serde_json::Value) + 'static) {
+        self.smart.set_commander(Box::new(commander));
+    }
+
+    /// Pin a program for the zone of launchers (`SmartSource::Pinned`),
+    /// or take its pin away. `app` is the program's id, as the launcher
+    /// knows it (an item `app:<id>` names it).
+    pub fn pin_launcher(&mut self, app: &str, pin: bool) -> Result<(), BackendError> {
+        self.smart.pin(app, pin)
+    }
+
+    /// The pinned programs, by their ids, in the person's order.
+    pub fn pinned_launchers(&self) -> Vec<String> {
+        self.smart.pins()
+    }
+
+    /// The pinned programs are these, in this order (after the person
+    /// dragged one to another place).
+    pub fn set_pinned_launchers(&mut self, pins: &[String]) -> Result<(), BackendError> {
+        self.smart.set_pins(pins)
+    }
+
+    /// Every installed program as an item (`app:<id>`), by name: what
+    /// the person chooses from to pin one. It reads every desktop entry:
+    /// not for the thread that draws.
+    pub fn installed_programs(&self) -> Vec<Item> {
+        self.smart.installed_items()
+    }
+
+    /// Read the installed programs another way (a test's own list).
+    pub fn set_programs(&mut self, installed: impl Fn() -> Vec<App> + Send + Sync + 'static) {
+        self.smart.set_installed(Arc::new(installed));
+    }
+
+    /// Go to a watched folder, on threads of its own. One going at a
+    /// time: asked for while one is under way, another follows it.
+    fn go_to(&mut self, watch: WatchId) {
+        let Some(portal) = self.portals.get_mut(&watch) else {
+            return;
+        };
+        if portal.opening {
+            portal.again = true;
+            return;
+        }
+        portal.opening = true;
+        // What the kernel told of it so far is not told on any more: the
+        // folder is read anew, and told whole.
+        portal.watcher = None;
+        self.folders.remove(watch);
+        let gone = portal::go(
+            watch,
+            portal.folder.clone(),
+            Arc::clone(&self.system),
+            Arc::clone(&self.how),
+            self.answer.clone(),
+            Arc::clone(&self.wake),
+        );
+        if let Err(error) = gone {
+            portal.opening = false;
+            let reach = Reach::Away { why: format!("{}: no thread to read it on: {error}", text(&portal.folder)) };
+            self.events.extend(crate::zones::reach::told(&portal.location, &reach));
+            portal.reach = reach;
+        }
+    }
+
+    /// Take what a thread that went to a folder found.
+    fn settle(&mut self, answer: portal::Answer, events: &mut Vec<BackendEvent>) {
+        let (watch, outcome) = match (answer.watch, answer.outcome) {
+            (_, portal::Outcome::Once { location, listed }) => {
+                events.push(match listed {
+                    Ok(items) => BackendEvent::Listed { location, items },
+                    Err(error) => BackendEvent::ListingFailed { location, error },
+                });
+                return;
+            }
+            (None, _) => return,
+            (Some(watch), outcome) => (watch, outcome),
+        };
+        // (Let go of while its thread was under way.)
+        let Some(portal) = self.portals.get_mut(&watch) else {
+            return;
+        };
+        let (reach, done) = match outcome {
+            portal::Outcome::Slow => {
+                (Reach::Away { why: format!("{} does not answer", text(&portal.folder)) }, false)
+            }
+            portal::Outcome::There { watcher, items } => {
+                portal.watcher = Some(watcher);
+                portal.sentinel = None;
+                self.folders.adopt(watch, portal.location.clone(), portal.folder.clone(), &items);
+                events.push(BackendEvent::Listed { location: portal.location.clone(), items });
+                (Reach::There, true)
+            }
+            portal::Outcome::Away { why, sentinel } => {
+                portal.watcher = None;
+                portal.sentinel = sentinel;
+                (Reach::Away { why }, true)
+            }
+            portal::Outcome::Once { .. } => return,
+        };
+        if portal.reach != reach {
+            events.extend(crate::zones::reach::told(&portal.location, &reach));
+        }
+        portal.reach = reach;
+        if !done {
+            return;
+        }
+        portal.opening = false;
+        if std::mem::take(&mut portal.again) {
+            self.go_to(watch);
+        }
+    }
+
+    /// The list of the files opened lately, read and watched from now on.
+    fn read_recent(&mut self) {
+        if self.smart.recent.is_some() {
+            return;
+        }
+        let system = Arc::clone(&self.system);
+        self.smart.recent = Some(Source::new(
+            crate::zones::smart::told_as(SmartSource::Recent, &self.smart.recent_wanted),
+            move || recent::read(&system, recent::MOST),
+            std::slice::from_ref(&self.system.places.data_home),
+            |path| path.file_name().is_some_and(|name| name == "recently-used.xbel"),
+            self.smart_tell(),
+        ));
+    }
+
+    /// The downloads folder, read and watched from now on.
+    fn read_downloads(&mut self, folder: PathBuf) {
+        if self.smart.downloads.is_some() {
+            return;
+        }
+        let (system, from) = (Arc::clone(&self.system), folder.clone());
+        self.smart.downloads = Some(Source::new(
+            crate::zones::smart::told_as(SmartSource::Downloads, &self.smart.downloads_wanted),
+            move || crate::zones::smart::newest_first(system.list(&from).unwrap_or_default()),
+            std::slice::from_ref(&folder),
+            |_| true,
+            self.smart_tell(),
+        ));
+    }
+
+    fn smart_tell(&self) -> crate::zones::sources::Tell {
+        let (told, wake) = (Arc::clone(&self.told), Arc::clone(&self.wake));
+        Arc::new(move |events| {
+            told.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).extend(events);
+            wake();
+        })
     }
 
     /// The menu that was last asked for with `context_menu`, once.
@@ -883,11 +1120,30 @@ impl SystemBackend {
 impl ZonesBackend for SystemBackend {
     fn list(&mut self, location: &Location) -> Result<Vec<Item>, BackendError> {
         let folder = self.system.folder_of(location);
+        // A watched folder that is being gone to, or is away, is not
+        // gone to here as well: nothing is known of it, and what is in
+        // it is told when it is. So a mount that does not answer holds
+        // nobody.
+        if let Location::Directory { .. } = location {
+            let mut watched = self.portals.values().filter(|portal| portal.folder == folder).peekable();
+            if watched.peek().is_some() && !watched.any(|portal| portal.reach == Reach::There) {
+                return Ok(Vec::new());
+            }
+        }
         self.system.list(&folder).map_err(|error| refusal(error, &text(&folder)))
     }
 
     fn watch(&mut self, location: &Location) -> Result<WatchId, BackendError> {
         let folder = self.system.folder_of(location);
+        if let Location::Directory { .. } = location {
+            // Answered at once: the folder is gone to on a thread of its
+            // own, and told when it was read (or as away).
+            self.numbers += 1;
+            let watch = WatchId(self.numbers);
+            self.portals.insert(watch, portal::Portal::new(location.clone(), folder));
+            self.go_to(watch);
+            return Ok(watch);
+        }
         if !folder.is_dir() {
             return Err(BackendError::NotFound { what: text(&folder) });
         }
@@ -915,6 +1171,23 @@ impl ZonesBackend for SystemBackend {
     }
 
     fn unwatch(&mut self, watch: WatchId) {
+        // (A portal's own watcher and its threads' answers go with it.)
+        if self.portals.remove(&watch).is_some() {
+            self.folders.remove(watch);
+            return;
+        }
+        match self.smart.unwatch(watch) {
+            Some(Some(SmartSource::Recent)) => {
+                self.smart.recent = None;
+                return;
+            }
+            Some(Some(SmartSource::Downloads)) => {
+                self.smart.downloads = None;
+                return;
+            }
+            Some(_) => return,
+            None => {}
+        }
         if let (Some(folder), Some(watcher)) = (self.folders.remove(watch), &mut self.watcher) {
             watcher.remove(&folder);
         }
@@ -926,7 +1199,23 @@ impl ZonesBackend for SystemBackend {
 
     fn drain_events(&mut self) -> Vec<BackendEvent> {
         let mut events = std::mem::take(&mut self.events);
-        let changes = self.watcher.as_mut().map(watch::Watcher::take).unwrap_or_default();
+        events.append(&mut self.told.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
+        // What the threads that went to folders found.
+        while let Ok(answer) = self.answers.try_recv() {
+            self.settle(answer, &mut events);
+        }
+        let mut changes = self.watcher.as_mut().map(watch::Watcher::take).unwrap_or_default();
+        for portal in self.portals.values_mut() {
+            if let Some(watcher) = &mut portal.watcher {
+                changes.extend(watcher.take());
+            }
+        }
+        // A folder that is away may be back: the folder above it told.
+        let mut again: Vec<WatchId> = self
+            .portals
+            .iter_mut()
+            .filter_map(|(watch, portal)| portal.may_be_back().then_some(*watch))
+            .collect();
         if !changes.is_empty() {
             let told = self.folders.translate(changes, &*self.system);
             // What changed or went has other pictures now, or none.
@@ -939,24 +1228,56 @@ impl ZonesBackend for SystemBackend {
                 }
             }
             events.extend(told);
+            // A watched folder that was read anew may itself be gone
+            // (deleted, moved, its drive pulled out): it is gone to
+            // again, which says so or tells it whole.
+            for shaken in self.folders.take_shaken() {
+                again.extend(
+                    self.portals.iter().filter(|(_, portal)| portal.folder == shaken).map(|(watch, _)| *watch),
+                );
+            }
+        }
+        for watch in again {
+            self.go_to(watch);
         }
         events.extend(self.pictures.drain());
         events
     }
 
     fn facts(&mut self, item: &ItemId) -> Option<ItemFacts> {
+        if Smart::is_program(item) {
+            return self.smart.item(item).map(|item| item.facts);
+        }
         self.system.item(&uris::path_of_item(item)?).map(|item| item.facts)
     }
 
     fn request_icon(&mut self, item: &ItemId, size: IconSize) -> IconRequest {
-        self.pictures.request(item, size, false)
+        self.pictures.request(item, pixels(size), false)
     }
 
     fn request_thumbnail(&mut self, item: &ItemId, size: IconSize) -> IconRequest {
-        self.pictures.request(item, size, true)
+        self.pictures.request(item, pixels(size), true)
     }
 
     fn open(&mut self, item: &ItemId) -> Result<(), BackendError> {
+        if item.as_str().starts_with(crate::zones::programs::RUNNING) {
+            return self.smart.focus(item);
+        }
+        if Smart::is_program(item) {
+            let app = self.smart.app(item).ok_or_else(|| BackendError::NotFound { what: item.to_string() })?;
+            // (The entry was read with nothing to open: its command is
+            // ready as it is.)
+            let launch = Launch {
+                name: app.name.clone(),
+                program: app.command.first().cloned().unwrap_or_default(),
+                args: app.command.iter().skip(1).cloned().collect(),
+                directory: app.directory.clone(),
+                terminal: app.terminal,
+                bus_name: app.dbus_activatable.then(|| app.id.clone()),
+                addresses: Vec::new(),
+            };
+            return (self.launcher)(&launch).map_err(|error| refusal(error, &app.name));
+        }
         let path = self.path_of(item)?;
         let described = self
             .system
@@ -985,6 +1306,9 @@ impl ZonesBackend for SystemBackend {
     }
 
     fn open_with(&mut self, item: &ItemId, program: Option<&str>) -> Result<(), BackendError> {
+        if Smart::is_program(item) {
+            return Err(BackendError::Unsupported);
+        }
         let path = self.path_of(item)?;
         let associations = Associations::load(&self.system.places, &self.system.locales);
         match program {
@@ -1005,45 +1329,38 @@ impl ZonesBackend for SystemBackend {
     }
 
     fn context_menu(&mut self, items: &[ItemId], at: Point) -> Result<(), BackendError> {
+        // (A program is no file: what can be done with one is the
+        // renderer's to offer.)
+        if items.iter().any(Smart::is_program) {
+            return Err(BackendError::Unsupported);
+        }
         self.menu = Some(self.menu_for(items, at));
         (self.wake)();
         Ok(())
     }
 
     fn perform(&mut self, operation: &FileOperation) -> Result<FileOperation, BackendError> {
-        // (Without knowing who the person is, no trash can is theirs.)
-        let can = || self.trash.as_ref().ok_or(BackendError::Unsupported);
-        match operation {
-            FileOperation::Copy { from, to_folder } => files::copy(Path::new(from), Path::new(to_folder))
-                .map(|copy| FileOperation::Trash { path: text(&copy) })
-                .map_err(|error| refusal(error, from)),
-            FileOperation::Move { from, to_folder } => {
-                let back = Path::new(from).parent().map(text).ok_or_else(|| BackendError::NotFound { what: from.clone() })?;
-                files::move_into(Path::new(from), Path::new(to_folder))
-                    .map(|moved| FileOperation::Move { from: text(&moved), to_folder: back })
-                    .map_err(|error| refusal(error, from))
-            }
-            FileOperation::Rename { path, new_name } => {
-                let old = Path::new(path).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-                files::rename(Path::new(path), new_name)
-                    .map(|renamed| FileOperation::Rename { path: text(&renamed), new_name: old })
-                    .map_err(|error| match error.kind() {
-                        std::io::ErrorKind::AlreadyExists => BackendError::Exists { what: new_name.clone() },
-                        _ => refusal(error, path),
-                    })
-            }
-            FileOperation::NewFolder { parent, name } => files::new_folder(Path::new(parent), name)
-                .map(|made| FileOperation::Trash { path: text(&made) })
-                .map_err(|error| refusal(error, parent)),
-            FileOperation::Trash { path } => can()?
-                .put(Path::new(path))
-                .map(|_| FileOperation::Restore { path: path.clone() })
-                .map_err(|error| refusal(error, path)),
-            FileOperation::Restore { path } => can()?
-                .restore(Path::new(path))
-                .map(|_| FileOperation::Trash { path: path.clone() })
-                .map_err(|error| refusal(error, path)),
-        }
+        carry_out(self.trash.as_ref(), operation, &mut |_, _| Ok(()))
+    }
+
+    fn begin_operation(&mut self, request: u64, operation: &FileOperation) -> bool {
+        let (trash, operation) = (self.trash.clone(), operation.clone());
+        self.operations.begin(
+            request,
+            Box::new(move |watched| {
+                carry_out(trash.as_ref(), &operation, &mut |done, total| {
+                    watched.progress(done, total);
+                    if watched.called_off() {
+                        return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "called off"));
+                    }
+                    Ok(())
+                })
+            }),
+        )
+    }
+
+    fn cancel_operation(&mut self, request: u64) {
+        self.operations.cancel(request);
     }
 
     fn drop_payload(&mut self) -> Option<DropPayload> {
@@ -1072,6 +1389,65 @@ impl ZonesBackend for SystemBackend {
     /// core's file operations carry paths as text.)
     fn desktop_folder(&mut self) -> Option<String> {
         self.system.places.desktop().to_str().map(str::to_string)
+    }
+
+    fn begin_listing(&mut self, location: &Location) -> bool {
+        let Location::Directory { path } = location else {
+            // (The desktop is this machine's own and is listed at once.)
+            return false;
+        };
+        let folder = PathBuf::from(path);
+        let watched: Vec<WatchId> =
+            self.portals.iter().filter(|(_, portal)| portal.folder == folder).map(|(watch, _)| *watch).collect();
+        if watched.is_empty() {
+            // Not watched: read once, on a thread of its own, and told.
+            return portal::once(
+                location.clone(),
+                folder,
+                Arc::clone(&self.system),
+                self.answer.clone(),
+                Arc::clone(&self.wake),
+            );
+        }
+        for watch in watched {
+            let Some(portal) = self.portals.get_mut(&watch) else {
+                continue;
+            };
+            // While it is being gone to anyway, that going is the
+            // answer.
+            if portal.opening {
+                continue;
+            }
+            // (Away for the same reason as before is told again:
+            // somebody asked.)
+            if portal.reach.is_away() {
+                portal.reach = Reach::Opening;
+            }
+            self.go_to(watch);
+        }
+        true
+    }
+
+    fn list_source(&mut self, source: &SmartSource) -> Result<Vec<Item>, BackendError> {
+        self.smart.list(source)
+    }
+
+    fn watch_source(&mut self, source: &SmartSource) -> Result<WatchId, BackendError> {
+        match source {
+            SmartSource::Recent => self.read_recent(),
+            SmartSource::Downloads => {
+                let folder = self.system.places.downloads();
+                if !folder.is_dir() {
+                    return Err(BackendError::NotFound { what: text(&folder) });
+                }
+                self.read_downloads(folder);
+            }
+            _ => {}
+        }
+        self.numbers += 1;
+        let watch = WatchId(self.numbers);
+        self.smart.watch(watch, source)?;
+        Ok(watch)
     }
 }
 

@@ -196,6 +196,11 @@ pub struct MonitorData {
     pub reserved_top: i32,
     pub reserved_right: i32,
     pub reserved_bottom: i32,
+    /// How much of the room the work area leaves at each side is the
+    /// shell's zones' own, as taken off for this work area and in its
+    /// units. The shell reads it back: what it tells the zones of the
+    /// room a display has must be without the zones' own.
+    pub zones_room: gevrek_model::settings::ReservedArea,
     /// Where the bar belongs on this monitor: x, y, width, height.
     pub bar: Option<(i32, i32, i32, i32)>,
     /// Device pixels per logical pixel (1.0, 1.25, 2.0 ...).
@@ -490,6 +495,7 @@ mod change_tests {
             reserved_top: 0,
             reserved_right: 0,
             reserved_bottom: 0,
+            zones_room: Default::default(),
             bar: None,
             scale: 1.0,
             detail: Default::default(),

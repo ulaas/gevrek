@@ -49,9 +49,94 @@ fn folder_there(folder: &Path) -> std::io::Result<()> {
     }
 }
 
+/// What is told while something is copied: how many bytes are done of
+/// how many (0: not counted). An error for an answer ends the copy with
+/// that error, and nothing of the copy is left: `Interrupted` is how a
+/// copy is called off. (A test plays a disk that is full this way.)
+pub type Tick<'a> = &'a mut dyn FnMut(u64, u64) -> std::io::Result<()>;
+
+/// How far a copy is.
+struct Counted<'a> {
+    done: u64,
+    total: u64,
+    tick: Tick<'a>,
+}
+
+impl Counted<'_> {
+    /// So many bytes more are done. An error where the copy is to end.
+    fn more(&mut self, bytes: u64) -> std::io::Result<()> {
+        self.done += bytes;
+        (self.tick)(self.done, self.total)
+    }
+}
+
+/// A name beside where something is to arrive, under which it is
+/// written until it is whole. It begins with a dot, so no zone and no
+/// file manager shows it; what a run that was killed leaves is such a
+/// file, never half a file under a real name.
+fn part_name(folder: &Path, name: &str) -> PathBuf {
+    static MADE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let count = MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    folder.join(format!(".{name}.gevrek-part-{}-{count}", std::process::id()))
+}
+
+/// Give what was written whole under a part name its real name: `name`
+/// in `folder`, or the next free one. Never over anything: a name that
+/// was taken meanwhile is passed over. The answer is where it is.
+fn settle(part: &Path, folder: &Path, name: &str) -> std::io::Result<PathBuf> {
+    let is_folder = std::fs::symlink_metadata(part)?.is_dir();
+    for _ in 0..16 {
+        let to = free_name(folder, name)?;
+        let placed = if is_folder {
+            std::fs::rename(part, &to)
+        } else {
+            // (A second name for the same file is only ever made where
+            // there is none: that is what makes this safe against a
+            // file that appears in the same moment.)
+            match std::fs::hard_link(part, &to) {
+                Ok(()) => std::fs::remove_file(part),
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+                // (A file system without second names.)
+                Err(_) if to.symlink_metadata().is_err() => std::fs::rename(part, &to),
+                Err(_) => continue,
+            }
+        };
+        return placed.map(|()| to);
+    }
+    Err(Error::new(ErrorKind::AlreadyExists, "no free name"))
+}
+
+/// Copy `from` into `folder` under `name` (or the next free name): first
+/// whole under a part name beside it, then named. On any error nothing
+/// of it is left.
+fn arrive(from: &Path, folder: &Path, name: &str, tick: Tick<'_>) -> std::io::Result<PathBuf> {
+    let part = part_name(folder, name);
+    let mut counted = Counted { done: 0, total: size_of_tree(from), tick };
+    let arrived = copy_tree(from, &part, &mut counted).and_then(|()| settle(&part, folder, name));
+    if arrived.is_err() {
+        // Half a copy is not left lying.
+        let _ = remove_tree(&part);
+    }
+    arrived
+}
+
+/// The bytes of the files at and below `path`.
+fn size_of_tree(path: &Path) -> u64 {
+    match std::fs::symlink_metadata(path) {
+        Ok(data) if data.is_dir() => std::fs::read_dir(path)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| size_of_tree(&entry.path()))
+            .sum(),
+        Ok(data) if data.is_file() => data.len(),
+        _ => 0,
+    }
+}
+
 /// Copy what is at `from`, whatever it is, to `to`, which must not be
 /// there: a folder with everything in it, a link as a link.
-fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+fn copy_tree(from: &Path, to: &Path, counted: &mut Counted<'_>) -> std::io::Result<()> {
     let data = std::fs::symlink_metadata(from)?;
     let kind = data.file_type();
     if kind.is_symlink() {
@@ -60,7 +145,10 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
         std::fs::create_dir(to)?;
         for entry in std::fs::read_dir(from)? {
             let entry = entry?;
-            copy_tree(&entry.path(), &to.join(entry.file_name()))?;
+            // (Between two files is a place to be called off at, also
+            // where the files are empty.)
+            counted.more(0)?;
+            copy_tree(&entry.path(), &to.join(entry.file_name()), counted)?;
         }
         // The folder's own rights last: one that may not be written to
         // could not have been filled.
@@ -70,7 +158,17 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
         // is an error, not a file lost.)
         let mut source = std::fs::File::open(from)?;
         let mut target = std::fs::OpenOptions::new().write(true).create_new(true).open(to)?;
-        std::io::copy(&mut source, &mut target)?;
+        // (A piece at a time, so that it can say how far it is and be
+        // called off between two pieces.)
+        let mut piece = vec![0u8; 1 << 20];
+        loop {
+            let read = std::io::Read::read(&mut source, &mut piece)?;
+            if read == 0 {
+                break;
+            }
+            std::io::Write::write_all(&mut target, &piece[..read])?;
+            counted.more(read as u64)?;
+        }
         target.set_permissions(data.permissions())?;
         if let Ok(modified) = data.modified() {
             let _ = target.set_modified(modified);
@@ -83,19 +181,19 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
 
 /// Copy `from` into `folder`. The answer is where the copy is.
 pub fn copy(from: &Path, folder: &Path) -> std::io::Result<PathBuf> {
+    copy_told(from, folder, &mut |_, _| Ok(()))
+}
+
+/// As `copy`, telling `tick` how far it is, which may end it (then
+/// nothing of the copy is left, and the error is the one `tick` gave).
+pub fn copy_told(from: &Path, folder: &Path, tick: Tick<'_>) -> std::io::Result<PathBuf> {
     std::fs::symlink_metadata(from)?;
     folder_there(folder)?;
     let name = from.file_name().ok_or_else(|| Error::new(ErrorKind::InvalidInput, "no name"))?;
     if std::fs::canonicalize(folder)?.starts_with(std::fs::canonicalize(from)?) && from.is_dir() && !from.is_symlink() {
         return Err(Error::new(ErrorKind::InvalidInput, "a folder cannot go into itself"));
     }
-    let to = free_name(folder, &name.to_string_lossy())?;
-    if let Err(error) = copy_tree(from, &to) {
-        // Half a copy is not left lying.
-        let _ = remove_tree(&to);
-        return Err(error);
-    }
-    Ok(to)
+    arrive(from, folder, &name.to_string_lossy(), tick)
 }
 
 /// Take away what a copy that failed left: only ever something this
@@ -112,6 +210,12 @@ fn remove_tree(path: &Path) -> std::io::Result<()> {
 /// file system it is renamed; to another it is copied whole and only
 /// then taken away where it was.
 pub fn move_into(from: &Path, folder: &Path) -> std::io::Result<PathBuf> {
+    move_into_told(from, folder, &mut |_, _| Ok(()))
+}
+
+/// As `move_into`, telling `tick` how far a move to another file system
+/// is, which may call it off (then the file is where it was, whole).
+pub fn move_into_told(from: &Path, folder: &Path, tick: Tick<'_>) -> std::io::Result<PathBuf> {
     std::fs::symlink_metadata(from)?;
     folder_there(folder)?;
     let name = from.file_name().ok_or_else(|| Error::new(ErrorKind::InvalidInput, "no name"))?;
@@ -123,10 +227,9 @@ pub fn move_into(from: &Path, folder: &Path) -> std::io::Result<PathBuf> {
     match std::fs::rename(from, &to) {
         Ok(()) => Ok(to),
         Err(error) if error.kind() == ErrorKind::CrossesDevices => {
-            if let Err(error) = copy_tree(from, &to) {
-                let _ = remove_tree(&to);
-                return Err(error);
-            }
+            // Whole at the other end first, and only then taken away
+            // here: called off or failed, it is where it was.
+            let to = arrive(from, folder, &name.to_string_lossy(), tick)?;
             remove_tree(from)?;
             Ok(to)
         }

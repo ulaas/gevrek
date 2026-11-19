@@ -49,11 +49,52 @@ fn key(id: &ItemId) -> String {
 pub struct Seen {
     location: Location,
     known: BTreeMap<String, Item>,
+    /// While the place is being read whole: what changed meanwhile. The
+    /// reading may have passed an item before it changed, or not.
+    touched: Option<Vec<ItemId>>,
 }
 
 impl Seen {
     pub fn new(location: Location) -> Self {
-        Self { location, known: BTreeMap::new() }
+        Self { location, known: BTreeMap::new(), touched: None }
+    }
+
+    /// Whether an item of this id is known to be at the place.
+    pub fn knows(&self, id: &ItemId) -> bool {
+        self.known.contains_key(&key(id))
+    }
+
+    /// Everything that is known to be at the place.
+    pub fn items(&self) -> Vec<Item> {
+        self.known.values().cloned().collect()
+    }
+
+    /// The place is about to be read whole (which takes a while for a
+    /// large folder): from now on it is noted which items change.
+    pub fn begin_listing(&mut self) {
+        self.touched = Some(Vec::new());
+    }
+
+    /// The reading is over: the items that changed while it went on. Each
+    /// of them is to be read once more, since the listing may have it as
+    /// it was before.
+    pub fn end_listing(&mut self) -> Vec<ItemId> {
+        self.touched.take().unwrap_or_default()
+    }
+
+    fn note(&mut self, change: &Change) {
+        let Some(touched) = &mut self.touched else {
+            return;
+        };
+        match change {
+            Change::Came(item) | Change::Touched(item) => touched.push(item.id.clone()),
+            Change::Went(id) => touched.push(id.clone()),
+            Change::Renamed { from, item } => {
+                touched.push(from.clone());
+                touched.extend(item.iter().map(|item| item.id.clone()));
+            }
+            Change::Pictures | Change::Relisted(_) => {}
+        }
     }
 
     pub fn location(&self) -> &Location {
@@ -67,6 +108,7 @@ impl Seen {
 
     /// What a change is to the core, measured against what is known.
     pub fn apply(&mut self, change: Change) -> Vec<BackendEvent> {
+        self.note(&change);
         let location = self.location.clone();
         match change {
             Change::Came(item) => match self.known.insert(key(&item.id), item.clone()) {

@@ -1224,15 +1224,6 @@ impl Executor {
                 height: display.height,
             })
             .collect();
-        // (Whether enough of a window lies on a display to take hold of.)
-        let reaches = |display: &gevrek_model::geometry::Rect,
-                       window: &gevrek_model::geometry::Rect| {
-            let wide = (window.x + window.width).min(display.x + display.width)
-                - window.x.max(display.x);
-            let high = (window.y + window.height).min(display.y + display.height)
-                - window.y.max(display.y);
-            wide >= 32 && high >= 16
-        };
         let woken;
         let transition_rects = {
             let workspace = monitor_manager

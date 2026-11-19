@@ -862,7 +862,7 @@ fn control(ui: &mut Ui, pointer: &str, kind: &Kind<'_>, current: &Value) -> Opti
         }
         Kind::Integer { min, max } => {
             let mut number = current.as_i64().unwrap_or(0);
-            let changed = match hint(pointer) {
+            let changed = match hint_at(pointer) {
                 Some(hint) => ui
                     .add(
                         widgets::Slider::new(&mut number, hint.min as i64..=hint.max as i64)
@@ -877,7 +877,7 @@ fn control(ui: &mut Ui, pointer: &str, kind: &Kind<'_>, current: &Value) -> Opti
         }
         Kind::Number => {
             let mut number = current.as_f64().unwrap_or(0.0);
-            let changed = match hint(pointer) {
+            let changed = match hint_at(pointer) {
                 Some(hint) => ui
                     .add(
                         widgets::Slider::new(&mut number, hint.min..=hint.max)
@@ -1008,6 +1008,22 @@ fn control(ui: &mut Ui, pointer: &str, kind: &Kind<'_>, current: &Value) -> Opti
     }
 }
 
+/// How a number at `pointer` is offered. The schema knows the places of a
+/// list's entries by the first one (`/desktop/zones/zones/0/icon_size`):
+/// the second zone's is offered as the first's is, not by a guess from
+/// its name alone.
+pub fn hint_at(pointer: &str) -> Option<gevrek_schema::Hint> {
+    let numbered = |step: &str| !step.is_empty() && step.bytes().all(|byte| byte.is_ascii_digit());
+    if !pointer.split('/').any(numbered) {
+        return hint(pointer);
+    }
+    let first: Vec<&str> = pointer
+        .split('/')
+        .map(|step| if numbered(step) { "0" } else { step })
+        .collect();
+    hint(&first.join("/")).or_else(|| hint(pointer))
+}
+
 fn suffix(unit: &str) -> String {
     match unit {
         "" => String::new(),
@@ -1102,6 +1118,26 @@ mod tests {
         BindingProfile, MonitorSelector, RulePredicate, WindowRuleProfile, WorkspaceProfile,
     };
     use gevrek_model::Config;
+
+    #[test]
+    fn a_number_in_a_lists_later_entry_is_offered_as_in_the_first() {
+        // An opacity is 0 to 255 by its name alone, and hundredths in a
+        // zone's look: the third zone's is hundredths as the first's is.
+        let first = hint_at("/desktop/zones/zones/0/look/opacity").expect("a hint");
+        assert_eq!((first.min, first.max), (0.0, 100.0));
+        assert_eq!(hint_at("/desktop/zones/zones/2/look/opacity"), Some(first));
+        assert_eq!(
+            hint_at("/desktop/zones/zones/7/icon_size"),
+            hint("/desktop/zones/zones/0/icon_size")
+        );
+        // Where no entry is numbered, and where the first has no place
+        // written down, the hint is what it always was.
+        assert_eq!(hint_at("/desktop/shell/panel/height"), hint("/desktop/shell/panel/height"));
+        assert_eq!(
+            hint_at("/desktop/window_rules/3/no_such_number"),
+            hint("/desktop/window_rules/3/no_such_number")
+        );
+    }
 
     fn document() -> Document {
         let mut config = Config::default();

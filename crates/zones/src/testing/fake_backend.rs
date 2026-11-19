@@ -7,12 +7,13 @@ use crate::backend::{
     BackendError, BackendEvent, DragActions, DropPayload, FileOperation, IconHandle, IconRequest,
     IconSize, Location, WatchId, ZonesBackend,
 };
+use crate::config::SmartSource;
 use crate::geometry::{Display, ReservedArea};
 use crate::ids::{DisplayId, ItemId};
 use crate::item::{Item, ItemFacts};
 use crate::paths;
 use gevrek_model::geometry::{Point, Rect};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The desktop's own folder on the fake.
 pub const DESKTOP: &str = "/desk";
@@ -44,6 +45,23 @@ pub struct FakeBackend {
     pub journal_open: bool,
     /// How often anything was asked of the backend through the trait.
     pub calls: usize,
+    /// What the sources of smart zones have, as a test said.
+    sources: BTreeMap<SmartSource, Vec<Item>>,
+    source_watches: BTreeMap<WatchId, SmartSource>,
+    /// Folders that answer late (a share on a slow network): listing them
+    /// is only begun, and `answer` gives the answer.
+    slow: BTreeSet<String>,
+    /// Folders that are there and cannot be reached.
+    unreachable: BTreeSet<String>,
+    /// The listings that were begun and are not answered yet.
+    pub awaited: Vec<Location>,
+    /// Whether the screen is shown to others, where the system says.
+    pub shared: Option<bool>,
+    /// File operations take long: they are only begun, and
+    /// `finish_operations` ends them.
+    pub slow_operations: bool,
+    /// The operations that were begun and have not ended.
+    pub under_way: Vec<(u64, FileOperation)>,
 }
 
 impl FakeBackend {
@@ -60,7 +78,17 @@ impl FakeBackend {
 
     /// How many watches are running.
     pub fn watches(&self) -> usize {
-        self.watches.len()
+        self.watches.len() + self.source_watches.len()
+    }
+
+    /// Whether a folder is watched now.
+    pub fn is_watched(&self, folder: &str) -> bool {
+        self.watches.values().any(|location| paths::same_folder(Self::folder_of(location), folder))
+    }
+
+    /// Whether a folder can be reached now.
+    pub fn is_reachable(&self, folder: &str) -> bool {
+        !self.unreachable.iter().any(|gone| paths::same_folder(gone, folder))
     }
 
     fn number(&mut self) -> u64 {
@@ -75,6 +103,10 @@ impl FakeBackend {
 
     /// The location a watched folder is known by, as it was asked for.
     fn watched(&self, folder: &str) -> Option<Location> {
+        // (What cannot be reached tells nothing of what happens in it.)
+        if self.unreachable.iter().any(|gone| paths::same_folder(gone, folder)) {
+            return None;
+        }
         self.watches
             .values()
             .find(|location| match location {
@@ -119,6 +151,110 @@ impl FakeBackend {
     /// An empty folder is there (for a portal to show).
     pub fn add_folder(&mut self, path: &str) {
         self.folders.entry(path.to_string()).or_default();
+    }
+
+    /// A folder is there inside another, and is shown in it as an item.
+    pub fn add_folder_in(&mut self, parent: &str, name: &str) -> Item {
+        let path = paths::join(parent, name);
+        let item = Item::folder(&path);
+        self.add(parent, item.clone());
+        self.add_folder(&path);
+        item
+    }
+
+    /// A file is there in a folder.
+    pub fn add_file_in(&mut self, folder: &str, name: &str) -> Item {
+        let item = Item::file(&paths::join(folder, name));
+        self.add(folder, item.clone());
+        item
+    }
+
+    /// A source of smart zones has these items now (the files used last,
+    /// the programs that run). Whoever watches it is told.
+    pub fn set_source(&mut self, source: SmartSource, items: Vec<Item>) {
+        self.sources.insert(source.clone(), items.clone());
+        if self.source_watches.values().any(|watched| watched == &source) {
+            self.events.push(BackendEvent::SourceListed { source, items });
+        }
+    }
+
+    /// A folder answers late from now on, or at once again.
+    pub fn set_slow(&mut self, folder: &str, slow: bool) {
+        if slow {
+            self.slow.insert(folder.to_string());
+        } else {
+            self.slow.remove(folder);
+        }
+    }
+
+    /// A folder cannot be reached from now on (the share is gone), or
+    /// can again. Whoever watches it is told when it goes.
+    pub fn set_reachable(&mut self, folder: &str, reachable: bool) {
+        if reachable {
+            self.unreachable.remove(folder);
+            return;
+        }
+        if let Some(location) = self.watched(folder) {
+            self.events.push(BackendEvent::ListingFailed {
+                location,
+                error: BackendError::Refused { what: format!("{folder} does not answer") },
+            });
+        }
+        self.unreachable.insert(folder.to_string());
+    }
+
+    /// The answers to every listing that was begun arrive.
+    pub fn answer(&mut self) {
+        for location in std::mem::take(&mut self.awaited) {
+            let event = match self.listed(&location) {
+                Ok(items) => BackendEvent::Listed { location, items },
+                Err(error) => BackendEvent::ListingFailed { location, error },
+            };
+            self.events.push(event);
+        }
+    }
+
+    /// Every operation that was begun ends now, as it would have at once.
+    pub fn finish_operations(&mut self) {
+        for (request, operation) in std::mem::take(&mut self.under_way) {
+            let done = match self.perform(&operation) {
+                Ok(undo) => BackendEvent::OperationDone { request, undo: Some(undo), error: None },
+                Err(error) => BackendEvent::OperationDone { request, undo: None, error: Some(error) },
+            };
+            self.events.push(done);
+        }
+    }
+
+    /// The program that began the operations under way has ended, and its
+    /// threads with it: nobody is told how they end. Those that are
+    /// `carried_out` all the same (the system was doing them) leave their
+    /// files where they were going; the others leave nothing.
+    pub fn abandon_operations(&mut self, carried_out: bool) {
+        for (_, operation) in std::mem::take(&mut self.under_way) {
+            if carried_out {
+                let _ = self.perform(&operation);
+            }
+        }
+    }
+
+    /// An operation that is under way says how far it has come.
+    pub fn progress(&mut self, request: u64, done: u64, total: u64) {
+        self.events.push(BackendEvent::OperationProgress { request, done, total });
+    }
+
+    /// The system says the screen is shown to others, or no longer.
+    pub fn share_screen(&mut self, shared: bool) {
+        self.shared = Some(shared);
+        self.events.push(BackendEvent::ScreenShared { shared });
+    }
+
+    fn listed(&self, location: &Location) -> Result<Vec<Item>, BackendError> {
+        let folder = Self::folder_of(location);
+        if self.unreachable.iter().any(|gone| paths::same_folder(gone, folder)) {
+            return Err(BackendError::Refused { what: format!("{folder} does not answer") });
+        }
+        let key = self.folder_key(folder).ok_or_else(|| Self::missing(folder))?;
+        Ok(self.folders[&key].values().cloned().collect())
     }
 
     /// An item goes, as if something outside had deleted it.
@@ -219,9 +355,7 @@ impl FakeBackend {
 impl ZonesBackend for FakeBackend {
     fn list(&mut self, location: &Location) -> Result<Vec<Item>, BackendError> {
         self.calls += 1;
-        let folder = Self::folder_of(location);
-        let key = self.folder_key(folder).ok_or_else(|| Self::missing(folder))?;
-        Ok(self.folders[&key].values().cloned().collect())
+        self.listed(location)
     }
 
     fn watch(&mut self, location: &Location) -> Result<WatchId, BackendError> {
@@ -238,6 +372,58 @@ impl ZonesBackend for FakeBackend {
     fn unwatch(&mut self, watch: WatchId) {
         self.calls += 1;
         self.watches.remove(&watch);
+        self.source_watches.remove(&watch);
+    }
+
+    fn begin_listing(&mut self, location: &Location) -> bool {
+        self.calls += 1;
+        let folder = Self::folder_of(location);
+        if !self.slow.iter().any(|slow| paths::same_folder(slow, folder)) {
+            return false;
+        }
+        self.awaited.push(location.clone());
+        true
+    }
+
+    fn list_source(&mut self, source: &SmartSource) -> Result<Vec<Item>, BackendError> {
+        self.calls += 1;
+        self.sources.get(source).cloned().ok_or(BackendError::Unsupported)
+    }
+
+    fn watch_source(&mut self, source: &SmartSource) -> Result<WatchId, BackendError> {
+        self.calls += 1;
+        if !self.sources.contains_key(source) {
+            return Err(BackendError::Unsupported);
+        }
+        let watch = WatchId(self.number());
+        self.source_watches.insert(watch, source.clone());
+        Ok(watch)
+    }
+
+    fn screen_shared(&mut self) -> Option<bool> {
+        self.calls += 1;
+        self.shared
+    }
+
+    fn begin_operation(&mut self, request: u64, operation: &FileOperation) -> bool {
+        self.calls += 1;
+        if self.slow_operations {
+            self.under_way.push((request, operation.clone()));
+        }
+        self.slow_operations
+    }
+
+    fn cancel_operation(&mut self, request: u64) {
+        self.calls += 1;
+        let before = self.under_way.len();
+        self.under_way.retain(|(under_way, _)| *under_way != request);
+        if self.under_way.len() != before {
+            self.events.push(BackendEvent::OperationDone {
+                request,
+                undo: None,
+                error: Some(BackendError::Cancelled),
+            });
+        }
     }
 
     fn drain_events(&mut self) -> Vec<BackendEvent> {

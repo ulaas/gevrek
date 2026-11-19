@@ -145,24 +145,38 @@ impl Drop for Folder {
 pub fn watch_folder(path: &str, news: Arc<News>) -> Result<Folder, BackendError> {
     let location = Location::Directory { path: path.to_string() };
     let seen: Shared = Arc::new(Mutex::new(Seen::new(location)));
-    watch_into(path, seen, news)
+    watch_into(path, seen, news, Types::default(), || {})
 }
 
 /// Watch one of the folders the desktop is made of: what changes in it
 /// is a change of the desktop, measured against what is known of that.
-pub fn watch_desktop_folder(folder: &str, desktop: &Shared, news: Arc<News>) -> Result<Folder, BackendError> {
-    watch_into(folder, Arc::clone(desktop), news)
+pub fn watch_desktop_folder(
+    folder: &str,
+    desktop: &Shared,
+    news: Arc<News>,
+    types: Types,
+) -> Result<Folder, BackendError> {
+    watch_into(folder, Arc::clone(desktop), news, types, || {})
 }
 
 /// Watch `path`; what changes there is a change at the place `seen` is
-/// about.
-fn watch_into(path: &str, seen: Shared, news: Arc<News>) -> Result<Folder, BackendError> {
+/// about. `lost` is called (on the watcher's thread) when the folder
+/// itself seems to be gone: it was removed, or the watching of it failed
+/// (a drive pulled out, a machine that stopped answering).
+pub fn watch_into(
+    path: &str,
+    seen: Shared,
+    news: Arc<News>,
+    mut types: Types,
+    lost: impl Fn() + Send + 'static,
+) -> Result<Folder, BackendError> {
     let folder = shell::plain(path);
     if !std::path::Path::new(&folder).is_dir() {
         return Err(BackendError::NotFound { what: folder });
     }
     let location = locked(&seen).location().clone();
-    let (told, mut types, mut renamed_from) = (Arc::clone(&seen), Types::default(), None::<ItemId>);
+    let (told, mut renamed_from) = (Arc::clone(&seen), None::<ItemId>);
+    let itself = folder.clone();
     let ended = Arc::new(AtomicBool::new(false));
     let over = Arc::clone(&ended);
     let handler = move |event: notify::Result<notify::Event>| {
@@ -176,8 +190,18 @@ fn watch_into(path: &str, seen: Shared, news: Arc<News>) -> Result<Folder, Backe
         let again = |types: &mut Types| shell::list(&location, types).ok().map(Change::Relisted);
         match event {
             // What was missed cannot be known: everything is read anew.
-            Err(_) => changes.extend(again(&mut types)),
+            Err(_) => {
+                lost();
+                changes.extend(again(&mut types));
+            }
             Ok(event) if event.need_rescan() => changes.extend(again(&mut types)),
+            // (Windows tells of a watched folder's own going this way.)
+            Ok(event)
+                if matches!(event.kind, EventKind::Remove(_))
+                    && event.paths.first().is_some_and(|path| super::facts::same_path(&path.to_string_lossy(), &itself)) =>
+            {
+                lost();
+            }
             Ok(event) => {
                 let id = |index: usize| {
                     event.paths.get(index).map(|path| ItemId::new(path.to_string_lossy().into_owned()))
@@ -214,12 +238,13 @@ fn watch_into(path: &str, seen: Shared, news: Arc<News>) -> Result<Folder, Backe
                 }
             }
         }
+        // Told while what is known is held: so a listing of the whole
+        // place and a change of one item reach the core in the order
+        // they were measured in.
+        let mut seen = locked(&told);
         let mut events = Vec::new();
-        {
-            let mut seen = locked(&told);
-            for change in changes {
-                events.extend(seen.apply(change));
-            }
+        for change in changes {
+            events.extend(seen.apply(change));
         }
         news.tell(events);
     };
@@ -266,7 +291,7 @@ pub struct Window {
 impl Window {
     /// Make the window. From then on `news` is told when Windows says
     /// its displays changed.
-    pub fn open(news: Arc<News>) -> Result<Self, BackendError> {
+    pub fn open(news: Arc<News>, types: Types) -> Result<Self, BackendError> {
         let (made, handle) = mpsc::channel();
         let thread = std::thread::Builder::new()
             .name("gevrek-zones-watch".to_string())
@@ -285,7 +310,7 @@ impl Window {
                         desktop: None,
                         folders: Vec::new(),
                         whole: true,
-                        types: Types::default(),
+                        types,
                     });
                 });
                 let mut message = MSG::default();
@@ -759,7 +784,7 @@ mod tests {
         news.on_news(Box::new(move || {
             let _ = woken.send(());
         }));
-        let window = Window::open(Arc::clone(&news)).expect("a window");
+        let window = Window::open(Arc::clone(&news), Types::default()).expect("a window");
         let at = Location::Directory { path: root.clone() };
         let seen: Shared = Arc::new(Mutex::new(Seen::new(at.clone())));
         window.listen_to_folder(&seen, &root).expect("listening");
@@ -837,7 +862,7 @@ mod tests {
     #[test]
     fn the_hidden_window_opens_listens_and_closes() {
         let news = Arc::new(News::default());
-        let window = Window::open(Arc::clone(&news)).expect("a window");
+        let window = Window::open(Arc::clone(&news), Types::default()).expect("a window");
         let seen: Shared = Arc::new(Mutex::new(Seen::new(Location::Desktop)));
         // (Listening changes nothing of the desktop; the shell only
         // notes whom to tell.)

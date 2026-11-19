@@ -192,6 +192,13 @@ pub enum RuntimeEventKind {
     /// the window, with its `class` and `title`; or nothing was
     /// (`cancelled`).
     WindowPicked,
+    /// Another program takes pictures of a display again and again (the
+    /// screen is shared or recorded), or does so no longer: `state` is
+    /// `started` or `stopped`, `output` the display, and `shared` the
+    /// names of all displays that are shared now, with commas between
+    /// (empty: none). One picture, a screenshot, is not told. Only where
+    /// the window manager is the one that makes such pictures (Wayland).
+    ScreenShared,
 }
 
 impl RuntimeEventKind {
@@ -233,13 +240,14 @@ impl RuntimeEventKind {
             Self::NoticesChanged => "notices.changed",
             Self::DesktopPressed => "desktop.pressed",
             Self::WindowPicked => "window.picked",
+            Self::ScreenShared => "screen.shared",
         }
     }
 }
 
 impl RuntimeEventKind {
     /// Every kind, for lists and tests.
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 37] = [
         Self::RuntimeStarted,
         Self::RuntimeStopping,
         Self::ConfigurationReloaded,
@@ -276,6 +284,7 @@ impl RuntimeEventKind {
         Self::NoticesChanged,
         Self::DesktopPressed,
         Self::WindowPicked,
+        Self::ScreenShared,
     ];
 
     /// The event subscribers are told of for a window event of the
@@ -414,6 +423,14 @@ pub struct Executor {
     /// Timestamp of last expose promote/demote transition — used to suppress
     /// the Moved handler's recenter feedback loop during transitions
     last_expose_transition: Instant,
+    /// The window whose opening is being handled now (`on_window_created`):
+    /// what the graph does with a window is for a new one only where it
+    /// is this one.
+    opening: Option<WindowHandle>,
+    /// The window that is opening was put on the workspace of the window
+    /// it belongs to, which is not shown: it is out of sight, and does not
+    /// take the keyboard.
+    opened_out_of_sight: bool,
 }
 
 /// Carry out one engine effect on the desktop. The executor says what should
@@ -432,6 +449,57 @@ fn monitor_of(
     desktop
         .output_of(window)
         .and_then(|output| outputs.get_monitor(output).cloned())
+}
+
+/// Whether enough of a window lies on a display to take hold of it there:
+/// 32 across and 16 down at the least.
+fn reaches(display: &gevrek_model::geometry::Rect, window: &gevrek_model::geometry::Rect) -> bool {
+    let wide = (window.x + window.width).min(display.x + display.width) - window.x.max(display.x);
+    let high = (window.y + window.height).min(display.y + display.height) - window.y.max(display.y);
+    wide >= 32 && high >= 16
+}
+
+/// The display a window that lies at `rect` has gone to from `home`: the
+/// one more than half of it lies on, or, where no display has that much of
+/// it (part of it is beyond them all), the one its middle is on. `None`
+/// while half of it or more is on `home` still: a window across an edge
+/// stays with the display it was on until most of it has left, so one that
+/// lies half and half is not sent to and fro.
+fn display_gone_to(
+    outputs: &MonitorManager,
+    rect: &gevrek_model::geometry::Rect,
+    home: MonitorHandle,
+) -> Option<MonitorHandle> {
+    let whole = i64::from(rect.width.max(0)) * i64::from(rect.height.max(0));
+    if whole == 0 {
+        return None;
+    }
+    let part = |display: &crate::outputs::MonitorInfo| {
+        let wide = (rect.x + rect.width).min(display.x + display.width) - rect.x.max(display.x);
+        let high = (rect.y + rect.height).min(display.y + display.height) - rect.y.max(display.y);
+        i64::from(wide.max(0)) * i64::from(high.max(0))
+    };
+    let displays = outputs.get_all_monitors_ordered();
+    if displays
+        .iter()
+        .any(|display| display.handle == home && part(display) * 2 >= whole)
+    {
+        return None;
+    }
+    let (x, y) = (rect.x + rect.width / 2, rect.y + rect.height / 2);
+    displays
+        .iter()
+        .find(|display| part(display) * 2 > whole)
+        .or_else(|| {
+            displays.iter().find(|display| {
+                x >= display.x
+                    && x < display.x + display.width
+                    && y >= display.y
+                    && y < display.y + display.height
+            })
+        })
+        .map(|display| display.handle)
+        .filter(|display| *display != home)
 }
 
 /// What a display is known by beyond this run of the system: its device
@@ -536,6 +604,8 @@ impl Executor {
             expose_workspaces: HashSet::new(),
             locked_groups: HashSet::new(),
             last_expose_transition: Instant::now(),
+            opening: None,
+            opened_out_of_sight: false,
         }
     }
 
@@ -624,6 +694,13 @@ impl Executor {
     #[cfg(any(test, feature = "test-support"))]
     pub fn set_focused_monitor_for_tests(&mut self, monitor: MonitorHandle) {
         self.focused_monitor = Some(monitor);
+    }
+
+    /// As when gevrek has just put the window somewhere itself: what the
+    /// window says of its place next is no move of its own.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn expect_own_move_for_tests(&mut self, window: WindowHandle) {
+        self.suppressed_windows.insert(window);
     }
 
     #[cfg(any(test, feature = "test-support"))]

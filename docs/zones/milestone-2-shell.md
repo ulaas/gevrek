@@ -3,10 +3,12 @@
 Written 2026-11-19. The component of `gevrek-shell` that draws the zones
 and hears the pointer on them: `crates/shell/src/zones/`.
 
-**Nothing of it was run on a live desktop.** It was built against the
-backend in memory, drawn into pictures, and tried in tests. The real
-backends of both systems are wired in since, and what they do together
-with this on a real desktop nobody has seen yet.
+It was built against the backend in memory, drawn into pictures, and
+tried in tests. Since then it was run once on a real Windows desktop (two
+displays of 2560 by 1440): items show, dragging into and out of a zone
+works, a double click opens. Three faults were found there and are
+mended ("Found on the first real desktop" below); the mending itself
+was tried in tests only. On Linux nothing of it ran on a live desktop.
 
 ## What exists
 
@@ -136,9 +138,88 @@ Everything that changes the zones is a `Command`:
 | Double click an item | the backend's `open` |
 | Other button on an item | the backend's `context_menu`, or a menu of ours from `Desk::own_menu` |
 | Other button on a zone | rename, roll up, grid or list, the order, icon size, the locks, out of its tabs, take away |
-| Other button on the desktop | new zone here, find an item, sort by the rules, take the sorting back, hide |
-| Double click the bare desktop | `QuickHide` |
+| Other button on the desktop | new zone here, find an item, sort by the rules, take the sorting back, hide; while everything is hidden, only "Show the zones" |
+| Double click the bare desktop | `QuickHide` (hides, and brings back) |
+| Any press on a display's surface, Escape | the menu or box that is open is put away; the press then does what it does |
 | The wheel over a zone | scrolls it (the shell's own; not remembered) |
+
+## Menus and the box: one at a time, and put away by a press
+
+There is at most one menu of the zones. `Surfaces` keeps the open one
+(`menu`), as it keeps the box that is typed into (`typing`); `answer`
+closes it before it opens the next.
+
+The host closes a menu at a press *outside the shell's surfaces*
+(`Control::popup`), which is right for a panel's menu and not enough
+here: the displays' surfaces cover every display, so a press beside a
+menu of the zones is a press on a shell surface, which the host leaves
+to that surface (Windows: `PRESSED_AT` in `shellkit/src/win/mod.rs`; on
+Wayland a popup that holds the pointer is not dismissed by a press on a
+surface of its own program either). So each display's drawing says it
+itself: when a button of the pointer went down on it, or Escape was
+pressed while it has the keyboard (`surfaces::pressed_elsewhere`), the
+menu and the box are closed (`surfaces::dismiss`) before anything else
+of the frame. The press is not used up: the main button goes on to
+select, take hold or band, and the other button's new menu is opened
+after the old one is closed.
+
+- **Escape.** On Windows a menu never has the keyboard; while any menu
+  is open the host hears the key wherever the keyboard is and closes
+  every menu (`keys_heard`, `ESCAPE`), and so the zones' too. Where the
+  menu itself has the keyboard (a Wayland popup that holds the seat) its
+  own drawing closes it on Escape.
+- **Hidden or switched off.** `surfaces::sync`, which runs at every
+  wake-up and every configuration, closes both when the zones go from
+  seen to not seen (`Zones::put_away`: switched off, or hidden at once
+  and not peeked at). A menu asked for while hidden stays: it is the
+  way back.
+- **The box.** It closed itself only when it lost the keyboard
+  (`had_keyboard && !has`). On Windows a press on a display's surface
+  makes that window the active one, so the box does lose it; where the
+  box holds the keyboard for itself alone (`Keyboard::Exclusive` on a
+  layer surface) a press on the desktop takes nothing from it. It is
+  closed by the same `dismiss` now. What was looked for stays looked
+  for, as when the box loses the keyboard.
+- **Hidden.** The desktop's menu is "Show the zones" (`QuickHide` with
+  `hidden: false`) and nothing else while everything is hidden
+  (`surfaces::hidden_menu`): a zone made then, or a sorting, would not
+  be seen. Zones that are hidden are not in the layout, so the other
+  button anywhere on the display asks for this menu.
+
+## Found on the first real desktop
+
+Windows, two displays, `hide_desktop_icons: false` (step 2 of "Trying
+it, deliberately" in `milestone-2.md`).
+
+1. **Several menus at once.** The other button on the bare desktop, and
+   again without choosing: a second menu beside the first. `answer`
+   opened a popup and kept nothing of it. Mended: `Surfaces::menu`.
+2. **A press beside a menu did not close it.** The host's rule is a
+   press outside the shell's surfaces, and the displays' surfaces are
+   everywhere. Mended: `dismiss`, from each display's drawing.
+3. **Hidden, there was no way back** other than over the line
+   (`{"command":"quick_hide","hidden":false}`). The desktop's menu said
+   "Hide the zones" also while they were hidden, which does nothing
+   then. Mended: "Show the zones".
+
+   Two presses on the bare desktop are meant to bring everything back,
+   and whether they did not on that desktop, or were not tried, is not
+   known. Here they do: a test drives the display's drawing with what a
+   host gives it (the pointer comes, down, up, down, up, a frame each)
+   while everything is hidden, at a bare point and at a point inside a
+   hidden zone, and both bring everything back. It passed before
+   anything was changed, so none of this is the cause: a hidden zone
+   still being pressed (hidden zones are not in the layout), the first
+   press of the two beginning a rectangle and the second being lost,
+   the surface not being drawn again (what the press brings back is
+   painted in the same frame). What a test cannot say: the toolkit
+   counts two presses as "twice" only within 0.3 seconds of each other
+   (and 6 points), and reckons by the time a frame is drawn, where
+   Windows allows half a second by default and the person's own setting
+   beyond that; the host passes Windows' own "twice"
+   (`WM_LBUTTONDBLCLK`) on as a plain press. A slow pair of presses that
+   Explorer would take is not taken here. To be looked at on the real
+   desktop, now that the leftover menus are out of the way.
 
 ## The doors for what comes from elsewhere
 
@@ -270,11 +351,18 @@ its own that always runs.
 ## What was verified
 
 - `cargo build`; `cargo test -p gevrek-shell -p gevrek-zones` (the shell
-  141 passed and 7 ignored on Windows, 173 and 8 in WSL; the zones 89
+  158 passed and 7 ignored on Windows, 190 and 8 in WSL; the zones 89
   passed on both); `cargo clippy -p
   gevrek-shell --all-targets` with the two warnings it had before
   (`control.rs`, `tutoring.rs`) and none new; the same lint and the same tests in
   WSL.
+- Tests for what was found on the real desktop: one menu at a time and
+  a press beside it, the box with it, hiding while a menu is open, what
+  counts as a press elsewhere (these four against the host's own
+  `Control`, which without a display only writes down what is asked of
+  it: which surface was opened and which closed); two presses while
+  hidden, and the menu while hidden, driven through the display's
+  drawing.
 - Tests beside the code (33): what lies at a point, overlapping zones,
   tabs, the cell or line of a drop, scrolling, label breaking, snap
   guides; every gesture in the table above against the command it gives;
@@ -284,11 +372,16 @@ its own that always runs.
 
 ## What was not verified, and what is not done
 
-- Nothing ran on a real desktop: no surface was opened, no pointer was
-  read from a real window, no menu or box was shown. That the surfaces'
+- On a real desktop it ran once, on Windows, before the mending above:
+  that a press beside a menu now closes it, that there is one menu, and
+  that the box goes at a press on the desktop, are held by tests and
+  not seen. Nothing ran on a real Linux desktop. That the surfaces'
   hosts deliver what `draw::hear` reads (above all a press that began on
   one display and is let go on another) is assumed from how they are
   written, not seen.
+- Two presses on the bare desktop within Windows' own time for "twice"
+  but slower than the toolkit's 0.3 seconds do not hide or bring back
+  (see "Found on the first real desktop").
 - The backends, drag and drop and the line to the window manager are
   wired, and none was ever exercised with a real surface, a real desktop
   or a real window manager from here: `zones/backend.rs` is compiled on

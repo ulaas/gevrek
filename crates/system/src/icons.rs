@@ -333,7 +333,7 @@ pub(crate) mod shell {
         BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
     };
     use windows::Win32::UI::Shell::{
-        IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_ICONONLY,
+        IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF, SIIGBF_ICONONLY,
         SIIGBF_THUMBNAILONLY,
     };
 
@@ -349,16 +349,31 @@ pub(crate) mod shell {
     /// none: the shell is not let fall back to the icon, so that who asks
     /// knows which of the two it got.
     pub fn picture_as(name: &str, size: u32, thumbnail: bool) -> Option<Picture> {
-        let size = size.clamp(8, 512) as i32;
         let what = if thumbnail {
             SIIGBF_THUMBNAILONLY
         } else {
             SIIGBF_ICONONLY
         };
         let _com = Com::new();
+        // SAFETY: the shell's objects are used on this thread alone,
+        // which may use them while `_com` lives.
         unsafe {
             let item: IShellItemImageFactory =
                 SHCreateItemFromParsingName(&HSTRING::from(name), None).ok()?;
+            picture_from(&item, size, what)
+        }
+    }
+
+    /// The picture one of the shell's items gives of itself, asked for in
+    /// the way `what` says (the icon only, the small picture only, only
+    /// what is in Windows' own store of small pictures).
+    ///
+    /// # Safety
+    /// Called on a thread that is set up for the shell's objects, with an
+    /// item that was made on it.
+    pub unsafe fn picture_from(item: &IShellItemImageFactory, size: u32, what: SIIGBF) -> Option<Picture> {
+        let size = size.clamp(8, 512) as i32;
+        {
             let bitmap = item
                 .GetImage(SIZE { cx: size, cy: size }, what)
                 .ok()?;
@@ -495,6 +510,15 @@ impl Cache {
     pub fn forget(&mut self, name: &str) {
         self.known.retain(|(known, _), _| known != name);
         self.asked.retain(|(asked, _)| asked != name);
+    }
+
+    /// Let go of the icon `name` at one size only: its pixels are not
+    /// kept any longer (there is a bound on how much is). Asked for
+    /// again, it is looked for again.
+    pub fn forget_at(&mut self, name: &str, size: u32) {
+        let wanted = (name.to_string(), size);
+        self.known.remove(&wanted);
+        self.asked.remove(&wanted);
     }
 }
 

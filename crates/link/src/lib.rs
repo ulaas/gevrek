@@ -58,6 +58,15 @@ pub enum Request {
     Trigger(usize),
     /// Stop the running graph from running (`true`), or let it run again.
     Pause(bool),
+    /// Ask something of the zones on the desktop: a zones command as
+    /// JSON (`{"command": "quick_hide"}`). Answered with
+    /// [`Event::ZonesAnswered`], whatever comes of it. (This is the
+    /// asking side, for any program; the program that runs the zones
+    /// uses [`Link::host_zones`] and what goes with it.)
+    Zones(String),
+    /// Ask how the zones are, as the shell that runs them last told the
+    /// window manager. Answered with [`Event::ZonesState`].
+    ZonesState,
 }
 
 /// What the running graph does: the graph page lights its nodes with it.
@@ -108,6 +117,29 @@ pub enum Event {
     /// The answer to [`Request::State`], as the window manager's JSON.
     State(serde_json::Value),
     Graph(GraphEvent),
+    /// What came of a [`Request::Zones`]. `success`: it was carried out,
+    /// and `events` is what happened because of it (the zones' events as
+    /// JSON). Otherwise `error` says why: the zones' own reason, or that
+    /// no shell runs them (`delivered` is false then), or that the shell
+    /// or the window manager did not answer.
+    ZonesAnswered {
+        command: String,
+        success: bool,
+        delivered: bool,
+        error: Option<String>,
+        events: Vec<String>,
+    },
+    /// The answer to [`Request::ZonesState`]. `json` is the zones'
+    /// snapshot (`gevrek_zones::ipc::ZonesSnapshot`), empty where there
+    /// is none; `running`: a shell runs the zones now; `stale`: `json` is
+    /// from a shell that has gone since; `message` says in words why
+    /// there is nothing to show or why it is old.
+    ZonesState {
+        running: bool,
+        stale: bool,
+        json: String,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -547,6 +579,19 @@ async fn serve(client: &mut WMClient, request: Request, tell: &Teller) {
                 }
             }
         }
+        Request::Zones(command) => {
+            let answer = tokio::time::timeout(
+                CALL,
+                client.send_zones_command(command.clone(), gevrek_zones::ipc::VERSION, 0),
+            )
+            .await;
+            tell.tell(zones_answered(command, answer));
+        }
+        Request::ZonesState => {
+            tell.tell(zones_state(
+                tokio::time::timeout(CALL, client.get_zones_state()).await,
+            ));
+        }
         Request::Trigger(node) => {
             let error = said(
                 tokio::time::timeout(CALL, client.trigger_manual_event(node.to_string())).await,
@@ -580,6 +625,113 @@ async fn serve(client: &mut WMClient, request: Request, tell: &Teller) {
 
 /// Why a call that answers with a status did not do what was asked, if
 /// it did not.
+/// What is told of a zones command, from what the window manager
+/// answered, or did not.
+fn zones_answered<E: std::fmt::Display>(
+    command: String,
+    answer: Result<Result<gevrek_protocol::proto::ZonesCommandReply, E>, tokio::time::error::Elapsed>,
+) -> Event {
+    let not_asked = |error: String| Event::ZonesAnswered {
+        command: command.clone(),
+        success: false,
+        delivered: false,
+        error: Some(error),
+        events: Vec::new(),
+    };
+    match answer {
+        Ok(Ok(reply)) => Event::ZonesAnswered {
+            command,
+            success: reply.success,
+            delivered: reply.delivered,
+            error: reply.error,
+            events: reply.events,
+        },
+        Ok(Err(error)) => not_asked(error.to_string()),
+        Err(_) => not_asked("no answer".to_string()),
+    }
+}
+
+/// What is told of the zones' state, from what the window manager
+/// answered, or did not (said as a state with nothing in it and the
+/// reason, so that whoever asked always hears back).
+fn zones_state<E: std::fmt::Display>(
+    answer: Result<Result<gevrek_protocol::proto::ZonesStateResponse, E>, tokio::time::error::Elapsed>,
+) -> Event {
+    let nothing = |message: String| Event::ZonesState {
+        running: false,
+        stale: false,
+        json: String::new(),
+        message,
+    };
+    match answer {
+        Ok(Ok(state)) => Event::ZonesState {
+            running: state.running,
+            stale: state.stale,
+            json: state.json,
+            message: state.message,
+        },
+        Ok(Err(error)) => nothing(format!("The zones' state was not answered: {error}")),
+        Err(_) => nothing("The zones' state was not answered: no answer".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod zones_asking_tests {
+    use super::*;
+    use gevrek_protocol::proto::{ZonesCommandReply, ZonesStateResponse};
+
+    type Failed = Result<ZonesCommandReply, String>;
+
+    #[test]
+    fn a_zones_answer_is_told_as_it_came_or_as_not_asked() {
+        let reply = ZonesCommandReply {
+            success: false,
+            error: Some("no zone is called nowhere".to_string()),
+            events: vec![r#"{"event":"refused","reason":"no zone is called nowhere"}"#.to_string()],
+            delivered: true,
+        };
+        let Event::ZonesAnswered { command, success, delivered, error, events } =
+            zones_answered("{}".to_string(), Ok(Failed::Ok(reply)))
+        else {
+            panic!("not an answer of the zones");
+        };
+        assert_eq!((command.as_str(), success, delivered), ("{}", false, true));
+        assert_eq!(error.as_deref(), Some("no zone is called nowhere"));
+        assert_eq!(events.len(), 1);
+
+        let Event::ZonesAnswered { success, delivered, error, .. } =
+            zones_answered("{}".to_string(), Ok(Failed::Err("the line broke".to_string())))
+        else {
+            panic!("not an answer of the zones");
+        };
+        assert!(!success && !delivered);
+        assert_eq!(error.as_deref(), Some("the line broke"));
+    }
+
+    #[test]
+    fn the_zones_state_is_told_also_where_nothing_answered() {
+        let state = ZonesStateResponse {
+            running: true,
+            json: r#"{"version":1}"#.to_string(),
+            ..Default::default()
+        };
+        let Event::ZonesState { running, stale, json, message } =
+            zones_state(Ok(Ok::<_, String>(state)))
+        else {
+            panic!("not the zones' state");
+        };
+        assert!(running && !stale && message.is_empty());
+        assert_eq!(json, r#"{"version":1}"#);
+        let Event::ZonesState { running, json, message, .. } =
+            zones_state(Ok(Err::<ZonesStateResponse, _>("gone".to_string())))
+        else {
+            panic!("not the zones' state");
+        };
+        assert!(!running && json.is_empty());
+        assert_eq!(message, "The zones' state was not answered: gone");
+    }
+}
+
 fn said<E: std::fmt::Display>(
     answer: Result<Result<gevrek_protocol::proto::StatusResponse, E>, tokio::time::error::Elapsed>,
 ) -> Option<String> {

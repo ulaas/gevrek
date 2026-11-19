@@ -105,6 +105,16 @@ impl Places {
             .unwrap_or_else(|| self.home.join("Desktop"))
     }
 
+    /// The folder downloads go to: `XDG_DOWNLOAD_DIR` of
+    /// `user-dirs.dirs`, and `~/Downloads` where the file is not there or
+    /// does not say.
+    pub fn downloads(&self) -> PathBuf {
+        std::fs::read_to_string(self.config_home.join("user-dirs.dirs"))
+            .ok()
+            .and_then(|text| user_dir(&text, "XDG_DOWNLOAD_DIR", &self.home))
+            .unwrap_or_else(|| self.home.join("Downloads"))
+    }
+
     /// Where gevrek keeps what it remembers of launchers the person
     /// allowed to be started.
     pub fn trusted_launchers(&self) -> PathBuf {

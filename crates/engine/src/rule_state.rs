@@ -355,6 +355,17 @@ pub struct WindowState {
     pub drag: Option<DragState>,
     /// It was brought to the middle of a display, and was so before.
     pub centered_from: Option<BeforeCentered>,
+    /// When it was last told of as moved while it floated with most of it
+    /// on another display than its workspace's, and nobody was dragging
+    /// it (its program moved it, or the system did for a key). Once it has
+    /// come to rest there it is that display's
+    /// (`Executor::settle_moved_windows`).
+    pub moved_across: Option<std::time::Instant>,
+    /// Where it lay when a drag of it last ended. What is told of it as
+    /// moved while it lies there still is the last of that drag (a system
+    /// may tell of the place after it tells of the letting go), not a
+    /// move of its own: the drag's end has said which display it is on.
+    pub dropped_at: Option<Rect>,
 
     // ---- rules ----
     pub dynamic_rules: Option<DynamicRuleState>,

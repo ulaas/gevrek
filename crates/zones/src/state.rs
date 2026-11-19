@@ -4,14 +4,15 @@
 //! with every drag, so it lives in a file of its own (`store`), not in
 //! `config.json`.
 
+use crate::auto::AutoUndo;
 use crate::config::{Rule, RuleAction, ZoneDefinition};
-use crate::ids::ZoneId;
+use crate::ids::{ItemId, ZoneId};
 use crate::placement::Placements;
 use crate::profile::Profile;
 use crate::rules::UndoRecord;
 use gevrek_model::Extra;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The layout of the state file. A file with a lower number is brought up
 /// step by step (`store::migrate`); one with a higher number is from a
@@ -36,6 +37,22 @@ pub struct ZonesState {
     pub zones_made: u64,
     /// Counts up with every choice of an arrangement.
     pub choices: u64,
+    /// The zones and loose items are put away with the one key. Kept, so
+    /// that a desktop the person cleared is still clear after a restart.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub quick_hidden: bool,
+    /// The items that stay when the rest is put away with the one key,
+    /// whichever zone they are in.
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    pub always_visible_items: BTreeSet<ItemId>,
+    /// Every icon is drawn grey. A way of looking at the desktop that the
+    /// person switched on, kept like the putting away: it is no setting
+    /// of any zone's look, and changes none.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub grey_icons: bool,
+    /// How to take back the last making of zones by type.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_undo: Option<AutoUndo>,
     /// Keys this version does not know: kept, and written back as they were.
     #[serde(flatten)]
     pub extra: Extra,
@@ -52,6 +69,10 @@ impl Default for ZonesState {
             undo: None,
             zones_made: 0,
             choices: 0,
+            quick_hidden: false,
+            always_visible_items: BTreeSet::new(),
+            grey_icons: false,
+            auto_undo: None,
             extra: Extra::new(),
         }
     }
@@ -73,7 +94,33 @@ pub struct Snapshot {
     pub placements: Placements,
     pub profiles: Vec<Profile>,
     pub active_tabs: BTreeMap<String, ZoneId>,
+    /// Taken by the zones themselves, before something replaced the whole
+    /// layout (a snapshot restored, a layout brought in), so that what
+    /// was there is never lost. Only the last few of these are kept.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub automatic: bool,
     /// Keys this version does not know: kept, and written back as they were.
     #[serde(flatten)]
     pub extra: Extra,
 }
+
+impl Snapshot {
+    /// Whether two copies hold the same layout, whatever they are called
+    /// and whenever they were taken.
+    pub fn same_layout(&self, other: &Snapshot) -> bool {
+        // (When an arrangement was last used is no part of where things
+        // are: looking at a layout does not make it another.)
+        let arranged = |snapshot: &Snapshot| -> Vec<Profile> {
+            snapshot.profiles.iter().map(|profile| Profile { last_used: 0, ..profile.clone() }).collect()
+        };
+        self.zones == other.zones
+            && self.rules == other.rules
+            && self.catch_all == other.catch_all
+            && self.placements == other.placements
+            && arranged(self) == arranged(other)
+            && self.active_tabs == other.active_tabs
+    }
+}
+
+/// How many copies the zones keep that they took themselves.
+pub const AUTOMATIC_KEPT: usize = 5;

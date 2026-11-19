@@ -258,12 +258,16 @@ fn make(source: &Source<'_>, side: u32) -> Option<image::DynamicImage> {
     if source.size > LARGEST_FILE {
         return None;
     }
-    let reader = image::ImageReader::open(source.path).ok()?.with_guessed_format().ok()?;
-    let (width, height) = reader.into_dimensions().ok()?;
+    // (Read without the file counting as used: see `open_quietly`.)
+    let open = || {
+        let file = std::io::BufReader::new(super::open_quietly(source.path).ok()?);
+        image::ImageReader::new(file).with_guessed_format().ok()
+    };
+    let (width, height) = open()?.into_dimensions().ok()?;
     if u64::from(width) * u64::from(height) > MOST_PIXELS {
         return None;
     }
-    let full = image::ImageReader::open(source.path).ok()?.with_guessed_format().ok()?.decode().ok()?;
+    let full = open()?.decode().ok()?;
     Some(if width > side || height > side {
         full.resize(side, side, image::imageops::FilterType::Triangle)
     } else {

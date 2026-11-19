@@ -48,6 +48,11 @@ pub struct XDrag {
     /// The button was let go while gevrek's drag held the pointer: the
     /// X11 program is still to be told.
     release_owed: bool,
+    /// What the X11 program asks its drag to do, as gevrek's own drag
+    /// has it: the actions allowed, and the one asked for as the keys
+    /// would ask (`xdnd::wayland_actions`).
+    allowed: Option<smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction>,
+    wish: Option<smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction>,
 }
 
 impl State {
@@ -85,53 +90,113 @@ impl State {
         match what {
             // (Not gevrek's own standing in for a Wayland program's drag.)
             FromX::Dragging(now) => {
+                // (Another drag: nothing of the one before it counts.)
+                if now && !self.x_drag.grabbing {
+                    self.x_drag.press = None;
+                    self.x_drag.allowed = None;
+                    self.x_drag.wish = None;
+                }
                 self.x_drag.dragging = now && self.dragged.is_none() && self.xdnd_out.is_none();
                 if !self.x_drag.dragging && self.x_drag.standing && !self.x_drag.grabbing {
                     self.x_drag.standing = false;
                     self.x_drag_say(crate::xdnd::ToX::Stand(false));
                 }
             }
-            FromX::Entered(names) => {
+            FromX::Entered(names, asked, listed) => {
                 let kinds = crate::xdnd::offered(&names);
                 if !self.x_drag.dragging || self.x_drag.grabbing || kinds.is_empty() {
                     return;
                 }
-                let Some(pointer) = self.seat.get_pointer() else {
-                    return;
-                };
-                // gevrek's own drag on the Wayland side, begun where the
-                // X11 program's press was.
-                let start = pointer.grab_start_data().unwrap_or_else(|| {
-                    smithay::input::pointer::GrabStartData {
-                        focus: None,
-                        button: 0x110,
-                        location: pointer.current_location(),
-                    }
-                });
-                self.x_drag.press = start.focus.clone();
-                self.x_drag.kinds = kinds.clone();
-                self.x_drag.grabbing = true;
-                self.x_drag.leaving = false;
-                let (display, seat) = (self.display.clone(), self.seat.clone());
-                smithay::wayland::selection::data_device::start_dnd(
-                    &display,
-                    &seat,
-                    self,
-                    smithay::utils::SERIAL_COUNTER.next_serial(),
-                    Some(start),
-                    None,
-                    smithay::wayland::selection::data_device::SourceMetadata {
-                        mime_types: kinds.into_iter().map(|(kind, _)| kind).collect(),
-                        dnd_action: smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction::Copy,
-                    },
-                );
+                let (allowed, wish) = crate::xdnd::wayland_actions(asked, &listed);
+                self.x_drag.kinds = kinds;
+                self.x_drag.allowed = Some(allowed);
+                self.x_drag.wish = wish;
+                self.x_drag_begin_own();
                 log::info!("An X11 program's drag is carried over to the Wayland windows");
-                // (What is under the pointer now is told of it at once.)
-                let (x, y) = self.pointer_exact;
-                self.pointer_moved((x, y).into(), now_ms());
+            }
+            // A key went down or up in the X11 program: its drag is to
+            // do something else. gevrek's own drag says what it allows
+            // once, when it begins; so it ends and begins anew, which the
+            // window under the pointer sees as the drag leaving and
+            // coming back with other actions.
+            FromX::Asks(asked, listed) => {
+                let (allowed, wish) = crate::xdnd::wayland_actions(asked, &listed);
+                if !self.x_drag.grabbing
+                    || (self.x_drag.allowed, self.x_drag.wish) == (Some(allowed), wish)
+                {
+                    return;
+                }
+                self.x_drag_end_own();
+                self.x_drag.allowed = Some(allowed);
+                self.x_drag.wish = wish;
+                self.x_drag_begin_own();
             }
             FromX::Left => self.x_drag_end_own(),
         }
+    }
+
+    /// Begin gevrek's own drag on the Wayland side for the X11 program's:
+    /// with the kinds of data and the actions last carried over, where
+    /// the X11 program's press was.
+    fn x_drag_begin_own(&mut self) {
+        use smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction;
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let start =
+            pointer
+                .grab_start_data()
+                .unwrap_or_else(|| smithay::input::pointer::GrabStartData {
+                    focus: None,
+                    button: 0x110,
+                    location: pointer.current_location(),
+                });
+        // (The press is known while its own hold on the pointer lasts:
+        // the first time of a drag. Begun again, the drag has it still.)
+        if start.focus.is_some() || self.x_drag.press.is_none() {
+            self.x_drag.press = start.focus.clone();
+        }
+        self.x_drag.grabbing = true;
+        self.x_drag.leaving = false;
+        let kinds = self.x_drag.kinds.clone();
+        let (display, seat) = (self.display.clone(), self.seat.clone());
+        smithay::wayland::selection::data_device::start_dnd(
+            &display,
+            &seat,
+            self,
+            smithay::utils::SERIAL_COUNTER.next_serial(),
+            Some(start),
+            None,
+            smithay::wayland::selection::data_device::SourceMetadata {
+                mime_types: kinds.into_iter().map(|(kind, _)| kind).collect(),
+                dnd_action: self.x_drag.allowed.unwrap_or(DndAction::Copy),
+            },
+        );
+        // (What is under the pointer now is told of it at once.)
+        let (x, y) = self.pointer_exact;
+        self.pointer_moved((x, y).into(), now_ms());
+    }
+
+    /// Whether the drag that is on is gevrek's own, for an X11 program's.
+    pub(crate) fn x_drag_is_own(&self) -> bool {
+        self.x_drag.grabbing
+    }
+
+    /// What the X11 program asks its drag to do, as a Wayland action.
+    pub(crate) fn x_drag_wish(
+        &self,
+    ) -> Option<smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction>
+    {
+        self.x_drag.wish
+    }
+
+    /// The Wayland side settled on what a drop would do: the X11 program
+    /// is told with its drag's next place, and when the drop is done.
+    pub(crate) fn x_drag_chose(
+        &mut self,
+        chosen: smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction,
+    ) {
+        self.x_drag_say(crate::xdnd::ToX::Chose(crate::xdnd::taken_of(chosen)));
     }
 
     /// End gevrek's own drag without a drop: the X11 program's drag goes
@@ -155,12 +220,10 @@ impl State {
         if !self.x_drag.dragging {
             return;
         }
-        let (x, y) = self.desktop.pointer;
-        let over_x11 = self
-            .desktop
-            .window_at(x, y)
-            .and_then(|id| self.desktop.windows.get(&id))
-            .is_some_and(|record| matches!(record.surface, WindowSurface::X11(_)));
+        // (What is topmost there, as the pointer finds it: under a panel,
+        // a launcher or zones raised over the windows, an X11 window is
+        // not what the drag is over.)
+        let over_x11 = self.x11_window_under_pointer().is_some();
         if over_x11 == self.x_drag.standing {
             self.x_drag.standing = !over_x11;
             self.x_drag_say(crate::xdnd::ToX::Stand(!over_x11));
@@ -337,14 +400,11 @@ impl State {
             return;
         };
         let (x, y) = self.desktop.pointer;
-        let under = self
-            .desktop
-            .window_at(x, y)
-            .and_then(|id| self.desktop.windows.get(&id))
-            .and_then(|record| match &record.surface {
-                WindowSurface::X11(window) => Some(window.window_id()),
-                WindowSurface::Xdg(_) => None,
-            });
+        // The X11 window the drag is over, where one is topmost there: a
+        // surface of a shell above it has the drag by itself (the
+        // library's drag tells it), and the window under it is told that
+        // the drag left.
+        let under = self.x11_window_under_pointer();
         match (under, self.xdnd_out.is_some()) {
             (Some(window), begun) => {
                 if !begun {

@@ -529,7 +529,11 @@ impl Executor {
     /// What the Floating layout asks of a workspace's windows: under it
     /// the tiled ones float (where they are), and one that came since the
     /// last pass is put in the middle of the display at its own size, no
-    /// larger than the display has room for. Under another layout the
+    /// larger than the display has room for. One that belongs to another
+    /// window, or that stands where its program put it, stays where it
+    /// is: its place means something (a dialog over its window, a palette
+    /// beside it), and is only given up where too little of the window
+    /// would be on the display to take hold of. Under another layout the
     /// windows it floated are tiled again (the caller lays them out).
     fn settle_floating_layout(
         workspace: &mut crate::workspace::Workspace,
@@ -554,6 +558,18 @@ impl Executor {
             let Ok(rect) = queries(window_manager).rect(window) else {
                 continue;
             };
+            let own_place = queries(window_manager).parent(window).is_some()
+                || queries(window_manager).placed_itself(window);
+            if own_place && reaches(&work_area, &rect) {
+                let _ = effect(
+                    window_manager,
+                    Effect::Border {
+                        id: window,
+                        change: BorderChange::Follow,
+                    },
+                );
+                continue;
+            }
             // A window that comes with the size of a tile that filled
             // (nearly) the whole display would cover everything as a
             // floating window: it gets two thirds of the display instead.

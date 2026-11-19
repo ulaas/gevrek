@@ -29,6 +29,12 @@ pub struct FakeDesktopWindow {
     pub hidden_by_wm: bool,
     /// The application never gets narrower than this.
     pub min_width: Option<i32>,
+    /// The window it belongs to (it is that one's dialog).
+    pub parent: Option<WindowHandle>,
+    /// It stands where its program put it.
+    pub placed_itself: bool,
+    /// The desktop says it floats (a dialog, a window of one size).
+    pub floats: bool,
 }
 
 #[derive(Debug)]
@@ -48,6 +54,11 @@ pub struct FakeDesktop {
     pub came: Vec<Vec<(WindowHandle, Rect)>>,
     /// Programs asked to launch.
     pub launched: Vec<String>,
+    /// The windows the desktop itself is moving now (a workspace that
+    /// slides in): what they say of their places is not the person's.
+    pub animating: std::collections::BTreeSet<WindowHandle>,
+    /// The primary pointer button is held down.
+    pub button_down: bool,
     next_window: isize,
 }
 
@@ -63,6 +74,8 @@ impl FakeDesktop {
             applied: Vec::new(),
             came: Vec::new(),
             launched: Vec::new(),
+            animating: Default::default(),
+            button_down: false,
             next_window: 100,
         }
     }
@@ -86,6 +99,9 @@ impl FakeDesktop {
                 opacity: 255,
                 hidden_by_wm: false,
                 min_width: None,
+                parent: None,
+                placed_itself: false,
+                floats: false,
             },
         );
         self.focused = Some(id);
@@ -116,6 +132,16 @@ impl FakeDesktop {
     pub fn open_at(&mut self, title: &str, rect: Rect) -> WindowHandle {
         let id = self.open(title, "app.exe");
         self.windows.get_mut(&id).expect("just opened").rect = rect;
+        id
+    }
+
+    /// Open a dialog of `parent` at a given place: it belongs to that
+    /// window, and floats as a dialog does on a real desktop.
+    pub fn open_dialog(&mut self, title: &str, parent: WindowHandle, rect: Rect) -> WindowHandle {
+        let id = self.open_at(title, rect);
+        let window = self.windows.get_mut(&id).expect("just opened");
+        window.parent = Some(parent);
+        window.floats = true;
         id
     }
 
@@ -223,6 +249,14 @@ impl WindowQueries for FakeDesktop {
         self.get(id).is_some_and(|window| window.always_on_top)
     }
 
+    fn parent(&self, id: WindowHandle) -> Option<WindowHandle> {
+        self.get(id)?.parent
+    }
+
+    fn placed_itself(&self, id: WindowHandle) -> bool {
+        self.get(id).is_some_and(|window| window.placed_itself)
+    }
+
     fn is_tracked(&self, id: WindowHandle) -> bool {
         self.exists(id)
     }
@@ -285,7 +319,7 @@ impl WindowQueries for FakeDesktop {
             exe: window.exe.clone(),
             path: self.path(id),
             app_id: crate::contract::app_id_of_exe(&window.exe),
-            has_parent: false,
+            has_parent: window.parent.is_some(),
             is_visible: window.visible,
             is_tool_window: false,
             is_noactivate: false,
@@ -302,8 +336,8 @@ impl WindowQueries for FakeDesktop {
         false
     }
 
-    fn floats_by_rules(&self, _id: WindowHandle) -> bool {
-        false
+    fn floats_by_rules(&self, id: WindowHandle) -> bool {
+        self.get(id).is_some_and(|window| window.floats)
     }
 }
 
@@ -376,7 +410,7 @@ impl Desktop for FakeDesktop {
     }
 
     fn primary_button_down(&self) -> bool {
-        false
+        self.button_down
     }
 
     fn apply_animated_rectangles(
@@ -413,8 +447,8 @@ impl Desktop for FakeDesktop {
         Ok(false)
     }
 
-    fn is_animation_event_suppressed(&self, _id: WindowHandle) -> bool {
-        false
+    fn is_animation_event_suppressed(&self, id: WindowHandle) -> bool {
+        self.animating.contains(&id)
     }
 
     fn preferred_window_size(&self, _id: WindowHandle) -> Option<(i32, i32)> {

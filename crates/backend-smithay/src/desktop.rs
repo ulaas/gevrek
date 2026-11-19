@@ -86,6 +86,10 @@ pub struct WlWindow {
     pub restore: Option<Rect>,
     /// The client attached a buffer: the window can be shown.
     pub mapped: bool,
+    /// It was shown at a place of its own: where its X11 program put it,
+    /// or over the window it belongs to (`State::own_starting_place`), not
+    /// where windows open when nothing says where.
+    pub placed_itself: bool,
     /// The WM hides it (its workspace is not shown).
     pub hidden_by_wm: bool,
     /// When the WM hid it last: a workspace that is put away slides out,
@@ -431,6 +435,7 @@ impl WlDesktop {
                 tiled: false,
                 restore: None,
                 mapped: false,
+                placed_itself: false,
                 hidden_by_wm: false,
                 hidden_at: None,
                 passing: false,
@@ -846,11 +851,17 @@ impl WlDesktop {
             exe: window.exe.clone(),
             path: window.path.clone(),
             app_id: window.app_id.clone(),
-            has_parent: window.surface.has_parent(),
+            // A window that belongs to another (a dialog) is a window
+            // of its own that has an owner, as an owned window is on
+            // Windows; "has a parent" there means a window inside another,
+            // which no toplevel is. (Told as having a parent, every dialog
+            // was one of the "child windows" the system filters leave
+            // alone: on no workspace, in sight on every one of them.)
+            has_parent: false,
             is_visible: window.mapped,
             is_tool_window: false,
             is_noactivate: false,
-            has_owner: false,
+            has_owner: window.surface.has_parent(),
             is_cloaked: false,
             is_layered: false,
             tags: Default::default(),
@@ -1031,6 +1042,14 @@ impl WindowQueries for WlDesktop {
 
     fn rule_facts(&self, id: WindowHandle) -> Option<gevrek_engine::rules::WindowInfo> {
         self.facts(id)
+    }
+
+    fn parent(&self, id: WindowHandle) -> Option<WindowHandle> {
+        self.parent_of(id)
+    }
+
+    fn placed_itself(&self, id: WindowHandle) -> bool {
+        self.get(id).is_some_and(|window| window.placed_itself)
     }
 
     fn ignored_by_rules(&self, id: WindowHandle) -> bool {

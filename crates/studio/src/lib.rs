@@ -46,3 +46,5 @@ pub mod tryout;
 pub mod wallpaper_preview;
 pub mod welcome;
 pub mod snap_zones_edit;
+/// The zones that hold the desktop's icons (not the snap zones).
+pub mod zones_page;

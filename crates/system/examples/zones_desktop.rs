@@ -37,8 +37,10 @@ fn main() {
 mod windows_side {
     use gevrek_system::zones::displays;
     use gevrek_system::zones::explorer::{Explorer, ShellDesktop};
+    use gevrek_system::zones::places::Places;
     use gevrek_system::zones::{launch, SystemBackend};
     use gevrek_zones::backend::{BackendEvent, IconSize, Location, ZonesBackend};
+    use gevrek_zones::config::SmartSource;
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -49,7 +51,9 @@ mod windows_side {
         let explorer = if really_hide { ShellDesktop::new() } else { ShellDesktop::read_only() };
         let (woken, wakes) = mpsc::channel();
         let woken = std::sync::Mutex::new(woken);
-        let mut backend = SystemBackend::at(&state, Box::new(explorer), move || {
+        // (With the person's own Downloads and Recent folders, which are
+        // only read.)
+        let mut backend = SystemBackend::with(Places::of_session(&state), Box::new(explorer), move || {
             if let Ok(woken) = woken.lock() {
                 let _ = woken.send(());
             }
@@ -150,6 +154,36 @@ mod windows_side {
                     println!("  {} entries: {}", texts.len(), texts.join(" | "));
                 }
                 Err(error) => println!("  not read: {error}"),
+            }
+        }
+
+        println!("\n== What smart zones would show (only read) ==");
+        let sources = [SmartSource::Recent, SmartSource::Downloads];
+        let mut listed: Vec<(SmartSource, Vec<gevrek_zones::item::Item>)> = Vec::new();
+        for source in &sources {
+            if let Err(error) = backend.watch_source(source) {
+                println!("  {source:?}: {error}");
+                listed.push((source.clone(), Vec::new()));
+            }
+        }
+        // Each list is read on a thread of its own and told when it is
+        // there; woken by the backend, nothing is looked at by the clock.
+        while listed.len() < sources.len() {
+            if wakes.recv_timeout(Duration::from_secs(20)).is_err() {
+                break;
+            }
+            for event in backend.drain_events() {
+                if let BackendEvent::SourceListed { source, items } = event {
+                    listed.retain(|(known, _)| known != &source);
+                    listed.push((source, items));
+                }
+            }
+        }
+        for (source, items) in &listed {
+            println!("  {source:?}: {} items, the first of them:", items.len());
+            for item in items.iter().take(8) {
+                let when = item.facts.accessed.or(item.facts.created).unwrap_or(0);
+                println!("    {when:>10}  {}   [{}]", item.name, item.id);
             }
         }
 

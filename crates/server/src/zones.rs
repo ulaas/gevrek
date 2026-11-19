@@ -14,6 +14,7 @@ use gevrek_protocol::proto::{
     execution_event, zones_report, ExecutionEvent, RuntimeEvent, ZonesCommandReply, ZonesReport,
     ZonesRequest, ZonesStateResponse,
 };
+use gevrek_engine::shell_room::{ShellRoom, Side};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -69,6 +70,32 @@ struct Inner {
     /// Counts up with every command sent.
     requests: u64,
     waiting: HashMap<u64, Waiting>,
+    /// The room the zones keep clear of tiled windows, as the attached
+    /// shell last said it. None while no shell is attached or the one
+    /// that is has not said how the zones are: what is served as stale
+    /// keeps no room.
+    room: Vec<ShellRoom>,
+}
+
+/// The room a snapshot says the zones keep (`reserved`: for each region
+/// the display's lasting id, the side, and how deep). What is not
+/// written so is left out.
+pub fn room_of(snapshot: &str) -> Vec<ShellRoom> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(snapshot) else {
+        return Vec::new();
+    };
+    value["reserved"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|region| {
+            Some(ShellRoom {
+                display: region["display"].as_str().filter(|id| !id.is_empty())?.to_string(),
+                side: Side::named(region["edge"].as_str()?)?,
+                depth: i32::try_from(region["thickness"].as_i64()?).ok().filter(|depth| *depth > 0)?,
+            })
+        })
+        .collect()
 }
 
 /// What the window manager knows of the zones and of the shell that runs
@@ -153,6 +180,8 @@ impl ZonesHub {
             inner.sessions += 1;
             let session = inner.sessions;
             inner.attached = Some(Attached { session, requests });
+            // (Until it says how the zones are, none keeps room.)
+            inner.keep_room(Vec::new());
             session
         };
         log::info!("A shell runs the zones (session {session})");
@@ -174,6 +203,8 @@ impl ZonesHub {
                 .is_some_and(|attached| attached.session == session)
             {
                 inner.attached = None;
+                // The room its zones kept is the windows' again.
+                inner.keep_room(Vec::new());
             } else {
                 return;
             }
@@ -211,6 +242,8 @@ impl ZonesHub {
                 }
                 inner.sequence += 1;
                 let sequence = inner.sequence;
+                let room = room_of(&snapshot.json);
+                inner.keep_room(room);
                 inner.snapshot = Some(Kept {
                     session,
                     version: snapshot.version,
@@ -269,8 +302,34 @@ impl ZonesHub {
         }
     }
 
-    /// How the zones are, as far as this window manager was told.
+    /// The room the zones keep clear of tiled windows now.
+    pub fn room(&self) -> Vec<ShellRoom> {
+        self.lock().room.clone()
+    }
+
+    /// How the zones are, as far as this window manager was told: all of
+    /// what the shell said.
     pub fn state(&self) -> ZonesStateResponse {
+        self.state_of(false, "")
+    }
+
+    /// The same with less in it: without the items (`without_items`),
+    /// and of one zone alone (`zone`, unless it is empty). A desktop of
+    /// thousands of items makes a snapshot of a megabyte; whoever only
+    /// wants to know which zones there are is spared reading it. The
+    /// trimming is done here, outside the lock, on a copy: the shell
+    /// tells one snapshot for everybody and is asked for nothing more.
+    pub fn state_of(&self, without_items: bool, zone: &str) -> ZonesStateResponse {
+        let mut state = self.whole_state();
+        if (without_items || !zone.is_empty()) && !state.json.is_empty() {
+            if let Some(json) = trimmed(&state.json, without_items, zone) {
+                state.json = json;
+            }
+        }
+        state
+    }
+
+    fn whole_state(&self) -> ZonesStateResponse {
         let inner = self.lock();
         let running = inner.attached.is_some();
         let fresh = match (&inner.attached, &inner.snapshot) {
@@ -367,7 +426,53 @@ impl ZonesHub {
     }
 }
 
+/// A snapshot with less in it (see `ZonesHub::state_of`). This is the one
+/// place the window manager looks into the zones' JSON, and it knows of
+/// it only what `GetZonesState` promises by name: `zones` is a list of
+/// objects with an `id` and `items`, `loose` is a list. Everything else
+/// is handed on as it came. None where the text is not such an object;
+/// it is then served whole, and its reader says what is wrong with it.
+fn trimmed(json: &str, without_items: bool, zone: &str) -> Option<String> {
+    let mut value: serde_json::Value = serde_json::from_str(json).ok()?;
+    let snapshot = value.as_object_mut()?;
+    if let Some(zones) = snapshot.get_mut("zones").and_then(|zones| zones.as_array_mut()) {
+        if !zone.is_empty() {
+            zones.retain(|one| one.get("id").and_then(|id| id.as_str()) == Some(zone));
+        }
+        if without_items {
+            for one in zones.iter_mut().filter_map(|one| one.as_object_mut()) {
+                if let Some(items) = one.remove("items") {
+                    // (A shell that does not count them itself.)
+                    if !one.contains_key("item_count") {
+                        let count = items.as_array().map_or(0, Vec::len);
+                        one.insert("item_count".to_string(), count.into());
+                    }
+                }
+            }
+        }
+    }
+    if without_items {
+        if let Some(loose) = snapshot.remove("loose") {
+            if !snapshot.contains_key("loose_count") {
+                let count = loose.as_array().map_or(0, Vec::len);
+                snapshot.insert("loose_count".to_string(), count.into());
+            }
+        }
+    }
+    serde_json::to_string(&value).ok()
+}
+
 impl Inner {
+    /// The zones keep this room now: kept here, and left for the window
+    /// manager's loop, which takes it off the displays where it is the
+    /// one that keeps room (`gevrek_engine::shell_room`).
+    fn keep_room(&mut self, room: Vec<ShellRoom>) {
+        if self.room != room {
+            self.room = room.clone();
+        }
+        gevrek_engine::shell_room::tell(room);
+    }
+
     fn is_attached(&self, session: u64) -> bool {
         self.attached
             .as_ref()
@@ -403,6 +508,76 @@ mod tests {
                 events: vec![r#"{"event":"layout_changed"}"#.to_string()],
             })),
         }
+    }
+
+    #[tokio::test]
+    async fn the_room_the_zones_keep_is_the_attached_shells_and_given_back_with_it() {
+        let (hub, _events) = hub();
+        let reserving = r#"{"version":1,"zones":[],"reserved":[
+            {"display":"edid:DEL-A1","rect":{"x":0,"y":40,"width":1920,"height":120},
+             "edge":"top","thickness":120,"zones":["dock"]},
+            {"display":"edid:SAM-B2","rect":{"x":3560,"y":0,"width":280,"height":1080},
+             "edge":"right","thickness":280,"zones":["side"]}]}"#;
+        let room = |display: &str, side: Side, depth: i32| ShellRoom {
+            display: display.to_string(),
+            side,
+            depth,
+        };
+        assert!(hub.room().is_empty());
+        let (first, _line) = hub.attach().expect("attached");
+        // Attached, and nothing said yet: no room.
+        assert!(hub.room().is_empty());
+        hub.report(first, snapshot(reserving));
+        assert_eq!(
+            hub.room(),
+            [
+                room("edid:DEL-A1", Side::Top, 120),
+                room("edid:SAM-B2", Side::Right, 280)
+            ]
+        );
+        // The zones keep less: what the last snapshot says holds.
+        hub.report(first, snapshot(r#"{"version":1,"zones":[],"reserved":[]}"#));
+        assert!(hub.room().is_empty());
+        hub.report(first, snapshot(reserving));
+        assert_eq!(hub.room().len(), 2);
+        // The shell is gone: its snapshot is served as stale, and keeps
+        // no room.
+        hub.detach(first);
+        assert!(hub.state().stale);
+        assert!(hub.room().is_empty());
+        // What a shell that is not attached says keeps none either.
+        hub.report(first, snapshot(reserving));
+        assert!(hub.room().is_empty());
+        // The next shell: none until it has said how the zones are.
+        let (second, _line) = hub.attach().expect("attached");
+        assert!(hub.room().is_empty());
+        hub.report(second, snapshot(reserving));
+        assert_eq!(hub.room().len(), 2);
+    }
+
+    #[test]
+    fn a_snapshots_room_is_read_and_what_is_not_room_left_out() {
+        assert!(room_of("").is_empty());
+        assert!(room_of("[1]").is_empty());
+        assert!(room_of(r#"{"zones":[]}"#).is_empty());
+        let read = room_of(
+            r#"{"reserved":[
+                {"display":"edid:A","edge":"left","thickness":64},
+                {"display":"edid:A","edge":"middle","thickness":64},
+                {"display":"","edge":"top","thickness":64},
+                {"display":"edid:A","edge":"top","thickness":0},
+                {"display":"edid:A","edge":"top","thickness":-5},
+                {"display":"edid:A","edge":"top"},
+                {"edge":"top","thickness":10},
+                {"display":"edid:B","edge":"bottom","thickness":48,"zones":["a","b"]}]}"#,
+        );
+        assert_eq!(
+            read,
+            [
+                ShellRoom { display: "edid:A".to_string(), side: Side::Left, depth: 64 },
+                ShellRoom { display: "edid:B".to_string(), side: Side::Bottom, depth: 48 },
+            ]
+        );
     }
 
     /// The next thing subscribers were told: its kind and fields.
@@ -476,6 +651,90 @@ mod tests {
         let state = hub.state();
         assert!(state.running && !state.stale);
         assert_eq!(state.sequence, 3);
+    }
+
+    /// A snapshot as a shell with `items` items tells it: a tenth of them
+    /// in each of two zones, the rest loose.
+    fn large_snapshot(items: usize) -> String {
+        let item = |index: usize| {
+            serde_json::json!({
+                "id": format!(r"C:\Users\ada\Desktop\Quarterly report {index:05}.xlsx"),
+                "name": format!("Quarterly report {index:05}.xlsx"),
+                "kind": "file",
+                "path": format!(r"C:\Users\ada\Desktop\Quarterly report {index:05}.xlsx"),
+            })
+        };
+        let tenth = items / 10;
+        let zone = |id: &str, from: usize| {
+            serde_json::json!({
+                "id": id, "title": id, "kind": {"type": "manual"}, "visible": true,
+                "item_count": tenth,
+                "items": (from..from + tenth).map(item).collect::<Vec<_>>(),
+            })
+        };
+        serde_json::json!({
+            "version": 1,
+            "enabled": true,
+            "zones": [zone("work", 0), zone("play", tenth)],
+            "loose": (2 * tenth..items).map(item).collect::<Vec<_>>(),
+        })
+        .to_string()
+    }
+
+    #[tokio::test]
+    async fn the_state_can_be_asked_for_without_the_items_and_for_one_zone() {
+        let (hub, _events) = hub();
+        let (session, _requests) = hub.attach().unwrap();
+        let whole = large_snapshot(5000);
+        hub.report(session, snapshot(&whole));
+
+        // All of it, as it came, where nothing less is asked for.
+        assert_eq!(hub.state().json, whole);
+        assert_eq!(hub.state_of(false, "").json, whole);
+
+        let began = std::time::Instant::now();
+        let small = hub.state_of(true, "");
+        let took = began.elapsed();
+        let read: serde_json::Value = serde_json::from_str(&small.json).unwrap();
+        assert_eq!(read["zones"].as_array().unwrap().len(), 2);
+        assert_eq!(read["zones"][0]["item_count"], 500);
+        assert!(read["zones"][0].get("items").is_none());
+        assert!(read.get("loose").is_none());
+        assert_eq!(read["loose_count"], 4000);
+        assert_eq!((small.sequence, small.running, small.stale), (1, true, false));
+        println!(
+            "5000 items: the whole snapshot is {} bytes, without items {} bytes, trimmed in {took:?}",
+            whole.len(),
+            small.json.len()
+        );
+        assert!(whole.len() > 500_000, "the measure is of a large one");
+        assert!(small.json.len() < 1_000);
+        // (Generous: an unoptimized build on a busy machine.)
+        assert!(took < Duration::from_secs(2), "{took:?}");
+
+        // One zone, with its items and without.
+        let one: serde_json::Value = serde_json::from_str(&hub.state_of(false, "play").json).unwrap();
+        assert_eq!(one["zones"].as_array().unwrap().len(), 1);
+        assert_eq!(one["zones"][0]["id"], "play");
+        assert_eq!(one["zones"][0]["items"].as_array().unwrap().len(), 500);
+        assert_eq!(one["loose"].as_array().unwrap().len(), 4000);
+        let one: serde_json::Value = serde_json::from_str(&hub.state_of(true, "play").json).unwrap();
+        assert_eq!(one["zones"][0]["item_count"], 500);
+        assert!(one["zones"][0].get("items").is_none());
+        // A zone that is not there: none, and the rest as ever.
+        let none: serde_json::Value = serde_json::from_str(&hub.state_of(true, "nowhere").json).unwrap();
+        assert_eq!(none["zones"].as_array().unwrap().len(), 0);
+        assert_eq!(none["enabled"], true);
+
+        // What is no object is handed on as it came; its reader says so.
+        hub.report(session, snapshot("[1]"));
+        assert_eq!(hub.state_of(true, "work").json, "[1]");
+        // A shell that does not count: counted here.
+        hub.report(session, snapshot(r#"{"zones":[{"id":"a","items":[1,2]}],"loose":[1]}"#));
+        assert_eq!(
+            hub.state_of(true, "").json,
+            r#"{"zones":[{"id":"a","item_count":2}],"loose_count":1}"#
+        );
     }
 
     #[tokio::test]

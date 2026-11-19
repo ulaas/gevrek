@@ -13,18 +13,28 @@
 //! - `snap`, `layout`: where a dragged zone comes to rest, and where
 //!   items are inside one.
 //! - `rules`: sorting items by rules: a dry run, applying, taking back.
+//! - `auto`: zones made by themselves, one for each type of item: of
+//!   which type an item is, the plan, and where new zones go.
 //! - `search`: finding an item by some of its name.
 //! - `backend`: what is asked of a system (`ZonesBackend`), and what
 //!   passes between it and the core.
 //! - `core`: the state machine. Events and commands in, effects out.
+//! - `portal`, `focus`, `reserve`, `export`, `access`: what the core
+//!   works with for walking about in a folder, for the keyboard, for the
+//!   room tiled windows keep off, for carrying a whole layout elsewhere,
+//!   and for saying a scene to a screen reader.
 //! - `host`: carries events and requests between a core and a backend.
 //! - `ipc`: what is asked from outside, what is answered, and the zones
 //!   as they are told to other programs.
 //! - `testing`: a backend in memory.
 
+pub mod access;
+pub mod auto;
 pub mod backend;
 pub mod config;
 pub mod core;
+pub mod export;
+pub mod focus;
 pub mod geometry;
 pub mod host;
 pub mod ids;
@@ -33,7 +43,9 @@ pub mod item;
 pub mod layout;
 pub mod paths;
 pub mod placement;
+pub mod portal;
 pub mod profile;
+pub mod reserve;
 pub mod rules;
 pub mod search;
 pub mod snap;
@@ -44,7 +56,15 @@ pub mod store;
 pub mod testing;
 
 #[cfg(test)]
+mod auto_scenarios;
+#[cfg(test)]
 mod core_scenarios;
+#[cfg(test)]
+mod docs;
+#[cfg(test)]
+mod later_runs;
+#[cfg(test)]
+mod later_scenarios;
 #[cfg(test)]
 mod random_runs;
 

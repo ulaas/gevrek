@@ -181,7 +181,9 @@ pub fn plan<'a>(
     now: u64,
 ) -> Plan {
     let mut plan = Plan::default();
-    let locked = |zone: &ZoneId| config.zone(zone).is_some_and(|zone| zone.lock.members);
+    // (Locked by its own lock, or by the one for all zones.)
+    let locked =
+        |zone: &ZoneId| config.zone(zone).is_some_and(|zone| zone.lock.members || config.lock.members);
     // A zone that is not in the configuration holds nothing that is shown.
     let shown_zone_of =
         |item: &ItemId| placements.zone_of(item).filter(|zone| config.zone(zone).is_some());
@@ -211,7 +213,7 @@ pub fn plan<'a>(
                     Some(target) if target.kind != ZoneKind::Manual => {
                         hold(Reason::ZoneFillsItself)
                     }
-                    Some(target) if target.lock.members => hold(Reason::Locked),
+                    Some(target) if target.lock.members || config.lock.members => hold(Reason::Locked),
                     Some(_) => plan.steps.push(Step {
                         item: item.id.clone(),
                         decided,
@@ -232,6 +234,123 @@ pub fn plan<'a>(
         }
     }
     plan
+}
+
+/// Whether a matcher comes true by itself as time passes: it asks how
+/// long ago something was.
+pub fn asks_the_time(matcher: &Matcher) -> bool {
+    match matcher {
+        Matcher::Untouched { .. } => true,
+        Matcher::Date { newer_than_days, older_than_days, .. } => {
+            newer_than_days.is_some() || older_than_days.is_some()
+        }
+        _ => false,
+    }
+}
+
+/// Whether a rule is one of those that are tried again on a schedule.
+pub fn is_timed(rule: &Rule) -> bool {
+    rule.enabled && rule.matchers.iter().any(asks_the_time)
+}
+
+/// What the rules that ask the time would do now, to every item of the
+/// desktop wherever it is: an item that was sorted by hand a month ago
+/// and not touched since is exactly what such a rule is for. Only what a
+/// timed rule decides is in the plan: an item whose first matching rule
+/// asks nothing of the time is left to `plan`. A rule that moves the file
+/// itself is in it only where `move_files` says so.
+pub fn plan_timed<'a>(
+    config: &ZonesConfig,
+    items: impl IntoIterator<Item = &'a Item>,
+    placements: &Placements,
+    now: u64,
+    move_files: bool,
+) -> Plan {
+    let mut plan = plan(config, items, placements, Scope::All, now);
+    let timed = |decided: &Decided| match decided {
+        Decided::Rule(index) => config.rules.get(*index).is_some_and(is_timed),
+        Decided::CatchAll => false,
+    };
+    plan.steps.retain(|step| {
+        timed(&step.decided) && (move_files || matches!(step.action, RuleAction::AssignToZone { .. }))
+    });
+    plan.held.retain(|held| timed(&held.decided));
+    plan
+}
+
+/// Where a step of a plan takes an item.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "to", rename_all = "snake_case")]
+pub enum Destination {
+    /// Shown in a zone; the file stays where it is.
+    Zone { zone: ZoneId, title: String },
+    /// The file itself goes into a folder.
+    Folder { folder: String },
+}
+
+/// One line of a plan as it is shown to a person: what would go where,
+/// from where, and which rule says so. Lines of items that are held back
+/// say why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanLine {
+    pub item: ItemId,
+    /// The item's name as it is shown.
+    pub name: String,
+    /// The zone it is in now; none for a loose item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<ZoneId>,
+    pub destination: Destination,
+    pub decided: Decided,
+    /// What the person called the rule; empty for the catch-all and for a
+    /// rule without a name.
+    pub rule: String,
+    /// Why nothing is done with it, where nothing is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held: Option<Reason>,
+}
+
+/// A plan in the words a person is shown: the steps in their order, then
+/// what is held back. Made before the plan is applied, since it says
+/// where each item is now.
+pub fn explain<'a>(
+    plan: &Plan,
+    config: &ZonesConfig,
+    item: &dyn Fn(&ItemId) -> Option<&'a Item>,
+    placements: &Placements,
+) -> Vec<PlanLine> {
+    let action_of = |decided: &Decided| match decided {
+        Decided::Rule(index) => config.rules.get(*index).map(|rule| &rule.action),
+        Decided::CatchAll => config.catch_all.as_ref(),
+    };
+    let line = |id: &ItemId, decided: Decided, action: Option<&RuleAction>, held: Option<Reason>| {
+        let destination = match action? {
+            RuleAction::AssignToZone { zone } => Destination::Zone {
+                zone: zone.clone(),
+                title: config.zone(zone).map(|zone| zone.title.clone()).unwrap_or_default(),
+            },
+            RuleAction::MoveToFolder { folder } => Destination::Folder { folder: folder.clone() },
+        };
+        Some(PlanLine {
+            item: id.clone(),
+            name: item(id)
+                .map(|item| item.name.clone())
+                .unwrap_or_else(|| paths::file_name(id.as_str()).to_string()),
+            from: placements.zone_of(id).filter(|zone| config.zone(zone).is_some()).cloned(),
+            destination,
+            decided,
+            rule: match decided {
+                Decided::Rule(index) => config.rules.get(index).map(|rule| rule.name.clone()).unwrap_or_default(),
+                Decided::CatchAll => String::new(),
+            },
+            held,
+        })
+    };
+    let steps = plan.steps.iter().filter_map(|step| line(&step.item, step.decided, Some(&step.action), None));
+    let held = plan
+        .held
+        .iter()
+        .filter_map(|held| line(&held.item, held.decided, action_of(&held.decided), Some(held.reason.clone())));
+    steps.chain(held).collect()
 }
 
 /// One file a rule moved, or asked to be moved.
@@ -692,6 +811,145 @@ mod tests {
                 FileOperation::Move { from: "/archive/d.doc".to_string(), to_folder: "/desk".to_string() },
             ]
         );
+    }
+
+    #[test]
+    fn a_rule_is_timed_when_it_asks_how_long_ago() {
+        let date = |newer: Option<u32>, older: Option<u32>, after: Option<u64>| Matcher::Date {
+            field: DateField::Modified,
+            after,
+            before: None,
+            newer_than_days: newer,
+            older_than_days: older,
+        };
+        for (matcher, asks) in [
+            (Matcher::Untouched { days: 30 }, true),
+            (date(Some(1), None, None), true),
+            (date(None, Some(7), None), true),
+            // A day of the calendar is the same day whenever it is asked.
+            (date(None, None, Some(NOW)), false),
+            (extension(&["png"]), false),
+            (Matcher::Size { at_least: Some(1), at_most: None }, false),
+        ] {
+            assert_eq!(asks_the_time(&matcher), asks, "{matcher:?}");
+        }
+        let stale = assign("stale", vec![extension(&["doc"]), Matcher::Untouched { days: 30 }], "old");
+        assert!(is_timed(&stale));
+        assert!(!is_timed(&Rule { enabled: false, ..stale }));
+        assert!(!is_timed(&assign("pictures", vec![extension(&["png"])], "pictures")));
+    }
+
+    #[test]
+    fn the_timed_plan_holds_only_what_a_timed_rule_decides() {
+        let mut config = config(vec![
+            assign("stale", vec![Matcher::Untouched { days: 30 }], "old"),
+            Rule {
+                name: "ancient".to_string(),
+                matchers: vec![extension(&["tmp"]), Matcher::Untouched { days: 1 }],
+                action: RuleAction::MoveToFolder { folder: "/archive".to_string() },
+                ..Rule::default()
+            },
+            assign("pictures", vec![extension(&["png"])], "pictures"),
+        ]);
+        config.catch_all = Some(RuleAction::AssignToZone { zone: ZoneId::new("rest") });
+        let aged = |name: &str, days: u64| with(name, |facts| facts.modified = Some(NOW - days * DAY));
+        let items = [aged("old.png", 40), aged("new.png", 2), aged("scratch.tmp", 3), aged("note.txt", 2)];
+        let mut placements = Placements::default();
+        // Sorted by hand long ago: exactly what a timed rule is for.
+        placements.assign(&items[0].id, &ZoneId::new("pictures"), None, None);
+        let names = |plan: &Plan| plan.steps.iter().map(|step| step.item.as_str().to_string()).collect::<Vec<_>>();
+
+        let timed = plan_timed(&config, &items, &placements, NOW, false);
+        assert_eq!(names(&timed), ["/desk/old.png"]);
+        assert_eq!(timed.steps[0].decided, Decided::Rule(0));
+        // With the files themselves: the one that is to be moved as well.
+        let moving = plan_timed(&config, &items, &placements, NOW, true);
+        assert_eq!(names(&moving), ["/desk/old.png", "/desk/scratch.tmp"]);
+        // The rules that ask nothing of the time, and the catch-all, are
+        // left to the plan a person asks for.
+        let whole = plan(&config, &items, &placements, Scope::All, NOW);
+        assert_eq!(whole.steps.len(), 4);
+        // What a timed rule decides and cannot do is said, the rest is not.
+        config.zones.retain(|zone| zone.id.as_str() != "old");
+        let held = plan_timed(&config, &items, &placements, NOW, false);
+        assert!(held.steps.is_empty());
+        assert_eq!(held.held, [Held { item: items[0].id.clone(), decided: Decided::Rule(0), reason: Reason::NoSuchZone }]);
+    }
+
+    #[test]
+    fn a_plan_is_said_in_lines_a_person_can_read() {
+        let mut config = config(vec![
+            assign("Pictures", vec![extension(&["png"])], "pictures"),
+            Rule {
+                matchers: vec![extension(&["doc"])],
+                action: RuleAction::MoveToFolder { folder: "/archive".to_string() },
+                ..Rule::default()
+            },
+            assign("Lost", vec![extension(&["lost"])], "nowhere"),
+        ]);
+        config.catch_all = Some(RuleAction::AssignToZone { zone: ZoneId::new("rest") });
+        config.zones[0].title = "My pictures".to_string();
+        let mut drive = file("drive");
+        drive.path = None;
+        drive.facts.extension = Some("doc".to_string());
+        let items = [file("a.png"), file("b.doc"), drive, file("c.lost"), file("d.txt")];
+        let mut placements = Placements::default();
+        placements.assign(&items[0].id, &ZoneId::new("papers"), None, None);
+        let dry = plan(&config, &items, &placements, Scope::All, NOW);
+        let lookup = |id: &ItemId| items.iter().find(|item| &item.id == id);
+        let lines = explain(&dry, &config, &lookup, &placements);
+        // Each line as a person would be shown it.
+        let said: Vec<String> = lines
+            .iter()
+            .map(|line| {
+                let from = line.from.as_ref().map_or("the desktop", ZoneId::as_str);
+                let to = match &line.destination {
+                    Destination::Zone { zone, title } => format!("{zone} ({title})"),
+                    Destination::Folder { folder } => folder.clone(),
+                };
+                let held = line.held.as_ref().map(|reason| format!(", held: {reason:?}")).unwrap_or_default();
+                format!("{} from {from} to {to} by [{}]{held}", line.name, line.rule)
+            })
+            .collect();
+        assert_eq!(
+            said,
+            [
+                "a.png from papers to pictures (My pictures) by [Pictures]",
+                "b.doc from the desktop to /archive by []",
+                "d.txt from the desktop to rest (rest) by []",
+                "drive from the desktop to /archive by [], held: NotAFile",
+                "c.lost from the desktop to nowhere () by [Lost], held: NoSuchZone",
+            ]
+        );
+        assert_eq!(lines[2].decided, Decided::CatchAll);
+        // As JSON: the line a command line prints from.
+        assert_eq!(
+            serde_json::to_value(&lines[0]).unwrap(),
+            serde_json::json!({
+                "item": "/desk/a.png", "name": "a.png", "from": "papers",
+                "destination": {"to": "zone", "zone": "pictures", "title": "My pictures"},
+                "decided": {"rule": 0}, "rule": "Pictures"
+            })
+        );
+        let text = serde_json::to_string(&lines).unwrap();
+        assert_eq!(serde_json::from_str::<Vec<PlanLine>>(&text).unwrap(), lines);
+    }
+
+    #[test]
+    fn the_lock_for_all_zones_holds_the_rules_back_as_a_zones_own_does() {
+        let mut config = config(vec![assign("pictures", vec![extension(&["png"])], "pictures")]);
+        let items = [file("a.png"), file("b.png")];
+        let mut placements = Placements::default();
+        placements.assign(&items[1].id, &ZoneId::new("papers"), None, None);
+        assert_eq!(plan(&config, &items, &placements, Scope::All, NOW).steps.len(), 2);
+        config.lock.members = true;
+        let locked = plan(&config, &items, &placements, Scope::All, NOW);
+        assert!(locked.steps.is_empty());
+        assert!(locked.held.iter().all(|held| held.reason == Reason::Locked));
+        assert_eq!(locked.held.len(), 2);
+        // Where a zone stands is another lock, and none of the rules' concern.
+        config.lock = crate::config::Lock { geometry: true, members: false };
+        assert_eq!(plan(&config, &items, &placements, Scope::All, NOW).steps.len(), 2);
     }
 
     #[test]

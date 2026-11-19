@@ -17,23 +17,60 @@
 //! with each call, files are the host's to write, and the backend is only
 //! ever asked through an effect. So the same calls give the same state,
 //! on every system and in a test.
+//!
+//! Two kinds of time come in. `now`, with every call, is the time of the
+//! day in seconds since 1970: rules ask it how old a file is. What is
+//! measured in parts of a second (how long the pointer has rested on a
+//! rolled-up zone) comes as `at_ms` with the commands that need it: any
+//! count of thousandths of a second that only goes forward. The core
+//! says when it wants to be called again (`wake_at_ms`) and keeps no
+//! timer of its own.
+//!
+//! Beside the configuration and the state there is what is so only for
+//! the moment (`ViewState`): which rolled-up zone is open, where a portal
+//! stands, what is typed into a zone's filter, what has the keyboard,
+//! what is covered from view. It is never written anywhere, and the
+//! parts of this module that deal with it are `shown`, `folders`, `keys`
+//! and `layouts`. (`auto` is the zones made by type, which are kept.)
 
+mod auto;
+mod folders;
+mod keys;
+mod layouts;
+mod shown;
+
+pub use layouts::merge;
+
+use crate::auto::AutoPlan;
 use crate::backend::{BackendError, BackendEvent, BackendRequest, FileOperation, Location};
-use crate::config::{RuleAction, Sort, View, ZoneDefinition, ZoneKind, ZoneLook, ZonesConfig};
+use crate::config::{
+    ExpandOn, Lock, RuleAction, SmartSource, Sort, View, ZoneDefinition, ZoneKind, ZoneLook, ZonesConfig,
+};
+use crate::export::LayoutDocument;
+use crate::focus::{Direction, Focus, SelectMode, Step};
 use crate::geometry::{display_of, fallback_display, work_area, Display, ReservedArea, ZoneGeometry};
 use crate::ids::{DisplayId, ItemId, ZoneId};
 use crate::item::Item;
 use crate::layout::{self, ItemLayout, Metrics, PlacedItem};
 use crate::paths;
 use crate::placement::{Cell, LoosePosition};
+use crate::portal::{Listing, PortalScene, PortalView};
 use crate::profile::{self, Profile, ProfileKey};
-use crate::rules::{self, Plan, Scope};
+use crate::reserve::ReservedRegion;
+use crate::rules::{self, Plan, PlanLine, Scope};
 use crate::search::{self, Hit};
 use crate::snap::{self, Edges, Surroundings};
-use crate::state::{Snapshot, ZonesState};
+use crate::state::ZonesState;
 use gevrek_model::geometry::Rect;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+
+pub use crate::focus::DESK;
+
+/// In a command, in place of a zone's id: the zone that has the keyboard.
+/// So one key binding rolls up, locks or hides whichever zone the person
+/// is in (`{"command": "roll_up", "zone": "@focused"}`).
+pub const FOCUSED: &str = "@focused";
 
 /// How many file operations can be taken back, the last first.
 const FILE_UNDO_DEPTH: usize = 32;
@@ -167,6 +204,262 @@ pub enum Command {
     /// Bring the zones above the windows while a key is held.
     Peek { on: bool },
     Search { typed: String },
+
+    // ---- roll-up ----
+    /// The pointer is over a zone, or over none. A rolled-up zone it
+    /// rests on opens after a moment where zones open on hover (always
+    /// while something is `dragging`, so that it can be dropped inside);
+    /// one it has left closes after a moment. Tabs count as one.
+    PointerOver {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        zone: Option<ZoneId>,
+        at_ms: u64,
+        #[serde(default)]
+        dragging: bool,
+    },
+    /// Open a rolled-up zone for now, or close it again; without a value,
+    /// the other of what it is. What a press on its title does. Nothing
+    /// kept changes: the zone is rolled up as before.
+    Expand {
+        zone: ZoneId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expanded: Option<bool>,
+    },
+    /// Time has passed: do what was waiting for it (`wake_at_ms`).
+    Tick { at_ms: u64 },
+
+    // ---- tabs ----
+    /// Put a tab at another place among its tabs, counted from 0.
+    MoveTab { zone: ZoneId, index: usize },
+    /// Take a tab out of its tabs and put its top left corner at a point
+    /// of the desktop: what dragging a tab out does.
+    SplitTab {
+        zone: ZoneId,
+        x: i32,
+        y: i32,
+        #[serde(default = "yes")]
+        snap: bool,
+    },
+    /// Bring the next tab of a zone's tabs to the front (the one before,
+    /// `backwards`), going round at the ends.
+    NextTab {
+        zone: ZoneId,
+        #[serde(default)]
+        backwards: bool,
+    },
+
+    // ---- hiding, peeking, opening ----
+    /// A zone stays when the others are put away with the one key;
+    /// without a value, the other of what it is.
+    AlwaysVisible {
+        zone: ZoneId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on: Option<bool>,
+    },
+    /// An item stays when the others are put away, whichever zone it is
+    /// in or if it is in none.
+    ItemAlwaysVisible {
+        item: ItemId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on: Option<bool>,
+    },
+    /// Peek, or stop peeking: what the peek key does when it is pressed
+    /// rather than held.
+    TogglePeek,
+    /// What Escape does: stop peeking; else empty the filter of the zone
+    /// that has the keyboard; else choose nothing; else let the keyboard
+    /// go.
+    Dismiss,
+    /// Open items as a double click does. Whoever runs the zones starts
+    /// them (`ZonesEvent::OpenRequested`); peeking ends. One folder of a
+    /// portal is gone into instead, in place, unless `in_place` is false.
+    Open {
+        items: Vec<ItemId>,
+        /// The program to open them with.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        with: Option<String>,
+        #[serde(default = "yes")]
+        in_place: bool,
+    },
+
+    // ---- lock, look and everything else of the configuration ----
+    /// Lock every zone at once, whatever its own lock says; what is not
+    /// given stays, and with neither given both are turned to the other
+    /// of what they are.
+    LockAll {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        geometry: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        members: Option<bool>,
+    },
+    /// Change what a zone is configured as: `changes` is laid over the
+    /// zone's definition (a JSON merge patch; `null` puts a key back to
+    /// its default). Its look, its kind, its source, whether it is
+    /// private, the workspaces it is on. The id stays.
+    ModifyZone { zone: ZoneId, changes: serde_json::Value },
+    /// The same for what is set for all zones (`look`, `snap`, `roll_up`,
+    /// `lock`, `privacy`, `rules`...). The zones themselves are changed
+    /// one by one, not here.
+    ModifySettings { changes: serde_json::Value },
+
+    // ---- portals ----
+    /// Go into a folder a portal shows, without leaving the zone.
+    EnterFolder { zone: ZoneId, item: ItemId },
+    /// Go to a folder at or below the portal's own (a press on a part of
+    /// the way shown above its items).
+    NavigateTo { zone: ZoneId, directory: String },
+    NavigateUp { zone: ZoneId },
+    NavigateBack { zone: ZoneId },
+    NavigateForward { zone: ZoneId },
+    /// Ask again what a zone's folder or source has (it was not
+    /// reachable, and may be now).
+    RefreshZone { zone: ZoneId },
+    /// Make a folder in the folder a portal shows. It can be taken back
+    /// with `UndoFileOperation`.
+    NewFolder { zone: ZoneId, name: String },
+    /// Make a folder in any folder: on the desktop itself, with the
+    /// desktop's own folder (which the backend names). It can be taken
+    /// back with `UndoFileOperation` like the one above.
+    NewFolderIn { folder: String, name: String },
+    /// Move files (or copy them) into a folder: an item of a portal onto
+    /// a folder in it, or out of it onto the desktop. Each can be taken
+    /// back with `UndoFileOperation`.
+    MoveItemsToFolder {
+        items: Vec<ItemId>,
+        folder: String,
+        #[serde(default)]
+        copy: bool,
+    },
+    /// Show only the items of a zone whose names fit what was typed;
+    /// nothing typed shows all again. Without a zone: the one that has
+    /// the keyboard.
+    Filter {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        zone: Option<ZoneId>,
+        typed: String,
+    },
+
+    // ---- rules ----
+    /// Try the rules that ask how old an item is, and carry out what
+    /// they say now. Whoever runs the zones asks this on a schedule
+    /// (`timed_rules_every`). It can be taken back with `UndoRules`.
+    CheckTimedRules,
+
+    // ---- whole layouts ----
+    RenameSnapshot { name: String, to: String },
+    /// Say a whole layout as one document (`ZonesEvent::LayoutExported`):
+    /// the saved one of that name, or without a name the layout as it is.
+    ExportLayout {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// Take a layout document in: it is kept as a snapshot, and put in
+    /// force unless `apply` is false. The layout there was is kept as a
+    /// snapshot first, so nothing is lost. A document that cannot be
+    /// right changes nothing.
+    ImportLayout {
+        document: serde_json::Value,
+        #[serde(default = "yes")]
+        apply: bool,
+    },
+    /// Arrange the zones as they are kept for another set of displays.
+    CopyArrangement { from: ProfileKey },
+
+    // ---- the keyboard ----
+    /// Give a zone the keyboard; without a zone, let it go.
+    FocusZone {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        zone: Option<ZoneId>,
+    },
+    /// Give the keyboard to the zone that lies in a direction from the
+    /// one that has it; from none, to the first.
+    FocusNeighbour { direction: Direction },
+    /// Give an item the keyboard, in whichever zone shows it: its tab
+    /// comes to the front and a rolled-up zone opens. Without an item,
+    /// the zone keeps the keyboard and no item has it.
+    FocusItem {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        item: Option<ItemId>,
+    },
+    /// Go from the item that has the keyboard to one beside it. It is
+    /// the chosen one then; with `extend`, chosen as well as the others.
+    MoveItemFocus {
+        step: Step,
+        #[serde(default)]
+        extend: bool,
+    },
+    /// Choose items.
+    Select {
+        items: Vec<ItemId>,
+        #[serde(default)]
+        mode: SelectMode,
+    },
+    /// Open the chosen items, or the one that has the keyboard.
+    OpenFocused,
+    /// Put the chosen items (or the one that has the keyboard) into
+    /// another zone: the one named, or the one that lies in a direction.
+    MoveFocusedItems {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        direction: Option<Direction>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        zone: Option<ZoneId>,
+    },
+
+    /// Call off a file operation that has not ended (`Scene.operations`
+    /// names them).
+    CancelOperation { request: u64 },
+
+    // ---- privacy ----
+    /// Cover what every zone holds, and the loose items; or stop doing
+    /// so. Without a value, the other of what it is.
+    Mask {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        masked: Option<bool>,
+    },
+    /// Show what a covered zone holds (or cover it again); without a
+    /// zone, everything. It lasts until the screen is next shared or
+    /// everything is covered by hand.
+    Reveal {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        zone: Option<ZoneId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        revealed: Option<bool>,
+    },
+
+    // ---- the whole desktop ----
+    /// Draw every icon grey, or in its colours again; without a value,
+    /// the other of what it is. A way of looking at the desktop: the
+    /// looks the person set stay as they are, and this is laid over them.
+    /// It is remembered, as the one key's putting away is.
+    GreyIcons {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on: Option<bool>,
+    },
+    /// Make a zone for each type of item (`desktop.zones.auto`) and put
+    /// the items into them; a type that has its zone already gets what is
+    /// new of it. `dry_run` says what would be done
+    /// (`ZonesEvent::AutoPlanned`) and does nothing. What is not given is
+    /// taken from the configuration; without a display the zones are made
+    /// on the primary one. It can be taken back with `UndoAutoCreate`.
+    AutoCreate {
+        /// `loose`: the items that are in no zone. `all`: also the items
+        /// of the zones filled by hand (not of those made by type).
+        #[serde(default)]
+        scope: Scope,
+        /// How many items a type needs for a zone of its own.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        min_items: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        display: Option<DisplayId>,
+        /// With each zone that is made, a rule for what comes later.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        add_rules: Option<bool>,
+        #[serde(default)]
+        dry_run: bool,
+    },
+    /// Take back the last making of zones by type: its zones, where it
+    /// put the items, the rules it added.
+    UndoAutoCreate,
 }
 
 /// What happened, for a renderer and for whoever listens.
@@ -193,8 +486,19 @@ pub enum ZonesEvent {
     /// never seen in this set. `moved`: the zones whose display is not
     /// there and that went to another.
     ProfileChanged { made: bool, moved: Vec<ZoneId> },
-    RulesPreviewed { plan: Plan },
-    RulesApplied { plan: Plan },
+    /// What the rules would do. `lines` say the same as the plan in the
+    /// words a person is shown: which item, from where, to where, by
+    /// which rule; and what is held back, and why.
+    RulesPreviewed {
+        plan: Plan,
+        #[serde(default)]
+        lines: Vec<PlanLine>,
+    },
+    RulesApplied {
+        plan: Plan,
+        #[serde(default)]
+        lines: Vec<PlanLine>,
+    },
     RulesUndone,
     SnapshotSaved { name: String },
     SnapshotRestored { name: String },
@@ -205,6 +509,87 @@ pub enum ZonesEvent {
     OperationFailed { operation: FileOperation, error: BackendError },
     /// A command was not carried out, and why.
     Refused { reason: String },
+    /// A rolled-up zone is open for now, or closed again. Its rectangle
+    /// is the whole zone's while it is open.
+    ZoneExpanded { zone: ZoneId, expanded: bool },
+    /// Items are to be opened; whoever runs the zones starts them.
+    OpenRequested {
+        items: Vec<ItemId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        with: Option<String>,
+    },
+    /// Something set for all zones is other than it was.
+    SettingsChanged,
+    /// A portal shows another folder.
+    Navigated { zone: ZoneId, directory: String },
+    /// How far the listing of what a zone shows has come.
+    ListingChanged { zone: ZoneId, listing: Listing },
+    /// What is typed into a zone's filter; empty when it shows all again.
+    FilterChanged { zone: ZoneId, typed: String },
+    SnapshotRenamed { name: String, to: String },
+    /// A whole layout, as a document to be written somewhere. (Boxed: it
+    /// is far larger than anything else that is told.)
+    LayoutExported { document: Box<LayoutDocument> },
+    /// A layout was taken in under `name`. `kept_as`: the snapshot that
+    /// holds the layout there was before it was put in force.
+    LayoutImported {
+        name: String,
+        applied: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kept_as: Option<String>,
+    },
+    /// Another zone or item has the keyboard, or none has.
+    FocusChanged {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        zone: Option<ZoneId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        item: Option<ItemId>,
+    },
+    /// Other items are chosen.
+    SelectionChanged { items: Vec<ItemId> },
+    /// What is covered from view changed: everything was covered by hand
+    /// or uncovered, or the screen is shared or no longer.
+    PrivacyChanged { masked: bool, screen_shared: bool },
+    /// The room tiled windows are to keep off is other than it was. For
+    /// the window manager, by way of whoever runs the zones.
+    ReservedChanged { regions: Vec<ReservedRegion> },
+    /// The command that was refused (the `Refused` before this) was
+    /// refused by a lock of this zone: its own, or the one for all zones.
+    RefusedByLock { zone: ZoneId, geometry: bool, members: bool },
+    /// What the command that was refused was about: the zone and the item
+    /// it named (for a lock's refusal, the zone that is locked), with the
+    /// reason again. So that a refusal which came by a key or from
+    /// outside can be shown where it belongs. Told after the `Refused`
+    /// of every command that names a zone or an item.
+    RefusedAbout {
+        reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        zone: Option<ZoneId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        item: Option<ItemId>,
+        /// A lock refused it (`RefusedByLock` says which kind).
+        #[serde(default)]
+        locked: bool,
+    },
+    /// A file operation takes long: it is carried out by the backend and
+    /// ends later. It is in `Scene.operations` until then.
+    OperationBegun { request: u64, operation: FileOperation },
+    OperationProgress { request: u64, done: u64, total: u64 },
+    /// An operation that took long has ended, well or not (an
+    /// `OperationFailed` before this says if not).
+    OperationEnded { request: u64 },
+    /// Every icon is drawn grey now, or in its colours again.
+    GreyIconsChanged { on: bool },
+    /// What making zones by type would do: the answer to a dry run.
+    AutoPlanned { plan: AutoPlan },
+    /// Zones were made by type: the ones that are new, how many items
+    /// were put into zones (new ones and those that were there), and how
+    /// many rules were added. Nothing at all where there was nothing to
+    /// do.
+    AutoCreated { zones: Vec<ZoneId>, items: usize, rules: usize },
+    /// The last making of zones by type was taken back: how many zones
+    /// went, how many items are where they were, how many rules went.
+    AutoUndone { zones: usize, items: usize, rules: usize },
 }
 
 /// What follows from an event or a command.
@@ -240,7 +625,92 @@ pub struct ZoneScene {
     pub view: View,
     pub icon_size: u32,
     /// The items, from the top left corner of the zone's content area.
+    /// Each with its name, its kind, its place among them, and whether
+    /// it is chosen or has the keyboard. None while the zone is covered.
     pub items: ItemLayout,
+    /// Where the items are laid out, on the desktop: the zone without
+    /// its title, its tabs and its padding.
+    #[serde(default)]
+    pub content: Rect,
+    /// A rolled-up zone that is open for now. `rect` is the whole zone's
+    /// then.
+    #[serde(default)]
+    pub expanded: bool,
+    /// What opens it while it is rolled up.
+    #[serde(default)]
+    pub expand_on: ExpandOn,
+    /// What may not be changed by dragging: by the zone's own lock or by
+    /// the one for all zones.
+    #[serde(default)]
+    pub lock: Lock,
+    #[serde(default)]
+    pub always_visible: bool,
+    /// What it holds is covered; `items` is empty.
+    #[serde(default)]
+    pub masked: bool,
+    /// It is one of those that are covered until the person asks.
+    #[serde(default)]
+    pub private: bool,
+    #[serde(default)]
+    pub reserves_space: bool,
+    /// It has the keyboard.
+    #[serde(default)]
+    pub focused: bool,
+    /// How many items it holds, whatever the filter leaves of them and
+    /// also while it is covered.
+    #[serde(default)]
+    pub item_count: usize,
+    /// What is typed into its filter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
+    /// Which tab it is among how many, where it shares its place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<TabPlace>,
+    /// For a portal: where it stands, and how its listing does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub portal: Option<PortalScene>,
+    /// For a zone that fills itself from something other than the
+    /// desktop: how far the listing of that has come.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<Listing>,
+    /// It belongs to what is shown here: not hidden on these displays,
+    /// and of the workspace that is shown. A zone that is `here` and not
+    /// `shown` was put away with the one key.
+    #[serde(default)]
+    pub here: bool,
+    /// The whole zone's rectangle, whether it is rolled up or not: where
+    /// `rect` grows to when it opens.
+    #[serde(default)]
+    pub whole: Rect,
+    /// A file operation that takes long goes into it or out of it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub busy: bool,
+}
+
+/// A file operation that takes long, while it has not ended.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OperationScene {
+    /// What it is called off by (`Command::CancelOperation`).
+    pub request: u64,
+    pub operation: FileOperation,
+    /// How far it has come, in whatever the backend counts; a `total` of
+    /// 0 is "not known".
+    pub done: u64,
+    pub total: u64,
+    /// The zones it goes into or out of.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zones: Vec<ZoneId>,
+    /// The item it is done to, where that is one that is shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item: Option<ItemId>,
+}
+
+/// A tab's place among its tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TabPlace {
+    /// Counted from 0, in the order the tabs are shown.
+    pub index: usize,
+    pub count: usize,
 }
 
 /// The loose items of one display.
@@ -249,7 +719,15 @@ pub struct LooseScene {
     pub display: DisplayId,
     /// The room they are laid out in, on the desktop.
     pub area: Rect,
+    /// None while they are covered.
     pub items: Vec<PlacedItem>,
+    #[serde(default)]
+    pub masked: bool,
+    #[serde(default)]
+    pub item_count: usize,
+    /// The keyboard is on these items.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub focused: bool,
 }
 
 /// Everything there is to draw.
@@ -259,6 +737,80 @@ pub struct Scene {
     pub loose: Vec<LooseScene>,
     pub quick_hidden: bool,
     pub peeking: bool,
+    /// Everything is covered by hand.
+    #[serde(default)]
+    pub masked: bool,
+    /// The system says the screen is shown to others.
+    #[serde(default)]
+    pub screen_shared: bool,
+    /// The lock for all zones.
+    #[serde(default)]
+    pub lock: Lock,
+    /// What has the keyboard.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus: Option<Focus>,
+    /// The chosen items.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub selection: Vec<ItemId>,
+    /// The room tiled windows keep off.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reserved: Vec<ReservedRegion>,
+    /// The workspace that is shown, as far as it was told.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    /// The file operations that take long and have not ended.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub operations: Vec<OperationScene>,
+    /// Every icon is to be drawn grey, whatever the looks say of
+    /// saturation: laid over them, not written into them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub grey_icons: bool,
+    /// The loose items are put away with the zones: the one key was
+    /// pressed and nobody peeks. Of them only those with
+    /// `always_visible` are drawn then.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub loose_hidden: bool,
+}
+
+/// What is so for the moment only. None of it is configuration and none
+/// of it is written to the state file: after a restart no zone is open,
+/// every portal stands in its own folder, nothing is typed anywhere and
+/// nothing has the keyboard.
+#[derive(Debug, Clone, Default)]
+struct ViewState {
+    /// The zone the pointer is over.
+    pointer: Option<ZoneId>,
+    /// The rolled-up zones that are open for now.
+    expanded: BTreeSet<ZoneId>,
+    /// The zone that opens when the pointer has rested on it until then.
+    opening: Option<(ZoneId, u64)>,
+    /// The open zones the pointer has left, and when each closes.
+    closing: BTreeMap<ZoneId, u64>,
+    /// What is typed into each zone's filter.
+    filters: BTreeMap<ZoneId, String>,
+    /// Where each portal stands that is not in its own folder.
+    portals: BTreeMap<ZoneId, PortalView>,
+    focus: Option<Focus>,
+    selection: BTreeSet<ItemId>,
+    /// Everything is covered by hand.
+    masked: bool,
+    /// The covered zones the person asked to see.
+    revealed: BTreeSet<ZoneId>,
+    /// The loose items likewise.
+    loose_revealed: bool,
+    screen_shared: bool,
+    /// The lock that refused the command being carried out.
+    refused_by: Option<(ZoneId, bool)>,
+    /// The file operations that the backend carries out by itself, with
+    /// how far each has come.
+    long: BTreeMap<u64, (u64, u64)>,
+}
+
+/// What `settle` compares with afterwards, to tell of what changed by
+/// the way.
+struct Before {
+    focus: Option<Focus>,
+    selection: BTreeSet<ItemId>,
 }
 
 /// What a file operation that was asked for belongs to.
@@ -272,6 +824,17 @@ enum Pending {
     Arriving { operation: FileOperation, zone: Option<ZoneId>, at: Option<LoosePosition> },
     /// Something is being taken back.
     TakingBack { operation: FileOperation },
+}
+
+impl Pending {
+    fn operation(&self) -> &FileOperation {
+        match self {
+            Pending::RuleMove { operation, .. }
+            | Pending::Arriving { operation, .. }
+            | Pending::Portal { operation }
+            | Pending::TakingBack { operation } => operation,
+        }
+    }
 }
 
 /// The zones.
@@ -291,9 +854,18 @@ pub struct ZonesCore {
     /// The arrangement in use, by its place in the state's list. None
     /// until the displays are known.
     current: Option<usize>,
-    quick_hidden: bool,
     peeking: bool,
     metrics: Metrics,
+    view: ViewState,
+    /// How far the listing of each watched folder has come.
+    listings: BTreeMap<String, Listing>,
+    /// What the sources of smart zones have, in each source's own order.
+    sources: BTreeMap<SmartSource, Vec<Item>>,
+    source_listings: BTreeMap<SmartSource, Listing>,
+    /// The sources the backend was asked to watch.
+    watched_sources: BTreeSet<SmartSource>,
+    /// The room for tiled windows to keep off, as it was last told.
+    told_reserved: Vec<ReservedRegion>,
     requests: u64,
     pending: BTreeMap<u64, Pending>,
     file_undo: Vec<FileOperation>,
@@ -319,9 +891,14 @@ impl ZonesCore {
             reserved: Vec::new(),
             workspace: None,
             current: None,
-            quick_hidden: false,
             peeking: false,
             metrics: Metrics::default(),
+            view: ViewState::default(),
+            listings: BTreeMap::new(),
+            sources: BTreeMap::new(),
+            source_listings: BTreeMap::new(),
+            watched_sources: BTreeSet::new(),
+            told_reserved: Vec::new(),
             requests: 0,
             pending: BTreeMap::new(),
             file_undo: Vec::new(),
@@ -350,11 +927,18 @@ impl ZonesCore {
         self.metrics = metrics;
     }
 
-    /// An item of the desktop or of a portal's folder.
+    /// An item of the desktop, of a folder a zone shows, or of what a
+    /// smart zone looks through.
     pub fn item(&self, id: &ItemId) -> Option<&Item> {
         self.items
             .get(id)
             .or_else(|| self.directories.values().find_map(|items| items.get(id)))
+            .or_else(|| self.sources.values().find_map(|items| items.iter().find(|item| &item.id == id)))
+    }
+
+    /// The workspace that is shown, as far as it was told.
+    pub fn workspace(&self) -> Option<&str> {
+        self.workspace.as_deref()
     }
 
     /// The arrangement in use.
@@ -373,6 +957,24 @@ impl ZonesCore {
         self.sync_watches()
     }
 
+    /// Whether everything was hidden at once (`Command::QuickHide`) and
+    /// is still: only zones that are always visible are shown then.
+    pub fn quick_hidden(&self) -> bool {
+        self.state.quick_hidden
+    }
+
+    /// Whether what is hidden at once is looked at for a moment all the
+    /// same (`Command::Peek`).
+    pub fn peeking(&self) -> bool {
+        self.peeking
+    }
+
+    /// Whether the items that are in no zone are put away now: the one
+    /// key was pressed, and nobody peeks. (They go with the zones.)
+    pub fn loose_hidden(&self) -> bool {
+        self.state.quick_hidden && !self.peeking
+    }
+
     /// Whether the configuration has the zones switched on.
     pub fn enabled(&self) -> bool {
         self.config.enabled
@@ -380,6 +982,16 @@ impl ZonesCore {
 
     /// Another configuration is in force (the file was changed).
     pub fn set_config(&mut self, config: ZonesConfig) -> Vec<Effect> {
+        let before = self.before();
+        let mut effects = self.take_config(config);
+        // (No time is given here; what asks the time is asked again with
+        // the next event or command, which is at once.)
+        self.settle(&mut effects, before, None);
+        effects
+    }
+
+    /// Put a configuration in force and say what follows from that.
+    fn take_config(&mut self, config: ZonesConfig) -> Vec<Effect> {
         let per_workspace = self.config.profile_per_workspace;
         self.config = config;
         let mut effects = self.sync_watches();
@@ -423,17 +1035,36 @@ impl ZonesCore {
     /// display that is there.
     pub fn zone_rect(&self, zone: &ZoneId) -> Option<Rect> {
         let (rect, _) = self.place_of(zone)?;
-        let rolled = self.config.zone(zone).is_some_and(|zone| zone.rolled_up);
-        Some(if rolled { layout::rolled_up(rect, &self.metrics) } else { rect })
+        Some(if self.is_rolled(zone) { layout::rolled_up(rect, &self.metrics) } else { rect })
     }
 
-    /// Whether a zone is shown now.
+    /// Whether a zone is shown now: not hidden on these displays, on the
+    /// workspace that is shown, and not put away with the one key (unless
+    /// the zones are peeked at).
     pub fn is_shown(&self, zone: &ZoneId) -> bool {
+        self.is_about(zone)
+            && (self.peeking
+                || !self.state.quick_hidden
+                || self.config.zone(zone).is_some_and(|zone| zone.always_visible))
+    }
+
+    /// Whether a zone belongs to what is shown here at all: not hidden on
+    /// these displays, and of the workspace that is shown. A workspace
+    /// that was never told hides nothing.
+    fn is_about(&self, zone: &ZoneId) -> bool {
         let Some(definition) = self.config.zone(zone).filter(|_| self.config.enabled) else {
             return false;
         };
         let hidden_here = self.profile().is_some_and(|profile| profile.hidden.contains(zone));
-        !hidden_here && (self.peeking || !self.quick_hidden || definition.always_visible)
+        let on_this_workspace = definition.workspaces.is_empty()
+            || self.workspace.as_ref().is_none_or(|shown| definition.workspaces.contains(shown));
+        !hidden_here && on_this_workspace
+    }
+
+    /// What of a zone may not be changed by dragging: by its own lock or
+    /// by the one for all zones.
+    pub fn lock_of(&self, zone: &ZoneId) -> Lock {
+        self.config.zone(zone).map(|zone| zone.lock).unwrap_or_default().or(self.config.lock)
     }
 
     /// The tab of a group that is in front.
@@ -447,8 +1078,19 @@ impl ZonesCore {
             .unwrap_or_default()
     }
 
-    /// The items a zone shows, in the order it shows them.
+    /// The items a zone shows, in the order it shows them: what it
+    /// holds, without what its filter leaves out.
     pub fn zone_items(&self, zone: &ZoneId, now: u64) -> Vec<&Item> {
+        let mut items = self.zone_holds(zone, now);
+        if let Some(typed) = self.view.filters.get(zone) {
+            items.retain(|item| search::score(&item.name, typed).is_some());
+        }
+        items
+    }
+
+    /// Everything a zone holds, in its order, whatever is typed into its
+    /// filter.
+    pub fn zone_holds(&self, zone: &ZoneId, now: u64) -> Vec<&Item> {
         let Some(definition) = self.config.zone(zone) else {
             return Vec::new();
         };
@@ -460,20 +1102,18 @@ impl ZonesCore {
                 .iter()
                 .filter_map(|id| self.items.get(id))
                 .collect(),
-            ZoneKind::Portal { directory } => self
-                .directories
-                .get(directory)
+            ZoneKind::Portal { .. } => self
+                .directory_of(definition)
+                .and_then(|directory| self.directories.get(&directory))
                 .map(|items| items.values().collect())
                 .unwrap_or_default(),
-            ZoneKind::Smart { query } => self
-                .items
-                .values()
-                .filter(|item| {
-                    !query.is_empty() && query.iter().all(|matcher| rules::holds(matcher, item, now))
-                })
-                .collect(),
+            ZoneKind::Smart { query } => self.smart_items(definition, query, now),
         };
-        layout::sorted(items, definition.sort, definition.sort_descending)
+        let mut items = layout::sorted(items, definition.sort, definition.sort_descending);
+        if matches!(definition.kind, ZoneKind::Smart { .. }) && definition.limit > 0 {
+            items.truncate(definition.limit as usize);
+        }
+        items
     }
 
     /// The zone filled by hand that an item is shown in. An item placed
@@ -489,66 +1129,135 @@ impl ZonesCore {
         self.items.values().filter(|item| self.zone_of(&item.id).is_none()).collect()
     }
 
+    /// Say of each placed item what a renderer and a screen reader need:
+    /// its name and kind, which one it is among how many, and whether it
+    /// is chosen, has the keyboard, or stays when the rest is put away.
+    fn describe(&self, placed: &mut [PlacedItem], focused: Option<&ItemId>) {
+        let of = placed.len() as u32;
+        for (index, placed) in placed.iter_mut().enumerate() {
+            if let Some(item) = self.item(&placed.item) {
+                placed.name = item.name.clone();
+                placed.kind = item.kind;
+            }
+            placed.position = index as u32 + 1;
+            placed.of = of;
+            placed.selected = self.view.selection.contains(&placed.item);
+            placed.focused = focused == Some(&placed.item);
+            placed.always_visible = self.state.always_visible_items.contains(&placed.item);
+        }
+    }
+
+    /// One zone as it is to be drawn; nothing for a zone without a place.
+    fn zone_scene(&self, definition: &ZoneDefinition, groups: &[layout::TabGroup], now: u64) -> Option<ZoneScene> {
+        let (whole, display) = self.place_of(&definition.id)?;
+        let group = layout::group_of(groups, &definition.id);
+        let content = layout::content_area(whole, group.is_some(), &self.metrics);
+        let item_count = self.zone_holds(&definition.id, now).len();
+        let masked = self.is_masked(&definition.id);
+        // What is covered is not in the scene at all: what does not leave
+        // the core cannot be drawn, read out or listed by mistake.
+        let items: Vec<ItemId> = if masked {
+            Vec::new()
+        } else {
+            self.zone_items(&definition.id, now).into_iter().map(|item| item.id.clone()).collect()
+        };
+        let no_cells = BTreeMap::new();
+        let cells = match (&definition.kind, definition.sort) {
+            (ZoneKind::Manual, Sort::Manual) => self
+                .state
+                .placements
+                .zones
+                .get(&definition.id)
+                .map_or(&no_cells, |members| &members.cells),
+            _ => &no_cells,
+        };
+        let mut laid_out = layout::lay_out(
+            definition.view,
+            definition.icon_size,
+            &self.metrics,
+            (content.width, content.height),
+            &items,
+            cells,
+        );
+        let focus = self.view.focus.as_ref().filter(|focus| focus.zone == definition.id);
+        self.describe(&mut laid_out.items, focus.and_then(|focus| focus.item.as_ref()));
+        let rolled = self.is_rolled(&definition.id);
+        Some(ZoneScene {
+            zone: definition.id.clone(),
+            title: definition.title.clone(),
+            display: display.id.clone(),
+            rect: if rolled { layout::rolled_up(whole, &self.metrics) } else { whole },
+            shown: self.is_shown(&definition.id),
+            rolled_up: definition.rolled_up,
+            tab_group: group.map(|group| group.name.clone()),
+            front: group.is_none_or(|group| self.front_of(group) == definition.id),
+            look: definition.look.over(&self.config.look),
+            view: definition.view,
+            icon_size: definition.icon_size,
+            items: laid_out,
+            content,
+            expanded: self.is_expanded(&definition.id),
+            expand_on: self.expand_on(definition),
+            lock: definition.lock.or(self.config.lock),
+            always_visible: definition.always_visible,
+            masked,
+            private: definition.private || self.config.privacy.everything,
+            reserves_space: definition.reserves_space,
+            focused: focus.is_some(),
+            item_count,
+            filter: self.view.filters.get(&definition.id).cloned(),
+            tab: group.and_then(|group| {
+                let index = group.members.iter().position(|member| member == &definition.id)?;
+                Some(TabPlace { index, count: group.members.len() })
+            }),
+            portal: self.portal_scene(definition),
+            source: self.source_listing(definition),
+            here: self.is_about(&definition.id),
+            whole,
+            busy: false,
+        })
+    }
+
     /// Everything there is to draw, as it is at `now`.
     pub fn scene(&self, now: u64) -> Scene {
         let groups = layout::tab_groups(&self.config.zones);
         let mut scene = Scene {
-            quick_hidden: self.quick_hidden,
+            quick_hidden: self.state.quick_hidden,
             peeking: self.peeking,
+            masked: self.view.masked,
+            screen_shared: self.view.screen_shared,
+            lock: self.config.lock,
+            grey_icons: self.state.grey_icons,
+            loose_hidden: self.loose_hidden(),
             ..Scene::default()
         };
         if !self.config.enabled {
             return scene;
         }
-        for definition in &self.config.zones {
-            let Some((whole, display)) = self.place_of(&definition.id) else {
-                continue;
-            };
-            let group = layout::group_of(&groups, &definition.id);
-            let content = layout::content_area(whole, group.is_some(), &self.metrics);
-            let items: Vec<ItemId> = self
-                .zone_items(&definition.id, now)
-                .into_iter()
-                .map(|item| item.id.clone())
-                .collect();
-            let no_cells = BTreeMap::new();
-            let cells = match (&definition.kind, definition.sort) {
-                (ZoneKind::Manual, Sort::Manual) => self
-                    .state
-                    .placements
-                    .zones
-                    .get(&definition.id)
-                    .map_or(&no_cells, |members| &members.cells),
-                _ => &no_cells,
-            };
-            scene.zones.push(ZoneScene {
-                zone: definition.id.clone(),
-                title: definition.title.clone(),
-                display: display.id.clone(),
-                rect: if definition.rolled_up {
-                    layout::rolled_up(whole, &self.metrics)
-                } else {
-                    whole
-                },
-                shown: self.is_shown(&definition.id),
-                rolled_up: definition.rolled_up,
-                tab_group: group.map(|group| group.name.clone()),
-                front: group.is_none_or(|group| self.front_of(group) == definition.id),
-                look: definition.look.over(&self.config.look),
-                view: definition.view,
-                icon_size: definition.icon_size,
-                items: layout::lay_out(
-                    definition.view,
-                    definition.icon_size,
-                    &self.metrics,
-                    (content.width, content.height),
-                    &items,
-                    cells,
-                ),
-            });
+        scene.focus = self.view.focus.clone();
+        scene.selection = self.view.selection.iter().cloned().collect();
+        scene.reserved = self.reserved_regions();
+        scene.workspace = self.workspace.clone();
+        scene.zones = self
+            .config
+            .zones
+            .iter()
+            .filter_map(|definition| self.zone_scene(definition, &groups, now))
+            .collect();
+        scene.operations = self.operations();
+        for zone in &mut scene.zones {
+            zone.busy = scene.operations.iter().any(|operation| operation.zones.contains(&zone.zone));
         }
+        scene.loose = self.loose_scenes();
+        scene
+    }
+
+    /// The items that are in no zone, laid out on each display that has
+    /// some.
+    pub(crate) fn loose_scenes(&self) -> Vec<LooseScene> {
+        let mut loose = Vec::new();
         let Some(fallback) = fallback_display(&self.displays).map(|display| display.id.clone()) else {
-            return scene;
+            return loose;
         };
         let mut by_display: BTreeMap<DisplayId, Vec<&Item>> = BTreeMap::new();
         for item in self.loose_items() {
@@ -580,41 +1289,72 @@ impl ZonesCore {
                     })
                 })
                 .collect();
-            scene.loose.push(LooseScene {
-                display: display.id.clone(),
-                area,
-                items: layout::lay_out_loose(
+            let masked = self.loose_masked();
+            let mut placed = if masked {
+                Vec::new()
+            } else {
+                layout::lay_out_loose(
                     self.config.loose_icon_size,
                     &self.metrics,
                     (area.width, area.height),
                     &ids,
                     &own,
-                ),
+                )
+            };
+            let focus = self.view.focus.as_ref().filter(|focus| focus.desk.as_ref() == Some(&display.id));
+            self.describe(&mut placed, focus.and_then(|focus| focus.item.as_ref()));
+            loose.push(LooseScene {
+                display: display.id.clone(),
+                area,
+                items: placed,
+                masked,
+                item_count: ids.len(),
+                focused: focus.is_some(),
             });
         }
-        scene
+        loose
     }
 
-    /// The items whose names fit what was typed, wherever they are shown.
-    pub fn search(&self, typed: &str) -> Vec<Hit> {
-        let portals: Vec<(&ZoneId, &String)> = self
-            .config
-            .zones
-            .iter()
-            .filter_map(|zone| match &zone.kind {
-                ZoneKind::Portal { directory } => Some((&zone.id, directory)),
-                _ => None,
-            })
+    /// The items whose names fit what was typed, wherever they are
+    /// shown: on the desktop (loose or in a zone), in the folder each
+    /// portal stands in, and in what the zones that fill themselves show.
+    /// The best fit first, each with the zone it is in. What a covered
+    /// zone holds is not found. A filter typed into a zone hides nothing
+    /// here.
+    pub fn search(&self, typed: &str, now: u64) -> Vec<Hit> {
+        let covered = |zone: Option<&ZoneId>| match zone {
+            Some(zone) => self.is_masked(zone),
+            None => self.loose_masked(),
+        };
+        let mut found: Vec<(&Item, Option<&ZoneId>)> = self
+            .items
+            .values()
+            .map(|item| (item, self.zone_of(&item.id)))
+            .filter(|(_, zone)| !covered(*zone))
             .collect();
-        let desktop = self.items.values().map(|item| (item, self.zone_of(&item.id)));
-        let in_portals = portals.iter().flat_map(|(zone, directory)| {
-            self.directories
-                .get(*directory)
-                .into_iter()
-                .flat_map(|items| items.values())
-                .map(move |item| (item, Some(*zone)))
-        });
-        search::search(typed, desktop.chain(in_portals))
+        let mut smart: BTreeMap<&ItemId, Vec<ZoneId>> = BTreeMap::new();
+        for definition in &self.config.zones {
+            if definition.kind == ZoneKind::Manual || self.is_masked(&definition.id) {
+                continue;
+            }
+            for item in self.zone_holds(&definition.id, now) {
+                if matches!(definition.kind, ZoneKind::Smart { .. }) {
+                    smart.entry(&item.id).or_default().push(definition.id.clone());
+                }
+                // Once is enough: an item of the desktop is found there,
+                // and what two zones show is found in the first.
+                if !found.iter().any(|(known, _)| known.id == item.id) {
+                    found.push((item, Some(&definition.id)));
+                }
+            }
+        }
+        let mut hits = search::search(typed, found);
+        for hit in &mut hits {
+            let mut also = smart.remove(&hit.item).unwrap_or_default();
+            also.retain(|zone| Some(zone) != hit.zone.as_ref());
+            hit.also_in = also;
+        }
+        hits
     }
 
     /// What is wrong with the state, if anything. What the long runs of
@@ -633,6 +1373,22 @@ impl ZonesCore {
             if self.config.zone(front).is_none_or(|zone| zone.tab_group.as_ref() != Some(group)) {
                 return Some(format!("{front} is in front of {group} and is no tab of it"));
             }
+        }
+        if let Some(focus) = self.view.focus.as_ref().filter(|focus| focus.desk.is_none()) {
+            if self.config.zone(&focus.zone).is_none() {
+                return Some(format!("{} has the keyboard and is no zone", focus.zone));
+            }
+        }
+        if let Some(stray) = self.view.selection.iter().find(|item| self.item(item).is_none()) {
+            return Some(format!("{stray} is chosen and is not there"));
+        }
+        if let Some(open) = self
+            .view
+            .expanded
+            .iter()
+            .find(|zone| self.config.zone(zone).is_none_or(|zone| !zone.rolled_up))
+        {
+            return Some(format!("{open} is open for now and is not rolled up"));
         }
         if self.displays.is_empty() {
             return None;
@@ -774,40 +1530,53 @@ impl ZonesCore {
         ]
     }
 
-    /// Ask for the folders of the portals to be watched, and for those of
-    /// portals that are gone to be let go.
+    /// Ask for what the zones show to be watched: the folder each portal
+    /// stands in, and what the zones that fill themselves look through.
+    /// What no zone shows any longer is let go.
     fn sync_watches(&mut self) -> Vec<Effect> {
-        let wanted: BTreeSet<String> = self
-            .config
-            .zones
-            .iter()
-            // (Switched off, no folder is watched.)
-            .filter(|_| self.config.enabled)
-            .filter_map(|zone| match &zone.kind {
-                ZoneKind::Portal { directory } => Some(directory.clone()),
-                _ => None,
-            })
-            .collect();
+        // (Switched off, nothing is watched.)
+        let zones = self.config.zones.iter().filter(|_| self.config.enabled);
+        let mut wanted: BTreeSet<String> = BTreeSet::new();
+        let mut wanted_sources: BTreeSet<SmartSource> = BTreeSet::new();
+        for zone in zones {
+            match (&zone.kind, &zone.source) {
+                (ZoneKind::Portal { .. }, _) => wanted.extend(self.directory_of(zone)),
+                (ZoneKind::Smart { .. }, SmartSource::Folder { directory }) => {
+                    wanted.insert(directory.clone());
+                }
+                (ZoneKind::Smart { .. }, SmartSource::Desktop) | (ZoneKind::Manual, _) => {}
+                (ZoneKind::Smart { .. }, source) => {
+                    wanted_sources.insert(source.clone());
+                }
+            }
+        }
         let mut effects = Vec::new();
         for directory in wanted.difference(&self.watched) {
+            self.listings.insert(directory.clone(), Listing::Loading);
             effects.push(Effect::Ask(BackendRequest::Watch { directory: directory.clone() }));
         }
         for directory in self.watched.difference(&wanted) {
             effects.push(Effect::Ask(BackendRequest::Unwatch { directory: directory.clone() }));
             self.directories.remove(directory);
+            self.listings.remove(directory);
         }
         self.watched = wanted;
+        for source in wanted_sources.difference(&self.watched_sources) {
+            self.source_listings.insert(source.clone(), Listing::Loading);
+            effects.push(Effect::Ask(BackendRequest::WatchSource { source: source.clone() }));
+        }
+        for source in self.watched_sources.difference(&wanted_sources) {
+            effects.push(Effect::Ask(BackendRequest::UnwatchSource { source: source.clone() }));
+            self.sources.remove(source);
+            self.source_listings.remove(source);
+        }
+        self.watched_sources = wanted_sources;
         effects
     }
 
     fn ask(&mut self, pending: Pending) -> Effect {
         self.requests += 1;
-        let operation = match &pending {
-            Pending::RuleMove { operation, .. }
-            | Pending::Arriving { operation, .. }
-            | Pending::Portal { operation }
-            | Pending::TakingBack { operation } => operation.clone(),
-        };
+        let operation = pending.operation().clone();
         self.pending.insert(self.requests, pending);
         Effect::Ask(BackendRequest::Perform { request: self.requests, operation })
     }
@@ -817,15 +1586,60 @@ impl ZonesCore {
     /// Something happened outside. `now` is the time in seconds since
     /// 1970 (rules that ask about age are tried against it).
     pub fn event(&mut self, event: BackendEvent, now: u64) -> Vec<Effect> {
+        let before = self.before();
+        let mut effects = self.happened(event, now);
+        self.settle(&mut effects, before, Some(now));
+        effects
+    }
+
+    fn happened(&mut self, event: BackendEvent, now: u64) -> Vec<Effect> {
         match event {
             BackendEvent::Listed { location: Location::Desktop, items } => {
                 self.items = items.into_iter().map(|item| (item.id.clone(), item)).collect();
                 vec![Effect::Notify(ZonesEvent::LayoutChanged)]
             }
             BackendEvent::Listed { location: Location::Directory { path }, items } => {
+                // (An answer that comes after the folder was let go.)
+                if !self.watched.contains(&path) {
+                    return Vec::new();
+                }
                 self.directories
                     .insert(path.clone(), items.into_iter().map(|item| (item.id.clone(), item)).collect());
-                self.portals_changed(&path)
+                let mut effects = self.listing_is(&path, Listing::Ready);
+                effects.extend(self.portals_changed(&path));
+                effects
+            }
+            BackendEvent::ListingFailed { location: Location::Directory { path }, error } => {
+                if !self.watched.contains(&path) {
+                    return Vec::new();
+                }
+                // What was shown of it is not known to be there any more.
+                self.directories.remove(&path);
+                let mut effects = self.listing_is(&path, Listing::Unavailable { reason: error.to_string() });
+                effects.extend(self.portals_changed(&path));
+                effects
+            }
+            // The desktop that cannot be listed keeps what was last known
+            // of it: there is nothing better to show.
+            BackendEvent::ListingFailed { location: Location::Desktop, .. } => Vec::new(),
+            BackendEvent::SourceListed { source, items } => self.source_listed(source, items),
+            BackendEvent::SourceFailed { source, error } => self.source_failed(source, error),
+            BackendEvent::ScreenShared { shared } => self.screen_shared(shared),
+            BackendEvent::OperationBegun { request } => match self.pending.get(&request) {
+                Some(pending) => {
+                    self.view.long.insert(request, (0, 0));
+                    let operation = pending.operation().clone();
+                    vec![Effect::Notify(ZonesEvent::OperationBegun { request, operation })]
+                }
+                None => Vec::new(),
+            },
+            BackendEvent::OperationProgress { request, done, total } => {
+                // (Word of one that has ended, or was never asked for.)
+                if !self.pending.contains_key(&request) {
+                    return Vec::new();
+                }
+                self.view.long.insert(request, (done, total));
+                vec![Effect::Notify(ZonesEvent::OperationProgress { request, done, total })]
             }
             BackendEvent::ItemAdded { location: Location::Desktop, item } => self.arrived(item, now),
             BackendEvent::ItemRemoved { location: Location::Desktop, item } => {
@@ -834,11 +1648,15 @@ impl ZonesCore {
                     return Vec::new();
                 }
                 self.state.placements.take(&item);
+                self.state.always_visible_items.remove(&item);
                 vec![Effect::Notify(ZonesEvent::ItemsChanged { zone }), Effect::SaveState]
             }
             BackendEvent::ItemRenamed { location: Location::Desktop, from, item } => {
                 self.items.remove(&from);
                 self.state.placements.rename(&from, &item.id);
+                if self.state.always_visible_items.remove(&from) {
+                    self.state.always_visible_items.insert(item.id.clone());
+                }
                 let zone = self.zone_of(&item.id).cloned();
                 self.items.insert(item.id.clone(), item);
                 vec![Effect::Notify(ZonesEvent::ItemsChanged { zone }), Effect::SaveState]
@@ -850,20 +1668,24 @@ impl ZonesCore {
             }
             BackendEvent::ItemAdded { location: Location::Directory { path }, item }
             | BackendEvent::ItemChanged { location: Location::Directory { path }, item } => {
-                if !self.watched.contains(&path) {
+                if !self.follows(&path) {
                     return Vec::new();
                 }
                 self.directories.entry(path.clone()).or_default().insert(item.id.clone(), item);
                 self.portals_changed(&path)
             }
             BackendEvent::ItemRemoved { location: Location::Directory { path }, item } => {
+                if !self.follows(&path) {
+                    return Vec::new();
+                }
                 if let Some(items) = self.directories.get_mut(&path) {
                     items.remove(&item);
                 }
+                self.state.always_visible_items.remove(&item);
                 self.portals_changed(&path)
             }
             BackendEvent::ItemRenamed { location: Location::Directory { path }, from, item } => {
-                if !self.watched.contains(&path) {
+                if !self.follows(&path) {
                     return Vec::new();
                 }
                 let items = self.directories.entry(path.clone()).or_default();
@@ -889,24 +1711,43 @@ impl ZonesCore {
                 }
                 self.workspace = name;
                 if !self.config.profile_per_workspace {
-                    return Vec::new();
+                    // Zones that are of some workspaces only come and go
+                    // with them, also where all share one arrangement.
+                    return if self.config.zones.iter().any(|zone| !zone.workspaces.is_empty()) {
+                        vec![Effect::Notify(ZonesEvent::LayoutChanged)]
+                    } else {
+                        Vec::new()
+                    };
                 }
                 let mut effects = self.choose_profile();
                 effects.push(Effect::Notify(ZonesEvent::LayoutChanged));
                 effects
             }
-            BackendEvent::OperationDone { request, undo, error } => self.operation_done(request, undo, error),
+            BackendEvent::OperationDone { request, undo, error } => {
+                let long = self.view.long.remove(&request).is_some();
+                let mut effects = self.operation_done(request, undo, error);
+                if long {
+                    effects.push(Effect::Notify(ZonesEvent::OperationEnded { request }));
+                }
+                effects
+            }
             BackendEvent::IconReady { .. } => Vec::new(),
         }
     }
 
+    /// Whether word of single items of a folder is taken: the folder is
+    /// watched and was listed whole. Until it was (it is still being
+    /// listed, or could not be), a single item says nothing of the rest,
+    /// and the listing that comes will have it.
+    fn follows(&self, directory: &str) -> bool {
+        self.watched.contains(directory) && self.listings.get(directory).is_some_and(Listing::is_ready)
+    }
+
     /// The zones that show a folder have other items.
     fn portals_changed(&self, directory: &str) -> Vec<Effect> {
-        self.config
-            .zones
-            .iter()
-            .filter(|zone| matches!(&zone.kind, ZoneKind::Portal { directory: shown } if shown == directory))
-            .map(|zone| Effect::Notify(ZonesEvent::ItemsChanged { zone: Some(zone.id.clone()) }))
+        self.showing(directory)
+            .into_iter()
+            .map(|zone| Effect::Notify(ZonesEvent::ItemsChanged { zone: Some(zone) }))
             .collect()
     }
 
@@ -929,7 +1770,8 @@ impl ZonesCore {
                 let takes = self
                     .config
                     .zone(zone)
-                    .is_some_and(|zone| zone.kind == ZoneKind::Manual && !zone.lock.members);
+                    .is_some_and(|zone| zone.kind == ZoneKind::Manual && !zone.lock.members)
+                    && !self.config.lock.members;
                 if takes {
                     let zone = zone.clone();
                     self.state.placements.assign(&id, &zone, None, None);
@@ -946,9 +1788,10 @@ impl ZonesCore {
     /// Put an item that was brought to the desktop where it was let go:
     /// into the zone, if that still takes it, or at its place.
     fn settle_arrival(&mut self, item: &ItemId, (zone, at): (Option<ZoneId>, Option<LoosePosition>)) {
-        let takes = zone.as_ref().is_some_and(|zone| {
-            self.config.zone(zone).is_some_and(|zone| zone.kind == ZoneKind::Manual && !zone.lock.members)
-        });
+        let takes = !self.config.lock.members
+            && zone.as_ref().is_some_and(|zone| {
+                self.config.zone(zone).is_some_and(|zone| zone.kind == ZoneKind::Manual && !zone.lock.members)
+            });
         match (zone, at) {
             (Some(zone), _) if takes => self.state.placements.assign(item, &zone, None, None),
             (_, Some(at)) => self.state.placements.loosen(item, Some(at)),
@@ -1055,11 +1898,192 @@ impl ZonesCore {
     /// Carry out a command. One that cannot be carried out changes
     /// nothing and gives `ZonesEvent::Refused` with the reason.
     pub fn command(&mut self, command: Command, now: u64) -> Vec<Effect> {
+        let refused = |reason: String| vec![Effect::Notify(ZonesEvent::Refused { reason })];
         if !self.config.enabled {
-            let reason = "zones are switched off (desktop.zones.enabled)".to_string();
-            return vec![Effect::Notify(ZonesEvent::Refused { reason })];
+            return refused("zones are switched off (desktop.zones.enabled)".to_string());
         }
-        let outcome = match command {
+        let command = match self.aimed(command) {
+            Ok(command) => command,
+            Err(reason) => return refused(reason),
+        };
+        let before = self.before();
+        self.view.refused_by = None;
+        let (mut zone, item) = Self::about(&command);
+        let mut effects = self.carry_out(command, now).unwrap_or_else(refused);
+        // A refusal says what it was about, for the zone to show it; one
+        // that was a lock's says whose lock.
+        let reason = effects.iter().find_map(|effect| match effect {
+            Effect::Notify(ZonesEvent::Refused { reason }) => Some(reason.clone()),
+            _ => None,
+        });
+        let by_lock = self.view.refused_by.take();
+        if let Some(reason) = reason {
+            let locked = by_lock.is_some();
+            if let Some((locked_zone, geometry)) = by_lock {
+                zone = Some(locked_zone.clone());
+                let event = ZonesEvent::RefusedByLock { zone: locked_zone, geometry, members: !geometry };
+                effects.push(Effect::Notify(event));
+            }
+            if zone.is_some() || item.is_some() {
+                effects.push(Effect::Notify(ZonesEvent::RefusedAbout { reason, zone, item, locked }));
+            }
+        }
+        self.settle(&mut effects, before, Some(now));
+        effects
+    }
+
+    /// A command that names `@focused` for a zone, with the zone that has
+    /// the keyboard in its place.
+    fn aimed(&self, command: Command) -> Result<Command, String> {
+        // (A whole layout is large, and names no zone to act on.)
+        if matches!(command, Command::ImportLayout { .. }) {
+            return Ok(command);
+        }
+        let Ok(mut written) = serde_json::to_value(&command) else {
+            return Ok(command);
+        };
+        let Some(fields) = written.as_object_mut() else {
+            return Ok(command);
+        };
+        let mut aimed = false;
+        for key in ["zone", "with"] {
+            if fields.get(key).and_then(|zone| zone.as_str()) == Some(FOCUSED) {
+                let focused = self.view.focus.as_ref().ok_or("no zone has the keyboard")?;
+                if focused.desk.is_some() {
+                    return Err("the desktop has the keyboard, not a zone".to_string());
+                }
+                fields.insert(key.to_string(), serde_json::Value::from(focused.zone.as_str()));
+                aimed = true;
+            }
+        }
+        if !aimed {
+            return Ok(command);
+        }
+        serde_json::from_value(written).map_err(|error| error.to_string())
+    }
+
+    /// The zone and the item a command names, where it names one.
+    fn about(command: &Command) -> (Option<ZoneId>, Option<ItemId>) {
+        // (A whole layout is large, and is about no one zone.)
+        if matches!(command, Command::ImportLayout { .. }) {
+            return (None, None);
+        }
+        let written = serde_json::to_value(command).unwrap_or_default();
+        let named = |key: &str| written.get(key).and_then(|name| name.as_str()).map(str::to_string);
+        let first = written.get("items").and_then(|items| items.get(0)).and_then(|item| item.as_str());
+        (named("zone").map(ZoneId::new), named("item").or(first.map(str::to_string)).map(ItemId::new))
+    }
+
+    fn before(&self) -> Before {
+        Before { focus: self.view.focus.clone(), selection: self.view.selection.clone() }
+    }
+
+    /// After anything happened: bring what is so for the moment in line
+    /// with what there is (a zone that is gone is not open, nothing that
+    /// is gone has the keyboard or is chosen), and tell of what changed
+    /// by the way: the keyboard is elsewhere, other items are chosen,
+    /// other room is to be kept free of tiled windows.
+    fn settle(&mut self, effects: &mut Vec<Effect>, before: Before, now: Option<u64>) {
+        let rolled = |core: &Self, zone: &ZoneId| core.config.zone(zone).is_some_and(|zone| zone.rolled_up);
+        let open: Vec<ZoneId> = self.view.expanded.iter().filter(|zone| !rolled(self, zone)).cloned().collect();
+        for zone in open {
+            self.view.expanded.remove(&zone);
+            self.view.closing.remove(&zone);
+        }
+        if self.view.opening.as_ref().is_some_and(|(zone, _)| !rolled(self, zone)) {
+            self.view.opening = None;
+        }
+        let known = |core: &Self, zone: &ZoneId| core.config.zone(zone).is_some();
+        if self.view.pointer.as_ref().is_some_and(|zone| !known(self, zone)) {
+            self.view.pointer = None;
+        }
+        let gone: Vec<ZoneId> = self
+            .view
+            .filters
+            .keys()
+            .chain(self.view.revealed.iter())
+            .chain(self.view.portals.keys())
+            .filter(|zone| !known(self, zone))
+            .cloned()
+            .collect();
+        for zone in gone {
+            self.view.filters.remove(&zone);
+            self.view.revealed.remove(&zone);
+            self.view.portals.remove(&zone);
+        }
+        // A portal that shows another folder now begins there.
+        let moved: Vec<ZoneId> = self
+            .view
+            .portals
+            .iter()
+            .filter(|(zone, view)| {
+                !matches!(self.config.zone(zone).map(|zone| &zone.kind),
+                    Some(ZoneKind::Portal { directory }) if directory == view.root())
+            })
+            .map(|(zone, _)| zone.clone())
+            .collect();
+        for zone in moved {
+            self.view.portals.remove(&zone);
+        }
+        // The keyboard: on a zone that is there and shown, and on an item
+        // the zone shows. (Without the time nothing that depends on it is
+        // looked at: the item stays until the next call, which has it.)
+        if let Some(focus) = self.view.focus.clone() {
+            if let Some(display) = &focus.desk {
+                // The bare desktop: while something lies loose on that
+                // display and is to be seen, and on an item that does.
+                match self.desks().into_iter().find(|(on, _, _)| on == display) {
+                    None => self.view.focus = None,
+                    Some((_, _, items)) => {
+                        if focus.item.as_ref().is_some_and(|item| !items.iter().any(|placed| &placed.item == item)) {
+                            self.view.focus = Some(Focus::on_desk(display, None));
+                        }
+                    }
+                }
+            } else if !self.is_shown(&focus.zone) || (self.is_masked(&focus.zone) && focus.item.is_some()) {
+                self.view.focus = self.is_shown(&focus.zone).then(|| Focus::on_zone(&focus.zone, None));
+            } else if let (Some(item), Some(now)) = (&focus.item, now) {
+                if !self.zone_items(&focus.zone, now).iter().any(|shown| &shown.id == item) {
+                    self.view.focus = Some(Focus::on_zone(&focus.zone, None));
+                }
+            }
+        }
+        let stray: Vec<ItemId> =
+            self.view.selection.iter().filter(|item| self.item(item).is_none()).cloned().collect();
+        for item in stray {
+            self.view.selection.remove(&item);
+        }
+        // A zone that was open because the keyboard was in it closes when
+        // the keyboard leaves, unless the pointer holds it open.
+        let was_in = before.focus.as_ref().map(|focus| &focus.zone);
+        let is_in = self.view.focus.as_ref().map(|focus| focus.zone.clone());
+        if let Some(left) = was_in.filter(|zone| Some(*zone) != is_in.as_ref()) {
+            let held = self.view.pointer.as_ref().is_some_and(|over| self.companions(over).contains(left));
+            if !held && self.view.expanded.contains(left) {
+                effects.extend(self.set_expanded(&left.clone(), false));
+            }
+        }
+        if self.view.focus != before.focus {
+            let focus = self.view.focus.clone();
+            effects.push(Effect::Notify(ZonesEvent::FocusChanged {
+                zone: focus.as_ref().map(|focus| focus.zone.clone()),
+                item: focus.and_then(|focus| focus.item),
+            }));
+        }
+        if self.view.selection != before.selection {
+            effects.push(Effect::Notify(ZonesEvent::SelectionChanged {
+                items: self.view.selection.iter().cloned().collect(),
+            }));
+        }
+        let regions = self.reserved_regions();
+        if regions != self.told_reserved {
+            self.told_reserved = regions.clone();
+            effects.push(Effect::Notify(ZonesEvent::ReservedChanged { regions }));
+        }
+    }
+
+    fn carry_out(&mut self, command: Command, now: u64) -> Outcome {
+        match command {
             Command::CreateZone { title, kind, rect } => self.create_zone(title, kind, rect),
             Command::RenameZone { zone, title } => self.change_zone(&zone, |zone| zone.title = title),
             Command::DeleteZone { zone } => self.delete_zone(&zone),
@@ -1075,6 +2099,97 @@ impl ZonesCore {
                 zone.lock.geometry = geometry.unwrap_or(zone.lock.geometry);
                 zone.lock.members = members.unwrap_or(zone.lock.members);
             }),
+            Command::LockAll { geometry, members } => {
+                let before = self.config.lock;
+                self.config.lock = match (geometry, members) {
+                    (None, None) => {
+                        let on = !(before.geometry && before.members);
+                        Lock { geometry: on, members: on }
+                    }
+                    _ => Lock {
+                        geometry: geometry.unwrap_or(before.geometry),
+                        members: members.unwrap_or(before.members),
+                    },
+                };
+                if self.config.lock == before {
+                    Ok(Vec::new())
+                } else {
+                    Ok(vec![
+                        Effect::Notify(ZonesEvent::SettingsChanged),
+                        Effect::Notify(ZonesEvent::LayoutChanged),
+                        Effect::SaveConfig,
+                    ])
+                }
+            }
+            Command::ModifyZone { zone, changes } => self.modify_zone(&zone, &changes),
+            Command::ModifySettings { changes } => self.modify_settings(&changes),
+            Command::PointerOver { zone, at_ms, dragging } => Ok(self.pointer_over(zone, at_ms, dragging)),
+            Command::Expand { zone, expanded } => self.expand(&zone, expanded),
+            Command::Tick { at_ms } => Ok(self.tick(at_ms)),
+            Command::MoveTab { zone, index } => self.move_tab(&zone, index),
+            Command::SplitTab { zone, x, y, snap } => {
+                // (Refused before anything is taken apart.)
+                self.known(&zone)?.tab_group.as_ref().ok_or_else(|| format!("{zone} is no tab"))?;
+                self.movable(&zone)?;
+                let mut effects = self.untab(&zone)?;
+                effects.extend(self.move_zone(&zone, x, y, snap)?);
+                Ok(effects)
+            }
+            Command::NextTab { zone, backwards } => self.next_tab(&zone, backwards),
+            Command::AlwaysVisible { zone, on } => {
+                let on = on.unwrap_or(!self.known(&zone)?.always_visible);
+                self.change_zone(&zone, |zone| zone.always_visible = on)
+            }
+            Command::ItemAlwaysVisible { item, on } => self.item_always_visible(&item, on),
+            Command::TogglePeek => {
+                self.peeking = !self.peeking;
+                Ok(vec![self.visibility()])
+            }
+            Command::Dismiss => Ok(self.dismiss()),
+            Command::Open { items, with, in_place } => self.open(items, with, in_place),
+            Command::EnterFolder { zone, item } => self.navigate(&zone, folders::Way::Into(item)),
+            Command::NavigateTo { zone, directory } => self.navigate(&zone, folders::Way::To(directory)),
+            Command::NavigateUp { zone } => self.navigate(&zone, folders::Way::Up),
+            Command::NavigateBack { zone } => self.navigate(&zone, folders::Way::Back),
+            Command::NavigateForward { zone } => self.navigate(&zone, folders::Way::Forward),
+            Command::RefreshZone { zone } => self.refresh_zone(&zone),
+            Command::NewFolder { zone, name } => self.new_folder(&zone, &name),
+            Command::NewFolderIn { folder, name } => self.new_folder_in(folder, &name),
+            Command::MoveItemsToFolder { items, folder, copy } => self.move_items_to_folder(&items, &folder, copy),
+            Command::Filter { zone, typed } => self.filter(zone, &typed),
+            Command::CheckTimedRules => self.check_timed_rules(now),
+            Command::RenameSnapshot { name, to } => self.rename_snapshot(&name, &to),
+            Command::ExportLayout { name } => self.export_layout(name.as_deref(), now),
+            Command::ImportLayout { document, apply } => self.import_layout(&document, apply, now),
+            Command::CopyArrangement { from } => self.copy_arrangement(&from),
+            Command::FocusZone { zone } => self.focus_zone(zone),
+            Command::FocusNeighbour { direction } => self.focus_neighbour(direction),
+            Command::FocusItem { item } => self.focus_item(item, now),
+            Command::MoveItemFocus { step, extend } => self.move_item_focus(step, extend, now),
+            Command::Select { items, mode } => Ok(self.select(&items, mode)),
+            Command::OpenFocused => {
+                let items = self.acted_on();
+                if items.is_empty() {
+                    Err("no item has the keyboard and none is chosen".to_string())
+                } else {
+                    self.open(items, None, true)
+                }
+            }
+            Command::MoveFocusedItems { direction, zone } => self.move_focused_items(direction, zone, now),
+            Command::CancelOperation { request } => {
+                if self.pending.contains_key(&request) && self.view.long.contains_key(&request) {
+                    Ok(vec![Effect::Ask(BackendRequest::Cancel { request })])
+                } else {
+                    Err("no such operation is under way".to_string())
+                }
+            }
+            Command::Mask { masked } => Ok(self.mask(masked)),
+            Command::GreyIcons { on } => self.set_grey_icons(on),
+            Command::AutoCreate { scope, min_items, display, add_rules, dry_run } => {
+                self.auto_create(scope, min_items, display.as_ref(), add_rules, dry_run, now)
+            }
+            Command::UndoAutoCreate => self.undo_auto_create(),
+            Command::Reveal { zone, revealed } => self.reveal(zone, revealed),
             Command::Tab { zone, with } => self.tab(&zone, &with),
             Command::Untab { zone } => self.untab(&zone),
             Command::ActivateTab { zone } => self.activate_tab(&zone),
@@ -1088,7 +2203,9 @@ impl ZonesCore {
             }
             Command::ShowZone { zone, shown } => self.show_zone(&zone, shown),
             Command::PreviewRules { scope } => {
-                Ok(vec![Effect::Notify(ZonesEvent::RulesPreviewed { plan: self.plan(scope, now) })])
+                let plan = self.plan(scope, now);
+                let lines = self.explain(&plan);
+                Ok(vec![Effect::Notify(ZonesEvent::RulesPreviewed { plan, lines })])
             }
             Command::ApplyRules { scope } => self.apply_rules(scope, now),
             Command::UndoRules => self.undo_rules(),
@@ -1139,7 +2256,7 @@ impl ZonesCore {
                 }
             }
             Command::SaveSnapshot { name } => self.save_snapshot(name, now),
-            Command::RestoreSnapshot { name } => self.restore_snapshot(&name),
+            Command::RestoreSnapshot { name } => self.restore_snapshot(&name, now),
             Command::DeleteSnapshot { name } => {
                 let before = self.state.snapshots.len();
                 self.state.snapshots.retain(|snapshot| snapshot.name != name);
@@ -1150,24 +2267,27 @@ impl ZonesCore {
                 }
             }
             Command::QuickHide { hidden } => {
-                self.quick_hidden = hidden.unwrap_or(!self.quick_hidden);
-                Ok(vec![self.visibility()])
+                let hidden = hidden.unwrap_or(!self.state.quick_hidden);
+                if hidden == self.state.quick_hidden {
+                    return Ok(vec![self.visibility()]);
+                }
+                self.state.quick_hidden = hidden;
+                Ok(vec![self.visibility(), Effect::SaveState])
             }
             Command::Peek { on } => {
                 self.peeking = on;
                 Ok(vec![self.visibility()])
             }
             Command::Search { typed } => {
-                let hits = self.search(&typed);
+                let hits = self.search(&typed, now);
                 Ok(vec![Effect::Notify(ZonesEvent::Found { typed, hits })])
             }
-        };
-        outcome.unwrap_or_else(|reason| vec![Effect::Notify(ZonesEvent::Refused { reason })])
+        }
     }
 
     fn visibility(&self) -> Effect {
         Effect::Notify(ZonesEvent::VisibilityChanged {
-            quick_hidden: self.quick_hidden,
+            quick_hidden: self.state.quick_hidden,
             peeking: self.peeking,
         })
     }
@@ -1293,10 +2413,11 @@ impl ZonesCore {
         effects
     }
 
-    fn movable(&self, zone: &ZoneId) -> Result<(Rect, Display), String> {
+    fn movable(&mut self, zone: &ZoneId) -> Result<(Rect, Display), String> {
         self.known(zone)?;
         let companions = self.companions(zone);
-        if companions.iter().any(|zone| self.config.zone(zone).is_some_and(|zone| zone.lock.geometry)) {
+        if companions.iter().any(|zone| self.lock_of(zone).geometry) {
+            self.view.refused_by = Some((zone.clone(), true));
             return Err(format!("{zone} is locked where it is"));
         }
         let (rect, display) = self.place_of(zone).ok_or("no display is known yet")?;
@@ -1343,11 +2464,13 @@ impl ZonesCore {
 
     fn add_item(&mut self, zone: &ZoneId, item: &ItemId, index: Option<usize>, cell: Option<Cell>) -> Outcome {
         let target = self.known(zone)?.clone();
-        if target.lock.members {
+        if self.lock_of(zone).members {
+            self.view.refused_by = Some((zone.clone(), false));
             return Err(format!("{zone} is locked: nothing goes in or out"));
         }
         let from = self.zone_of(item).cloned();
-        if from.as_ref().and_then(|from| self.config.zone(from)).is_some_and(|from| from.lock.members) {
+        if let Some(from) = from.as_ref().filter(|from| self.lock_of(from).members) {
+            self.view.refused_by = Some((from.clone(), false));
             return Err(format!("{item} is in a locked zone"));
         }
         match &target.kind {
@@ -1364,14 +2487,17 @@ impl ZonesCore {
                 Ok(effects)
             }
             ZoneKind::Portal { directory } => {
+                // Into the folder the portal stands in, which is the one
+                // the person sees.
+                let directory = self.directory_of(&target).unwrap_or_else(|| directory.clone());
                 let path = self
                     .item(item)
                     .and_then(|item| item.path.clone())
                     .ok_or_else(|| format!("{item} is no file that could be moved"))?;
-                if paths::parent(&path).is_some_and(|at| paths::same_folder(at, directory)) {
+                if paths::parent(&path).is_some_and(|at| paths::same_folder(at, &directory)) {
                     return Err(format!("{item} is in that folder already"));
                 }
-                let operation = FileOperation::Move { from: path, to_folder: directory.clone() };
+                let operation = FileOperation::Move { from: path, to_folder: directory };
                 Ok(vec![self.ask(Pending::Portal { operation })])
             }
             ZoneKind::Smart { .. } => Err(format!("{zone} fills itself")),
@@ -1381,10 +2507,7 @@ impl ZonesCore {
     fn trash_items(&mut self, items: &[ItemId]) -> Outcome {
         let mut effects = Vec::new();
         for id in items {
-            let locked = self
-                .zone_of(id)
-                .and_then(|zone| self.config.zone(zone))
-                .is_some_and(|zone| zone.lock.members);
+            let locked = self.zone_of(id).is_some_and(|zone| self.lock_of(zone).members);
             // What is no file (This PC) and what a locked zone holds stays.
             let Some(path) = self.item(id).and_then(|item| item.path.clone()).filter(|_| !locked) else {
                 continue;
@@ -1402,7 +2525,8 @@ impl ZonesCore {
             return Err(format!("{item} is not on the desktop"));
         }
         let from = self.zone_of(item).cloned();
-        if from.as_ref().and_then(|from| self.config.zone(from)).is_some_and(|from| from.lock.members) {
+        if let Some(from) = from.as_ref().filter(|from| self.lock_of(from).members) {
+            self.view.refused_by = Some((from.clone(), false));
             return Err(format!("{item} is in a locked zone"));
         }
         if let Some(position) = &position {
@@ -1527,16 +2651,51 @@ impl ZonesCore {
         rules::plan(&self.config, self.items.values(), &self.state.placements, scope, now)
     }
 
+    /// A plan in the words a person is shown, as the items are now.
+    pub fn explain(&self, plan: &Plan) -> Vec<PlanLine> {
+        rules::explain(plan, &self.config, &|id| self.items.get(id), &self.state.placements)
+    }
+
+    /// How often the rules that ask the time want to be tried
+    /// (`Command::CheckTimedRules`), in seconds. None while there is no
+    /// such rule, or the configuration says never.
+    pub fn timed_rules_every(&self) -> Option<u64> {
+        let minutes = self.config.timed_rules.every_minutes;
+        (self.config.enabled && minutes > 0 && self.config.rules.iter().any(rules::is_timed))
+            .then(|| u64::from(minutes) * 60)
+    }
+
+    fn check_timed_rules(&mut self, now: u64) -> Outcome {
+        let plan = rules::plan_timed(
+            &self.config,
+            self.items.values(),
+            &self.state.placements,
+            now,
+            self.config.timed_rules.move_files,
+        );
+        // Nothing has come of age: nothing is said, and what could be
+        // taken back before still can be.
+        if plan.steps.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.apply_plan(plan, now)
+    }
+
     fn apply_rules(&mut self, scope: Scope, now: u64) -> Outcome {
         let plan = self.plan(scope, now);
+        self.apply_plan(plan, now)
+    }
+
+    fn apply_plan(&mut self, plan: Plan, now: u64) -> Outcome {
+        let lines = self.explain(&plan);
         if plan.steps.is_empty() {
             // Nothing to do, and nothing to take back that was not there before.
-            return Ok(vec![Effect::Notify(ZonesEvent::RulesApplied { plan })]);
+            return Ok(vec![Effect::Notify(ZonesEvent::RulesApplied { plan, lines })]);
         }
         let items = &self.items;
         let path_of = |id: &ItemId| items.get(id).and_then(|item| item.path.clone());
         let applied = rules::apply(&plan, &path_of, &mut self.state.placements, now);
-        let mut effects = vec![Effect::Notify(ZonesEvent::RulesApplied { plan })];
+        let mut effects = vec![Effect::Notify(ZonesEvent::RulesApplied { plan, lines })];
         for moved in &applied.undo.moved {
             effects.push(self.ask(Pending::RuleMove {
                 item: moved.item.clone(),
@@ -1558,57 +2717,6 @@ impl ZonesCore {
         }
         effects.push(Effect::Notify(ZonesEvent::LayoutChanged));
         effects.push(Effect::SaveState);
-        Ok(effects)
-    }
-
-    fn save_snapshot(&mut self, name: String, now: u64) -> Outcome {
-        if name.trim().is_empty() {
-            return Err("a snapshot needs a name".to_string());
-        }
-        let snapshot = Snapshot {
-            name: name.clone(),
-            taken_at: now,
-            zones: self.config.zones.clone(),
-            rules: self.config.rules.clone(),
-            catch_all: self.config.catch_all.clone(),
-            placements: self.state.placements.clone(),
-            profiles: self.state.profiles.clone(),
-            active_tabs: self.state.active_tabs.clone(),
-            extra: Default::default(),
-        };
-        match self.state.snapshots.iter_mut().find(|snapshot| snapshot.name == name) {
-            Some(existing) => *existing = snapshot,
-            None => self.state.snapshots.push(snapshot),
-        }
-        Ok(vec![Effect::Notify(ZonesEvent::SnapshotSaved { name }), Effect::SaveState])
-    }
-
-    fn restore_snapshot(&mut self, name: &str) -> Outcome {
-        let snapshot = self
-            .state
-            .snapshots
-            .iter()
-            .find(|snapshot| snapshot.name == name)
-            .cloned()
-            .ok_or_else(|| format!("no snapshot is called {name}"))?;
-        self.config.zones = snapshot.zones;
-        self.config.rules = snapshot.rules;
-        self.config.catch_all = snapshot.catch_all;
-        self.state.placements = snapshot.placements;
-        self.state.profiles = snapshot.profiles;
-        self.state.active_tabs = snapshot.active_tabs;
-        // What the rules did before no longer describes what is there.
-        self.state.undo = None;
-        self.current = None;
-        let mut effects = vec![Effect::Notify(ZonesEvent::SnapshotRestored { name: name.to_string() })];
-        effects.extend(self.sync_watches());
-        self.choose_profile();
-        self.reconcile();
-        effects.extend([
-            Effect::Notify(ZonesEvent::LayoutChanged),
-            Effect::SaveConfig,
-            Effect::SaveState,
-        ]);
         Ok(effects)
     }
 }

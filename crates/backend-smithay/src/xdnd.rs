@@ -377,14 +377,116 @@ fn answer(
 // (the drag's selection, converted). The X11 program learns of the
 // button being let go from gevrek, tells the unseen window that the
 // drag is dropped, and is told when the Wayland side is done.
+//
+// What the drag is to do (a copy, a move) is the X11 program's to say,
+// with every place it tells the unseen window: its toolkit has made that
+// of the keys held. It is carried over as what gevrek's own drag allows
+// and asks for (`wayland_actions`), and what the two Wayland sides then
+// settle on is told back to the X11 program, which deletes what it gave
+// only when told it was moved.
+
+/// What an X11 program says its drag is to do, by the names XDND has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XAction {
+    Copy,
+    Move,
+    Link,
+    /// The person is to be asked, among what the program lists.
+    Ask,
+    /// Something between the two programs alone.
+    Private,
+}
+
+/// The action of this name (`XdndActionCopy` and its fellows); a name
+/// that is none of them is a copy, which is what a program means that
+/// names nothing.
+pub fn x_action(name: &str) -> XAction {
+    match name {
+        "XdndActionMove" => XAction::Move,
+        "XdndActionLink" => XAction::Link,
+        "XdndActionAsk" => XAction::Ask,
+        "XdndActionPrivate" => XAction::Private,
+        _ => XAction::Copy,
+    }
+}
+
+/// What a Wayland window is offered for what an X11 program asks: the
+/// actions gevrek's own drag allows, and the one it asks for as the keys
+/// would (`dnd::choose`).
+///
+/// - a copy: a copy, and nothing else;
+/// - a move: a move, and a copy as well. A window that takes only copies
+///   gets one, and the X11 program is told "copied" and keeps what it
+///   gave; nothing is lost either way;
+/// - a link: a Wayland drag knows none. A copy is offered and nothing is
+///   asked for;
+/// - to ask the person: what the program lists, and asking itself. A
+///   window that cannot ask takes what it likes best of the list.
+pub fn wayland_actions(
+    asked: XAction,
+    listed: &[XAction],
+) -> (
+    smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction,
+    Option<smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction>,
+) {
+    use smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction;
+    let plain = |action: XAction| match action {
+        XAction::Move => DndAction::Copy | DndAction::Move,
+        _ => DndAction::Copy,
+    };
+    match asked {
+        XAction::Copy | XAction::Private => (DndAction::Copy, Some(DndAction::Copy)),
+        XAction::Move => (plain(XAction::Move), Some(DndAction::Move)),
+        XAction::Link => (DndAction::Copy, None),
+        XAction::Ask => {
+            let mut allowed = DndAction::Ask;
+            if listed.is_empty() {
+                allowed |= DndAction::Copy | DndAction::Move;
+            }
+            for action in listed {
+                allowed |= plain(*action);
+            }
+            (allowed, Some(DndAction::Ask))
+        }
+    }
+}
+
+/// What the Wayland side settled on, as the X11 program is told it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Taken {
+    Copy,
+    Move,
+    Ask,
+}
+
+/// What a chosen action is to the X11 program; `None` where nothing is
+/// chosen (it is then told a copy, as before anything was said).
+pub fn taken_of(
+    chosen: smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction,
+) -> Option<Taken> {
+    use smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction;
+    if chosen == DndAction::Move {
+        Some(Taken::Move)
+    } else if chosen == DndAction::Copy {
+        Some(Taken::Copy)
+    } else if chosen == DndAction::Ask {
+        Some(Taken::Ask)
+    } else {
+        None
+    }
+}
 
 /// What the X11 side of such a drag tells the compositor.
 #[derive(Debug)]
 pub enum FromX {
     /// An X11 program drags something (or the drag is over).
     Dragging(bool),
-    /// The drag came over the unseen window, with these kinds of data.
-    Entered(Vec<String>),
+    /// The drag came over the unseen window, with these kinds of data,
+    /// and is to do this (among these, where the person is to be asked).
+    Entered(Vec<String>, XAction, Vec<XAction>),
+    /// While over it, the program asks for another action (a key went
+    /// down or up in it).
+    Asks(XAction, Vec<XAction>),
     /// It left it again (it is over an X11 window, or was given up).
     Left,
 }
@@ -400,6 +502,9 @@ pub enum ToX {
     Fetch(String, OwnedFd),
     /// The Wayland side is done with the drag: taken, or not.
     Done(bool),
+    /// What the Wayland side would do with a drop where the drag is now
+    /// (`None`: nothing is settled).
+    Chose(Option<Taken>),
 }
 
 /// The kinds of data a Wayland window is offered for what an X11
@@ -482,6 +587,35 @@ fn target(display: u32, tell: &impl Fn(FromX), said: mpsc::Receiver<ToX>) -> any
         atom("_GEVREK_DND")?,
         atom("INCR")?,
     );
+    // The other things a drag can be asked to do, and where a program
+    // lists those the person may choose among.
+    let mut actions: Vec<(u32, XAction)> = Vec::new();
+    for name in [
+        "XdndActionMove",
+        "XdndActionLink",
+        "XdndActionAsk",
+        "XdndActionPrivate",
+    ] {
+        actions.push((atom(name)?, x_action(name)));
+    }
+    let action_list = atom("XdndActionList")?;
+    let action_of = |named: u32| {
+        actions
+            .iter()
+            .find(|(known, _)| *known == named)
+            .map_or(XAction::Copy, |(_, action)| *action)
+    };
+    let named = |wanted: XAction| {
+        actions
+            .iter()
+            .find(|(_, action)| *action == wanted)
+            .map_or(copy, |(name, _)| *name)
+    };
+    let atom_of = |taken: Option<Taken>| match taken {
+        Some(Taken::Move) => named(XAction::Move),
+        Some(Taken::Ask) => named(XAction::Ask),
+        Some(Taken::Copy) | None => copy,
+    };
     x.xfixes_query_version(5, 0)?.reply()?;
     x.xfixes_select_selection_input(
         root,
@@ -521,6 +655,13 @@ fn target(display: u32, tell: &impl Fn(FromX), said: mpsc::Receiver<ToX>) -> any
     let mut waiting: Vec<(String, OwnedFd)> = Vec::new();
     let mut fetching: Option<Fetching> = None;
     let mut fetched = Instant::now();
+    // The drag came over the unseen window and the compositor is not
+    // told yet: what it is to do is known with its first place.
+    let mut entering = false;
+    // What the program last asked the drag to do, and what the Wayland
+    // side last settled on.
+    let mut asked = XAction::Copy;
+    let mut chosen: Option<Taken> = None;
     let message = |to: u32, kind: u32, numbers: [u32; 5]| -> anyhow::Result<()> {
         x.send_event(
             false,
@@ -573,23 +714,62 @@ fn target(display: u32, tell: &impl Fn(FromX), said: mpsc::Receiver<ToX>) -> any
                 from = Some(source);
                 dropped = None;
                 done = None;
-                tell(FromX::Entered(
-                    by_name.iter().map(|(name, _)| name.clone()).collect(),
-                ));
+                chosen = None;
+                entering = true;
             }
             Some(Event::ClientMessage(told)) if told.type_ == position => {
+                let numbers = told.data.as_data32();
+                let source = numbers[0];
+                // What the drag is to do, as the program's toolkit made
+                // it of the keys; where the person is to be asked, among
+                // what the program lists.
+                let now = action_of(numbers[4]);
+                if entering || now != asked {
+                    let mut listed = Vec::new();
+                    if now == XAction::Ask {
+                        if let Ok(reply) = x
+                            .get_property(false, source, action_list, AtomEnum::ATOM, 0, 16)?
+                            .reply()
+                        {
+                            if let Some(named) = reply.value32() {
+                                listed = named.map(action_of).collect();
+                            }
+                        }
+                    }
+                    asked = now;
+                    if std::mem::take(&mut entering) {
+                        tell(FromX::Entered(
+                            by_name.iter().map(|(name, _)| name.clone()).collect(),
+                            now,
+                            listed,
+                        ));
+                    } else {
+                        tell(FromX::Asks(now, listed));
+                    }
+                }
                 // It is taken (what the Wayland window under the pointer
-                // makes of it is its own to decide at the drop).
-                let source = told.data.as_data32()[0];
-                message(source, status, [own, 1 | 2, 0, 0, copy])?;
+                // makes of it is its own to decide at the drop), as what
+                // the Wayland side last settled on.
+                message(source, status, [own, 1 | 2, 0, 0, atom_of(chosen)])?;
             }
             Some(Event::ClientMessage(told)) if told.type_ == leave => {
+                entering = false;
                 if dropped.is_none() {
                     from = None;
                     tell(FromX::Left);
                 }
             }
             Some(Event::ClientMessage(told)) if told.type_ == drop => {
+                // (Let go before any place was told: a copy, as a
+                // program means that says nothing.)
+                if std::mem::take(&mut entering) {
+                    asked = XAction::Copy;
+                    tell(FromX::Entered(
+                        by_name.iter().map(|(name, _)| name.clone()).collect(),
+                        XAction::Copy,
+                        Vec::new(),
+                    ));
+                }
                 from = Some(told.data.as_data32()[0]);
                 dropped = Some(Instant::now());
                 fetched = Instant::now();
@@ -658,6 +838,7 @@ fn target(display: u32, tell: &impl Fn(FromX), said: mpsc::Receiver<ToX>) -> any
                 Ok(ToX::Stand(_)) => {}
                 Ok(ToX::Fetch(kind, pipe)) => waiting.push((kind, pipe)),
                 Ok(ToX::Done(taken)) => done = Some(taken),
+                Ok(ToX::Chose(taken)) => chosen = taken,
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => return Ok(()),
             }
@@ -693,10 +874,18 @@ fn target(display: u32, tell: &impl Fn(FromX), said: mpsc::Receiver<ToX>) -> any
             };
             if over {
                 let taken = done.unwrap_or(false);
+                // (Told a move, the program takes away what it gave; so
+                // only what the Wayland side said it did is told.)
                 message(
                     source,
                     finished,
-                    [own, u32::from(taken), if taken { copy } else { 0 }, 0, 0],
+                    [
+                        own,
+                        u32::from(taken),
+                        if taken { atom_of(chosen) } else { 0 },
+                        0,
+                        0,
+                    ],
                 )?;
                 dropped = None;
                 done = None;
@@ -748,5 +937,68 @@ mod tests {
         let both = ["text/plain", "TEXT"].map(String::from);
         assert_eq!(offered(&both), [pair("text/plain", "text/plain")]);
         assert!(offered(&["TARGETS".to_string()]).is_empty());
+    }
+
+    #[test]
+    fn an_x11_programs_action_is_known_by_its_name() {
+        assert_eq!(x_action("XdndActionCopy"), XAction::Copy);
+        assert_eq!(x_action("XdndActionMove"), XAction::Move);
+        assert_eq!(x_action("XdndActionLink"), XAction::Link);
+        assert_eq!(x_action("XdndActionAsk"), XAction::Ask);
+        assert_eq!(x_action("XdndActionPrivate"), XAction::Private);
+        // No name, or one nobody knows: a copy.
+        assert_eq!(x_action(""), XAction::Copy);
+        assert_eq!(x_action("XdndActionDescription"), XAction::Copy);
+    }
+
+    #[test]
+    fn what_an_x11_program_asks_is_what_the_wayland_side_is_offered() {
+        use smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction;
+        let both = DndAction::Copy | DndAction::Move;
+        assert_eq!(
+            wayland_actions(XAction::Copy, &[]),
+            (DndAction::Copy, Some(DndAction::Copy))
+        );
+        assert_eq!(
+            wayland_actions(XAction::Private, &[]),
+            (DndAction::Copy, Some(DndAction::Copy))
+        );
+        // A move is asked for, and a copy can be had in its place.
+        assert_eq!(
+            wayland_actions(XAction::Move, &[]),
+            (both, Some(DndAction::Move))
+        );
+        // No link on Wayland: a copy, and nothing pressed for.
+        assert_eq!(wayland_actions(XAction::Link, &[]), (DndAction::Copy, None));
+        // To ask: among what is listed, or among all where nothing is.
+        assert_eq!(
+            wayland_actions(XAction::Ask, &[]),
+            (both | DndAction::Ask, Some(DndAction::Ask))
+        );
+        assert_eq!(
+            wayland_actions(XAction::Ask, &[XAction::Copy, XAction::Link]),
+            (DndAction::Copy | DndAction::Ask, Some(DndAction::Ask))
+        );
+        assert_eq!(
+            wayland_actions(XAction::Ask, &[XAction::Copy, XAction::Move]),
+            (both | DndAction::Ask, Some(DndAction::Ask))
+        );
+    }
+
+    #[test]
+    fn a_move_asked_of_a_window_that_only_copies_ends_as_a_copy() {
+        use smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction;
+        // Shift held in the X11 program, dropped on a window that takes
+        // copies alone: the two sides share the copy, and the X11
+        // program is told that, not the move it asked for.
+        let (offered, wish) = wayland_actions(XAction::Move, &[]);
+        let chosen = crate::dnd::choose(offered & DndAction::Copy, DndAction::Copy, wish);
+        assert_eq!(chosen, DndAction::Copy);
+        assert_eq!(taken_of(chosen), Some(Taken::Copy));
+        // On a window that takes both, and likes a copy: the move.
+        let chosen = crate::dnd::choose(offered, DndAction::Copy, wish);
+        assert_eq!(taken_of(chosen), Some(Taken::Move));
+        assert_eq!(taken_of(DndAction::Ask), Some(Taken::Ask));
+        assert_eq!(taken_of(DndAction::empty()), None);
     }
 }

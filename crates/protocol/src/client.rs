@@ -406,9 +406,26 @@ impl WMClient {
 
     /// How the zones are, as the shell last reported it.
     pub async fn get_zones_state(&mut self) -> Result<proto::ZonesStateResponse> {
+        self.get_zones_state_of(false, "").await
+    }
+
+    /// The same with less in it: without the items of the zones and of
+    /// the desktop (their numbers stay), and of one zone alone where one
+    /// is named. For whoever asks often, or only for the zones.
+    pub async fn get_zones_state_of(
+        &mut self,
+        without_items: bool,
+        zone: &str,
+    ) -> Result<proto::ZonesStateResponse> {
         let response = self
             .client
-            .get_zones_state(with_deadline(proto::Empty {}, QUERY_DEADLINE))
+            .get_zones_state(with_deadline(
+                proto::ZonesStateRequest {
+                    without_items,
+                    zone: zone.to_string(),
+                },
+                QUERY_DEADLINE,
+            ))
             .await?;
         Ok(response.into_inner())
     }

@@ -46,9 +46,11 @@
 
 pub mod dnd;
 pub mod input;
+pub mod look;
 pub mod place;
 
 use crate::dnd::{DragActions, DragEvent, DragImage, DragOutcome, DragStart, DropAnswer};
+use crate::look::BlurRegion;
 use crate::{Edge, Flow, Keyboard, Level, Place, Timings};
 use anyhow::Context as _;
 use egui_wgpu::wgpu;
@@ -73,7 +75,7 @@ use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, MDT_EFFECTIVE_DPI,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, ReleaseCapture, SendInput, SetCapture, SetFocus, TrackMouseEvent, INPUT,
+    GetDoubleClickTime, GetKeyState, ReleaseCapture, SendInput, SetCapture, SetFocus, TrackMouseEvent, INPUT,
     INPUT_MOUSE, TME_LEAVE, TRACKMOUSEEVENT, VK_CONTROL, VK_ESCAPE, VK_F4, VK_LBUTTON, VK_MBUTTON,
     VK_MENU, VK_RBUTTON, VK_SHIFT,
 };
@@ -83,10 +85,11 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetCursorPos,
-    GetForegroundWindow, IsWindow, LoadCursorW, MsgWaitForMultipleObjectsEx, PeekMessageW,
-    PostThreadMessageW, RegisterClassExW, SetCursor, SetForegroundWindow,
-    SetLayeredWindowAttributes, SetWindowPos, SetWindowsHookExW, ShowWindow, TranslateMessage,
-    UnhookWindowsHookEx, EVENT_SYSTEM_FOREGROUND, HCURSOR, HHOOK, HTCLIENT, HWND_BOTTOM,
+    GetForegroundWindow, GetMessageTime, GetSystemMetrics, GetWindowLongPtrW, IsWindow, LoadCursorW, MsgWaitForMultipleObjectsEx,
+    PeekMessageW, PostThreadMessageW, RegisterClassExW, SetCursor, SetForegroundWindow,
+    SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, SetWindowsHookExW, ShowWindow,
+    TranslateMessage, UnhookWindowsHookEx, EVENT_SYSTEM_FOREGROUND, GWL_EXSTYLE, HCURSOR, HHOOK,
+    HTCLIENT, HWND_BOTTOM, SM_CXDOUBLECLK, SM_CYDOUBLECLK,
     HWND_TOPMOST, KBDLLHOOKSTRUCT, LWA_ALPHA, MA_NOACTIVATE, MSG, MSLLHOOKSTRUCT,
     MWMO_INPUTAVAILABLE, PM_REMOVE, QS_ALLINPUT, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
     SWP_NOZORDER, SW_SHOWNOACTIVATE, WH_KEYBOARD_LL, WH_MOUSE_LL, WINDOWPOS, WINEVENT_OUTOFCONTEXT,
@@ -116,6 +119,8 @@ pub struct SurfaceId(u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Popped {
     Menu,
+    /// A menu that opens from a line of another: beside that line.
+    Sub,
     Hint { beside: bool },
 }
 
@@ -134,6 +139,10 @@ pub struct Control {
     /// which a mouse button was pressed elsewhere on the desktop since
     /// they last asked (`pressed_outside`).
     outside: Vec<SurfaceId>,
+    /// The buttons that went down on surfaces, with the system's time of
+    /// each, until they are asked for (`presses`); only the last few are
+    /// kept, for the surfaces that never ask.
+    pressed: Vec<(SurfaceId, crate::Press)>,
     /// Surfaces that begin or cease to take drops, with what they take
     /// of any drag.
     drops: Vec<(SurfaceId, Option<DropAnswer>)>,
@@ -147,6 +156,16 @@ pub struct Control {
     dropped: Vec<(SurfaceId, IDataObject)>,
     /// The window of each surface that is open, as Windows names it.
     windows: Vec<(SurfaceId, isize)>,
+    /// Surfaces to be given another level among the windows.
+    levels: Vec<(SurfaceId, Level)>,
+    /// Surfaces that are to take the keyboard another way.
+    keyboards: Vec<(SurfaceId, Keyboard)>,
+    /// The parts of surfaces behind which the desktop is shown soft.
+    blurs: Vec<(SurfaceId, Vec<BlurRegion>)>,
+    /// Surfaces to be left out of pictures of the screen, or no longer.
+    captures: Vec<(SurfaceId, bool)>,
+    /// This Windows shows the desktop soft behind a window.
+    blur: bool,
 }
 
 /// What a drag out of a surface carries.
@@ -215,6 +234,40 @@ impl Control {
         self.popups
             .push((id, parent, anchor, size, Popped::Menu, Box::new(draw)));
         id
+    }
+
+    /// Open a menu that belongs to a line of another menu (or of any
+    /// surface): as [`Control::popup`], but beside `anchor`, their tops in
+    /// line; on the other side of it where the display ends, and slid
+    /// along where it would leave the display below. The surface it
+    /// belongs to stays open, and may itself be a popup.
+    pub fn submenu(
+        &mut self,
+        parent: SurfaceId,
+        anchor: egui::Rect,
+        size: egui::Vec2,
+        draw: impl FnMut(&mut egui::Ui, &mut Control) -> Flow + 'static,
+    ) -> SurfaceId {
+        self.next_id += 1;
+        let id = SurfaceId(self.next_id);
+        self.popups
+            .push((id, parent, anchor, size, Popped::Sub, Box::new(draw)));
+        id
+    }
+
+    /// The buttons that went down on a surface since this was last asked
+    /// for it, each with the system's own time of the press (see
+    /// [`crate::Press`]). The same presses reach the drawing through egui;
+    /// these say when they were made.
+    pub fn presses(&mut self, id: SurfaceId) -> Vec<crate::Press> {
+        let mut mine = Vec::new();
+        self.pressed.retain(|(on, press)| {
+            if *on == id {
+                mine.push(*press);
+            }
+            *on != id
+        });
+        mine
     }
 
     /// Open a hint: as [`Control::popup`], but only to be read. It takes
@@ -365,6 +418,61 @@ impl Control {
             .map(|(_, window)| *window)
     }
 
+    /// Put an open surface on another level among the windows, without
+    /// closing it: below them, above them, over everything, and back
+    /// (what lies below the windows and is raised over them to be looked
+    /// at for a moment). Its place, its size and what is drawn on it stay.
+    /// Not to or from [`Level::Marks`], which a surface is from the start
+    /// or never: such a change is left undone and said in the log.
+    pub fn set_level(&mut self, id: SurfaceId, level: Level) {
+        self.levels.push((id, level));
+    }
+
+    /// Change how an open surface takes the keyboard. To
+    /// [`Keyboard::Exclusive`]: it has the keyboard from now (as when it
+    /// opens so), and the window that had it is remembered; away from it:
+    /// that window has the keyboard again, if the surface still had it.
+    /// To [`Keyboard::Never`]: a press on it no longer takes the keyboard
+    /// (if it has it now, it keeps it until something else is pressed).
+    pub fn set_keyboard(&mut self, id: SurfaceId, keyboard: Keyboard) {
+        self.keyboards.push((id, keyboard));
+    }
+
+    /// Show the desktop soft (blurred) behind these parts of a surface
+    /// and nowhere else behind it; an empty list ends it. The parts are
+    /// in the surface's own points and are said again whenever they
+    /// change (a ground moved, sized, added, taken away); what was said
+    /// last holds. The surface must draw something see-through there, or
+    /// nothing of it shows. See [`crate::look`], and
+    /// [`Control::blur_available`] for when nothing will be shown.
+    ///
+    /// On Windows each part is the system's material for a passing window
+    /// with the system's own round corners (eight pixels, four, or none:
+    /// the nearest to `radius`), on a window of its own under the surface
+    /// ([`look`]).
+    pub fn set_blur_regions(&mut self, id: SurfaceId, regions: &[BlurRegion]) {
+        self.blurs.retain(|(known, _)| *known != id);
+        self.blurs.push((id, regions.to_vec()));
+    }
+
+    /// Whether [`Control::set_blur_regions`] shows anything here. Where it
+    /// does not (a Windows before 11 22H2), a drawing makes its grounds
+    /// solid enough to be read on by themselves: a plain see-through
+    /// ground is what is left.
+    pub fn blur_available(&self) -> bool {
+        self.blur
+    }
+
+    /// Leave a surface out of pictures taken of the screen (screenshots,
+    /// recordings, a screen that is shared), or no longer: it is seen on
+    /// the display and missing in the picture, with what is behind it in
+    /// its place. Windows 10 of 2020 and later; before that the surface
+    /// is black in such pictures.
+    pub fn exclude_from_capture(&mut self, id: SurfaceId, exclude: bool) {
+        self.captures.retain(|(known, _)| *known != id);
+        self.captures.push((id, exclude));
+    }
+
     /// Whether a surface is open now.
     pub fn is_open(&self, id: SurfaceId) -> bool {
         // (Also one asked for earlier in this pass, which is made when
@@ -459,6 +567,7 @@ impl<M: 'static> Shell<M> {
             total_ms: 0.0,
             control: Control::default(),
             ole: None,
+            double_click: double_click_setting(),
         };
         // A window nobody sees, to be told when displays come, go or
         // change (such news is for top-level windows only), and so that
@@ -481,6 +590,7 @@ impl<M: 'static> Shell<M> {
             )
         }
         .context("the window that watches the displays")?;
+        host.control.blur = look::supported(watcher);
         host.watcher = Some(Window {
             handle: watcher,
             reserved: false,
@@ -676,6 +786,14 @@ const IN_FRONT: u32 = WM_APP + 5;
 /// pixels; as on Linux.
 const POPUP_GAP: i32 = 4;
 
+/// How far a menu that opens from a line of another lies from that line's
+/// end: over the rim of the menu it came from by a little, so that the
+/// two read as one thing and the pointer crosses no gap between them.
+const SUB_GAP: i32 = -3;
+
+/// How many presses are kept for the surfaces to ask for.
+const PRESSES_KEPT: usize = 32;
+
 /// The room between a hint beside a panel and what it is about.
 const HINT_GAP: i32 = 6;
 
@@ -690,6 +808,9 @@ struct News {
     lparam: isize,
     /// The keys held when it happened.
     modifiers: egui::Modifiers,
+    /// When Windows saw what the message tells of, in thousandths of a
+    /// second (not when the loop came to it).
+    time: u32,
 }
 
 /// What a window's procedure must know to answer on the spot.
@@ -720,6 +841,10 @@ fn hear(window: isize, message: u32, wparam: usize, lparam: isize) {
         wparam,
         lparam,
         modifiers: input::modifiers(held(VK_SHIFT), held(VK_CONTROL), held(VK_MENU)),
+        // SAFETY: a question without arguments. (Asked by a hook and not
+        // by a window's procedure, it says the time of this thread's last
+        // message: near enough for news that is no press.)
+        time: unsafe { GetMessageTime() } as u32,
     };
     HEARD.with(|heard| {
         if let Ok(mut heard) = heard.try_borrow_mut() {
@@ -865,6 +990,14 @@ unsafe extern "system" fn procedure(
             LRESULT(0)
         }
         WM_ACTIVATE | WM_WINDOWPOSCHANGED => {
+            // Where it stands among the windows may be another: what
+            // lies under it to show the desktop soft goes under it again.
+            if message == WM_WINDOWPOSCHANGED {
+                let position = &*(lparam.0 as *const WINDOWPOS);
+                if !position.flags.contains(SWP_NOZORDER) {
+                    look::restack_under(window);
+                }
+            }
             // Windows asks to be told both of an application bar.
             if facts_of(window).reserved {
                 let mut data = bar_data(window);
@@ -1266,6 +1399,12 @@ struct Surface {
     /// The window that had the keyboard before this surface took it; 0:
     /// none, or the surface takes no keyboard.
     before: isize,
+    /// The parts behind which the desktop is shown soft, in points, and
+    /// the windows under the surface that show it.
+    blur: Vec<BlurRegion>,
+    backdrops: look::Backdrops,
+    /// Left out of pictures of the screen.
+    hidden_from_capture: bool,
 }
 
 impl Surface {
@@ -1293,13 +1432,21 @@ impl Surface {
 
     /// A menu: a press elsewhere, or Escape, closes it.
     fn is_popup(&self) -> bool {
-        matches!(self.role, Role::Popup(.., Popped::Menu))
+        matches!(self.role, Role::Popup(.., Popped::Menu | Popped::Sub))
     }
 
     /// It stands beside the windows and takes the keyboard only when it
     /// is pressed: a press elsewhere on the desktop is told to it.
     fn is_beside(&self) -> bool {
         matches!(&self.role, Role::Placed(place) if place.keyboard == Keyboard::OnDemand)
+    }
+
+    /// The surface a popup belongs to.
+    fn parent(&self) -> Option<SurfaceId> {
+        match &self.role {
+            Role::Popup(parent, ..) => Some(*parent),
+            Role::Placed(_) => None,
+        }
     }
 
     /// A hint: only read; the pointer goes through it.
@@ -1312,12 +1459,30 @@ impl Surface {
         matches!(self.role, Role::Popup(..))
     }
 
-    fn above(&self) -> bool {
+    /// Where it stands among the windows now.
+    fn order(&self) -> place::Order {
         match &self.role {
-            Role::Placed(place) => {
-                matches!(place.level, Level::Above | Level::Overlay | Level::Marks)
-            }
-            Role::Popup(..) => true,
+            Role::Placed(place) => place::order_of(place.level, self.covered),
+            Role::Popup(..) => place::Order::Topmost,
+        }
+    }
+
+    /// Put its window where it stands among the windows.
+    fn restack(&self) {
+        // SAFETY: a window of this thread; no pointers.
+        unsafe {
+            let _ = SetWindowPos(
+                self.window.handle,
+                match self.order() {
+                    place::Order::Bottom => HWND_BOTTOM,
+                    place::Order::Topmost => HWND_TOPMOST,
+                },
+                0,
+                0,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+            );
         }
     }
 }
@@ -1351,6 +1516,22 @@ struct Host {
     /// again. (After the surfaces, whose windows are places to drop on
     /// until they go.)
     ole: Option<Option<dnd::Ole>>,
+    /// What the person set a double click to be in Windows: the time in
+    /// milliseconds and the rectangle's sides in pixels. Read when the
+    /// shell starts and when Windows says a setting changed.
+    double_click: (u32, i32, i32),
+}
+
+/// What a double click is in Windows now (see [`input::double_click`]).
+fn double_click_setting() -> (u32, i32, i32) {
+    // SAFETY: questions without arguments of ours.
+    unsafe {
+        (
+            GetDoubleClickTime(),
+            GetSystemMetrics(SM_CXDOUBLECLK),
+            GetSystemMetrics(SM_CYDOUBLECLK),
+        )
+    }
 }
 
 /// A drag that can begin.
@@ -1554,6 +1735,17 @@ impl Host {
             }
             self.control.drag_news.retain(|(on, _)| *on != id);
             self.control.dropped.retain(|(on, _)| *on != id);
+            self.control.pressed.retain(|(on, _)| *on != id);
+        }
+        // (A menu that opened from a menu that is gone goes too.)
+        loop {
+            let open: Vec<SurfaceId> = self.surfaces.iter().map(|surface| surface.id).collect();
+            let before = self.surfaces.len();
+            self.surfaces
+                .retain(|surface| surface.parent().is_none_or(|parent| open.contains(&parent)));
+            if self.surfaces.len() == before {
+                break;
+            }
         }
         for (id, place, draw) in std::mem::take(&mut self.control.open) {
             let name = place.name.clone();
@@ -1633,6 +1825,36 @@ impl Host {
                 dnd::set_answer(surface.window.handle, answer);
             }
         }
+        for (id, level) in std::mem::take(&mut self.control.levels) {
+            if let Some(index) = self.surfaces.iter().position(|surface| surface.id == id) {
+                self.change_level(index, level);
+            }
+        }
+        for (id, keyboard) in std::mem::take(&mut self.control.keyboards) {
+            if let Some(index) = self.surfaces.iter().position(|surface| surface.id == id) {
+                self.change_keyboard(index, keyboard);
+            }
+        }
+        for (id, regions) in std::mem::take(&mut self.control.blurs) {
+            if let Some(index) = self.surfaces.iter().position(|surface| surface.id == id) {
+                self.surfaces[index].blur = regions;
+                self.lay_backdrops(index);
+            }
+        }
+        for (id, exclude) in std::mem::take(&mut self.control.captures) {
+            if let Some(surface) = self.by_id(id) {
+                if surface.hidden_from_capture != exclude {
+                    surface.hidden_from_capture = exclude;
+                    if !look::exclude_from_capture(surface.window.handle, exclude) {
+                        log::warn!(
+                            "Windows did not {} surface {id:?} of pictures of the screen",
+                            if exclude { "leave out" } else { "put back into" }
+                        );
+                    }
+                    surface.backdrops.exclude_from_capture(exclude);
+                }
+            }
+        }
         // Listening to the whole desktop only while there is a popup to
         // close.
         // (And while a surface is open that stands beside the windows
@@ -1678,16 +1900,16 @@ impl Host {
             .collect();
         // Not in the taskbar or the window switcher.
         let mut style = WS_EX_TOOLWINDOW;
-        if place.keyboard == Keyboard::Never {
+        if place::never_active(place.keyboard, place.level) {
             style |= WS_EX_NOACTIVATE;
         }
-        if matches!(place.level, Level::Above | Level::Overlay | Level::Marks) {
+        if place::order_of(place.level, false) == place::Order::Topmost {
             style |= WS_EX_TOPMOST;
         }
         if place.level == Level::Marks {
             // The pointer and its presses go through it, to whatever
             // window is under it; and it is never the active window.
-            style |= WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE;
+            style |= WS_EX_LAYERED | WS_EX_TRANSPARENT;
         }
         if self.see_through {
             // No picture of the window's own behind the layer drawn on.
@@ -1717,7 +1939,7 @@ impl Host {
         };
         change_facts(handle, |facts| {
             facts.activates = place.keyboard != Keyboard::Never;
-            facts.bottom = matches!(place.level, Level::Background | Level::Below);
+            facts.bottom = place::stays_below(place.level);
             facts.pointer = arrow();
         });
         self.finish(id, window, Role::Placed(place), display, draw)
@@ -1898,6 +2120,9 @@ impl Host {
             kept: None,
             pinned: None,
             before: 0,
+            blur: Vec::new(),
+            backdrops: look::Backdrops::default(),
+            hidden_from_capture: false,
         })
     }
 
@@ -2008,6 +2233,9 @@ impl Host {
                     Popped::Hint { beside: true } => {
                         place::beside(anchor, size, whole, place::pixels(HINT_GAP, scale))
                     }
+                    Popped::Sub => {
+                        place::beside_line(anchor, size, whole, place::pixels(SUB_GAP, scale))
+                    }
                     _ => place::popup_at(anchor, size, whole, place::pixels(POPUP_GAP, scale)),
                 };
                 (at, scale, owner.display.clone(), false)
@@ -2044,6 +2272,97 @@ impl Host {
             }
             surface.redraw = true;
         }
+        // What shows the desktop soft under it is where it is now, in
+        // the pixels of the display it is on now.
+        if !surface.backdrops.is_empty() {
+            self.lay_backdrops(index);
+        }
+    }
+
+    /// The windows under a surface that show the desktop soft, made to
+    /// be the parts it last asked for, where it is now.
+    fn lay_backdrops(&mut self, index: usize) {
+        let (module, available) = (self.module, self.control.blur);
+        let surface = &mut self.surfaces[index];
+        let name = match &surface.role {
+            Role::Placed(place) => place.name.clone(),
+            Role::Popup(..) => String::new(),
+        };
+        let wanted = if available {
+            look::windows_for(
+                &surface.blur,
+                (surface.area.x, surface.area.y),
+                surface.scale,
+            )
+        } else {
+            Vec::new()
+        };
+        surface
+            .backdrops
+            .set(module, surface.window.handle, &name, &wanted);
+    }
+
+    /// Put an open surface on another level among the windows.
+    fn change_level(&mut self, index: usize, level: Level) {
+        let surface = &mut self.surfaces[index];
+        let Role::Placed(place) = &mut surface.role else {
+            return;
+        };
+        if place.level == level {
+            return;
+        }
+        if !place::can_change_level(place.level, level) {
+            log::warn!(
+                "surface {:?} stays {:?}: a surface is marks from the start or never",
+                surface.id,
+                place.level
+            );
+            return;
+        }
+        place.level = level;
+        let window = surface.window.handle;
+        // (First: its procedure keeps it below while this says so.)
+        change_facts(window, |facts| facts.bottom = place::stays_below(level));
+        // A bar above the windows listens for a window that covers the
+        // display; that is asked for when it is given its place.
+        self.settle(index);
+        // (Its backdrops follow by its window's own news.)
+        self.surfaces[index].restack();
+    }
+
+    /// Change how an open surface takes the keyboard.
+    fn change_keyboard(&mut self, index: usize, keyboard: Keyboard) {
+        let surface = &mut self.surfaces[index];
+        let Role::Placed(place) = &mut surface.role else {
+            return;
+        };
+        if place.keyboard == keyboard {
+            return;
+        }
+        let was = std::mem::replace(&mut place.keyboard, keyboard);
+        let never = place::never_active(keyboard, place.level);
+        let window = surface.window.handle;
+        // SAFETY: a window of this thread; its style as a number.
+        unsafe {
+            let style = GetWindowLongPtrW(window, GWL_EXSTYLE);
+            let quiet = WS_EX_NOACTIVATE.0 as isize;
+            let wanted = if never { style | quiet } else { style & !quiet };
+            if wanted != style {
+                SetWindowLongPtrW(window, GWL_EXSTYLE, wanted);
+            }
+        }
+        change_facts(window, |facts| facts.activates = keyboard != Keyboard::Never);
+        if keyboard == Keyboard::Exclusive {
+            let before = take_keyboard(window);
+            let ours = self
+                .surfaces
+                .iter()
+                .any(|surface| surface.window.handle.0 as isize == before);
+            self.surfaces[index].before = if ours { 0 } else { before };
+        } else if was == Keyboard::Exclusive {
+            let before = std::mem::take(&mut self.surfaces[index].before);
+            give_back(window, before);
+        }
     }
 
     fn settle_all(&mut self) {
@@ -2065,25 +2384,8 @@ impl Host {
         let window = surface.window.handle;
         unsafe {
             let _ = ShowWindow(window, SW_SHOWNOACTIVATE);
-            let order = match &surface.role {
-                Role::Placed(place) if matches!(place.level, Level::Background | Level::Below) => {
-                    Some(HWND_BOTTOM)
-                }
-                _ if surface.above() => Some(HWND_TOPMOST),
-                _ => None,
-            };
-            if let Some(order) = order {
-                let _ = SetWindowPos(
-                    window,
-                    order,
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
-                );
-            }
         }
+        surface.restack();
         if matches!(&surface.role, Role::Placed(place) if place.keyboard == Keyboard::Exclusive) {
             let before = take_keyboard(window);
             // One of the shell's own surfaces is not gone back to: it may
@@ -2134,6 +2436,9 @@ impl Host {
                 if news.wparam == 0x2F {
                     self.displays_changed = true;
                 }
+                // (Whatever setting it was: how fast a double click is
+                // may be it. Every surface takes it with its next frame.)
+                self.double_click = double_click_setting();
                 return;
             }
             PRESSED_AT => {
@@ -2160,7 +2465,16 @@ impl Host {
                 return;
             }
             ESCAPE => {
-                self.close_popups();
+                // One step back: of menus that opened from each other the
+                // last one goes (a menu alone is the last), and the one it
+                // opened from is drawn again, to see that it is gone.
+                let last = self.surfaces.iter().rev().find(|surface| surface.is_popup());
+                if let Some((id, parent)) = last.map(|surface| (surface.id, surface.parent())) {
+                    self.control.close.push(id);
+                    if let Some(parent) = parent.and_then(|parent| self.by_id(parent)) {
+                        parent.redraw = true;
+                    }
+                }
                 return;
             }
             IN_FRONT => {
@@ -2227,7 +2541,20 @@ impl Host {
                 surface
                     .events
                     .push(egui::Event::ModifiersChanged(modifiers));
-                if let Some(key) = input::key_of(news.wparam as u16) {
+                // The key for a menu has no name in egui: it is told as
+                // Shift and F10, which Windows itself takes for the same.
+                let (key, modifiers) = if input::is_menu_key(news.wparam as u16) {
+                    (
+                        Some(egui::Key::F10),
+                        egui::Modifiers {
+                            shift: true,
+                            ..modifiers
+                        },
+                    )
+                } else {
+                    (input::key_of(news.wparam as u16), modifiers)
+                };
+                if let Some(key) = key {
                     surface.events.push(egui::Event::Key {
                         key,
                         physical_key: None,
@@ -2264,20 +2591,14 @@ impl Host {
                     // bar is not shown over a film or a game.
                     ABN_FULLSCREENAPP => {
                         let covered = news.lparam != 0;
-                        if surface.covered != covered
-                            && matches!(&surface.role, Role::Placed(place) if place.level == Level::Above)
-                        {
+                        // (Kept whatever its level is now: a surface
+                        // that becomes a bar while a film runs steps
+                        // down at once.)
+                        if surface.covered != covered {
+                            let before = surface.order();
                             surface.covered = covered;
-                            unsafe {
-                                let _ = SetWindowPos(
-                                    surface.window.handle,
-                                    if covered { HWND_BOTTOM } else { HWND_TOPMOST },
-                                    0,
-                                    0,
-                                    0,
-                                    0,
-                                    SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
-                                );
+                            if surface.order() != before {
+                                surface.restack();
                             }
                         }
                     }
@@ -2289,8 +2610,20 @@ impl Host {
                 let Some((button, pressed)) = input::button(message, news.wparam) else {
                     return;
                 };
+                let at = input::point(news.lparam, surface.scale);
+                if pressed {
+                    let press = crate::Press {
+                        button,
+                        at,
+                        time_ms: news.time,
+                    };
+                    self.control.pressed.push((surface.id, press));
+                    // (A surface that never asks leaves them lying.)
+                    let over = self.control.pressed.len().saturating_sub(PRESSES_KEPT);
+                    self.control.pressed.drain(..over);
+                }
                 surface.events.push(egui::Event::PointerButton {
-                    pos: input::point(news.lparam, surface.scale),
+                    pos: at,
                     button,
                     pressed,
                     modifiers,
@@ -2331,6 +2664,18 @@ impl Host {
             .collect(),
             ..Default::default()
         };
+        // A double click is what it is in Windows, not what the toolkit
+        // thinks: on this surface's display, as the setting is now.
+        let (delay, apart) = input::double_click(
+            self.double_click.0,
+            self.double_click.1,
+            self.double_click.2,
+            surface.scale,
+        );
+        surface.context.options_mut(|options| {
+            options.input_options.max_double_click_delay = delay;
+            options.input_options.max_click_dist = apart;
+        });
         let mut flow = Flow::Continue;
         let draw = &mut surface.draw;
         let control = &mut self.control;

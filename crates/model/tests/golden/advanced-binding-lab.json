@@ -321,7 +321,7 @@
       "monitor_layouts": []
     },
     "zones": {
-      "enabled": false,
+      "enabled": true,
       "zones": [],
       "rules": [],
       "catch_all": null,
@@ -334,13 +334,211 @@
         "blur": null,
         "corner_radius": null,
         "title_colour": null,
-        "title_on_hover": null
+        "title_on_hover": null,
+        "title_bar": null,
+        "labels": null,
+        "icon_tint": null,
+        "icon_saturation": null
       },
       "snap": {
         "enabled": true,
         "distance": 12,
         "gap": 8,
         "grid": 0
+      },
+      "roll_up": {
+        "expand_on": "hover",
+        "expand_delay_ms": 150,
+        "collapse_delay_ms": 400
+      },
+      "lock": {
+        "geometry": false,
+        "members": false
+      },
+      "privacy": {
+        "everything": false,
+        "when_shared": "private"
+      },
+      "timed_rules": {
+        "every_minutes": 60,
+        "move_files": false
+      },
+      "gestures": {
+        "double_middle_click": "grey_icons"
+      },
+      "auto": {
+        "min_items": 2,
+        "add_rules": true,
+        "categories": [
+          {
+            "id": "folders",
+            "title": "Folders",
+            "extensions": [],
+            "mime_prefixes": [],
+            "kinds": [
+              "folder"
+            ]
+          },
+          {
+            "id": "programs",
+            "title": "Programs",
+            "extensions": [
+              "lnk",
+              "url",
+              "exe",
+              "msi",
+              "bat",
+              "cmd",
+              "desktop",
+              "appimage"
+            ],
+            "mime_prefixes": [],
+            "kinds": [
+              "shortcut",
+              "launcher"
+            ]
+          },
+          {
+            "id": "documents",
+            "title": "Documents",
+            "extensions": [
+              "pdf",
+              "doc",
+              "docx",
+              "odt",
+              "rtf",
+              "txt",
+              "md",
+              "xls",
+              "xlsx",
+              "ods",
+              "csv",
+              "ppt",
+              "pptx",
+              "odp",
+              "epub"
+            ],
+            "mime_prefixes": [
+              "text/",
+              "application/pdf",
+              "application/msword",
+              "application/vnd."
+            ],
+            "kinds": []
+          },
+          {
+            "id": "pictures",
+            "title": "Pictures",
+            "extensions": [
+              "png",
+              "jpg",
+              "jpeg",
+              "gif",
+              "webp",
+              "bmp",
+              "svg",
+              "tif",
+              "tiff",
+              "heic",
+              "ico"
+            ],
+            "mime_prefixes": [
+              "image/"
+            ],
+            "kinds": []
+          },
+          {
+            "id": "video",
+            "title": "Video",
+            "extensions": [
+              "mp4",
+              "mkv",
+              "mov",
+              "avi",
+              "webm",
+              "wmv",
+              "m4v"
+            ],
+            "mime_prefixes": [
+              "video/"
+            ],
+            "kinds": []
+          },
+          {
+            "id": "audio",
+            "title": "Audio",
+            "extensions": [
+              "mp3",
+              "flac",
+              "wav",
+              "ogg",
+              "m4a",
+              "aac",
+              "opus",
+              "wma"
+            ],
+            "mime_prefixes": [
+              "audio/"
+            ],
+            "kinds": []
+          },
+          {
+            "id": "archives",
+            "title": "Archives",
+            "extensions": [
+              "zip",
+              "7z",
+              "rar",
+              "tar",
+              "gz",
+              "bz2",
+              "xz",
+              "zst",
+              "iso",
+              "cab"
+            ],
+            "mime_prefixes": [],
+            "kinds": []
+          },
+          {
+            "id": "code",
+            "title": "Code",
+            "extensions": [
+              "rs",
+              "py",
+              "js",
+              "ts",
+              "c",
+              "h",
+              "cpp",
+              "hpp",
+              "cs",
+              "java",
+              "go",
+              "rb",
+              "php",
+              "sh",
+              "ps1",
+              "json",
+              "toml",
+              "yaml",
+              "yml",
+              "xml",
+              "html",
+              "css",
+              "sql"
+            ],
+            "mime_prefixes": [],
+            "kinds": []
+          },
+          {
+            "id": "other",
+            "title": "Other",
+            "extensions": [],
+            "mime_prefixes": [],
+            "kinds": []
+          }
+        ]
       }
     },
     "startup": [],
@@ -619,6 +817,436 @@
         "long_press_ms": 500,
         "command": {
           "command": "reset_binding_submap"
+        }
+      },
+      {
+        "name": "Enter the zones mode",
+        "enabled": true,
+        "key": "Z",
+        "ctrl": true,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "set_binding_submap",
+          "name": "zones"
+        }
+      },
+      {
+        "name": "Zones above the windows, or back",
+        "enabled": true,
+        "key": "Z",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "toggle_peek"
+          }
+        }
+      },
+      {
+        "name": "Open what is chosen",
+        "enabled": true,
+        "key": "RETURN",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "open_focused"
+          }
+        }
+      },
+      {
+        "name": "Roll this zone up or down",
+        "enabled": true,
+        "key": "R",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "roll_up",
+            "zone": "@focused"
+          }
+        }
+      },
+      {
+        "name": "Next tab of this zone",
+        "enabled": true,
+        "key": "TAB",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "next_tab",
+            "zone": "@focused"
+          }
+        }
+      },
+      {
+        "name": "Hide or show the zones",
+        "enabled": true,
+        "key": "SPACE",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "quick_hide"
+          }
+        }
+      },
+      {
+        "name": "Cover what the zones hold",
+        "enabled": true,
+        "key": "M",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "mask"
+          }
+        }
+      },
+      {
+        "name": "Zones back below the windows",
+        "enabled": true,
+        "key": "ESCAPE",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "peek",
+            "on": false
+          }
+        }
+      },
+      {
+        "name": "Leave the zones mode",
+        "enabled": true,
+        "key": "ESCAPE",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "release",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "reset_binding_submap"
+        }
+      },
+      {
+        "name": "The zone to the left",
+        "enabled": true,
+        "key": "LEFT",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "focus_neighbour",
+            "direction": "left"
+          }
+        }
+      },
+      {
+        "name": "The item to the left",
+        "enabled": true,
+        "key": "H",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "move_item_focus",
+            "step": "left"
+          }
+        }
+      },
+      {
+        "name": "Move the chosen items to the zone on the left",
+        "enabled": true,
+        "key": "LEFT",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "move_focused_items",
+            "direction": "left"
+          }
+        }
+      },
+      {
+        "name": "The zone to the down",
+        "enabled": true,
+        "key": "DOWN",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "focus_neighbour",
+            "direction": "down"
+          }
+        }
+      },
+      {
+        "name": "The item to the down",
+        "enabled": true,
+        "key": "J",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "move_item_focus",
+            "step": "down"
+          }
+        }
+      },
+      {
+        "name": "Move the chosen items to the zone on the down",
+        "enabled": true,
+        "key": "DOWN",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "move_focused_items",
+            "direction": "down"
+          }
+        }
+      },
+      {
+        "name": "The zone to the up",
+        "enabled": true,
+        "key": "UP",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "focus_neighbour",
+            "direction": "up"
+          }
+        }
+      },
+      {
+        "name": "The item to the up",
+        "enabled": true,
+        "key": "K",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "move_item_focus",
+            "step": "up"
+          }
+        }
+      },
+      {
+        "name": "Move the chosen items to the zone on the up",
+        "enabled": true,
+        "key": "UP",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "move_focused_items",
+            "direction": "up"
+          }
+        }
+      },
+      {
+        "name": "The zone to the right",
+        "enabled": true,
+        "key": "RIGHT",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "focus_neighbour",
+            "direction": "right"
+          }
+        }
+      },
+      {
+        "name": "The item to the right",
+        "enabled": true,
+        "key": "L",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "move_item_focus",
+            "step": "right"
+          }
+        }
+      },
+      {
+        "name": "Move the chosen items to the zone on the right",
+        "enabled": true,
+        "key": "RIGHT",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": false,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "zones",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "zones",
+          "action": {
+            "command": "move_focused_items",
+            "direction": "right"
+          }
         }
       }
     ],

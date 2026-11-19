@@ -67,5 +67,5 @@ x11rb = "0.13"
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 # The dmabuf example makes a buffer on the display device with ioctls.
 libc = "0.2"
-wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+wayland-protocols = { version = "0.32", features = ["client", "unstable", "staging"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }

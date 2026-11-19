@@ -402,15 +402,19 @@ impl State {
             .into();
         // What is being dragged follows the pointer, under its picture.
         let drag_icon = self.drag_icon.as_ref().filter(|surface| surface.is_alive());
+        let drag_at = self.drag_picture_place();
         if !self.hide_pointer {
             self.pointer_elements(renderer, output, pointer, false, &mut elements);
         }
-        if let Some(icon) = drag_icon {
+        if let (Some(icon), Some(place)) = (drag_icon, drag_at) {
+            // (Where its program put it against the pointer: a picture
+            // held by its middle has its middle there, not its corner.)
+            let at: Point<i32, Physical> = (place.0 - screen.x, place.1 - screen.y).into();
             elements.extend(
                 render_elements_from_surface_tree::<R, WaylandSurfaceRenderElement<R>>(
                     renderer,
                     icon,
-                    pointer,
+                    at,
                     1.0,
                     1.0,
                     Kind::Unspecified,
@@ -1463,10 +1467,27 @@ impl State {
                 let Some(geometry) = map.layer_geometry(surface) else {
                     continue;
                 };
+                // The parts of it its own program wants the desktop soft
+                // behind (`background_effect.rs`), where no rule makes
+                // that all of it.
+                let whole_soft = gevrek_model::layer_rules::blur_of(rules, surface.namespace());
+                let soft_parts = if whole_soft {
+                    Vec::new()
+                } else {
+                    crate::background_effect::parts_within(
+                        &crate::background_effect::blur_parts(surface.wl_surface()),
+                        (geometry.size.w, geometry.size.h),
+                    )
+                };
                 // (What shows what is behind it is no part of the picture
                 // of what is behind.)
-                if self.backdrop_pass
-                    && gevrek_model::layer_rules::blur_of(rules, surface.namespace())
+                if self.backdrop_pass && (whole_soft || !soft_parts.is_empty()) {
+                    continue;
+                }
+                // A picture another program takes of the screen: without
+                // what its rule keeps out of such pictures.
+                if self.capture_pass
+                    && crate::sharing::kept_out_of_captures(rules, surface.namespace())
                 {
                     continue;
                 }
@@ -1544,37 +1565,49 @@ impl State {
                 }
                 // Behind it, where its rule asks for that: the part of
                 // what lies there (the windows and the wallpaper), soft.
-                if gevrek_model::layer_rules::blur_of(
-                    &self.config.desktop.layer_rules,
-                    surface.namespace(),
-                ) {
+                // Behind the parts its program names, where it names some.
+                let behind: Vec<(i32, i32, i32, i32)> = if whole_soft {
+                    vec![(
+                        geometry.loc.x,
+                        geometry.loc.y,
+                        geometry.size.w.max(1),
+                        geometry.size.h.max(1),
+                    )]
+                } else {
+                    soft_parts
+                        .iter()
+                        .map(|part| {
+                            (
+                                geometry.loc.x + part.loc.x,
+                                geometry.loc.y + part.loc.y,
+                                part.size.w,
+                                part.size.h,
+                            )
+                        })
+                        .collect()
+                };
+                if !behind.is_empty() {
                     let soft = self.soft_behind(display);
                     if let (Some((soft, soft_size)), Some(points)) = (soft, points) {
                         // The same part of the small picture as the
-                        // surface is of the display.
+                        // rectangle is of the display.
                         let across = f64::from(soft_size.0) / f64::from(points.0);
                         let down = f64::from(soft_size.1) / f64::from(points.1);
-                        let part = Rectangle::new(
-                            (
-                                f64::from(geometry.loc.x) * across,
-                                f64::from(geometry.loc.y) * down,
-                            )
-                                .into(),
-                            (
-                                f64::from(geometry.size.w.max(1)) * across,
-                                f64::from(geometry.size.h.max(1)) * down,
-                            )
-                                .into(),
-                        );
-                        elements.extend(soft_element(
-                            renderer,
-                            &soft,
-                            (f64::from(at.x), f64::from(at.y)),
-                            None,
-                            part,
-                            (geometry.size.w.max(1), geometry.size.h.max(1)),
-                            None,
-                        ));
+                        for (x, y, width, height) in behind {
+                            let part = Rectangle::new(
+                                (f64::from(x) * across, f64::from(y) * down).into(),
+                                (f64::from(width) * across, f64::from(height) * down).into(),
+                            );
+                            elements.extend(soft_element(
+                                renderer,
+                                &soft,
+                                (f64::from(x), f64::from(y)),
+                                None,
+                                part,
+                                (width, height),
+                                None,
+                            ));
+                        }
                     }
                 }
             }

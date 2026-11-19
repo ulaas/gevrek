@@ -1817,3 +1817,561 @@ fn the_windows_of_a_display_that_goes_are_listed_once_for_one_that_is_there() {
         assert!(there.contains(&output), "{window:?} is listed for {output:?}");
     }
 }
+
+// ---- windows that belong to another window --------------------------------
+
+/// A dialog of `parent` opens at `rect`, taking the keyboard as a new
+/// window does, and the core is told.
+fn open_dialog(
+    core: &mut WmCore,
+    desktop: &mut FakeDesktop,
+    title: &str,
+    parent: WindowHandle,
+    rect: Rect,
+) -> WindowHandle {
+    let id = desktop.open_dialog(title, parent, rect);
+    core.handle_window_event(desktop, WindowEvent::Created(id))
+        .expect("created");
+    core.flush_pending_layouts(desktop).expect("layout");
+    id
+}
+
+/// The graph gevrek comes with, as far as new windows go: each is
+/// arranged as what it is.
+fn arranging_graph() -> NodeGraph {
+    use gevrek_model::graph::{NodeType, WindowMode};
+    let mut graph = NodeGraph::new();
+    let created = graph.add_node(NodeType::OnWindowCreated, [0.0, 0.0]);
+    let arrange = graph.add_node(
+        NodeType::SetWindowArrangement {
+            mode: WindowMode::Auto,
+        },
+        [0.0, 0.0],
+    );
+    graph
+        .add_connection_by_name(created, "Event", arrange, "Trigger")
+        .expect("connected");
+    graph
+        .add_connection_by_name(created, "Window", arrange, "Window")
+        .expect("connected");
+    graph
+}
+
+/// What was reported: a dialog a program opens while the person works on
+/// another workspace came up there, over what they were doing, with the
+/// keyboard. It opens on its window's workspace, out of sight with it,
+/// and the keyboard stays where it was; it is there, with its window, when
+/// that workspace is shown. Whether the window is taken by gevrek itself
+/// or by the graph.
+#[test]
+fn a_dialog_of_a_window_that_is_put_away_opens_with_it() {
+    for by_graph in [false, true] {
+        let (mut core, mut desktop) = setup(&["main", "two"]);
+        if by_graph {
+            core.executor.set_graph(arranging_graph());
+        }
+        let editor = open(&mut core, &mut desktop, "editor");
+        switch_to(&mut core, &mut desktop, "two");
+        let notes = open(&mut core, &mut desktop, "notes");
+        focus(&mut core, &mut desktop, notes);
+        let before = published(&core, &desktop);
+
+        let place = Rect::new(500, 300, 400, 200);
+        let question = open_dialog(&mut core, &mut desktop, "Save changes?", editor, place);
+
+        assert_eq!(
+            core.monitor_manager.find_window(question),
+            Some((OUTPUT, 0)),
+            "on its window's workspace (by the graph: {by_graph})"
+        );
+        assert!(core.monitor_manager.is_window_floating(question));
+        assert!(!desktop.window(question).visible, "out of sight");
+        assert!(core.executor.window_state.get(question).hidden_by_wm);
+        assert_eq!(desktop.focused, Some(notes), "the keyboard stays");
+        assert_eq!(desktop.window(question).rect, place, "where it opened");
+        assert_eq!(tiled(&core), [notes], "the workspace in sight is as it was");
+        let after = published(&core, &desktop);
+        assert_eq!(listed(&after, question), Some((OUTPUT, "main".to_string())));
+        assert!(told_moved(&before, &after).is_empty());
+
+        // Its window's workspace is shown: both are there.
+        switch_to(&mut core, &mut desktop, "main");
+        assert!(desktop.window(editor).visible && desktop.window(question).visible);
+        assert!(!desktop.window(notes).visible);
+        assert_eq!(desktop.window(question).rect, place);
+        assert!(!core.executor.window_state.get(question).hidden_by_wm);
+    }
+}
+
+/// A dialog of a window on the workspace that is shown opens as it always
+/// did: in sight, floating, with the keyboard.
+#[test]
+fn a_dialog_of_a_window_in_sight_opens_in_sight_with_the_keyboard() {
+    for by_graph in [false, true] {
+        let (mut core, mut desktop) = setup(&["main", "two"]);
+        if by_graph {
+            core.executor.set_graph(arranging_graph());
+        }
+        let editor = open(&mut core, &mut desktop, "editor");
+        focus(&mut core, &mut desktop, editor);
+        let question = open_dialog(
+            &mut core,
+            &mut desktop,
+            "Save changes?",
+            editor,
+            Rect::new(500, 300, 400, 200),
+        );
+        assert_eq!(core.monitor_manager.find_window(question), Some((OUTPUT, 0)));
+        assert!(core.monitor_manager.is_window_floating(question));
+        assert!(desktop.window(question).visible);
+        assert_eq!(desktop.focused, Some(question), "it has the keyboard");
+        assert_eq!(tiled(&core), [editor]);
+    }
+}
+
+/// A rule of the person's that sends the window to a workspace is the
+/// last word: the dialog goes where the rule says, not after its window.
+#[test]
+fn a_rule_that_names_a_workspace_wins_over_the_dialogs_window() {
+    use gevrek_model::settings::{RuleEffect, RulePredicate, WindowRuleProfile};
+    for dynamic in [false, true] {
+        let rules = Arc::new(Mutex::new(RuleEngine::new()));
+        rules
+            .lock()
+            .unwrap()
+            .set_declarative_rules(vec![WindowRuleProfile {
+                name: "questions".to_string(),
+                dynamic,
+                predicates: vec![RulePredicate {
+                    kind: crate::rules::MatchKind::Title,
+                    strategy: crate::rules::MatchStrategy::Contains,
+                    value: "Save".to_string(),
+                    ..Default::default()
+                }],
+                effects: vec![RuleEffect::MoveToWorkspace {
+                    monitor_index: None,
+                    workspace_index: 2,
+                }],
+                ..Default::default()
+            }]);
+        let executor = Executor::new(NodeGraph::new(), Arc::new(Mutex::new(Vec::new())), rules);
+        let mut outputs = Outputs::with_workspace_count(0);
+        outputs.add_test_monitor(OUTPUT, "Primary");
+        for name in ["main", "two", "three"] {
+            outputs
+                .create_workspace(OUTPUT, name.to_string(), LayoutType::BSP)
+                .expect("workspace created");
+        }
+        let mut core = WmCore::new(
+            executor,
+            outputs,
+            FocusManager::new(),
+            SnapZoneManager::new(Default::default()),
+        );
+        let mut desktop = FakeDesktop::new(OUTPUT);
+
+        let editor = open(&mut core, &mut desktop, "editor");
+        switch_to(&mut core, &mut desktop, "two");
+        let question = open_dialog(
+            &mut core,
+            &mut desktop,
+            "Save changes?",
+            editor,
+            Rect::new(500, 300, 400, 200),
+        );
+        assert_eq!(
+            core.monitor_manager.find_window(question),
+            Some((OUTPUT, 2)),
+            "where the rule says (a rule looked at again later: {dynamic})"
+        );
+        assert!(!desktop.window(question).visible);
+    }
+}
+
+/// Where the window a dialog belongs to is on no workspace (gevrek leaves
+/// it alone, it is a scratchpad's, the person minimized it), the dialog
+/// opens where the person is, as any window does.
+#[test]
+fn a_dialog_of_a_window_on_no_workspace_opens_where_the_person_is() {
+    use gevrek_model::command::WindowSelector;
+    // Left alone.
+    let (mut core, mut desktop) = setup(&["main", "two"]);
+    let editor = open(&mut core, &mut desktop, "editor");
+    command(
+        &mut core,
+        &mut desktop,
+        DispatchCommand::UnmanageWindow {
+            selector: WindowSelector::Handle(editor.0 as i64),
+        },
+    );
+    assert!(core.monitor_manager.find_window(editor).is_none());
+    switch_to(&mut core, &mut desktop, "two");
+    let place = Rect::new(500, 300, 400, 200);
+    let question = open_dialog(&mut core, &mut desktop, "Save changes?", editor, place);
+    assert_eq!(core.monitor_manager.find_window(question), Some((OUTPUT, 1)));
+    assert!(desktop.window(question).visible);
+    assert_eq!(desktop.focused, Some(question));
+
+    // A scratchpad's.
+    let (mut core, mut desktop) = setup(&["main", "two"]);
+    let terminal = desktop.open("terminal", "app.exe");
+    core.executor.scratchpads.bind("terminal", terminal, false);
+    let question = open_dialog(&mut core, &mut desktop, "Close?", terminal, place);
+    assert_eq!(core.monitor_manager.find_window(question), Some((OUTPUT, 0)));
+    assert!(desktop.window(question).visible);
+
+    // Minimized by the person, floating on a workspace that is put away.
+    let (mut core, mut desktop) = setup(&["main", "two"]);
+    let viewer = open(&mut core, &mut desktop, "viewer");
+    focus(&mut core, &mut desktop, viewer);
+    command(&mut core, &mut desktop, DispatchCommand::ToggleFloating);
+    desktop.windows.get_mut(&viewer).unwrap().minimized = true;
+    core.handle_window_event(&mut desktop, WindowEvent::Minimized(viewer))
+        .expect("minimized");
+    switch_to(&mut core, &mut desktop, "two");
+    assert_eq!(core.monitor_manager.find_window(viewer), Some((OUTPUT, 0)));
+    let question = open_dialog(&mut core, &mut desktop, "Close?", viewer, place);
+    assert_eq!(core.monitor_manager.find_window(question), Some((OUTPUT, 1)));
+    assert!(desktop.window(question).visible);
+
+    // A dialog's own dialog goes after the window above them both.
+    let (mut core, mut desktop) = setup(&["main", "two"]);
+    let editor = open(&mut core, &mut desktop, "editor");
+    let unmanaged = desktop.open_dialog("Find", editor, place);
+    switch_to(&mut core, &mut desktop, "two");
+    let question = open_dialog(&mut core, &mut desktop, "Not found", unmanaged, place);
+    assert_eq!(core.monitor_manager.find_window(question), Some((OUTPUT, 0)));
+    assert!(!desktop.window(question).visible);
+}
+
+/// The window a dialog belongs to closes while both are put away: the
+/// dialog is its workspace's still, and is there when that is shown.
+#[test]
+fn a_dialog_outlives_its_window_on_the_workspace_it_opened_on() {
+    let (mut core, mut desktop) = setup(&["main", "two"]);
+    let editor = open(&mut core, &mut desktop, "editor");
+    switch_to(&mut core, &mut desktop, "two");
+    let question = open_dialog(
+        &mut core,
+        &mut desktop,
+        "Save changes?",
+        editor,
+        Rect::new(500, 300, 400, 200),
+    );
+    desktop.close(editor);
+    core.handle_window_event(&mut desktop, WindowEvent::Destroyed(editor))
+        .expect("destroyed");
+    core.flush_pending_layouts(&mut desktop).expect("layout");
+    assert_eq!(core.monitor_manager.find_window(question), Some((OUTPUT, 0)));
+    assert!(!desktop.window(question).visible);
+    assert_eq!(
+        listed(&published(&core, &desktop), question),
+        Some((OUTPUT, "main".to_string()))
+    );
+
+    switch_to(&mut core, &mut desktop, "main");
+    assert!(desktop.window(question).visible);
+    // And a window that opens for it now finds no window to go after.
+    switch_to(&mut core, &mut desktop, "two");
+    let orphan = open_dialog(
+        &mut core,
+        &mut desktop,
+        "Really?",
+        editor,
+        Rect::new(500, 300, 400, 200),
+    );
+    assert_eq!(core.monitor_manager.find_window(orphan), Some((OUTPUT, 1)));
+}
+
+/// Under the Floating layout a window that belongs to another, or that
+/// stands where its program put it, stays there; only one of which too
+/// little would be on the display is brought back. A program's own
+/// window still opens in the middle.
+#[test]
+fn the_floating_layout_leaves_a_window_with_a_place_of_its_own_where_it_is() {
+    let (mut core, mut desktop) = setup(&["one"]);
+    command(
+        &mut core,
+        &mut desktop,
+        DispatchCommand::SetLayout {
+            layout: LayoutType::Floating,
+        },
+    );
+    let middle = |desktop: &FakeDesktop, id: WindowHandle| {
+        let rect = desktop.window(id).rect;
+        // The fake output is 1920x1080, with 40 kept free at its foot.
+        (rect.x + rect.width / 2 - 960).abs() <= 1 && (rect.y + rect.height / 2 - 520).abs() <= 1
+    };
+    let arrive = |core: &mut WmCore, desktop: &mut FakeDesktop, id: WindowHandle| {
+        core.handle_window_event(desktop, WindowEvent::Created(id))
+            .expect("created");
+        core.flush_pending_layouts(desktop).expect("layout");
+    };
+    let editor = open(&mut core, &mut desktop, "editor");
+    assert!(middle(&desktop, editor), "a program's window: in the middle");
+
+    // One that belongs to the editor (not a dialog by what the desktop
+    // says: it would be tiled elsewhere, and comes as any window does).
+    let place = Rect::new(1200, 150, 420, 300);
+    let palette = desktop.open_at("palette", place);
+    desktop.windows.get_mut(&palette).unwrap().parent = Some(editor);
+    arrive(&mut core, &mut desktop, palette);
+    assert!(core.monitor_manager.is_window_floating(palette));
+    assert_eq!(desktop.window(palette).rect, place, "it keeps its place");
+
+    // One that stands where its program put it.
+    let own = Rect::new(40, 700, 500, 260);
+    let player = desktop.open_at("player", own);
+    desktop.windows.get_mut(&player).unwrap().placed_itself = true;
+    arrive(&mut core, &mut desktop, player);
+    assert_eq!(desktop.window(player).rect, own, "it keeps its place");
+
+    // One of which only a sliver is on the display: brought back.
+    let lost = desktop.open_at("tools", Rect::new(1900, 150, 420, 300));
+    desktop.windows.get_mut(&lost).unwrap().parent = Some(editor);
+    arrive(&mut core, &mut desktop, lost);
+    assert!(middle(&desktop, lost), "{:?}", desktop.window(lost).rect);
+    assert_eq!(
+        (desktop.window(lost).rect.width, desktop.window(lost).rect.height),
+        (420, 300)
+    );
+
+    // And a window of its own, after all that: in the middle still.
+    let viewer = open(&mut core, &mut desktop, "viewer");
+    assert!(middle(&desktop, viewer));
+    assert_eq!(desktop.window(palette).rect, place, "nobody else was moved");
+}
+
+// ---- floating windows that are moved to another display --------------------
+
+/// Two displays, an editor that is tiled and a viewer that floats, both on
+/// the first.
+fn a_viewer_that_floats() -> (WmCore, FakeDesktop, WindowHandle, WindowHandle) {
+    let (mut core, mut desktop) = setup(&["main", "two"]);
+    second_display(&mut core, &mut desktop, &["side", "more"]);
+    let editor = open(&mut core, &mut desktop, "editor");
+    let viewer = open(&mut core, &mut desktop, "viewer");
+    focus(&mut core, &mut desktop, viewer);
+    command(&mut core, &mut desktop, DispatchCommand::ToggleFloating);
+    assert!(core.monitor_manager.is_window_floating(viewer));
+    (core, desktop, editor, viewer)
+}
+
+/// The program of a window (or the system, for a key) puts it somewhere.
+fn moved_by_itself(core: &mut WmCore, desktop: &mut FakeDesktop, window: WindowHandle, to: Rect) {
+    desktop.windows.get_mut(&window).unwrap().rect = to;
+    core.handle_window_event(desktop, WindowEvent::Moved(window, to.x, to.y))
+        .expect("moved");
+    core.flush_pending_layouts(desktop).expect("layout");
+}
+
+/// The look that is taken every now and then, a moment after the last
+/// move: the windows that joined another display.
+fn at_rest(core: &mut WmCore, desktop: &mut FakeDesktop) -> Vec<WindowHandle> {
+    let later = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    core.settle_moved_windows(desktop, later)
+}
+
+const ON_FIRST: Rect = Rect { x: 300, y: 300, width: 800, height: 600 };
+const ON_SECOND: Rect = Rect { x: 2400, y: 300, width: 800, height: 600 };
+
+/// What was reported. A floating window its program moved to the other
+/// display (or the system did, for Win+Shift+arrow) stayed listed for the
+/// display it had left. Once it has come to rest it is the other
+/// display's, published for it alone and told as moved, once.
+#[test]
+fn a_floating_window_moved_to_the_other_display_by_its_program_joins_it() {
+    let (mut core, mut desktop, editor, viewer) = a_viewer_that_floats();
+    let before = published(&core, &desktop);
+    let main = Some((OUTPUT, "main".to_string()));
+    let side = Some((BESIDE, "side".to_string()));
+
+    moved_by_itself(&mut core, &mut desktop, viewer, ON_SECOND);
+    // Looked at while it may be on its way still: not yet.
+    let now = std::time::Instant::now();
+    assert!(core.settle_moved_windows(&mut desktop, now).is_empty());
+    assert_eq!(listed(&published(&core, &desktop), viewer), main);
+
+    assert_eq!(at_rest(&mut core, &mut desktop), [viewer]);
+    let after = published(&core, &desktop);
+    assert_eq!(listed(&after, viewer), side);
+    assert_eq!(listed(&after, editor), main);
+    assert_eq!(told_moved(&before, &after), [viewer.0.to_string()]);
+    assert_eq!(desktop.window(viewer).rect, ON_SECOND, "it stays where it is");
+    assert!(desktop.window(viewer).visible);
+    // (It has the keyboard: what is asked for next is asked of that
+    // display.)
+    assert_eq!(core.executor.focused_monitor(), Some(BESIDE));
+
+    // Looked at again: nothing more happens, and nothing more is told.
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    assert!(told_moved(&after, &published(&core, &desktop)).is_empty());
+    // It is hidden and shown with the workspace it joined.
+    switch_to(&mut core, &mut desktop, "more");
+    assert!(!desktop.window(viewer).visible);
+    assert!(desktop.window(editor).visible);
+    switch_to(&mut core, &mut desktop, "side");
+    assert!(desktop.window(viewer).visible);
+
+    // And back the same way.
+    let there = published(&core, &desktop);
+    moved_by_itself(&mut core, &mut desktop, viewer, ON_FIRST);
+    assert_eq!(at_rest(&mut core, &mut desktop), [viewer]);
+    let back = published(&core, &desktop);
+    assert_eq!(listed(&back, viewer), main);
+    assert_eq!(told_moved(&there, &back), [viewer.0.to_string()]);
+}
+
+/// A window that lies across the edge stays with the display it was on
+/// until most of it has left; one that lies half and half stays with
+/// whichever display has it, so it is not sent to and fro.
+#[test]
+fn a_window_across_the_edge_stays_until_most_of_it_has_left() {
+    let (mut core, mut desktop, _editor, viewer) = a_viewer_that_floats();
+    let home = |core: &WmCore| core.monitor_manager.find_window(viewer).map(|(on, _)| on);
+    let at = |x: i32| Rect::new(x, 300, 800, 600);
+
+    // 620 of its 800 on the first display.
+    moved_by_itself(&mut core, &mut desktop, viewer, at(1300));
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    assert_eq!(home(&core), Some(OUTPUT));
+    // Half and half.
+    moved_by_itself(&mut core, &mut desktop, viewer, at(1520));
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    assert_eq!(home(&core), Some(OUTPUT));
+    // 399 on the first.
+    moved_by_itself(&mut core, &mut desktop, viewer, at(1521));
+    assert_eq!(at_rest(&mut core, &mut desktop), [viewer]);
+    assert_eq!(home(&core), Some(BESIDE));
+    // Half and half again: it is the second display's now, and stays.
+    for _ in 0..3 {
+        moved_by_itself(&mut core, &mut desktop, viewer, at(1520));
+        assert!(at_rest(&mut core, &mut desktop).is_empty());
+        assert_eq!(home(&core), Some(BESIDE));
+    }
+    // 401 on the first: back.
+    moved_by_itself(&mut core, &mut desktop, viewer, at(1519));
+    assert_eq!(at_rest(&mut core, &mut desktop), [viewer]);
+    assert_eq!(home(&core), Some(OUTPUT));
+}
+
+/// What is not a window that came to rest on another display by itself:
+/// one the desktop is moving (a workspace that slides), one that is
+/// hidden, one that is held by the pointer, one gevrek put there, a tiled
+/// one, one put out of the way, a maximized one, and one that was seen
+/// before the displays changed.
+#[test]
+fn a_floating_window_is_not_taken_to_another_display_for_a_move_that_is_not_its_own() {
+    let home = |core: &WmCore, window| core.monitor_manager.find_window(window).map(|(on, _)| on);
+
+    // The desktop moves it itself: its workspace slides in.
+    let (mut core, mut desktop, _editor, viewer) = a_viewer_that_floats();
+    desktop.animating.insert(viewer);
+    moved_by_itself(&mut core, &mut desktop, viewer, ON_SECOND);
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    // (And where the slide began after the move was seen: it waits, and
+    // is judged by where the window is when the slide is over.)
+    desktop.animating.clear();
+    moved_by_itself(&mut core, &mut desktop, viewer, ON_SECOND);
+    desktop.animating.insert(viewer);
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    desktop.windows.get_mut(&viewer).unwrap().rect = ON_FIRST;
+    desktop.animating.clear();
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    assert_eq!(home(&core, viewer), Some(OUTPUT));
+
+    // Hidden: its workspace is put away (what a hidden window says of its
+    // place is where it was put away, or a place it passes through).
+    let (mut core, mut desktop, _editor, viewer) = a_viewer_that_floats();
+    switch_to(&mut core, &mut desktop, "two");
+    moved_by_itself(&mut core, &mut desktop, viewer, ON_SECOND);
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    assert_eq!(core.monitor_manager.find_window(viewer), Some((OUTPUT, 0)));
+    // Seen in sight, and hidden before it came to rest.
+    let (mut core, mut desktop, _editor, viewer) = a_viewer_that_floats();
+    moved_by_itself(&mut core, &mut desktop, viewer, ON_SECOND);
+    switch_to(&mut core, &mut desktop, "two");
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    assert_eq!(core.monitor_manager.find_window(viewer), Some((OUTPUT, 0)));
+
+    // Held: a drag says where it went when it ends, by where the pointer
+    // is. (The pointer is on the first display still.)
+    let (mut core, mut desktop, _editor, viewer) = a_viewer_that_floats();
+    core.handle_window_event(&mut desktop, WindowEvent::DragStarted(viewer))
+        .expect("taken");
+    // (At the size it has: a drag that changes the size is another matter.)
+    let held = desktop.window(viewer).rect;
+    let across = Rect::new(2400, 300, held.width, held.height);
+    moved_by_itself(&mut core, &mut desktop, viewer, across);
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    assert_eq!(home(&core, viewer), Some(OUTPUT));
+    core.handle_window_event(&mut desktop, WindowEvent::DragEnded(viewer))
+        .expect("let go");
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    assert_eq!(home(&core, viewer), Some(OUTPUT));
+    // Its place is told once more after the letting go, as some systems
+    // do: the drag has said where it is (most of it lies on the second
+    // display, and the pointer let go of it on the first).
+    core.handle_window_event(&mut desktop, WindowEvent::Moved(viewer, across.x, across.y))
+        .expect("moved");
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    assert_eq!(home(&core, viewer), Some(OUTPUT));
+    // Moved by its program after that, it is judged as any other.
+    moved_by_itself(&mut core, &mut desktop, viewer, ON_SECOND);
+    assert_eq!(at_rest(&mut core, &mut desktop), [viewer]);
+    assert_eq!(home(&core, viewer), Some(BESIDE));
+    // The button is down, with no drag told of: the same.
+    let (mut core, mut desktop, _editor, viewer) = a_viewer_that_floats();
+    desktop.button_down = true;
+    moved_by_itself(&mut core, &mut desktop, viewer, ON_SECOND);
+    desktop.button_down = false;
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    // Seen with no button down, and taken hold of before it came to rest.
+    moved_by_itself(&mut core, &mut desktop, viewer, ON_SECOND);
+    desktop.button_down = true;
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    desktop.button_down = false;
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    assert_eq!(home(&core, viewer), Some(OUTPUT));
+
+    // gevrek put it there itself.
+    let (mut core, mut desktop, _editor, viewer) = a_viewer_that_floats();
+    core.executor.expect_own_move_for_tests(viewer);
+    moved_by_itself(&mut core, &mut desktop, viewer, ON_SECOND);
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    assert_eq!(home(&core, viewer), Some(OUTPUT));
+
+    // A tiled window is where its tile is.
+    let (mut core, mut desktop, editor, _viewer) = a_viewer_that_floats();
+    moved_by_itself(&mut core, &mut desktop, editor, ON_SECOND);
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    assert_eq!(home(&core, editor), Some(OUTPUT));
+
+    // Put out of the way, to the side of its display the other one is at.
+    let (mut core, mut desktop, _editor, viewer) = a_viewer_that_floats();
+    moved_by_itself(&mut core, &mut desktop, viewer, Rect::new(1000, 300, 800, 600));
+    command(&mut core, &mut desktop, DispatchCommand::ToggleFloatingAside);
+    let aside = desktop.window(viewer).rect;
+    assert!(aside.x > 1520, "most of it is beyond the edge: {aside:?}");
+    core.handle_window_event(&mut desktop, WindowEvent::Moved(viewer, aside.x, aside.y))
+        .expect("moved");
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    assert_eq!(home(&core, viewer), Some(OUTPUT));
+
+    // Maximized on the other display by its program: left to it.
+    let (mut core, mut desktop, _editor, viewer) = a_viewer_that_floats();
+    desktop.windows.get_mut(&viewer).unwrap().maximized = true;
+    moved_by_itself(&mut core, &mut desktop, viewer, Rect::new(1920, 0, 2560, 1440));
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    assert_eq!(home(&core, viewer), Some(OUTPUT));
+
+    // The displays change before it came to rest: nothing is carried over.
+    let (mut core, mut desktop, _editor, viewer) = a_viewer_that_floats();
+    moved_by_itself(&mut core, &mut desktop, viewer, ON_SECOND);
+    let same = core.monitor_manager.get_all_monitors();
+    let changes = core.monitor_manager.reconcile_with(same);
+    core.executor
+        .apply_monitor_changes(&mut desktop, &core.monitor_manager, &changes);
+    assert!(at_rest(&mut core, &mut desktop).is_empty());
+    assert_eq!(home(&core, viewer), Some(OUTPUT));
+}

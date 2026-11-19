@@ -228,6 +228,8 @@ pub struct Studio {
     /// The workspaces of each display.
     workspaces: crate::workspaces::Page,
     snap_zones_edit: crate::snap_zones_edit::SnapZonesEdit,
+    /// The zones that hold the desktop's icons: their page.
+    zones_page: crate::zones_page::ZonesPage,
     /// This studio asked the window manager to have a window picked,
     /// and has not heard which yet.
     picking: bool,
@@ -361,6 +363,7 @@ impl Studio {
             layout_preview: Default::default(),
             workspaces: Default::default(),
             snap_zones_edit: Default::default(),
+            zones_page: Default::default(),
             picking: false,
             arrangement: Default::default(),
             night_light: Default::default(),
@@ -538,6 +541,9 @@ impl Studio {
                     if kind == "window.picked" {
                         self.window_picked(&fields);
                     }
+                    // What the zones on the desktop tell: their page asks
+                    // again how they are.
+                    self.zones_page.heard(&kind);
                     if kind == "output.trial" {
                         let field = |name: &str| {
                             fields
@@ -591,6 +597,39 @@ impl Studio {
                     Some(error) => self.toast(Tone::Bad, format!("{command}: {error}")),
                 },
                 Event::State(state) => self.state = Some(state),
+                // What the zones' page asked, it shows itself, where it
+                // was asked; what anybody else asked is said as every
+                // command's answer is.
+                Event::ZonesAnswered {
+                    command,
+                    success,
+                    delivered,
+                    error,
+                    events,
+                } => {
+                    let shown = self.zones_page.answered(
+                        &command,
+                        success,
+                        delivered,
+                        error.as_deref(),
+                        &events,
+                        &self.document,
+                    );
+                    match (shown, success, error) {
+                        (true, _, _) => {}
+                        (false, true, _) => self.toast(Tone::Note, format!("Done: {command}")),
+                        (false, false, error) => self.toast(
+                            Tone::Bad,
+                            format!("{command}: {}", error.unwrap_or_else(|| "refused".to_string())),
+                        ),
+                    }
+                }
+                Event::ZonesState {
+                    running,
+                    stale,
+                    json,
+                    message,
+                } => self.zones_page.state(running, stale, &json, &message),
                 Event::Graph(event) => self.graph.take_in(event),
             }
         }
@@ -1397,6 +1436,28 @@ impl Studio {
             }
             Page::Problems => self.problems(ui, palette),
             Page::Diagnostics => self.diagnostics(ui, palette),
+            Page::Zones => {
+                // (Whose desktop it is: the window manager's, and this
+                // program's own where none is on the line.)
+                let windows = self.peer.as_ref().map_or(cfg!(windows), |peer| {
+                    peer.platform.to_ascii_lowercase().contains("win")
+                });
+                let around = crate::zones_page::Around {
+                    connected: self.connected(),
+                    dirty: self.dirty(),
+                    windows,
+                    highlight: highlight.as_deref(),
+                };
+                for wish in self.zones_page.show(ui, &mut self.document, &around) {
+                    match wish {
+                        crate::zones_page::Wish::Ask(command) => {
+                            self.link.send(Request::Zones(command))
+                        }
+                        crate::zones_page::Wish::AskState => self.link.send(Request::ZonesState),
+                        crate::zones_page::Wish::Show(pointer) => self.show_setting(pointer),
+                    }
+                }
+            }
             _ => {
                 if page == Page::Appearance {
                     if let Some(config) = self.document.config() {

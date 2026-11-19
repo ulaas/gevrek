@@ -305,6 +305,22 @@ pub trait WindowQueries {
     fn smallest_size(&self, _id: WindowId) -> Option<(i32, i32)> {
         None
     }
+    /// The window this one belongs to: the window a dialog asks about, the
+    /// one a tool's window is there for (the parent of a Wayland toplevel,
+    /// the window an X11 window is transient for, the owner of a window
+    /// on Windows). `None` for a window of its own. The window named need
+    /// not be one gevrek has in a workspace: the engine looks.
+    fn parent(&self, _id: WindowId) -> Option<WindowId> {
+        None
+    }
+    /// The window stands where its program put it (an X11 window that
+    /// names its place), or where the desktop put it for what it belongs
+    /// to (a dialog over its window): a place that means something, which
+    /// the Floating layout leaves it at. False where the place is only
+    /// where windows happen to open.
+    fn placed_itself(&self, _id: WindowId) -> bool {
+        false
+    }
     /// The backend knows this window (it has seen it appear).
     fn is_tracked(&self, id: WindowId) -> bool;
     /// The process the window belongs to.

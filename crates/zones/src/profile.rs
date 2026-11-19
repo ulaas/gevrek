@@ -165,6 +165,18 @@ pub fn choose(
         None => {
             let from = nearest(profiles, &key);
             let mut profile = from.map(|index| profiles[index].clone()).unwrap_or_default();
+            // Where the zones are comes from the nearest displays; which
+            // zones a workspace shows is the workspace's own, and comes
+            // from the arrangement it was last seen with.
+            if profile.key.workspace != key.workspace {
+                let own = profiles
+                    .iter()
+                    .filter(|other| other.key.workspace == key.workspace)
+                    .max_by_key(|other| other.last_used);
+                if let Some(own) = own {
+                    profile.hidden = own.hidden.clone();
+                }
+            }
             let from = from.map(|index| profiles[index].key.clone());
             profile.key = key;
             profiles.push(profile);
@@ -334,5 +346,25 @@ mod tests {
         // Each is its own from then on.
         profiles[second.index].geometry.clear();
         assert!(!profiles[first.index].geometry.is_empty());
+    }
+
+    #[test]
+    fn a_workspace_keeps_its_own_set_of_zones_when_the_displays_change() {
+        let both = [laptop(), display("desk", 1920, 2560, 1440)];
+        let mut profiles = Vec::new();
+        // Docked: the first workspace hides nothing, the second hides one zone.
+        let one = choose(&mut profiles, &both, Some("1"), 1).unwrap();
+        profiles[one.index].geometry.insert(ZoneId::new("z"), geometry("desk", Anchor::Top));
+        let two = choose(&mut profiles, &both, Some("2"), 2).unwrap();
+        profiles[two.index].hidden.insert(ZoneId::new("z"));
+        // Undocked on the first workspace, then over to the second: its
+        // places come from the nearest displays (the first workspace's,
+        // just made), and what it hides from its own docked arrangement.
+        let alone_one = choose(&mut profiles, &[laptop()], Some("1"), 3).unwrap();
+        assert!(profiles[alone_one.index].hidden.is_empty());
+        let alone_two = choose(&mut profiles, &[laptop()], Some("2"), 4).unwrap();
+        assert_eq!(alone_two.made, Some(Some(ProfileKey::of(&[laptop()], Some("1")))));
+        assert_eq!(profiles[alone_two.index].hidden, [ZoneId::new("z")].into());
+        assert_eq!(profiles[alone_two.index].geometry, profiles[alone_one.index].geometry);
     }
 }

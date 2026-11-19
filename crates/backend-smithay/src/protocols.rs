@@ -32,7 +32,91 @@ use smithay::wayland::xdg_activation::{
 /// An activation token older than this no longer gives the focus.
 const ACTIVATION_TOKEN_LIFETIME: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// The layer a surface of a shell was on and how it took the keyboard
+/// when it was last committed.
+#[derive(Default)]
+struct Standing(std::sync::Mutex<Option<(Layer, KeyboardInteractivity)>>);
+
+/// Whether a surface that stands so has the keyboard without being
+/// pressed: above the windows, and asking for all of it.
+pub fn holds_the_keyboard(standing: (Layer, KeyboardInteractivity)) -> bool {
+    matches!(standing.0, Layer::Top | Layer::Overlay)
+        && standing.1 == KeyboardInteractivity::Exclusive
+}
+
+/// Whether a surface that has the keyboard lets go of it by a change of
+/// how it stands: it held the keyboard and holds it no more (it left the
+/// layers above the windows, or no longer asks for all of it), or it
+/// takes no keyboard at all now. One that was given the keyboard by a
+/// press keeps it through a change of its layer.
+pub fn gives_up_the_keyboard(
+    before: (Layer, KeyboardInteractivity),
+    now: (Layer, KeyboardInteractivity),
+) -> bool {
+    (holds_the_keyboard(before) && !holds_the_keyboard(now))
+        || (before.1 != KeyboardInteractivity::None && now.1 == KeyboardInteractivity::None)
+}
+
+/// The name the shell gives the surfaces that keep room for its zones
+/// (`Place::reserved_strip`, as `crates/shell` opens them); an instance
+/// of the shell may add to it.
+pub const ZONES_ROOM: &str = "gevrek-zones-room";
+
+/// The side of a display a layer surface keeps room at and how deep, by
+/// what it is fixed to: one edge, or one edge and both beside it. `None`
+/// for one that keeps none (no exclusive zone, or fixed to no single
+/// side).
+pub fn kept_side(
+    anchor: smithay::wayland::shell::wlr_layer::Anchor,
+    exclusive: i32,
+) -> Option<(gevrek_engine::shell_room::Side, i32)> {
+    use gevrek_engine::shell_room::Side;
+    use smithay::wayland::shell::wlr_layer::Anchor;
+    if exclusive <= 0 {
+        return None;
+    }
+    let across = Anchor::LEFT | Anchor::RIGHT;
+    let down = Anchor::TOP | Anchor::BOTTOM;
+    let side = if anchor == Anchor::TOP || anchor == Anchor::TOP | across {
+        Side::Top
+    } else if anchor == Anchor::BOTTOM || anchor == Anchor::BOTTOM | across {
+        Side::Bottom
+    } else if anchor == Anchor::LEFT || anchor == Anchor::LEFT | down {
+        Side::Left
+    } else if anchor == Anchor::RIGHT || anchor == Anchor::RIGHT | down {
+        Side::Right
+    } else {
+        return None;
+    };
+    Some((side, exclusive))
+}
+
 impl State {
+    /// How much of the room kept on a display is the shell's zones' own:
+    /// at each side the deepest room a surface of theirs keeps there, as
+    /// the layers are arranged now. Told with the state, so that the
+    /// shell can take its own room out of the work area it reads.
+    pub fn zones_room(&self, id: MonitorHandle) -> gevrek_model::settings::ReservedArea {
+        use gevrek_engine::shell_room::{by_display, ShellRoom};
+        let Some((_, output)) = self.outputs.iter().find(|(known, _)| *known == id) else {
+            return Default::default();
+        };
+        let rooms: Vec<ShellRoom> = layer_map_for_output(output)
+            .layers()
+            .filter(|layer| layer.namespace().starts_with(ZONES_ROOM))
+            .filter_map(|layer| {
+                let state = layer.cached_state();
+                kept_side(state.anchor, state.exclusive_zone.into())
+            })
+            .map(|(side, depth)| ShellRoom {
+                display: String::new(),
+                side,
+                depth,
+            })
+            .collect();
+        by_display(&rooms).remove("").unwrap_or_default()
+    }
+
     fn output_for_layer(&self, surface: &WlSurface) -> Option<(MonitorHandle, Output)> {
         self.outputs
             .iter()
@@ -62,7 +146,7 @@ impl State {
                 })
                 .unwrap_or(true)
         });
-        let wants_keyboard = {
+        let standing = {
             let mut map = layer_map_for_output(&output);
             map.arrange();
             let layer = map
@@ -73,18 +157,53 @@ impl State {
                     layer.layer_surface().send_configure();
                 }
             }
-            layer.is_some_and(|layer| {
+            layer.map(|layer| {
                 let state = layer.cached_state();
-                matches!(state.layer, Layer::Top | Layer::Overlay)
-                    && state.keyboard_interactivity == KeyboardInteractivity::Exclusive
+                (state.layer, state.keyboard_interactivity)
             })
         };
+        let wants_keyboard = standing.is_some_and(holds_the_keyboard);
+        // What it was at its commit before this one: a surface may go to
+        // another layer while it is shown (zones raised over the windows
+        // to be looked at, and put back), and take the keyboard another
+        // way.
+        let before = standing.and_then(|now| {
+            with_states(surface, |states| {
+                states
+                    .data_map
+                    .insert_if_missing_threadsafe(Standing::default);
+                states.data_map.get::<Standing>().and_then(|kept| {
+                    kept.0
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .replace(now)
+                })
+            })
+        });
         // A launcher or a lock prompt takes the keyboard while it is there.
         if wants_keyboard && self.layer_focus.as_ref() != Some(surface) {
             self.layer_focus = Some(surface.clone());
             self.desktop.focus_dirty = true;
         }
+        if let (Some(before), Some(now)) = (before, standing) {
+            // It had the keyboard because it held it, or cannot have it
+            // any more: the keyboard goes back to the windows.
+            if gives_up_the_keyboard(before, now) && self.layer_focus.as_ref() == Some(surface) {
+                self.layer_focus = None;
+                self.desktop.focus_dirty = true;
+            }
+        }
         self.update_work_area(id, &output);
+        // On another layer, another thing may be under the pointer where
+        // it rests: the surface itself, or what it covered.
+        if before.is_some_and(|before| Some(before.0) != standing.map(|now| now.0)) {
+            self.desktop.needs_redraw = true;
+            let (x, y) = self.pointer_exact;
+            self.pointer_moved(
+                (x, y).into(),
+                self.start_time.elapsed().as_millis() as u32,
+            );
+        }
         true
     }
 
