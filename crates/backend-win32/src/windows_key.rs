@@ -326,24 +326,113 @@ mod system {
         let Some(drag) = drag.as_ref() else {
             return;
         };
-        let (left, top, right, bottom) =
-            dragged(drag.start, drag.way, (at.0 - drag.from.0, at.1 - drag.from.1));
-        let mut flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS;
-        if drag.way == Way::Move {
-            flags |= SWP_NOSIZE;
+        let edges = dragged(drag.start, drag.way, (at.0 - drag.from.0, at.1 - drag.from.1));
+        want(Wanted {
+            window: drag.window,
+            edges,
+            only_moved: drag.way == Way::Move,
+        });
+    }
+
+    /// Where a dragged window is to be next.
+    #[derive(Clone, Copy)]
+    struct Wanted {
+        window: isize,
+        edges: Edges,
+        only_moved: bool,
+    }
+
+    /// The newest place asked for, until the thread that carries it out
+    /// takes it. An older one that was not taken yet is dropped.
+    static WANTED: (Mutex<Option<Wanted>>, std::sync::Condvar) =
+        (Mutex::new(None), std::sync::Condvar::new());
+    static CARRIER: std::sync::Once = std::sync::Once::new();
+
+    /// How long a program is given to carry out one place before the next
+    /// is sent all the same (it is asked twice: `settled`).
+    const PATIENCE_MS: u32 = 150;
+
+    /// Ask for a dragged window's next place.
+    ///
+    /// The pointer tells of itself up to a thousand times a second, and a
+    /// window was sent a place for each: a program that takes a while over
+    /// every new size (Unreal Editor lays out and draws all of itself anew)
+    /// got them faster than it could carry them out, and went on working
+    /// through places of long ago, far behind the pointer and for seconds
+    /// after the button was let go. Now a window is sent one place at a
+    /// time, the newest there is when it has done with the last.
+    fn want(wanted: Wanted) {
+        CARRIER.call_once(|| {
+            let started = std::thread::Builder::new()
+                .name("gevrek-drag".into())
+                .spawn(carry);
+            if let Err(error) = started {
+                log::warn!("no thread for dragging windows with the Windows key: {error}");
+            }
+        });
+        *WANTED.0.lock().unwrap_or_else(|error| error.into_inner()) = Some(wanted);
+        WANTED.1.notify_one();
+    }
+
+    /// Carry out the places asked for, one after the other, for good.
+    fn carry() {
+        loop {
+            let wanted = {
+                let mut next = WANTED.0.lock().unwrap_or_else(|error| error.into_inner());
+                loop {
+                    match next.take() {
+                        Some(wanted) => break wanted,
+                        None => {
+                            next = WANTED
+                                .1
+                                .wait(next)
+                                .unwrap_or_else(|error| error.into_inner());
+                        }
+                    }
+                }
+            };
+            let (left, top, right, bottom) = wanted.edges;
+            let mut flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS;
+            if wanted.only_moved {
+                flags |= SWP_NOSIZE;
+            }
+            let window = HWND(wanted.window as *mut _);
+            // SAFETY: a window that is gone is no window; a program that
+            // hangs is not waited for (the asking is not).
+            unsafe {
+                let _ = SetWindowPos(window, None, left, top, right - left, bottom - top, flags);
+            }
+            settled(window);
         }
-        // SAFETY: a window that is gone is no window; a program that hangs
-        // is not waited for (the asking is not).
-        unsafe {
-            let _ = SetWindowPos(
-                HWND(drag.window as *mut _),
-                None,
-                left,
-                top,
-                right - left,
-                bottom - top,
-                flags,
-            );
+    }
+
+    /// Wait until a window's program has carried out what was posted to
+    /// it, or for as long as there is patience. A message sent the plain
+    /// way is answered when the program next looks for messages, before
+    /// the posted ones that wait: the first answer says that it looks, and
+    /// the second that it has been through what was posted meanwhile.
+    fn settled(window: HWND) {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SendMessageTimeoutW, SMTO_ABORTIFHUNG, WM_NULL,
+        };
+        for _ in 0..2 {
+            // SAFETY: a message that means nothing, to a window that may
+            // be gone; not waited for beyond the time given.
+            let answered = unsafe {
+                SendMessageTimeoutW(
+                    window,
+                    WM_NULL,
+                    WPARAM(0),
+                    LPARAM(0),
+                    SMTO_ABORTIFHUNG,
+                    PATIENCE_MS,
+                    None,
+                )
+            };
+            if answered.0 == 0 {
+                return;
+            }
         }
     }
 
