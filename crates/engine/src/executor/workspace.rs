@@ -616,11 +616,22 @@ impl Executor {
         if let Some(window) = focus::output_focus_target(monitor_manager, output) {
             return effect(window_manager, Effect::Focus(Some(window)));
         }
-        let elsewhere = queries(window_manager)
+        // A window of a workspace that is not shown here keeps no keys:
+        // one of another output, and also one of this output's workspace
+        // that was just put away. That one is still the system's active
+        // window for a moment (it is hidden after its way out), and when
+        // it is hidden the system gives the keyboard to a window of its
+        // own choosing, as likely as not on the other display, which then
+        // became the display with the keyboard. So the keyboard is taken
+        // from it now, while this output shows nothing to give it to.
+        let shown = monitor_manager
+            .get_workspaces(output)
+            .map(|workspaces| workspaces.focused_idx());
+        let away = queries(window_manager)
             .active_window()
             .and_then(|window| monitor_manager.find_window(window))
-            .is_some_and(|(other, _)| other != output);
-        if elsewhere {
+            .is_some_and(|(other, index)| other != output || Some(index) != shown);
+        if away {
             effect(window_manager, Effect::Focus(None))?;
         }
         Ok(())
@@ -1343,8 +1354,11 @@ impl Executor {
             &mut changes,
         )?;
         self.apply_changes(window_manager, changes);
-        if let Some(window) = reveal.focus {
-            effect(window_manager, Effect::Focus(Some(window)))?;
+        match reveal.focus {
+            Some(window) => effect(window_manager, Effect::Focus(Some(window)))?,
+            // A workspace with no window keeps the keyboard on its display
+            // all the same: nothing of the workspace that went keeps it.
+            None => self.focus_on_output(window_manager, monitor_manager, monitor)?,
         }
         log::info!(
             "Switched workspace using selector '{}'",

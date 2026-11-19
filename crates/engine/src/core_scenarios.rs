@@ -760,6 +760,67 @@ fn going_to_an_output_with_nothing_on_it_takes_the_keyboard_along() {
     assert_eq!(desktop.focused, None);
 }
 
+/// A display that changes to a workspace with no window keeps the
+/// keyboard. The window of the workspace that went had it, and is hidden
+/// a moment later; Windows then gives the keyboard to a window of its own
+/// choosing, here the one on the other display, which became the display
+/// with the keyboard (reported by the person, 2026-11-20).
+#[test]
+fn a_workspace_with_no_window_keeps_the_keyboard_on_its_display() {
+    use crate::outputs::MonitorInfo;
+    const SECOND: MonitorHandle = MonitorHandle(2);
+    let (mut core, mut desktop) = setup(&["main", "empty"]);
+    let screen = Rect::new(1920, 0, 2560, 1440);
+    let mut monitors = core.monitor_manager.get_all_monitors();
+    monitors.push(MonitorInfo {
+        handle: SECOND,
+        name: "Second".to_string(),
+        device_path: String::new(),
+        stable_id: String::new(),
+        is_primary: false,
+        x: screen.x,
+        y: screen.y,
+        width: screen.width,
+        height: screen.height,
+        work_x: screen.x,
+        work_y: screen.y,
+        work_width: screen.width,
+        work_height: screen.height,
+        dpi_scale: 1.0,
+    });
+    core.monitor_manager.replace_monitors(monitors);
+    core.monitor_manager
+        .create_workspace(SECOND, "side".to_string(), LayoutType::BSP)
+        .expect("workspace on the second output");
+    desktop.more_outputs.push((SECOND, screen));
+
+    let editor = open(&mut core, &mut desktop, "editor");
+    let viewer = open(&mut core, &mut desktop, "viewer");
+    core.monitor_manager.find_and_remove_window(viewer);
+    core.monitor_manager
+        .get_focused_workspace_mut(SECOND)
+        .expect("the second output's workspace")
+        .add_window(viewer, true);
+    focus(&mut core, &mut desktop, editor);
+    assert_eq!(core.executor.focused_monitor(), Some(OUTPUT));
+
+    desktop.hides_later = true;
+    switch_to(&mut core, &mut desktop, "empty");
+    // (The editor is hidden now, a moment after it was asked to be.)
+    desktop.settle();
+    assert_eq!(
+        desktop.focused, None,
+        "the keyboard is nobody's, not the other display's window's"
+    );
+    assert_eq!(core.executor.focused_monitor(), Some(OUTPUT));
+
+    // Back: the editor has it again.
+    switch_to(&mut core, &mut desktop, "main");
+    desktop.settle();
+    assert_eq!(desktop.focused, Some(editor));
+    assert_eq!(core.executor.focused_monitor(), Some(OUTPUT));
+}
+
 #[test]
 fn a_window_chosen_in_the_overview_ends_it_and_has_the_keyboard() {
     let (mut core, mut desktop) = setup(&["main"]);

@@ -59,6 +59,13 @@ pub struct FakeDesktop {
     pub animating: std::collections::BTreeSet<WindowHandle>,
     /// The primary pointer button is held down.
     pub button_down: bool,
+    /// Windows are hidden a moment after they are asked to be, as on
+    /// Windows, and the one that had the keyboard hands it to another
+    /// shown window when it goes (`settle`). Off: hidden at once, and
+    /// the keyboard is nobody's.
+    pub hides_later: bool,
+    /// Asked to hide and not hidden yet (`hides_later`).
+    pub hiding: Vec<WindowHandle>,
     next_window: isize,
 }
 
@@ -76,6 +83,8 @@ impl FakeDesktop {
             launched: Vec::new(),
             animating: Default::default(),
             button_down: false,
+            hides_later: false,
+            hiding: Vec::new(),
             next_window: 100,
         }
     }
@@ -109,6 +118,24 @@ impl FakeDesktop {
     }
 
     /// The window goes away; the caller then feeds `WindowEvent::Destroyed`.
+    /// The windows asked to hide are hidden now (`hides_later`). One that
+    /// had the keyboard gives it, as Windows does, to the first window
+    /// still shown, wherever it is.
+    pub fn settle(&mut self) {
+        for id in std::mem::take(&mut self.hiding) {
+            if let Some(window) = self.windows.get_mut(&id) {
+                window.visible = false;
+            }
+            if self.focused == Some(id) {
+                self.focused = self
+                    .windows
+                    .iter()
+                    .find(|(other, window)| **other != id && window.visible)
+                    .map(|(other, _)| *other);
+            }
+        }
+    }
+
     pub fn close(&mut self, id: WindowHandle) {
         self.windows.remove(&id);
         if self.focused == Some(id) {
@@ -353,7 +380,14 @@ impl Desktop for FakeDesktop {
                 }
                 // (A window that is hidden does not keep the keyboard:
                 // the system takes it away, as every real one does.)
-                if !*visible && self.focused == Some(*id) {
+                if !*visible && self.hides_later {
+                    // As Windows: the window is hidden a moment later
+                    // (`settle`), and keeps the keyboard until then.
+                    self.hiding.push(*id);
+                    if let Some(window) = self.windows.get_mut(id) {
+                        window.visible = true;
+                    }
+                } else if !*visible && self.focused == Some(*id) {
                     self.focused = None;
                 }
             }
