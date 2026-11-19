@@ -216,6 +216,14 @@ impl SystemBackend {
         self.displays.pixels_of(display)
     }
 
+    /// Windows' own name for a display (`\\.\DISPLAY1`), by which the
+    /// shell's surfaces are placed. (Not the path the window manager
+    /// knows it by: a surface asked for by that was opened on no
+    /// display.)
+    pub fn name_of(&mut self, display: &DisplayId) -> Option<String> {
+        self.displays.name_of(display)
+    }
+
     /// What the drag over a zone carries now; `None` when it left.
     pub fn set_drop(&mut self, payload: Option<DropPayload>) {
         self.dragged_over = payload;

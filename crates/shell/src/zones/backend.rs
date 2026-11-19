@@ -120,6 +120,11 @@ impl Desk for System {
 
     fn spot_of(&mut self, display: &DisplayId) -> Option<Spot> {
         let output = self.outputs.iter().find(|(known, _)| known == display).map(|(_, output)| output.clone())?;
+        // (Windows places a surface by the display's own name, not by
+        // the path the window manager's state has for it: asked for by
+        // the path, no surface was opened at all.)
+        #[cfg(windows)]
+        let output = self.backend.name_of(display).unwrap_or(output);
         #[cfg(windows)]
         let pixels = self.backend.pixels_of(display)?;
         // (A Wayland compositor places a surface by its output's name.)

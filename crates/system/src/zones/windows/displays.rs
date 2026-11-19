@@ -214,6 +214,16 @@ impl Displays {
             .map(|found| found.pixels)
     }
 
+    /// Windows' own name for a display (`\\.\DISPLAY1`): what a surface is
+    /// placed on a display by. `None` for one Windows does not show now.
+    pub fn name_of(&mut self, display: &DisplayId) -> Option<String> {
+        self.with_pixels()
+            .into_iter()
+            .find(|found| found.id == display.as_str())
+            .map(|found| found.name)
+            .filter(|name| !name.is_empty())
+    }
+
     /// See [`to_pixels`].
     pub fn to_pixels(&mut self, at: Point, pointer: Option<(i32, i32)>) -> (i32, i32) {
         to_pixels(&self.with_pixels(), at, pointer)
