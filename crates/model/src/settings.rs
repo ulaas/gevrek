@@ -365,6 +365,22 @@ pub enum PanelFit {
     Content,
 }
 
+/// Whether the taskbar has the windows of one program under one button.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskGrouping {
+    /// A button for every window, always.
+    Never,
+    /// A button for every window while there is room for them all; one
+    /// for each program when there is not.
+    #[default]
+    WhenFull,
+    /// One button for each program, always.
+    Always,
+}
+
 /// Where a panel that is not as wide as the display stands along its edge.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
@@ -529,6 +545,13 @@ pub struct PanelProfile {
     /// taskbar has a button of its own that says which, and changes it.)
     #[serde(default)]
     pub tasks_of_all_workspaces: bool,
+    /// Whether the windows of one program stand under one button of the
+    /// taskbar (a press on it lists them): never, when there is no room
+    /// for a button each, or always. (The buttons get narrower first,
+    /// down to a window's picture alone; windows there is still no room
+    /// for are listed by a button of their own.)
+    #[serde(default)]
+    pub task_grouping: TaskGrouping,
     /// The clock, in `strftime` form.
     pub clock_format: String,
     /// Show the icons of older programs in the tray too: those that
@@ -617,6 +640,7 @@ impl Default for PanelProfile {
             title_width: 260,
             task_width: 150,
             tasks_of_all_workspaces: false,
+            task_grouping: TaskGrouping::WhenFull,
             clock_format: "%a %d %b  %H:%M".to_string(),
             older_tray_icons: true,
             displays: Vec::new(),

@@ -281,6 +281,9 @@ mod linux {
         /// The list of every icon of the tray, under the tray's button.
         TrayList,
         Sound,
+        /// The windows a button of the taskbar stands for (by the first
+        /// of them: another button's list is another menu).
+        Windows(u64),
     }
 
     /// What the surfaces share.
@@ -1473,7 +1476,16 @@ mod linux {
             .layout_menu
             .map(|anchor| (Menu::Layouts, anchor))
             .or(asked.notices.map(|anchor| (Menu::Notices, anchor)))
-            .or(asked.sound_menu.map(|anchor| (Menu::Sound, anchor)));
+            .or(asked.sound_menu.map(|anchor| (Menu::Sound, anchor)))
+            .or(asked.task_menu.as_ref().map(|(anchor, windows)| {
+                (Menu::Windows(windows.first().copied().unwrap_or(0)), *anchor)
+            }));
+        // (The windows a button of the taskbar lists, as they are now.)
+        let listed = asked
+            .task_menu
+            .as_ref()
+            .map(|(_, windows)| crate::panel::tasks_of_ids(&view, windows))
+            .unwrap_or_default();
         let pressed = asked.pressed;
         let tray = asked.tray;
         // The wheel and the middle button on an icon of the tray.
@@ -1598,6 +1610,12 @@ mod linux {
                 open_notices(shared, panel, anchor, notices, Rc::clone(&alive), control)
             }
             Menu::Sound => open_sound_menu(shared, panel, anchor, Rc::clone(&alive), control),
+            Menu::Windows(_) => {
+                if listed.is_empty() {
+                    return Flow::Continue;
+                }
+                open_task_menu(shared, panel, anchor, listed, Rc::clone(&alive), control)
+            }
             // Opened when its program has answered, not from here.
             Menu::Tray | Menu::TrayList => return Flow::Continue,
         };
@@ -1882,6 +1900,43 @@ mod linux {
                     sender.send(Message::System(crate::panel::SystemView::read()));
                 });
             }
+            Flow::Close
+        })
+    }
+
+    /// The list under a button of the taskbar that stands for several
+    /// windows: a press on one goes to it and puts the list away.
+    fn open_task_menu(
+        shared: &Rc<RefCell<State>>,
+        panel: SurfaceId,
+        anchor: egui::Rect,
+        tasks: Vec<crate::panel::Task>,
+        alive: Rc<()>,
+        control: &mut Control,
+    ) -> SurfaceId {
+        let size = crate::panel::task_menu_size(tasks.len());
+        let state = Rc::clone(shared);
+        let mut fonts = false;
+        control.popup(panel, anchor, size, move |ui, _| {
+            let _held = &alive;
+            let context = ui.ctx().clone();
+            let shared = state.borrow();
+            if !fonts {
+                theme::install_fonts(&context, shared.settings.system_font);
+                fonts = true;
+            }
+            let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
+            theme::apply(&context, &palette, &shared.settings);
+            // (Escape puts a menu away, as a press elsewhere does.)
+            if crate::panel::menu_escape(&context) {
+                return Flow::Close;
+            }
+            let Some(window) = crate::panel::task_menu(ui, &palette, &tasks) else {
+                return Flow::Continue;
+            };
+            shared
+                .link
+                .send(Request::Dispatch(crate::panel::go_to_window(window)));
             Flow::Close
         })
     }

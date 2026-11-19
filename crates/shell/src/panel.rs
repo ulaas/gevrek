@@ -14,7 +14,7 @@
 //! and says where it is, and the surface is put there.
 
 use gevrek_model::settings::{
-    PanelAlign, PanelEdge, PanelFit, PanelModule, PanelProfile, PanelStyle,
+    PanelAlign, PanelEdge, PanelFit, PanelModule, PanelProfile, PanelStyle, TaskGrouping,
 };
 use gevrek_ui::brand_icons::BrandIcon;
 use gevrek_ui::theme::{self, icons};
@@ -1215,6 +1215,10 @@ pub struct Asked {
     /// Bring this window to the middle of this display, floating, or
     /// put it back as it was (the other button on it in the taskbar).
     pub centre: Option<u64>,
+    /// A button of the taskbar that stands for several windows was
+    /// pressed (the windows of one program, or those there is no room
+    /// for): list these next to this rectangle.
+    pub task_menu: Option<(egui::Rect, Vec<u64>)>,
     /// Give this workspace (its place among the tabs) another name: its
     /// tab was right-clicked.
     pub rename: Option<usize>,
@@ -1329,10 +1333,10 @@ struct Ink {
     /// The panel goes down a side: what it shows stands under each
     /// other and is kept narrow (a word is a sign, or a few letters).
     upright: bool,
-    /// How far along the panel a module that takes what room there is
-    /// (the taskbar) may reach: where what stands at the panel's end
-    /// begins.
-    until: f32,
+    /// How long a module that takes what room there is (the taskbar)
+    /// may be: as long as its group may be, less what else stands in
+    /// the group.
+    room: f32,
 }
 
 /// Draw a panel. `wheel` is what the wheel has turned over this panel and
@@ -1346,7 +1350,7 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
         text: rgb(bar.text),
         accent: bar.accent.map_or(shown.accent, rgb),
         upright: bar.edge.is_upright(),
-        until: f32::INFINITY,
+        room: f32::INFINITY,
     };
     let (red, green, blue) = bar.background;
     let background = egui::Color32::from_rgba_unmultiplied(red, green, blue, bar.opacity);
@@ -1459,6 +1463,36 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                     .rect;
                 (long(rect) > 0.5).then_some(rect)
             };
+            // What stands in a group beside its taskbar is as long as it
+            // was the last time: the taskbar has the rest of the room
+            // its group may take, and no more of it.
+            let beside_id =
+                |slot: usize| egui::Id::unique(("panel-beside-tasks", shown.output, slot));
+            let with_room = |slot: usize, most: f32| {
+                let beside: f32 = context
+                    .data(|data| data.get_temp(beside_id(slot)))
+                    .unwrap_or(0.0);
+                Ink {
+                    room: (most - beside).max(0.0),
+                    ..ink
+                }
+            };
+            // (`all`: how long the group came to be, its taskbar with it.
+            // Nothing is noted for a group without one.)
+            let note_tasks = |slot: usize, all: f32| {
+                let Some(tasks) = context.data_mut(|data| data.remove_temp::<f32>(task_long_id()))
+                else {
+                    return;
+                };
+                let beside = (all - tasks).max(0.0);
+                let before: f32 = context
+                    .data(|data| data.get_temp(beside_id(slot)))
+                    .unwrap_or(0.0);
+                if (beside - before).abs() > 0.5 {
+                    context.data_mut(|data| data.insert_temp(beside_id(slot), beside));
+                    context.request_repaint();
+                }
+            };
             if fitted {
                 // One run: the left, the middle, the right, with room
                 // between the groups; how long it came to be is how long
@@ -1468,6 +1502,9 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                 } else {
                     spacing * 2.0
                 };
+                // (The run is not longer than the display: a taskbar in
+                // it has what the rest of the run leaves of that.)
+                let ink = with_room(3, long(whole) - padding * 2.0);
                 let builder = egui::UiBuilder::new().max_rect(inner).layout(forward);
                 ui.scope_builder(builder, |ui| {
                     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
@@ -1481,43 +1518,85 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                     }
                     groups[2] = group(ui, &bar.right, true, false, &ink, &mut asked);
                 });
-                let used = groups
+                let run = groups
                     .iter()
                     .flatten()
                     .fold(None, |all: Option<egui::Rect>, one| {
                         Some(all.map_or(*one, |all| all.union(*one)))
                     })
-                    .map_or(0.0, long)
-                    + padding * 2.0;
+                    .map_or(0.0, long);
+                note_tasks(3, run);
+                let used = run + padding * 2.0;
                 if natural.is_none_or(|natural| (used - natural).abs() > 0.5) {
                     context.data_mut(|data| data.insert_temp(natural_id, used));
                     context.request_repaint();
                 }
             } else {
-                // What stands at the panel's end is as long as it was
-                // the last time: what stands at its start may reach up
-                // to there, and no further.
+                // The three groups are as long as they were the last
+                // time: each may reach up to where its neighbours stand
+                // (the middle one stays in the middle), and no further.
                 let end_id = egui::Id::unique(("panel-end", shown.output));
                 let end_before: f32 = context.data(|data| data.get_temp(end_id)).unwrap_or(0.0);
-                let last = if upright {
-                    inner.bottom()
+                let centre_id = egui::Id::unique(("panel-centre", shown.output));
+                let centre_before: f32 = if bar.centre.is_empty() {
+                    0.0
                 } else {
-                    inner.right()
+                    context
+                        .data(|data| data.get_temp(centre_id))
+                        .unwrap_or(0.0)
                 };
-                let start_ink = Ink {
-                    until: last - end_before - if end_before > 0.0 { spacing } else { 0.0 },
-                    ..ink
+                // (How long the start is matters to a taskbar that
+                // stands elsewhere, and is kept only for one.)
+                let start_id = egui::Id::unique(("panel-start", shown.output));
+                let tasks_elsewhere = bar
+                    .centre
+                    .iter()
+                    .chain(&bar.right)
+                    .any(|module| *module == PanelModule::Taskbar);
+                let start_before: f32 = if tasks_elsewhere {
+                    context.data(|data| data.get_temp(start_id)).unwrap_or(0.0)
+                } else {
+                    0.0
                 };
+                let (first, middle, last) = if upright {
+                    (inner.top(), strip.center().y, inner.bottom())
+                } else {
+                    (inner.left(), strip.center().x, inner.right())
+                };
+                // (A group, with the room between it and the next.)
+                let kept = |long: f32| if long > 0.0 { long + spacing } else { 0.0 };
+                let half = kept(centre_before / 2.0);
+                let start_most = (last - kept(end_before) - first).min(if half > 0.0 {
+                    middle - half - first
+                } else {
+                    f32::INFINITY
+                });
+                let end_most = (last - first - kept(start_before)).min(if half > 0.0 {
+                    last - middle - half
+                } else {
+                    f32::INFINITY
+                });
+                let centre_most =
+                    2.0 * (middle - first - kept(start_before)).min(last - kept(end_before) - middle);
+                let start_ink = with_room(0, start_most);
+                let end_ink = with_room(2, end_most);
                 let builder = egui::UiBuilder::new().max_rect(inner).layout(forward);
                 ui.scope_builder(builder, |ui| {
                     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
                     groups[0] = group(ui, &bar.left, false, false, &start_ink, &mut asked);
+                    note_tasks(0, groups[0].map_or(0.0, long));
                     if !upright {
                         ui.with_layout(backward, |ui| {
-                            groups[2] = group(ui, &bar.right, true, true, &ink, &mut asked);
+                            groups[2] = group(ui, &bar.right, true, true, &end_ink, &mut asked);
+                            note_tasks(2, groups[2].map_or(0.0, long));
                         });
                     }
                 });
+                let start_now = groups[0].map_or(0.0, long);
+                if tasks_elsewhere && (start_now - start_before).abs() > 0.5 {
+                    context.data_mut(|data| data.insert_temp(start_id, start_now));
+                    context.request_repaint();
+                }
                 if upright {
                     // Down a side it is laid out from the top as the rest
                     // is (from the bottom up, what a module shows under
@@ -1530,7 +1609,8 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                     let builder = egui::UiBuilder::new().max_rect(place).layout(forward);
                     ui.scope_builder(builder, |ui| {
                         ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
-                        groups[2] = group(ui, &bar.right, true, false, &ink, &mut asked);
+                        groups[2] = group(ui, &bar.right, true, false, &end_ink, &mut asked);
+                        note_tasks(2, groups[2].map_or(0.0, long));
                     });
                 }
                 let end_now = groups[2].map_or(0.0, long);
@@ -1541,8 +1621,8 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                 if !bar.centre.is_empty() {
                     // In the middle of the panel whatever stands at its
                     // ends: placed by how long it was the last time.
-                    let id = egui::Id::unique(("panel-centre", shown.output));
-                    let before: f32 = context.data(|data| data.get_temp(id)).unwrap_or(0.0);
+                    let (id, before) = (centre_id, centre_before);
+                    let centre_ink = with_room(1, centre_most);
                     let across = if upright {
                         strip.width()
                     } else {
@@ -1554,7 +1634,8 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                     );
                     let builder = egui::UiBuilder::new().max_rect(place).layout(forward);
                     ui.scope_builder(builder, |ui| {
-                        groups[1] = group(ui, &bar.centre, false, false, &ink, &mut asked);
+                        groups[1] = group(ui, &bar.centre, false, false, &centre_ink, &mut asked);
+                        note_tasks(1, groups[1].map_or(0.0, long));
                     });
                     let used = groups[1].map_or(0.0, long);
                     if (used - before).abs() > 0.5 {
@@ -2725,184 +2806,7 @@ fn draw_module(
                 }
             }
         }
-        PanelModule::Taskbar => {
-            // Whose windows it has: every workspace's, or the shown
-            // one's. Its own small button says which, and changes it.
-            let all = bar.tasks_of_all_workspaces;
-            let tasks = if all { &view.all_tasks } else { &view.tasks };
-            let scope = cell(
-                ui,
-                ink,
-                &Cell {
-                    pressed: true,
-                    ..says(
-                        Sign::Font(if all { icons::STACK } else { icons::SQUARE }),
-                        None,
-                        if all { accent } else { quiet },
-                    )
-                },
-            )
-            .hint(if all {
-                "The windows of every workspace. A press shows this workspace's only."
-            } else {
-                "The windows of this workspace. A press shows every workspace's."
-            });
-            if scope.clicked() {
-                asked.all_tasks = Some(!all);
-            }
-            let gap = if upright {
-                ui.spacing().item_spacing.y
-            } else {
-                ui.spacing().item_spacing.x
-            };
-            // The room the buttons have: up to where what stands at the
-            // panel's end begins (as long as it was the last time).
-            let from = if upright {
-                ui.cursor().top()
-            } else {
-                ui.cursor().left()
-            };
-            let room = (ink.until - from).max(0.0);
-            // Along a panel that lies: as wide as the setting says, or
-            // narrower when the buttons of all the windows would not fit
-            // beside each other. Down a side: a square each, and as many
-            // as there is room for.
-            let count = tasks.len();
-            let (task_long, fits) = if upright {
-                let each = 28.0;
-                let fit = |room: f32| ((room + gap) / (each + gap)).floor().max(0.0) as usize;
-                // (Where not all fit, the word that says how many more
-                // there are has its room too.)
-                let fits = if fit(room) >= count {
-                    count
-                } else {
-                    fit(room - 22.0 - gap)
-                };
-                (each, fits)
-            } else if bar.task_width == 0 || count == 0 {
-                (0.0, count)
-            } else {
-                let each = (room - gap * (count as f32 - 1.0)) / count as f32;
-                ((bar.task_width as f32).min(each.max(36.0)), count)
-            };
-            for task in tasks.iter().take(fits) {
-                // The one with the keyboard stands out, as the shown
-                // workspace does among the tabs, more quietly.
-                let has_keys = task.focused && task.shown && view.focused;
-                // (One on a workspace that is not shown reads fainter.)
-                let text = if task.shown { text } else { text.gamma_multiply(0.6) };
-                let ink_of_words = if has_keys {
-                    text
-                } else {
-                    text.gamma_multiply(0.78)
-                };
-                let label = task_label(task);
-                // (Down a side: its picture, or its first letter; the
-                // hint has the title.)
-                let said = if upright {
-                    label
-                        .chars()
-                        .next()
-                        .map(|letter| letter.to_uppercase().to_string())
-                        .unwrap_or_default()
-                } else {
-                    label
-                };
-                let picture = task_picture(ui.ctx(), &task.icon);
-                let before = if picture.is_some() && !upright { 22.0 } else { 0.0 };
-                let mut job = egui::text::LayoutJob::simple_singleline(
-                    said,
-                    egui::FontId::proportional(12.5),
-                    ink_of_words,
-                );
-                if task_long > 0.0 && !upright {
-                    // Every button the same width, whatever its title
-                    // says: a title that changes moves no button.
-                    job.wrap = egui::text::TextWrapping::truncate_at_width(
-                        (task_long - 18.0 - before).max(8.0),
-                    );
-                }
-                let words = ui.fonts_mut(|fonts| fonts.layout_job(job));
-                let long = if task_long > 0.0 {
-                    task_long
-                } else {
-                    words.size().x + 18.0 + before
-                };
-                let (place, response) =
-                    ui.allocate_exact_size(along(long), egui::Sense::click());
-                let fill = match (response.hovered(), has_keys) {
-                    (true, true) => accent.gamma_multiply(0.36),
-                    (false, true) => accent.gamma_multiply(0.24),
-                    (true, false) => text.gamma_multiply(0.14),
-                    (false, false) => text.gamma_multiply(0.06),
-                };
-                ui.painter().rect_filled(place, 8.0, fill);
-                if has_keys {
-                    // A line of the accent's at its edge says it again.
-                    let line = if upright {
-                        egui::Rect::from_min_max(
-                            egui::pos2(place.left(), place.top() + 7.0),
-                            egui::pos2(place.left() + 2.0, place.bottom() - 7.0),
-                        )
-                    } else {
-                        egui::Rect::from_min_max(
-                            egui::pos2(place.left() + 10.0, place.bottom() - 2.0),
-                            egui::pos2(place.right() - 10.0, place.bottom()),
-                        )
-                    };
-                    ui.painter().rect_filled(line, 1.0, accent);
-                }
-                let whole = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                match (&picture, upright) {
-                    (Some(picture), true) => {
-                        ui.painter().image(
-                            picture.id(),
-                            egui::Rect::from_center_size(place.center(), egui::Vec2::splat(18.0)),
-                            whole,
-                            egui::Color32::WHITE,
-                        );
-                    }
-                    (Some(picture), false) => {
-                        ui.painter().image(
-                            picture.id(),
-                            egui::Rect::from_center_size(
-                                egui::pos2(place.left() + 17.0, place.center().y),
-                                egui::Vec2::splat(16.0),
-                            ),
-                            whole,
-                            egui::Color32::WHITE,
-                        );
-                        ui.painter().galley(
-                            egui::pos2(
-                                place.left() + 9.0 + before,
-                                place.center().y - words.size().y / 2.0,
-                            ),
-                            words,
-                            ink_of_words,
-                        );
-                    }
-                    (None, _) => {
-                        ui.painter()
-                            .galley(place.center() - words.size() / 2.0, words, ink_of_words);
-                    }
-                }
-                let response = response.hint(&task.title);
-                if response.clicked() && !has_keys {
-                    asked.go = Some(task.id);
-                }
-                // The other button: the window to the middle of this
-                // display, floating; again, back as it was.
-                if response.secondary_clicked() {
-                    asked.centre = Some(task.id);
-                }
-            }
-            // (Those there is no room for are said to be there.)
-            if fits < count {
-                let more = format!("+{}", count - fits);
-                cell(ui, ink, &says(Sign::None, Some(&more), quiet))
-                    .hint(format!("{} more windows", count - fits));
-            }
-        }
+        PanelModule::Taskbar => draw_tasks(ui, shown, ink, asked),
         PanelModule::Keyboard => {
             if let Some(layout) = shown.keyboard {
                 // Its short word; the hint has the whole name and what a
@@ -2948,6 +2852,516 @@ fn draw_module(
         // Nothing to show now, or not known to this version.
         PanelModule::Layout | PanelModule::Title | PanelModule::Other(_) => {}
     }
+}
+
+/// A button of the taskbar is not shorter than this along the panel: a
+/// window's picture, or a letter of its name.
+pub const TASK_LEAST: f32 = 28.0;
+
+/// A button narrower than this has no room for words beside its picture:
+/// the picture alone. (One without a picture: a letter of its name.)
+const TASK_WORDS: f32 = 72.0;
+const TASK_WORDS_ALONE: f32 = 48.0;
+
+/// How long the button is that stands for the windows there is no room
+/// for.
+pub const TASK_MORE: f32 = 30.0;
+
+/// Where the taskbar notes how long it came to be in this frame, for the
+/// group it stands in.
+fn task_long_id() -> egui::Id {
+    egui::Id::unique("gevrek panel taskbar long")
+}
+
+/// How long each of `count` buttons of the taskbar is, and how many of
+/// them stand, in a room of `room` with `gap` between two buttons.
+///
+/// All of them stand while each has [`TASK_LEAST`] at least: `wanted`
+/// long, or shorter where that is more than its share of the room. Where
+/// not even that is there, as many of the shortest as there is room for
+/// beside the button that has the rest ([`TASK_MORE`]).
+pub fn task_fit(room: f32, gap: f32, count: usize, wanted: f32) -> (f32, usize) {
+    if count == 0 {
+        return (TASK_LEAST, 0);
+    }
+    let each = (room - gap * (count as f32 - 1.0)) / count as f32;
+    if each >= TASK_LEAST {
+        return (each.min(wanted.max(TASK_LEAST)), count);
+    }
+    let fits = ((room - TASK_MORE) / (TASK_LEAST + gap)).floor().max(0.0) as usize;
+    (TASK_LEAST, fits.min(count - 1))
+}
+
+/// What the windows of one program are known together by: what their
+/// picture is looked for by, else what the program calls its windows.
+/// None for a window that says neither (it stands alone).
+fn task_program(task: &Task) -> Option<&str> {
+    [task.icon.as_str(), task.class.as_str()]
+        .into_iter()
+        .map(str::trim)
+        .find(|said| !said.is_empty())
+}
+
+/// The buttons of the taskbar: the windows each stands for, in the order
+/// the windows have (a program's button where its first window is).
+/// `all_fit`: there is room for a button for every window.
+pub fn task_buttons(tasks: &[Task], grouping: TaskGrouping, all_fit: bool) -> Vec<Vec<&Task>> {
+    let together = match grouping {
+        TaskGrouping::Never => false,
+        TaskGrouping::WhenFull => !all_fit,
+        TaskGrouping::Always => true,
+    };
+    let mut buttons: Vec<Vec<&Task>> = Vec::new();
+    for task in tasks {
+        let program = task_program(task).filter(|_| together);
+        let place = program.and_then(|program| {
+            buttons
+                .iter()
+                .position(|button| task_program(button[0]) == Some(program))
+        });
+        match place {
+            Some(place) => buttons[place].push(task),
+            None => buttons.push(vec![task]),
+        }
+    }
+    buttons
+}
+
+/// The windows of these ids as the view has them, in the order asked.
+pub fn tasks_of_ids(view: &View, ids: &[u64]) -> Vec<Task> {
+    ids.iter()
+        .filter_map(|id| {
+            view.all_tasks
+                .iter()
+                .chain(&view.tasks)
+                .find(|task| task.id == *id)
+                .cloned()
+        })
+        .collect()
+}
+
+/// The command that gives a window the keyboard.
+pub fn go_to_window(id: u64) -> String {
+    serde_json::json!({"command": "focus_window", "selector": {"kind": "handle", "value": id}})
+        .to_string()
+}
+
+/// The taskbar: its own button (whose windows it has), and a button for
+/// each window. It is never longer than the room it has (`ink.room`):
+/// the buttons get shorter, down to a window's picture alone; then the
+/// windows of one program stand under one button (where the settings let
+/// them); and the windows there is still no room for are behind a button
+/// that lists them.
+fn draw_tasks(ui: &mut egui::Ui, shown: &Shown, ink: &Ink, asked: &mut Asked) {
+    let (bar, view, accent) = (shown.bar, shown.view, ink.accent);
+    let upright = ink.upright;
+    let across = across_of(ui, upright);
+    // (Along the panel, across it.)
+    let along = |long: f32| {
+        if upright {
+            egui::vec2(across, long)
+        } else {
+            egui::vec2(long, across)
+        }
+    };
+    let quiet = ink.text.gamma_multiply(0.55);
+    // Whose windows it has: every workspace's, or the shown one's. Its
+    // own small button says which, and changes it.
+    let all = bar.tasks_of_all_workspaces;
+    let tasks = if all { &view.all_tasks } else { &view.tasks };
+    let gap = if upright {
+        ui.spacing().item_spacing.y
+    } else {
+        ui.spacing().item_spacing.x
+    };
+    // The room the windows' buttons have: the taskbar's, less its own
+    // button (as long as `cell` makes one that has a sign and no words).
+    let own = if upright { 27.0 } else { across.max(26.0) };
+    let room = (ink.room - own - gap).max(0.0);
+    // Along a panel that lies: as wide as the setting says, or narrower
+    // when the buttons would not fit beside each other. Down a side: a
+    // square each.
+    let natural = !upright && bar.task_width == 0;
+    let wanted = if upright {
+        TASK_LEAST
+    } else if natural {
+        f32::INFINITY
+    } else {
+        bar.task_width as f32
+    };
+    let all_fit = task_fit(room, gap, tasks.len(), wanted).1 == tasks.len();
+    let buttons = task_buttons(tasks, bar.task_grouping, all_fit);
+    let (each, fits) = task_fit(room, gap, buttons.len(), wanted);
+
+    // What each button says, and how long it is.
+    struct Button<'a> {
+        windows: &'a [&'a Task],
+        /// The window it shows: the one with the keyboard among its own.
+        chosen: &'a Task,
+        picture: Option<egui::TextureHandle>,
+        has_keys: bool,
+        colour: egui::Color32,
+        long: f32,
+    }
+    let font = egui::FontId::proportional(12.5);
+    let mut drawn: Vec<Button> = buttons
+        .iter()
+        .take(fits)
+        .map(|windows| {
+            let chosen = windows
+                .iter()
+                .find(|task| task.focused && task.shown)
+                .or_else(|| windows.iter().find(|task| task.focused))
+                .copied()
+                .unwrap_or(windows[0]);
+            // The one with the keyboard stands out, as the shown
+            // workspace does among the tabs, more quietly.
+            let has_keys = view.focused && windows.iter().any(|task| task.focused && task.shown);
+            // (One on a workspace that is not shown reads fainter.)
+            let text = if windows.iter().any(|task| task.shown) {
+                ink.text
+            } else {
+                ink.text.gamma_multiply(0.6)
+            };
+            Button {
+                windows: windows.as_slice(),
+                chosen,
+                picture: task_picture(ui.ctx(), &chosen.icon),
+                has_keys,
+                colour: if has_keys {
+                    text
+                } else {
+                    text.gamma_multiply(0.78)
+                },
+                long: each,
+            }
+        })
+        .collect();
+    // (The room a button's picture takes before its words, and the count
+    // of its windows after them.)
+    let before = |button: &Button| if button.picture.is_some() { 22.0 } else { 0.0 };
+    let after = |button: &Button| if button.windows.len() > 1 { 16.0 } else { 0.0 };
+    if natural {
+        // Each as wide as its words, while they all have room so; else
+        // none wider than its share.
+        let wide: Vec<f32> = drawn
+            .iter()
+            .map(|button| {
+                let words = ui.painter().layout_no_wrap(
+                    task_label(button.chosen),
+                    font.clone(),
+                    button.colour,
+                );
+                words.size().x + 18.0 + before(button) + after(button)
+            })
+            .collect();
+        let together = wide.iter().sum::<f32>() + gap * (wide.len() as f32 - 1.0).max(0.0);
+        for (button, wide) in drawn.iter_mut().zip(wide) {
+            button.long = if together <= room {
+                wide.max(TASK_LEAST)
+            } else {
+                wide.clamp(TASK_LEAST, each)
+            };
+        }
+    }
+    // The windows there is no room for.
+    let hidden: Vec<&Task> = buttons.iter().skip(fits).flatten().copied().collect();
+
+    // In the order they stand along the panel (where the panel's end is
+    // laid out from its edge inwards, the last comes first).
+    enum Piece {
+        Own,
+        Window(usize),
+        More,
+    }
+    let mut pieces = vec![Piece::Own];
+    pieces.extend((0..drawn.len()).map(Piece::Window));
+    if !hidden.is_empty() {
+        pieces.push(Piece::More);
+    }
+    if matches!(
+        ui.layout().main_dir(),
+        egui::Direction::RightToLeft | egui::Direction::BottomUp
+    ) {
+        pieces.reverse();
+    }
+    let mut reached: Option<egui::Rect> = None;
+    let whole = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+    for piece in pieces {
+        let place = match piece {
+            Piece::Own => {
+                let scope = cell(
+                    ui,
+                    ink,
+                    &Cell {
+                        sign: Sign::Font(if all { icons::STACK } else { icons::SQUARE }),
+                        words: None,
+                        colour: if all { accent } else { quiet },
+                        fill: None,
+                        pressed: true,
+                    },
+                )
+                .hint(if all {
+                    "The windows of every workspace. A press shows this workspace's only."
+                } else {
+                    "The windows of this workspace. A press shows every workspace's."
+                });
+                if scope.clicked() {
+                    asked.all_tasks = Some(!all);
+                }
+                scope.rect
+            }
+            Piece::Window(index) => {
+                let button = &drawn[index];
+                let many = button.windows.len() > 1;
+                // (No room for words: its picture alone, or a letter.)
+                let narrow = upright
+                    || button.long
+                        < if button.picture.is_some() {
+                            TASK_WORDS
+                        } else {
+                            TASK_WORDS_ALONE
+                        };
+                let label = task_label(button.chosen);
+                let said = if !narrow {
+                    label
+                } else if button.picture.is_none() {
+                    label
+                        .chars()
+                        .next()
+                        .map(|letter| letter.to_uppercase().to_string())
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                let mut job =
+                    egui::text::LayoutJob::simple_singleline(said, font.clone(), button.colour);
+                if !narrow {
+                    // A button is as wide as it is, whatever its title
+                    // says: a title that changes moves no button.
+                    job.wrap = egui::text::TextWrapping::truncate_at_width(
+                        (button.long - 18.0 - before(button) - after(button)).max(8.0),
+                    );
+                }
+                let words = ui.fonts_mut(|fonts| fonts.layout_job(job));
+                let (place, response) =
+                    ui.allocate_exact_size(along(button.long), egui::Sense::click());
+                let fill = match (response.hovered(), button.has_keys) {
+                    (true, true) => accent.gamma_multiply(0.36),
+                    (false, true) => accent.gamma_multiply(0.24),
+                    (true, false) => ink.text.gamma_multiply(0.14),
+                    (false, false) => ink.text.gamma_multiply(0.06),
+                };
+                ui.painter().rect_filled(place, 8.0, fill);
+                if button.has_keys {
+                    // A line of the accent's at its edge says it again.
+                    let line = if upright {
+                        egui::Rect::from_min_max(
+                            egui::pos2(place.left(), place.top() + 7.0),
+                            egui::pos2(place.left() + 2.0, place.bottom() - 7.0),
+                        )
+                    } else {
+                        let in_by = (place.width() / 2.0 - 4.0).min(10.0);
+                        egui::Rect::from_min_max(
+                            egui::pos2(place.left() + in_by, place.bottom() - 2.0),
+                            egui::pos2(place.right() - in_by, place.bottom()),
+                        )
+                    };
+                    ui.painter().rect_filled(line, 1.0, accent);
+                }
+                match (&button.picture, narrow) {
+                    (Some(picture), true) => {
+                        let side = if upright { 18.0 } else { 16.0 };
+                        ui.painter().image(
+                            picture.id(),
+                            egui::Rect::from_center_size(place.center(), egui::Vec2::splat(side)),
+                            whole,
+                            egui::Color32::WHITE,
+                        );
+                    }
+                    (Some(picture), false) => {
+                        ui.painter().image(
+                            picture.id(),
+                            egui::Rect::from_center_size(
+                                egui::pos2(place.left() + 17.0, place.center().y),
+                                egui::Vec2::splat(16.0),
+                            ),
+                            whole,
+                            egui::Color32::WHITE,
+                        );
+                        ui.painter().galley(
+                            egui::pos2(
+                                place.left() + 9.0 + before(button),
+                                place.center().y - words.size().y / 2.0,
+                            ),
+                            words,
+                            button.colour,
+                        );
+                    }
+                    (None, true) => {
+                        ui.painter()
+                            .galley(place.center() - words.size() / 2.0, words, button.colour);
+                    }
+                    (None, false) => {
+                        // (In the middle of what the count leaves.)
+                        let middle = place.center() - egui::vec2(after(button) / 2.0, 0.0);
+                        ui.painter()
+                            .galley(middle - words.size() / 2.0, words, button.colour);
+                    }
+                }
+                if many {
+                    // How many windows it stands for: after its words,
+                    // or small in its corner where it has none.
+                    let count = button.windows.len().to_string();
+                    if narrow {
+                        ui.painter().text(
+                            place.right_bottom() - egui::vec2(2.0, 1.0),
+                            egui::Align2::RIGHT_BOTTOM,
+                            count,
+                            egui::FontId::proportional(9.0),
+                            ink.text,
+                        );
+                    } else {
+                        ui.painter().text(
+                            egui::pos2(place.right() - 8.0, place.center().y),
+                            egui::Align2::RIGHT_CENTER,
+                            count,
+                            egui::FontId::proportional(11.0),
+                            quiet,
+                        );
+                    }
+                }
+                if many {
+                    let response = response.hint(format!(
+                        "{} windows: {}. A press lists them.",
+                        button.windows.len(),
+                        task_label(button.chosen)
+                    ));
+                    // The windows it stands for, to choose one from.
+                    if response.clicked() {
+                        let ids = button.windows.iter().map(|task| task.id).collect();
+                        asked.task_menu = Some((response.rect, ids));
+                    }
+                } else {
+                    let response = response.hint(&button.chosen.title);
+                    if response.clicked() && !button.has_keys {
+                        asked.go = Some(button.chosen.id);
+                    }
+                    // The other button: the window to the middle of this
+                    // display, floating; again, back as it was.
+                    if response.secondary_clicked() {
+                        asked.centre = Some(button.chosen.id);
+                    }
+                }
+                place
+            }
+            Piece::More => {
+                // Those there is no room for are said to be there, and a
+                // press lists them. (It is the accent's where the window
+                // with the keyboard is among them.)
+                let (place, response) =
+                    ui.allocate_exact_size(along(TASK_MORE), egui::Sense::click());
+                let has_keys = view.focused && hidden.iter().any(|task| task.focused && task.shown);
+                let fill = match (response.hovered(), has_keys) {
+                    (true, true) => accent.gamma_multiply(0.36),
+                    (false, true) => accent.gamma_multiply(0.24),
+                    (true, false) => ink.text.gamma_multiply(0.14),
+                    (false, false) => ink.text.gamma_multiply(0.06),
+                };
+                ui.painter().rect_filled(place, 8.0, fill);
+                ui.painter().text(
+                    place.center(),
+                    egui::Align2::CENTER_CENTER,
+                    if hidden.len() > 99 {
+                        "+".to_string()
+                    } else {
+                        format!("+{}", hidden.len())
+                    },
+                    egui::FontId::proportional(if hidden.len() > 9 { 10.5 } else { 12.0 }),
+                    if has_keys { ink.text } else { quiet },
+                );
+                let response = response.hint(format!(
+                    "{} more windows. A press lists them.",
+                    hidden.len()
+                ));
+                if response.clicked() {
+                    let ids = hidden.iter().map(|task| task.id).collect();
+                    asked.task_menu = Some((response.rect, ids));
+                }
+                place
+            }
+        };
+        reached = Some(reached.map_or(place, |reached| reached.union(place)));
+    }
+    // How long it came to be: its group gives the rest of its room to
+    // what else stands in it.
+    let long = reached.map_or(0.0, |reached| {
+        if upright {
+            reached.height()
+        } else {
+            reached.width()
+        }
+    });
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(task_long_id(), long));
+}
+
+/// How many windows the list of them shows at once (more are scrolled).
+const TASK_LINES: usize = 12;
+
+/// How large the list of windows under a button of the taskbar is, in
+/// points.
+pub fn task_menu_size(count: usize) -> egui::Vec2 {
+    egui::vec2(340.0, 14.0 + 32.0 * count.clamp(1, TASK_LINES) as f32)
+}
+
+/// The list under a button of the taskbar that stands for several
+/// windows: each with its picture and its title, the one with the
+/// keyboard marked. The window that was pressed, if one was.
+pub fn task_menu(ui: &mut egui::Ui, palette: &theme::Palette, tasks: &[Task]) -> Option<u64> {
+    let mut chosen = None;
+    egui::CentralPanel::default()
+        .frame(
+            egui::Frame::new()
+                .fill(palette.surface)
+                .inner_margin(egui::Margin::same(6)),
+        )
+        .show(ui, |ui| {
+            let (on, chose) = menu_keys(ui.ctx(), tasks.len(), |_| true, false);
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    for (index, task) in tasks.iter().enumerate() {
+                        let words = if task.title.trim().is_empty() {
+                            task.class.trim()
+                        } else {
+                            task.title.trim()
+                        };
+                        let name: String = words.chars().take(42).collect();
+                        let label = egui::RichText::new(name).size(13.0);
+                        let marked = task.focused && task.shown;
+                        let button = match task_picture(ui.ctx(), &task.icon) {
+                            Some(picture) => egui::Button::image_and_text(
+                                egui::Image::new((picture.id(), egui::Vec2::splat(16.0))),
+                                label,
+                            )
+                            .selected(marked),
+                            None => egui::Button::selectable(marked, label),
+                        }
+                        .min_size(egui::vec2(ui.available_width(), 28.0));
+                        let response = ui.add(button);
+                        if on == Some(index) {
+                            menu_mark(ui, response.rect, palette);
+                            response.scroll_to_me(None);
+                        }
+                        if response.clicked() || (chose && on == Some(index)) {
+                            chosen = Some(task.id);
+                        }
+                    }
+                });
+        });
+    chosen
 }
 
 /// How large the menu of devices to play on is, in points.
@@ -4244,6 +4658,284 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
         assert!(start.height() > 200.0 && end.height() > 80.0);
     }
 
+    /// All the buttons stand while each has the least a button is long;
+    /// then as many of the shortest as fit beside the one for the rest.
+    #[test]
+    fn the_buttons_of_the_taskbar_share_the_room_they_have() {
+        // Room for all at the width that is wanted.
+        assert_eq!(task_fit(1000.0, 8.0, 3, 150.0), (150.0, 3));
+        // Narrower, each its share.
+        let (each, fits) = task_fit(400.0, 8.0, 5, 150.0);
+        assert_eq!(fits, 5);
+        assert!((each - (400.0 - 32.0) / 5.0).abs() < 0.01, "{each}");
+        // Down to the least, and not below it.
+        assert_eq!(task_fit(5.0 * 28.0 + 4.0 * 8.0, 8.0, 5, 150.0), (TASK_LEAST, 5));
+        let (each, fits) = task_fit(5.0 * 28.0 + 4.0 * 8.0 - 1.0, 8.0, 5, 150.0);
+        assert_eq!(each, TASK_LEAST);
+        assert!(fits < 5);
+        // What stands is never longer than the room.
+        for room in [0.0_f32, 10.0, 29.0, 31.0, 66.0, 100.0, 333.0, 2000.0] {
+            for count in [0_usize, 1, 2, 7, 40, 300] {
+                for wanted in [0.0, 28.0, 150.0, f32::INFINITY] {
+                    let (each, fits) = task_fit(room, 8.0, count, wanted);
+                    assert!(each >= TASK_LEAST && fits <= count);
+                    let more = if fits < count { TASK_MORE } else { 0.0 };
+                    let pieces = fits + usize::from(fits < count);
+                    let long = each * fits as f32 + more + 8.0 * pieces.saturating_sub(1) as f32;
+                    // (But the button for the rest alone, which is there
+                    // whatever the room.)
+                    assert!(
+                        long <= room.max(TASK_MORE) + 0.01,
+                        "{long} in {room}: {count} at {wanted}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The windows of one program under one button: always, never, or
+    /// when there is no room for a button each.
+    #[test]
+    fn the_windows_of_a_program_stand_under_one_button() {
+        let task = |id: u64, icon: &str, class: &str| Task {
+            id,
+            title: format!("window {id}"),
+            class: class.to_string(),
+            icon: icon.to_string(),
+            focused: false,
+            shown: true,
+        };
+        let tasks = [
+            task(1, "firefox", "Navigator"),
+            task(2, "", "term"),
+            task(3, "firefox", "Navigator"),
+            task(4, "", ""),
+            task(5, "", "term"),
+            task(6, "", ""),
+        ];
+        let ids = |buttons: Vec<Vec<&Task>>| -> Vec<Vec<u64>> {
+            buttons
+                .iter()
+                .map(|button| button.iter().map(|task| task.id).collect())
+                .collect()
+        };
+        let apart: Vec<Vec<u64>> = (1..=6).map(|id| vec![id]).collect();
+        // (A window that says nothing of its program stands alone.)
+        let together = vec![vec![1, 3], vec![2, 5], vec![4], vec![6]];
+        use TaskGrouping::{Always, Never, WhenFull};
+        assert_eq!(ids(task_buttons(&tasks, Never, false)), apart);
+        assert_eq!(ids(task_buttons(&tasks, WhenFull, true)), apart);
+        assert_eq!(ids(task_buttons(&tasks, WhenFull, false)), together);
+        assert_eq!(ids(task_buttons(&tasks, Always, true)), together);
+    }
+
+    /// Where the groups of a panel came to stand (islands: each piece
+    /// reaches as far beyond its group as the panel's padding), and what
+    /// the last frame asked, after `frames` frames; a press at `press`
+    /// in the last one.
+    fn panel_drawn(
+        bar: &PanelProfile,
+        view: &View,
+        size: egui::Vec2,
+        frames: usize,
+        press: Option<egui::Pos2>,
+    ) -> Asked {
+        let system = SystemView {
+            volume: Some((40, false)),
+            battery: None,
+            network: None,
+            brightness: None,
+        };
+        let context = egui::Context::default();
+        let mut asked = Asked::default();
+        for frame in 0..frames {
+            let mut events = Vec::new();
+            if let Some(at) = press {
+                // (Over it, down on it, and up again: three frames.)
+                let step = frame + 3;
+                if step == frames {
+                    events.push(egui::Event::PointerMoved(at));
+                } else if step == frames + 1 {
+                    events.push(egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: Default::default(),
+                    });
+                } else if step == frames + 2 {
+                    events.push(egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: Default::default(),
+                    });
+                }
+            }
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                events,
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                asked = draw(
+                    ui,
+                    &Shown {
+                        bar,
+                        view,
+                        accent: egui::Color32::from_rgb(64, 224, 208),
+                        quiet: false,
+                        notices: 0,
+                        mode: "",
+                        recording: false,
+                        sharing: false,
+                        output: "Monitor ACM2702 (1)",
+                        tray: &[],
+                        system: &system,
+                        keyboard: None,
+                    },
+                    None,
+                );
+            });
+            output.textures_delta.clear();
+        }
+        asked
+    }
+
+    fn many_tasks(count: u64) -> Vec<Task> {
+        (0..count)
+            .map(|id| Task {
+                id: id + 1,
+                title: format!("window {id} of a program with a long title"),
+                class: format!("program-{}", id % 7),
+                icon: String::new(),
+                focused: id == 3,
+                shown: true,
+            })
+            .collect()
+    }
+
+    /// What was reported: with many windows the taskbar's buttons went on
+    /// over what stands in the middle of the panel and at its end. They
+    /// do not, however many windows there are, wherever on the panel the
+    /// taskbar stands, and whatever is set for it.
+    #[test]
+    fn the_taskbar_keeps_to_its_room_however_many_windows_there_are() {
+        use gevrek_model::settings::{PanelEdge, PanelFit, PanelStyle};
+        let size = egui::vec2(1100.0, 36.0);
+        for count in [0, 1, 4, 13, 40, 300] {
+            for grouping in [
+                TaskGrouping::Never,
+                TaskGrouping::WhenFull,
+                TaskGrouping::Always,
+            ] {
+                for task_width in [0, 150] {
+                    for place in 0..3 {
+                        for fit in [PanelFit::Full, PanelFit::Content] {
+                            let mut bar = PanelProfile {
+                                edge: PanelEdge::Top,
+                                style: PanelStyle::Islands,
+                                fit,
+                                task_width,
+                                task_grouping: grouping,
+                                left: vec![PanelModule::Launcher, PanelModule::Workspaces],
+                                centre: vec![PanelModule::Clock],
+                                right: vec![
+                                    PanelModule::Sound,
+                                    PanelModule::Clock,
+                                    PanelModule::Power,
+                                ],
+                                ..Default::default()
+                            };
+                            match place {
+                                0 => bar.left.push(PanelModule::Taskbar),
+                                1 => bar.centre.insert(0, PanelModule::Taskbar),
+                                _ => bar.right.insert(0, PanelModule::Taskbar),
+                            }
+                            let mut view =
+                                view(&windows_state(), "Monitor ACM2702 (1)").expect("the display");
+                            view.tasks = many_tasks(count);
+                            let what = format!(
+                                "{count} windows, {grouping:?}, {task_width} wide, in group {place}, {fit:?}"
+                            );
+                            let reach = panel_drawn(&bar, &view, size, 8, None).reach;
+                            // (It has come to rest: a frame more is the same.)
+                            let again = panel_drawn(&bar, &view, size, 9, None).reach;
+                            assert_eq!(reach, again, "{what}");
+                            assert_eq!(reach.len(), 3, "{what}: {reach:?}");
+                            // What stands in a piece, without the room
+                            // around it.
+                            let beyond = bar.padding as f32;
+                            let mut pieces: Vec<(f32, f32)> = reach
+                                .iter()
+                                .map(|piece| (piece.left() + beyond, piece.right() - beyond))
+                                .collect();
+                            pieces.sort_by(|one, other| one.0.total_cmp(&other.0));
+                            assert!(pieces[0].0 >= -0.5, "{what}: {pieces:?}");
+                            assert!(pieces[2].1 <= size.x + 0.5, "{what}: {pieces:?}");
+                            for pair in pieces.windows(2) {
+                                assert!(pair[0].1 <= pair[1].0 + 0.5, "{what}: {pieces:?}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Windows there is no room for are behind a button of their own: a
+    /// press on it asks for the list of them, and of no others.
+    #[test]
+    fn the_windows_without_room_are_listed_by_a_button_of_their_own() {
+        use gevrek_model::settings::PanelEdge;
+        let size = egui::vec2(700.0, 36.0);
+        let bar = PanelProfile {
+            edge: PanelEdge::Top,
+            task_grouping: TaskGrouping::Never,
+            left: vec![PanelModule::Taskbar],
+            centre: Vec::new(),
+            right: vec![PanelModule::Power],
+            ..Default::default()
+        };
+        let mut view = view(&windows_state(), "Monitor ACM2702 (1)").expect("the display");
+        view.tasks = many_tasks(60);
+        // Its button is the last of the taskbar: found from the panel's
+        // end, where the power's button stands before it.
+        let mut listed = None;
+        for from_end in (30..160).step_by(6) {
+            let at = egui::pos2(size.x - from_end as f32, size.y / 2.0);
+            let asked = panel_drawn(&bar, &view, size, 8, Some(at));
+            if let Some((_, windows)) = asked.task_menu {
+                listed = Some(windows);
+                break;
+            }
+        }
+        let listed = listed.expect("a button for the windows without room");
+        assert!(!listed.is_empty() && listed.len() < 60, "{listed:?}");
+        // (The last ones, in their order.)
+        let last: Vec<u64> = (61 - listed.len() as u64..=60).collect();
+        assert_eq!(listed, last);
+        assert_eq!(tasks_of_ids(&view, &listed).len(), listed.len());
+        // With the windows of a program together there is room for all:
+        // a press on a program's button lists its windows.
+        let bar = PanelProfile {
+            task_grouping: TaskGrouping::WhenFull,
+            ..bar
+        };
+        let mut listed = None;
+        for from_start in (50..200).step_by(6) {
+            let at = egui::pos2(from_start as f32, size.y / 2.0);
+            let asked = panel_drawn(&bar, &view, size, 8, Some(at));
+            if let Some((_, windows)) = asked.task_menu {
+                listed = Some(windows);
+                break;
+            }
+        }
+        let listed = listed.expect("a program's button");
+        assert!(listed.len() >= 8, "{listed:?}");
+        let program = |id: &u64| (id - 1) % 7;
+        assert!(listed.iter().all(|id| program(id) == program(&listed[0])), "{listed:?}");
+    }
+
     /// A panel drawn into a picture, to be looked at while it is worked
     /// on:
     ///
@@ -4251,7 +4943,8 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
     ///
     /// `GEVREK_LOOK=left` (or `right`, `bottom`) for another edge,
     /// `GEVREK_LOOK_STYLE=islands` (or `bare`), `GEVREK_LOOK_HEIGHT=44`
-    /// for how thick it is, `GEVREK_LOOK_SIZE=1600x900` for the display.
+    /// for how thick it is, `GEVREK_LOOK_SIZE=1600x900` for the display,
+    /// `GEVREK_LOOK_WINDOWS=40` for so many windows on the taskbar.
     #[test]
     #[ignore = "draws a picture to look at: GEVREK_LOOK_OUT=<file>"]
     fn the_panel_is_drawn_to_be_looked_at() {
@@ -4335,11 +5028,14 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
             title: "panel.rs - gevrek - a title that goes on for a while".to_string(),
             focused: true,
             place: gevrek_model::settings::DisplayRef::named("DP-1"),
-            tasks: vec![
-                task(1, "Terminal", false),
-                task(2, "Firefox", true),
-                task(3, "Files", false),
-            ],
+            tasks: match said("GEVREK_LOOK_WINDOWS").and_then(|text| text.parse::<u64>().ok()) {
+                Some(count) => many_tasks(count),
+                None => vec![
+                    task(1, "Terminal", false),
+                    task(2, "Firefox", true),
+                    task(3, "Files", false),
+                ],
+            },
             all_tasks: Vec::new(),
         };
         let system = SystemView {

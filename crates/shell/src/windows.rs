@@ -151,6 +151,9 @@ enum Menu {
     Sound,
     /// The icons of the tray: all of them, and which stand on the panel.
     Tray,
+    /// The windows a button of the taskbar stands for (by the first of
+    /// them: another button's list is another menu).
+    Windows(u64),
 }
 
 /// What the surfaces share.
@@ -3029,7 +3032,10 @@ fn draw_panel(
         .map(|anchor| (Menu::Layouts, anchor))
         .or(asked.notices.map(|anchor| (Menu::Notices, anchor)))
         .or(asked.sound_menu.map(|anchor| (Menu::Sound, anchor)))
-        .or(tray_list.map(|anchor| (Menu::Tray, anchor)));
+        .or(tray_list.map(|anchor| (Menu::Tray, anchor)))
+        .or(asked.task_menu.as_ref().map(|(anchor, windows)| {
+            (Menu::Windows(windows.first().copied().unwrap_or(0)), *anchor)
+        }));
     // Another workspace is asked for: the menu was for this one.
     if let (Some((id, _)), true, None) = (open, asked.show.is_some(), wanted) {
         control.close(id);
@@ -3118,6 +3124,27 @@ fn draw_panel(
                 if !gevrek_system::sound::choose_output(id) {
                     log::warn!("the device to play on was not changed");
                 }
+                Flow::Close
+            })
+        }
+        Menu::Windows(_) => {
+            // The windows as they are now; a press on one goes to it.
+            let listed = asked.task_menu.as_ref().map(|(_, windows)| windows.as_slice());
+            let tasks = panel::tasks_of_ids(&view, listed.unwrap_or_default());
+            if tasks.is_empty() {
+                return Flow::Continue;
+            }
+            let size = panel::task_menu_size(tasks.len());
+            let line = Rc::clone(shared);
+            control.popup(surface, anchor, size, move |ui, _| {
+                let _held = &held;
+                let palette = themed(ui, &mut fonts);
+                let Some(window) = panel::task_menu(ui, &palette, &tasks) else {
+                    return Flow::Continue;
+                };
+                line.borrow()
+                    .link
+                    .send(Request::Dispatch(panel::go_to_window(window)));
                 Flow::Close
             })
         }
