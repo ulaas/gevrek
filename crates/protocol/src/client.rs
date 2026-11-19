@@ -391,6 +391,53 @@ impl WMClient {
         let response = self.client.shutdown(request).await?;
         Ok(response.into_inner())
     }
+
+    /// Become the shell that runs the zones: what `reports` gives is told
+    /// to the window manager, and what is asked of the zones comes back
+    /// as the stream. The call lasts for as long as the zones run, so it
+    /// has no deadline.
+    pub async fn attach_zones(
+        &mut self,
+        reports: impl tokio_stream::Stream<Item = proto::ZonesReport> + Send + 'static,
+    ) -> Result<tonic::Streaming<proto::ZonesRequest>> {
+        let response = self.client.attach_zones(Request::new(reports)).await?;
+        Ok(response.into_inner())
+    }
+
+    /// How the zones are, as the shell last reported it.
+    pub async fn get_zones_state(&mut self) -> Result<proto::ZonesStateResponse> {
+        let response = self
+            .client
+            .get_zones_state(with_deadline(proto::Empty {}, QUERY_DEADLINE))
+            .await?;
+        Ok(response.into_inner())
+    }
+
+    /// Ask something of the zones (a zones command as JSON) and wait for
+    /// the shell's answer: for `timeout_ms`, or the window manager's own
+    /// time where that is 0.
+    pub async fn send_zones_command(
+        &mut self,
+        json: impl Into<String>,
+        version: u32,
+        timeout_ms: u32,
+    ) -> Result<proto::ZonesCommandReply> {
+        // The window manager answers when its own wait is over; this one
+        // is a little longer, so that its answer is the one shown.
+        let waited = Duration::from_millis(u64::from(timeout_ms.min(30_000)));
+        let response = self
+            .client
+            .send_zones_command(with_deadline(
+                proto::ZonesCommandDocument {
+                    json: json.into(),
+                    version,
+                    timeout_ms,
+                },
+                COMMAND_DEADLINE.max(waited + Duration::from_secs(2)),
+            ))
+            .await?;
+        Ok(response.into_inner())
+    }
 }
 
 #[cfg(test)]

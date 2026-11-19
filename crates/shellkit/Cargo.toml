@@ -30,7 +30,17 @@ accesskit_unix = "0.24"
 
 # Windows: borderless tool windows.
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true }
+# (Drag and drop: OLE, the data that is dragged, and the memory it is in.)
+windows = { workspace = true, features = [
+    "Win32_System_Ole",
+    "Win32_System_SystemServices",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+] }
+# The same crate `windows` is built on, by its own name: the drop target
+# and the drag source are written with a macro that names it so.
+windows-core = "0.58"
 raw-window-handle = "0.6"
 # What is drawn, told to screen readers and other aids (UI Automation).
 accesskit_windows = "0.35"

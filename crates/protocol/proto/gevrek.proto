@@ -72,6 +72,20 @@ service WindowManager {
 
   // Gracefully shutdown the window manager
   rpc Shutdown(ShutdownRequest) returns (StatusResponse);
+
+  // The zones on the desktop live in the shell; this is the shell's line
+  // for them. The shell reports how the zones are, what happens to them,
+  // and its answers; the window manager sends what is asked of them. One
+  // shell is attached at a time (a second is refused while the first is
+  // there), and the end of this call is how the window manager knows
+  // that the zones are no longer running. Capability: "zones_ipc_v1".
+  rpc AttachZones(stream ZonesReport) returns (stream ZonesRequest);
+
+  // How the zones are, as the shell last reported it.
+  rpc GetZonesState(Empty) returns (ZonesStateResponse);
+
+  // Ask something of the zones and wait for the shell's answer.
+  rpc SendZonesCommand(ZonesCommandDocument) returns (ZonesCommandReply);
 }
 
 // Shutdown request with optional parameters
@@ -1014,4 +1028,94 @@ message DetailedWindowInfo {
   // of the icon theme, or the path of a file of its pixels. Empty where
   // it gave none (the window's picture is then its program's).
   string icon = 23;
+}
+
+// ============================================================================
+// Zones (the shell's containers for the desktop's icons)
+// ============================================================================
+//
+// The JSON in these messages is gevrek-zones' (`gevrek_zones::ipc`), under
+// its own version number: its shapes still move, and these messages need
+// not change when they do.
+
+// What the shell that runs the zones tells the window manager.
+message ZonesReport {
+  oneof report {
+    ZonesSnapshotReport snapshot = 1;
+    ZonesEventReport event = 2;
+    ZonesCommandAnswer answer = 3;
+  }
+}
+
+// The zones as they are: `gevrek_zones::ipc::ZonesSnapshot` as JSON.
+message ZonesSnapshotReport {
+  // The version of the JSON (`gevrek_zones::ipc::VERSION`).
+  uint32 version = 1;
+  string json = 2;
+}
+
+// Something happened to the zones: a `gevrek_zones::ZonesEvent` as JSON.
+// Subscribers are told as a `runtime_event` of the kind `zones.<name>`.
+message ZonesEventReport {
+  uint32 version = 1;
+  // The event's own word (`zone_created`).
+  string name = 2;
+  string json = 3;
+}
+
+// The shell's answer to a `ZonesRequest` that had a `request_id`.
+message ZonesCommandAnswer {
+  uint64 request_id = 1;
+  bool success = 2;
+  // Why it was refused, in the zones' own words.
+  optional string error = 3;
+  // What happened because of it: `ZonesEvent`s as JSON, in their order.
+  repeated string events = 4;
+}
+
+// Something asked of the zones, sent to the shell that runs them.
+message ZonesRequest {
+  // Echoed in the answer. 0: nobody waits, and nothing is to be answered.
+  uint64 request_id = 1;
+  uint32 version = 2;
+  // A zones command (`{"command": "quick_hide"}`).
+  string json = 3;
+}
+
+message ZonesStateResponse {
+  // A shell that runs the zones is attached now.
+  bool running = 1;
+  // `json` is from a shell that has gone since, or from before the shell
+  // that is attached now has reported anything.
+  bool stale = 2;
+  uint32 version = 3;
+  // Counts up with every snapshot this window manager was given; 0 while
+  // there never was one (`json` is empty then).
+  uint64 sequence = 4;
+  string json = 5;
+  // When the snapshot came, in milliseconds since 1970.
+  int64 published_ms = 6;
+  // In words, where there is nothing to show or it is old.
+  string message = 7;
+}
+
+message ZonesCommandDocument {
+  // A zones command (`{"command": "quick_hide"}`).
+  string json = 1;
+  uint32 version = 2;
+  // How long to wait for the shell's answer; 0: the window manager's own
+  // time (5 s). Never more than 30 s.
+  uint32 timeout_ms = 3;
+}
+
+message ZonesCommandReply {
+  // The shell carried it out.
+  bool success = 1;
+  // Why not: the zones' own reason, that no shell runs the zones, or that
+  // none answered in time.
+  optional string error = 2;
+  // What happened because of it: `ZonesEvent`s as JSON, in their order.
+  repeated string events = 3;
+  // A shell that runs the zones was attached and was sent the command.
+  bool delivered = 4;
 }

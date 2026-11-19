@@ -10,13 +10,24 @@ description = "What gevrek's shell asks of the system it runs on: the installed 
 log = { workspace = true }
 dirs = { workspace = true }
 # Icons: pictures (PNG) and drawings (SVG).
-image = { version = "0.25", default-features = false, features = ["png"] }
+# (JPEG and WebP: the pictures small pictures of files are made of.)
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 resvg = { version = "0.45", default-features = false }
+# The zones' backends: the trait they answer, and what passes through it.
+gevrek-zones = { path = "../zones" }
+gevrek-model = { path = "../model" }
+# (What the window manager says of the displays, as the shell has it.)
+serde_json = { workspace = true }
 
 # Linux: the sound server, spoken to in its own protocol (PulseAudio's,
 # which PipeWire serves too), with no library of C.
 [target.'cfg(target_os = "linux")'.dependencies]
 pulseaudio = "0.3"
+# What changes in the folders zones show: the kernel tells (inotify),
+# nothing is looked at again and again.
+notify = { version = "8", default-features = false }
+# The local time a file was put into the trash at, for its record there.
+jiff = { workspace = true }
 
 # Windows: the Start menu and the shell's pictures of what is in it.
 [target.'cfg(windows)'.dependencies]
@@ -47,7 +58,21 @@ windows = { workspace = true, features = [
     "Win32_System_Memory",
     # (A window's picture, for the window switcher.)
     "Win32_Storage_Xps",
+    # (The zones: the clipboard and what is dragged, as the shell's menus
+    # and file operations need them.)
+    "Win32_System_Ole",
+    "Win32_System_SystemServices",
+    # (Who a display is: its EDID, by the device of the display and that
+    # device's key.)
+    "Win32_Devices_Display",
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Devices_Properties",
 ] }
+# The zones: what changes in the folders they show. Windows tells
+# (`ReadDirectoryChangesW`); nothing is looked at again and again.
+notify = { version = "8", default-features = false }
+# (What is written down of Explorer's own icons before they are put away.)
+serde = { workspace = true }
 # The same crate `windows` is built on, by its own name: what answers the
 # system's calls back (the sound's changes) is written with a macro that
 # names it so.

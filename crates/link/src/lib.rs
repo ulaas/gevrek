@@ -7,6 +7,12 @@
 //!
 //! The line is kept: when the window manager is not there, or goes away,
 //! it is tried again every few seconds until it answers.
+//!
+//! The program that runs the zones on the desktop has a part of the line
+//! of its own (`zones`).
+
+pub mod zones;
+pub use zones::{ZonesAsk, ZonesHeard, ZonesTell};
 
 use gevrek_model::Config;
 use gevrek_protocol::proto::execution_event::Event as Wire;
@@ -116,6 +122,8 @@ pub enum Level {
 pub struct Link {
     requests: UnboundedSender<Request>,
     events: Receiver<Event>,
+    zones: UnboundedSender<ZonesTell>,
+    zones_heard: Receiver<ZonesHeard>,
 }
 
 impl Link {
@@ -123,6 +131,8 @@ impl Link {
     pub fn start(address: String, wake: impl Fn() + Send + Sync + 'static) -> Self {
         let (requests, incoming) = unbounded_channel();
         let (outgoing, events) = std::sync::mpsc::channel();
+        let (zones, zones_told) = unbounded_channel();
+        let (zones_hearing, zones_heard) = std::sync::mpsc::channel();
         let spawned = std::thread::Builder::new()
             .name("gevrek-link".to_string())
             .spawn(move || {
@@ -140,19 +150,38 @@ impl Link {
                     events: outgoing,
                     wake: std::sync::Arc::new(wake),
                 };
-                runtime.block_on(run(address, incoming, tell));
+                let zones = zones::ZonesSide::new(
+                    zones_told,
+                    zones::ZonesTeller {
+                        heard: zones_hearing,
+                        wake: std::sync::Arc::clone(&tell.wake),
+                    },
+                );
+                runtime.block_on(run(address, incoming, tell, zones));
             });
         if let Err(error) = spawned {
             log::error!("the line to the window manager could not be started: {error}");
         }
-        Self { requests, events }
+        Self {
+            requests,
+            events,
+            zones,
+            zones_heard,
+        }
     }
 
     /// A line that leads nowhere (for a window that only edits a file).
     pub fn none() -> Self {
         let (requests, _) = unbounded_channel();
         let (_, events) = std::sync::mpsc::channel();
-        Self { requests, events }
+        let (zones, _) = unbounded_channel();
+        let (_, zones_heard) = std::sync::mpsc::channel();
+        Self {
+            requests,
+            events,
+            zones,
+            zones_heard,
+        }
     }
 
     pub fn send(&self, request: Request) {
@@ -172,6 +201,58 @@ impl Link {
     pub fn poll(&self) -> Vec<Event> {
         self.events.try_iter().collect()
     }
+
+    /// Say that this program runs the zones on the desktop. Said once,
+    /// at any time; it holds for as long as the line does, over every
+    /// loss of the window manager. From then on [`Link::poll_zones`] tells
+    /// what is asked of the zones. Only one program does this (the
+    /// shell): a second one is not let in by the window manager while the
+    /// first is there.
+    pub fn host_zones(&self) {
+        let _ = self.zones.send(ZonesTell::Host);
+    }
+
+    /// Tell how the zones are now (`ZonesSnapshot::of(&core, now)`): after
+    /// everything that changes them, and once at the start. Not with every
+    /// movement of a drag: when it ends, or a few times a second. The
+    /// last one is kept and told again by the line itself whenever the
+    /// window manager comes (back), so there is nothing to do on
+    /// [`ZonesHeard::Attached`].
+    pub fn publish_zones(&self, snapshot: gevrek_zones::ipc::ZonesSnapshot) {
+        let _ = self.zones.send(ZonesTell::Snapshot(Box::new(snapshot)));
+    }
+
+    /// Tell of something that happened to the zones (each
+    /// `Effect::Notify` the core gives; `gevrek_zones::ipc::events_of`
+    /// picks them out), before the snapshot that shows it. Let go while
+    /// the window manager is not there.
+    pub fn publish_zones_event(&self, event: gevrek_zones::ZonesEvent) {
+        let _ = self.zones.send(ZonesTell::Event(event));
+    }
+
+    /// Answer what was asked with a number ([`ZonesAsk::request`]):
+    /// `Answer::of(&effects)` for a command the core was given,
+    /// `Answer::done()` or `Answer::refused(why)` for what is not the
+    /// core's. Whoever asked waits a few seconds, no longer.
+    pub fn answer_zones(&self, request: u64, answer: gevrek_zones::ipc::Answer) {
+        let _ = self.zones.send(ZonesTell::Answer { request, answer });
+    }
+
+    /// The same four from another thread.
+    pub fn zones_teller(&self) -> impl Fn(ZonesTell) + Send + 'static {
+        let zones = self.zones.clone();
+        move |tell| {
+            let _ = zones.send(tell);
+        }
+    }
+
+    /// What was asked of the zones, and whether the window manager
+    /// listens, since the last call. Nothing ever for a program that did
+    /// not call [`Link::host_zones`]. The window is woken for each, as it
+    /// is for an [`Event`].
+    pub fn poll_zones(&self) -> Vec<ZonesHeard> {
+        self.zones_heard.try_iter().collect()
+    }
 }
 
 #[derive(Clone)]
@@ -187,13 +268,19 @@ impl Teller {
     }
 }
 
-async fn run(address: String, mut requests: UnboundedReceiver<Request>, tell: Teller) {
+async fn run(
+    address: String,
+    mut requests: UnboundedReceiver<Request>,
+    tell: Teller,
+    mut zones: zones::ZonesSide,
+) {
     let endpoint = gevrek_protocol::Endpoint::parse(&address).address();
     loop {
-        let mut client = match connect(&endpoint).await {
+        let (mut client, features) = match connect(&endpoint).await {
             Ok((client, peer)) => {
+                let features = peer.features.clone();
                 tell.tell(Event::Connected(peer));
-                client
+                (client, features)
             }
             Err(error) => {
                 tell.tell(Event::Disconnected(error));
@@ -209,6 +296,10 @@ async fn run(address: String, mut requests: UnboundedReceiver<Request>, tell: Te
                                 return;
                             }
                         }
+                        told = zones.tells.recv(), if !zones.closed => match told {
+                            Some(told) => zones.keep(told),
+                            None => zones.closed = true,
+                        },
                     }
                 }
                 continue;
@@ -233,12 +324,19 @@ async fn run(address: String, mut requests: UnboundedReceiver<Request>, tell: Te
         // workspace, the next event) is carried at once; and requests
         // close to each other are one question.
         let mut due = Due::default();
+        zones.attach(&mut client, &features).await;
         let lost = loop {
             use tokio_stream::StreamExt;
             let next = due.next();
+            let zones_retry = zones.retry_at;
             tokio::select! {
                 event = stream.next() => match event {
-                    Some(Ok(event)) => relay(event.event, &tell),
+                    Some(Ok(event)) => {
+                        if let Some(Wire::RuntimeEvent(event)) = &event.event {
+                            zones.heard(&event.kind, &event.fields);
+                        }
+                        relay(event.event, &tell)
+                    }
                     Some(Err(error)) => break format!("the window manager went away: {}", error.message()),
                     None => break "the window manager went away".to_string(),
                 },
@@ -255,8 +353,21 @@ async fn run(address: String, mut requests: UnboundedReceiver<Request>, tell: Te
                     due.taken(std::time::Instant::now());
                     serve(&mut client, Request::State, &tell).await;
                 }
+                told = zones.tells.recv(), if !zones.closed => match told {
+                    Some(told) => zones.take(told, &mut client, &features).await,
+                    None => zones.closed = true,
+                },
+                asked = zones::next(&mut zones.call) => match asked {
+                    Some(Ok(request)) => zones.asked(request),
+                    Some(Err(error)) => zones.lost(format!("the zones' call ended: {}", error.message())),
+                    None => zones.lost("the zones' call ended".to_string()),
+                },
+                _ = tokio::time::sleep_until(zones_retry.unwrap_or_else(std::time::Instant::now).into()), if zones_retry.is_some() => {
+                    zones.attach(&mut client, &features).await;
+                }
             }
         };
+        zones.line_down();
         tell.tell(Event::Disconnected(lost));
         tokio::time::sleep(Duration::from_millis(600)).await;
     }

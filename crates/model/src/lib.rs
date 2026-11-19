@@ -54,6 +54,8 @@ pub mod wallpaper;
 pub mod window;
 pub mod snap_zones;
 pub mod zones;
+// What a display says of itself, and the id made of it (std only).
+pub mod edid;
 
 pub use config::Config;
 

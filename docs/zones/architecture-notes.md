@@ -154,7 +154,7 @@ question 1.
   Windows the `\\?\DISPLAY#…` path, stable for a display on a port; on
   Linux the connector's name (`HDMI-A-1`). EDID was read nowhere when
   these notes were first written; it is now read on both systems into
-  `MonitorInfo::stable_id` (`engine/src/outputs_edid.rs`), which is the
+  `MonitorInfo::stable_id` (`model/src/edid.rs`), which is the
   same for a display wherever it is plugged in.
 - Each display has its own ring of workspaces. A display that goes has its
   workspaces kept and given back when it returns

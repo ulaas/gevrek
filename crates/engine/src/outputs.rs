@@ -14,8 +14,9 @@ use std::collections::HashMap;
 mod reconcile;
 pub use reconcile::MonitorChanges;
 
-#[path = "outputs_edid.rs"]
-pub mod edid;
+// What a display says of itself and the id made of it: in the model, so
+// that the shell reads it without the engine. Known here by its old name.
+pub use gevrek_model::edid;
 
 pub use gevrek_model::ids::OutputId as MonitorHandle;
 
@@ -111,29 +112,15 @@ pub fn number_same_names(monitors: &mut [MonitorInfo]) {
 /// unplugged, has the id without a number. An id that is alone is left as
 /// it is.
 pub fn number_same_stable_ids(monitors: &mut [MonitorInfo]) {
-    let mut by_id: HashMap<String, Vec<usize>> = HashMap::new();
-    for (index, monitor) in monitors.iter().enumerate() {
-        if !monitor.stable_id.is_empty() {
-            by_id
-                .entry(monitor.stable_id.clone())
-                .or_default()
-                .push(index);
-        }
-    }
-    for mut twins in by_id.into_values().filter(|twins| twins.len() > 1) {
-        twins.sort_by(|a, b| {
-            let (a, b) = (&monitors[*a], &monitors[*b]);
-            a.device_path
-                .to_lowercase()
-                .cmp(&b.device_path.to_lowercase())
-                .then((a.x, a.y).cmp(&(b.x, b.y)))
-                .then(a.handle.0.cmp(&b.handle.0))
-        });
-        for (number, index) in twins.into_iter().enumerate() {
-            monitors[index]
-                .stable_id
-                .push_str(&format!("#{}", number + 1));
-        }
+    // (The rule itself is written once, beside the ids: `edid`.)
+    let mut ids: Vec<String> = monitors.iter().map(|monitor| monitor.stable_id.clone()).collect();
+    let places: Vec<(String, i32, i32, isize)> = monitors
+        .iter()
+        .map(|monitor| (monitor.device_path.clone(), monitor.x, monitor.y, monitor.handle.0))
+        .collect();
+    edid::number_same_ids(&mut ids, &places);
+    for (monitor, id) in monitors.iter_mut().zip(ids) {
+        monitor.stable_id = id;
     }
 }
 

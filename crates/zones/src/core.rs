@@ -133,8 +133,29 @@ pub enum Command {
     },
     /// Take back the last application of the rules.
     UndoRules,
-    /// Take back the last file operation of a portal.
+    /// Take back the last file operation (of a portal, of the bin, of
+    /// files brought in).
     UndoFileOperation,
+    /// Give an item's file another name. It can be taken back with
+    /// `UndoFileOperation`.
+    RenameItem { item: ItemId, name: String },
+    /// Put items into the system's bin (never deleted outright). It can
+    /// be taken back with `UndoFileOperation`.
+    TrashItems { items: Vec<ItemId> },
+    /// Bring files from elsewhere to the desktop: copied or moved into
+    /// `folder` (the desktop's own, which the backend names), and each
+    /// put into a zone or at a place of its own once it is there.
+    BringIn {
+        paths: Vec<String>,
+        folder: String,
+        /// Copied, not moved.
+        #[serde(default)]
+        copy: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        zone: Option<ZoneId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<LoosePosition>,
+    },
     SaveSnapshot { name: String },
     RestoreSnapshot { name: String },
     DeleteSnapshot { name: String },
@@ -247,6 +268,8 @@ enum Pending {
     RuleMove { item: ItemId, operation: FileOperation },
     /// Something was dropped on a portal; it can be taken back.
     Portal { operation: FileOperation },
+    /// A file is brought to the desktop; where it goes once it is there.
+    Arriving { operation: FileOperation, zone: Option<ZoneId>, at: Option<LoosePosition> },
     /// Something is being taken back.
     TakingBack { operation: FileOperation },
 }
@@ -274,6 +297,9 @@ pub struct ZonesCore {
     requests: u64,
     pending: BTreeMap<u64, Pending>,
     file_undo: Vec<FileOperation>,
+    /// Files that were brought to the desktop and are not told of yet,
+    /// by their paths: where each goes when it is.
+    arriving: BTreeMap<String, (Option<ZoneId>, Option<LoosePosition>)>,
 }
 
 type Outcome = Result<Vec<Effect>, String>;
@@ -299,6 +325,7 @@ impl ZonesCore {
             requests: 0,
             pending: BTreeMap::new(),
             file_undo: Vec::new(),
+            arriving: BTreeMap::new(),
         }
     }
 
@@ -777,6 +804,7 @@ impl ZonesCore {
         self.requests += 1;
         let operation = match &pending {
             Pending::RuleMove { operation, .. }
+            | Pending::Arriving { operation, .. }
             | Pending::Portal { operation }
             | Pending::TakingBack { operation } => operation.clone(),
         };
@@ -887,6 +915,14 @@ impl ZonesCore {
     fn arrived(&mut self, item: Item, now: u64) -> Vec<Effect> {
         let id = item.id.clone();
         let mut effects = Vec::new();
+        // Brought here by the person: where they let it go, before any rule.
+        let brought = item.path.as_ref().and_then(|path| self.arriving.remove(path));
+        if let Some(place) = brought {
+            self.items.insert(id.clone(), item);
+            self.settle_arrival(&id, place);
+            let zone = self.zone_of(&id).cloned();
+            return vec![Effect::Notify(ZonesEvent::ItemsChanged { zone }), Effect::SaveState];
+        }
         if self.config.enabled && self.config.rules_on_arrival && self.zone_of(&id).is_none() {
             let decided = rules::decide(&self.config.rules, self.config.catch_all.as_ref(), &item, now);
             if let Some((_, RuleAction::AssignToZone { zone })) = decided {
@@ -905,6 +941,19 @@ impl ZonesCore {
         let zone = self.zone_of(&id).cloned();
         effects.insert(0, Effect::Notify(ZonesEvent::ItemsChanged { zone }));
         effects
+    }
+
+    /// Put an item that was brought to the desktop where it was let go:
+    /// into the zone, if that still takes it, or at its place.
+    fn settle_arrival(&mut self, item: &ItemId, (zone, at): (Option<ZoneId>, Option<LoosePosition>)) {
+        let takes = zone.as_ref().is_some_and(|zone| {
+            self.config.zone(zone).is_some_and(|zone| zone.kind == ZoneKind::Manual && !zone.lock.members)
+        });
+        match (zone, at) {
+            (Some(zone), _) if takes => self.state.placements.assign(item, &zone, None, None),
+            (_, Some(at)) => self.state.placements.loosen(item, Some(at)),
+            _ => {}
+        }
     }
 
     fn operation_done(
@@ -949,8 +998,44 @@ impl ZonesCore {
                     _ => Vec::new(),
                 }
             }
-            (Pending::Portal { operation } | Pending::TakingBack { operation }, Some(error)) => {
+            (
+                Pending::Portal { operation }
+                | Pending::TakingBack { operation }
+                | Pending::Arriving { operation, .. },
+                Some(error),
+            ) => {
                 vec![Effect::Notify(ZonesEvent::OperationFailed { operation, error })]
+            }
+            (Pending::Arriving { operation, zone, at }, None) => {
+                let undo = undo.or_else(|| operation.reversed());
+                // Where the file is now is what takes it back says.
+                let path = match &undo {
+                    Some(FileOperation::Trash { path }) => Some(path.clone()),
+                    Some(FileOperation::Move { from, .. }) => Some(from.clone()),
+                    _ => None,
+                };
+                if let Some(undo) = undo {
+                    self.file_undo.push(undo);
+                    if self.file_undo.len() > FILE_UNDO_DEPTH {
+                        self.file_undo.remove(0);
+                    }
+                }
+                let Some(path) = path else {
+                    return Vec::new();
+                };
+                // Told of already, or still to come.
+                let there = self.items.values().find(|item| item.path.as_ref() == Some(&path)).map(|item| item.id.clone());
+                match there {
+                    Some(item) => {
+                        self.settle_arrival(&item, (zone, at));
+                        let zone = self.zone_of(&item).cloned();
+                        vec![Effect::Notify(ZonesEvent::ItemsChanged { zone }), Effect::SaveState]
+                    }
+                    None => {
+                        self.arriving.insert(path, (zone, at));
+                        Vec::new()
+                    }
+                }
             }
             (Pending::Portal { operation }, None) => {
                 if let Some(undo) = undo.or_else(|| operation.reversed()) {
@@ -1011,6 +1096,48 @@ impl ZonesCore {
                 Some(operation) => Ok(vec![self.ask(Pending::TakingBack { operation })]),
                 None => Err("no file operation to take back".to_string()),
             },
+            Command::TrashItems { items } => self.trash_items(&items),
+            Command::RenameItem { item, name } => {
+                let path = self.item(&item).and_then(|item| item.path.clone());
+                let name = name.trim().to_string();
+                match path {
+                    None => Err(format!("{item} is no file that could be renamed")),
+                    Some(_) if name.is_empty() || name.contains(['/', '\\']) => {
+                        Err("that is no name for a file".to_string())
+                    }
+                    Some(path) if paths::file_name(&path) == name => Ok(Vec::new()),
+                    Some(path) => {
+                        let operation = FileOperation::Rename { path, new_name: name };
+                        Ok(vec![self.ask(Pending::Portal { operation })])
+                    }
+                }
+            }
+            Command::BringIn { paths, folder, copy, zone, at } => {
+                if paths.is_empty() || folder.trim().is_empty() {
+                    Err("nothing to bring in, or nowhere to".to_string())
+                } else if zone.as_ref().is_some_and(|zone| self.config.zone(zone).is_none()) {
+                    Err("no such zone".to_string())
+                } else {
+                    Ok(paths
+                        .into_iter()
+                        .enumerate()
+                        .map(|(number, from)| {
+                            let operation = if copy {
+                                FileOperation::Copy { from, to_folder: folder.clone() }
+                            } else {
+                                FileOperation::Move { from, to_folder: folder.clone() }
+                            };
+                            // Several let go at one point lie a step apart.
+                            let at = at.clone().map(|at| LoosePosition {
+                                x: at.x + 24 * number as i32,
+                                y: at.y + 24 * number as i32,
+                                ..at
+                            });
+                            self.ask(Pending::Arriving { operation, zone: zone.clone(), at })
+                        })
+                        .collect())
+                }
+            }
             Command::SaveSnapshot { name } => self.save_snapshot(name, now),
             Command::RestoreSnapshot { name } => self.restore_snapshot(&name),
             Command::DeleteSnapshot { name } => {
@@ -1249,6 +1376,25 @@ impl ZonesCore {
             }
             ZoneKind::Smart { .. } => Err(format!("{zone} fills itself")),
         }
+    }
+
+    fn trash_items(&mut self, items: &[ItemId]) -> Outcome {
+        let mut effects = Vec::new();
+        for id in items {
+            let locked = self
+                .zone_of(id)
+                .and_then(|zone| self.config.zone(zone))
+                .is_some_and(|zone| zone.lock.members);
+            // What is no file (This PC) and what a locked zone holds stays.
+            let Some(path) = self.item(id).and_then(|item| item.path.clone()).filter(|_| !locked) else {
+                continue;
+            };
+            effects.push(self.ask(Pending::Portal { operation: FileOperation::Trash { path } }));
+        }
+        if effects.is_empty() {
+            return Err("nothing of that can be put into the bin".to_string());
+        }
+        Ok(effects)
     }
 
     fn loosen_item(&mut self, item: &ItemId, position: Option<LoosePosition>) -> Outcome {

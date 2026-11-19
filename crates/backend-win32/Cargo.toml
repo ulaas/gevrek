@@ -34,6 +34,9 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 gevrek-model = { path = "../model" }
 gevrek-engine = { path = "../engine" }
 gevrek-host = { path = "../host" }
+# Who a display is wherever it is plugged in: read in one place for the
+# window manager and the shell (`gevrek_system::display_ids`).
+gevrek-system = { path = "../system" }
 
 [dev-dependencies]
 gevrek-engine = { path = "../engine", features = ["test-support"] }

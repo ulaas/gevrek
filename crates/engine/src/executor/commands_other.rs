@@ -45,6 +45,7 @@ impl Executor {
             | DispatchCommand::Shell { .. }
             | DispatchCommand::Notify { .. }
             | DispatchCommand::AppShortcut { .. }
+            | DispatchCommand::Zones { .. }
             | DispatchCommand::Osd { .. }
             | DispatchCommand::Exec { .. }
             | DispatchCommand::LaunchStartup { .. }

@@ -98,6 +98,9 @@ mod tray_choice;
 mod shortcuts;
 // The overview of every workspace, where the shell draws it (a
 // compositor shows the workspaces themselves).
+// The zones of the desktop: containers that hold its icons.
+#[cfg(any(target_os = "linux", windows))]
+mod zones;
 #[cfg(windows)]
 mod overview;
 #[cfg(windows)]
@@ -152,6 +155,9 @@ mod linux {
     enum Message {
         /// The line to the window manager has news.
         Line,
+        /// The zones of the desktop have something to do: their backend
+        /// has news, or their state is due to be written.
+        Zones,
         /// A program sent a notification, or took one back.
         Bus(FromBus),
         /// polkit asks for the user's word, or takes a request back.
@@ -463,6 +469,8 @@ mod linux {
         own_preset: gevrek_ui::theme::Preset,
         wallpaper_accent: Option<egui::Color32>,
         terminal: String,
+        /// The zones of the desktop, once `desktop.zones.enabled` was set.
+        zones: Option<crate::zones::surfaces::Running>,
     }
 
     pub fn run() -> anyhow::Result<()> {
@@ -568,6 +576,7 @@ mod linux {
             own_preset: gevrek_ui::Settings::load(&appearance).preset,
             wallpaper_accent: None,
             terminal: gevrek_model::examples::default_terminal().to_string(),
+            zones: None,
         }));
         // The notification service; without the session's bus, or when
         // another service has the name, the shell runs without it.
@@ -644,6 +653,15 @@ mod linux {
             }
         }
         state.borrow_mut().verdicts = Some(shell.sender());
+        // This shell is the one that runs the zones of the desktop: what
+        // is asked of them through the window manager comes here. Told
+        // how they are at once, which is: not there, until the
+        // configuration is read.
+        {
+            let state = state.borrow();
+            state.link.host_zones();
+            state.link.publish_zones(Default::default());
+        }
         // `--launcher` goes through the same door as the key does.
         let mut open_first = args.launcher;
         if open_first {
@@ -659,6 +677,7 @@ mod linux {
                 }
                 match message {
                     Message::Line => take_in(&listening, control),
+                    Message::Zones => zones_woken(&listening, control),
                     Message::Bus(message) => from_bus(&listening, message, control),
                     Message::Agent(message) => from_agent(&listening, message, control),
                     Message::Portal(asked) => from_portal(&listening, asked, control),
@@ -837,6 +856,14 @@ mod linux {
 
     /// What the window manager said since the last time.
     fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
+        // What was asked of the zones (a key, `gevrek zones ...`).
+        let asked = state.borrow().link.poll_zones();
+        for heard in asked {
+            if let gevrek_link::ZonesHeard::Asked(ask) = heard {
+                let state = state.borrow();
+                crate::zones::surfaces::asked(&state.zones, &state.link, ask);
+            }
+        }
         let events = state.borrow().link.poll();
         for event in events {
             // The tutorial hears which commands were carried out: some of
@@ -1076,6 +1103,7 @@ mod linux {
                         state.link.send(Request::State);
                     }
                     sync_panels(state, control);
+                    zones_configured(state, control);
                     // Whatever is open is drawn by the new settings at
                     // once (the glass of the control centre, a colour).
                     control.redraw_all();
@@ -1084,6 +1112,10 @@ mod linux {
                     let arisen = {
                         let mut state = state.borrow_mut();
                         let state = &mut *state;
+                        // The zones are on the displays the state names.
+                        if let Some(zones) = &state.zones {
+                            zones.told(&wm);
+                        }
                         state.facts = gevrek_tutorial::Facts::of(&wm);
                         crate::tutoring::tidy_after_a_stop(
                             &wm,
@@ -3908,6 +3940,76 @@ mod linux {
             }
         }
         sender.send(Message::WifiLooking(false));
+    }
+
+    /// The running configuration is another: the zones of the desktop
+    /// are started, told, or put away, as it says
+    /// (`desktop.zones.enabled`).
+    fn zones_configured(state: &Rc<RefCell<State>>, control: &mut Control) {
+        let mut shared = state.borrow_mut();
+        let shared = &mut *shared;
+        let Some(config) = shared.running.as_ref().map(|(config, _)| config.desktop.zones.clone()) else {
+            return;
+        };
+        let Some(sender) = shared.verdicts.clone() else {
+            return;
+        };
+        let look = Rc::clone(state);
+        crate::zones::surfaces::Running::configured(
+            &mut shared.zones,
+            &config,
+            control,
+            move || {
+                sender.send(Message::Zones);
+            },
+            move || {
+                Rc::new(move |ui: &egui::Ui, fonts: &mut bool| {
+                    let state = look.borrow();
+                    let context = ui.ctx();
+                    if !*fonts {
+                        theme::install_fonts(context, state.settings.system_font);
+                        *fonts = true;
+                    }
+                    let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
+                    theme::apply(context, &palette, &state.settings);
+                    (palette, state.settings)
+                })
+            },
+            // What an item opens is started by the window manager, as
+            // what the launcher starts is: no child of the shell.
+            || {
+                let tell = shared.link.teller();
+                crate::zones::Starter {
+                    dispatch: Box::new(move |command| tell(Request::Dispatch(command))),
+                    terminal: shared.terminal.clone(),
+                }
+            },
+            // (Nothing draws desktop icons here but the zones.)
+            false,
+        );
+    }
+
+    /// The zones asked to be looked at. What they changed of the
+    /// configuration (a zone made, renamed, rolled up) is written as the
+    /// shell writes any change of its own.
+    fn zones_woken(state: &Rc<RefCell<State>>, control: &mut Control) {
+        let changed = {
+            let state = state.borrow();
+            let Some(zones) = &state.zones else {
+                return;
+            };
+            let changed = zones.woken(control);
+            zones.publish(&state.link);
+            changed
+        };
+        let Some(changed) = changed else {
+            return;
+        };
+        let mut state = state.borrow_mut();
+        if let Some((mut config, _)) = state.running.clone() {
+            config.desktop.zones = changed;
+            apply_configuration(&mut state, config);
+        }
     }
 
     /// Open the power menu, or close it when it is open.

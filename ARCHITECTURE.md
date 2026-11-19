@@ -111,6 +111,15 @@ a thin system-specific part where one is needed.
 
 14. **Shutdown** - Graceful server shutdown
 
+15. **AttachZones / GetZonesState / SendZonesCommand** - The zones on the
+    desktop live in the shell. Over `AttachZones` (a call that lasts while
+    the zones run) the shell tells how the zones are, what happens to them
+    and what it answers, and is sent what is asked of them; the WM serves
+    the last snapshot (`GetZonesState`, marked stale once the shell is
+    gone) and passes commands on and waits for the answer
+    (`SendZonesCommand`). The zones' own data travels as versioned JSON.
+    See `docs/zones/milestone-2-ipc.md`.
+
 ### Execution Events (Live Feedback)
 
 The editor receives real-time updates about node execution:
@@ -121,6 +130,9 @@ The editor receives real-time updates about node execution:
 - `GraphExecutionStarted` - When an event chain begins
 - `GraphExecutionCompleted` - When an event chain finishes
 - `LogEvent` - Log messages from the WM
+- `RuntimeEvent` - What happens in the WM, by kind (`window.created`,
+  `shell.command`, ...); what happens to the zones is among them as
+  `zones.<name>`, passed on from the shell
 
 ### Data Format
 

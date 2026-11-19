@@ -183,6 +183,40 @@ pub fn stable_id_of_place(place: &str) -> String {
     format!("port:{}", place.trim())
 }
 
+/// Tell displays apart that have the same id: two of one model that give no
+/// serial number (or the same one) have the same EDID to the last byte.
+/// Each gets a number after its id, `GSM-5B7F-noserial#1` and `#2`, in the
+/// order of where they are: by the device path (letters of either case),
+/// then by the place on the desktop, then by the handle. That number stays
+/// with the port (it is all there is to go by), and a twin that is left
+/// alone, the other unplugged, has the id without a number. An id that is
+/// alone is left as it is, and so is a display that has none.
+///
+/// `places` says of each display, in the order of `ids`, where it is:
+/// its device path, x, y and handle. This is the one place the rule is
+/// written, for whoever gives displays ids (the window manager on each
+/// system, and the shell on Windows): they must come to the same ids.
+pub fn number_same_ids(ids: &mut [String], places: &[(String, i32, i32, isize)]) {
+    let mut by_id: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
+    for (index, id) in ids.iter().enumerate() {
+        if !id.is_empty() && index < places.len() {
+            by_id.entry(id.clone()).or_default().push(index);
+        }
+    }
+    for mut twins in by_id.into_values().filter(|twins| twins.len() > 1) {
+        twins.sort_by(|a, b| {
+            let (a, b) = (&places[*a], &places[*b]);
+            a.0.to_lowercase()
+                .cmp(&b.0.to_lowercase())
+                .then((a.1, a.2).cmp(&(b.1, b.2)))
+                .then(a.3.cmp(&b.3))
+        });
+        for (number, index) in twins.into_iter().enumerate() {
+            ids[index].push_str(&format!("#{}", number + 1));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,5 +400,30 @@ mod tests {
         );
         assert_eq!(stable_id_of_place(" HDMI-A-1 "), "port:HDMI-A-1");
         assert_eq!(stable_id_of_place("winit"), "port:winit");
+    }
+
+    #[test]
+    fn twins_are_numbered_by_where_they_are_and_nobody_else_is() {
+        let place = |path: &str, x: i32, handle: isize| (path.to_string(), x, 0, handle);
+        let mut ids = vec![
+            "GSM-5B7F-noserial".to_string(),
+            "DEL-A0F1-00000001".to_string(),
+            "GSM-5B7F-noserial".to_string(),
+            String::new(),
+            String::new(),
+        ];
+        let places = [
+            place("\\\\?\\DISPLAY#GSM5B7F#B", 0, 1),
+            place("\\\\?\\DISPLAY#DELA0F1#A", 1920, 2),
+            place("\\\\?\\display#gsm5b7f#a", 3840, 3),
+            place("x", 0, 4),
+            place("y", 0, 5),
+        ];
+        number_same_ids(&mut ids, &places);
+        assert_eq!(ids, ["GSM-5B7F-noserial#2", "DEL-A0F1-00000001", "GSM-5B7F-noserial#1", "", ""]);
+        // The same path: by the place, then by the handle.
+        let mut ids = vec!["A".to_string(), "A".to_string(), "A".to_string()];
+        number_same_ids(&mut ids, &[place("p", 10, 9), place("p", 0, 8), place("p", 10, 7)]);
+        assert_eq!(ids, ["A#3", "A#1", "A#2"]);
     }
 }

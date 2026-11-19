@@ -323,7 +323,7 @@ pub fn from_windows_pixels(pixels: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(windows)]
-mod shell {
+pub(crate) mod shell {
     use super::{from_windows_pixels, Picture};
     use crate::com::Com;
     use windows::core::HSTRING;
@@ -334,18 +334,33 @@ mod shell {
     };
     use windows::Win32::UI::Shell::{
         IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_ICONONLY,
+        SIIGBF_THUMBNAILONLY,
     };
 
     /// The icon the shell draws for what `name` names to it: a file (a
     /// shortcut among them), or a place such as `shell:AppsFolder\…`.
     pub fn picture(name: &str, size: u32) -> Option<Picture> {
+        picture_as(name, size, false)
+    }
+
+    /// As `picture`; or, where `thumbnail`, the small picture of what a
+    /// file holds (a photograph, a page), as large as fits into `size`
+    /// each way. There is none for most files, and then the answer is
+    /// none: the shell is not let fall back to the icon, so that who asks
+    /// knows which of the two it got.
+    pub fn picture_as(name: &str, size: u32, thumbnail: bool) -> Option<Picture> {
         let size = size.clamp(8, 512) as i32;
+        let what = if thumbnail {
+            SIIGBF_THUMBNAILONLY
+        } else {
+            SIIGBF_ICONONLY
+        };
         let _com = Com::new();
         unsafe {
             let item: IShellItemImageFactory =
                 SHCreateItemFromParsingName(&HSTRING::from(name), None).ok()?;
             let bitmap = item
-                .GetImage(SIZE { cx: size, cy: size }, SIIGBF_ICONONLY)
+                .GetImage(SIZE { cx: size, cy: size }, what)
                 .ok()?;
             let mut read = None;
             let mut what = BITMAP::default();
@@ -463,6 +478,23 @@ impl Cache {
             let _ = self.ask.send(wanted.clone());
         }
         self.known.get(&wanted).and_then(Option::as_ref)
+    }
+
+    /// As `get`, for one who must tell "not looked for yet" (`None`)
+    /// from "looked for, and there is none" (`Some(None)`).
+    pub fn answer(&mut self, name: &str, size: u32) -> Option<Option<&Picture>> {
+        let _ = self.get(name, size);
+        self.known
+            .get(&(name.to_string(), size))
+            .map(Option::as_ref)
+    }
+
+    /// Let go of the icon `name` at every size: what it is an icon of
+    /// has changed, or nobody shows it any more. Asked for again, it is
+    /// looked for again.
+    pub fn forget(&mut self, name: &str) {
+        self.known.retain(|(known, _), _| known != name);
+        self.asked.retain(|(asked, _)| asked != name);
     }
 }
 
@@ -589,6 +621,15 @@ mod tests {
         wait();
         assert_eq!(cache.get("there", 4).expect("found").width, 4);
         assert_eq!(looked.load(Ordering::SeqCst), 3);
+        // One that was looked for and is none is told from one not yet
+        // looked for; forgotten, an icon is looked for again.
+        assert!(matches!(cache.answer("missing", 2), Some(None)));
+        assert!(matches!(cache.answer("there", 2), Some(Some(_))));
+        cache.forget("there");
+        assert!(cache.answer("there", 2).is_none());
+        wait();
+        assert!(matches!(cache.answer("there", 2), Some(Some(_))));
+        assert_eq!(looked.load(Ordering::SeqCst), 4);
     }
 
     fn tree() -> PathBuf {

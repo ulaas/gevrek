@@ -7,7 +7,9 @@
 //! caller: what to tell a renderer and listeners, and that the
 //! configuration or the state should be written.
 
-use crate::backend::{BackendEvent, BackendRequest, Location, WatchId, ZonesBackend};
+use crate::backend::{
+    BackendEvent, BackendRequest, IconHandle, IconRequest, Location, WatchId, ZonesBackend,
+};
 use crate::core::{Command, Effect, ZonesCore};
 use std::collections::{BTreeMap, VecDeque};
 
@@ -23,6 +25,8 @@ pub struct Host {
     desktop: Option<WatchId>,
     /// The backend was asked what there is, and watches.
     started: bool,
+    /// The pictures that came since they were last taken.
+    icons: Vec<(IconRequest, Option<IconHandle>)>,
 }
 
 impl Host {
@@ -34,7 +38,7 @@ impl Host {
     /// watching the desktop, and do what the core asks for at the start.
     /// With the zones switched off nothing is asked of the backend at all;
     /// it is done when they are switched on (`set_config`).
-    pub fn start<B: ZonesBackend>(&mut self, core: &mut ZonesCore, backend: &mut B, now: u64) -> Vec<Effect> {
+    pub fn start<B: ZonesBackend + ?Sized>(&mut self, core: &mut ZonesCore, backend: &mut B, now: u64) -> Vec<Effect> {
         if !core.enabled() || self.started {
             return Vec::new();
         }
@@ -62,7 +66,7 @@ impl Host {
     /// Another configuration is in force. Zones that are switched on by
     /// it start as at the start; zones that are switched off let go of
     /// everything they watched.
-    pub fn set_config<B: ZonesBackend>(
+    pub fn set_config<B: ZonesBackend + ?Sized>(
         &mut self,
         core: &mut ZonesCore,
         backend: &mut B,
@@ -80,7 +84,7 @@ impl Host {
     }
 
     /// Carry out a command, with everything it asks of the backend.
-    pub fn command<B: ZonesBackend>(
+    pub fn command<B: ZonesBackend + ?Sized>(
         &mut self,
         core: &mut ZonesCore,
         backend: &mut B,
@@ -95,7 +99,7 @@ impl Host {
 
     /// Pass on what the backend has to tell. Called when the backend
     /// wakes its host.
-    pub fn pump<B: ZonesBackend>(&mut self, core: &mut ZonesCore, backend: &mut B, now: u64) -> Vec<Effect> {
+    pub fn pump<B: ZonesBackend + ?Sized>(&mut self, core: &mut ZonesCore, backend: &mut B, now: u64) -> Vec<Effect> {
         let mut left = Vec::new();
         if !self.started {
             return left;
@@ -106,6 +110,10 @@ impl Host {
                 break;
             }
             for event in events {
+                // (For whoever draws: the core has no use for pictures.)
+                if let BackendEvent::IconReady { request, icon } = &event {
+                    self.icons.push((*request, *icon));
+                }
                 let effects = core.event(event, now);
                 left.extend(self.carry_out(core, backend, effects, now));
             }
@@ -116,7 +124,7 @@ impl Host {
     /// Ask the backend what the effects ask of it, tell the core the
     /// answers, and so on until nothing is asked. Returns the effects
     /// that are not for the backend.
-    fn carry_out<B: ZonesBackend>(
+    fn carry_out<B: ZonesBackend + ?Sized>(
         &mut self,
         core: &mut ZonesCore,
         backend: &mut B,
@@ -161,9 +169,16 @@ impl Host {
         left
     }
 
+    /// The pictures the backend said are ready since this was last
+    /// asked, each with the request it answers; without a handle where
+    /// there is none. For the renderer, which asked for them.
+    pub fn take_icons(&mut self) -> Vec<(IconRequest, Option<IconHandle>)> {
+        std::mem::take(&mut self.icons)
+    }
+
     /// Stop watching everything (the zones are switched off, the program
     /// ends).
-    pub fn stop<B: ZonesBackend>(&mut self, backend: &mut B) {
+    pub fn stop<B: ZonesBackend + ?Sized>(&mut self, backend: &mut B) {
         for (_, watch) in std::mem::take(&mut self.watches) {
             backend.unwatch(watch);
         }

@@ -49,6 +49,16 @@ pub struct WindowsPlatformConfig {
     /// still opens the Start menu. (Where no panel of gevrek's runs, the
     /// taskbar stays.)
     pub hide_taskbar: bool,
+    /// Explorer's own desktop icons are put away while gevrek's zones are
+    /// shown (`desktop.zones.enabled`): the zones draw every item of the
+    /// desktop themselves, and Explorer's would lie under them. How the
+    /// desktop was is written down first, and the icons are put back as
+    /// they were when the zones are switched off, when gevrek stops, and
+    /// with `gevrek zones restore-explorer`. On unless switched off; off,
+    /// zones are shown and nothing of Explorer's is touched (for trying
+    /// them: its icons then lie under the zones' surface and cannot be
+    /// pressed).
+    pub hide_desktop_icons: bool,
     /// The Windows key is gevrek's while gevrek runs: the key alone opens
     /// no Start menu, and a key pressed with it does what gevrek binds it
     /// to or nothing; none of Windows' own shortcuts on the key is carried
@@ -88,6 +98,7 @@ impl Default for WindowsPlatformConfig {
             corners: WindowCorner::Round,
             shadow: crate::settings::ShadowPolicy::Default,
             hide_taskbar: true,
+            hide_desktop_icons: true,
             own_windows_key: true,
             drag_with_windows_key: true,
             cut_columns_at_displays: false,

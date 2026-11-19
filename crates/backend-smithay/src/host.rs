@@ -866,7 +866,8 @@ impl State {
             // What the shell shows for someone else: told as its keys are.
             command @ (DispatchCommand::Notify { .. }
             | DispatchCommand::Osd { .. }
-            | DispatchCommand::AppShortcut { .. }) => {
+            | DispatchCommand::AppShortcut { .. }
+            | DispatchCommand::Zones { .. }) => {
                 self.emit(
                     RuntimeEventKind::ShellCommand,
                     None,

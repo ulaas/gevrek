@@ -178,6 +178,15 @@ fn may_be_dragged(class: &str) -> bool {
         ))
 }
 
+/// Whether a window of this class is the desktop to a press: Explorer's
+/// own, or the surface gevrek's shell draws the zones of the desktop on
+/// (`gevrek-zones`, which covers Explorer's while zones are shown; a press
+/// on it is a press on the desktop of that display as much as one on
+/// Explorer's icons was).
+fn is_the_desktop(class: &str) -> bool {
+    matches!(class, "Progman" | "WorkerW") || class.starts_with("Gevrek_Shell_gevrek-zones")
+}
+
 pub use system::{cancel_drag, key_pressed, key_released, pointer_moved, pressed, released};
 
 mod system {
@@ -233,10 +242,10 @@ mod system {
         // SAFETY: plain questions about the window at the point.
         unsafe {
             let window = GetAncestor(WindowFromPoint(POINT { x: at.0, y: at.1 }), GA_ROOT);
-            let mut name = [0u16; 32];
+            let mut name = [0u16; 64];
             let length = GetClassNameW(window, &mut name) as usize;
             let class = String::from_utf16_lossy(&name[..length.min(name.len())]);
-            if !matches!(class.as_str(), "Progman" | "WorkerW") {
+            if !is_the_desktop(&class) {
                 return None;
             }
             let desktop = windows::Win32::UI::WindowsAndMessaging::GetShellWindow();
@@ -518,6 +527,17 @@ mod tests {
         assert_eq!(small, (100, 100, 100 + LEAST.0, 100 + LEAST.1));
         let from_the_left = dragged(WINDOW, Way::Resize(-1, -1), (5000, 5000));
         assert_eq!(from_the_left, (900 - LEAST.0, 700 - LEAST.1, 900, 700));
+    }
+
+    #[test]
+    fn a_press_on_the_zones_of_the_desktop_is_a_press_on_the_desktop() {
+        for class in ["Progman", "WorkerW", "Gevrek_Shell_gevrek-zones", "Gevrek_Shell_gevrek-zones.dev"] {
+            assert!(is_the_desktop(class), "{class}");
+        }
+        // Not the panel, not a menu or the box of the zones, not a program.
+        for class in ["Gevrek_Shell_gevrek-panel", "Shell_TrayWnd", "Chrome_WidgetWin_1", "Gevrek_Border", ""] {
+            assert!(!is_the_desktop(class), "{class}");
+        }
     }
 
     #[test]

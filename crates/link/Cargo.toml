@@ -9,6 +9,10 @@ description = "The line from one of gevrek's programs (the studio, the shell) to
 [dependencies]
 gevrek-model = { path = "../model" }
 gevrek-protocol = { path = "../protocol" }
+# What is asked of the zones and how they are told, for the program that
+# runs them.
+gevrek-zones = { path = "../zones" }
+tonic = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }
 tokio = { workspace = true }

@@ -632,6 +632,70 @@ fn a_portal_shows_a_folder_and_what_is_dropped_on_it_is_moved_there() {
 }
 
 #[test]
+fn files_go_to_the_bin_and_come_from_elsewhere_and_both_can_be_taken_back() {
+    let mut backend = FakeBackend::new();
+    backend.add_folder("/elsewhere");
+    backend.add("/elsewhere", Item::file("/elsewhere/new.txt"));
+    backend.add("/elsewhere", Item::file("/elsewhere/other.txt"));
+    let mut desk = Desk::on(ZonesConfig::default(), ZonesState::default(), backend);
+    let zone = desk.zone("Z", Rect::new(100, 100, 300, 200));
+    let old = desk.file("old.txt");
+    desk.put(&zone, &old);
+
+    // Into the bin: gone from its zone; taken back, it is on the desktop again.
+    desk.does(Command::TrashItems { items: vec![old.clone()] });
+    assert!(desk.backend.in_folder(DESKTOP).is_empty());
+    assert_eq!(desk.names_in(&zone), Vec::<String>::new());
+    desk.does(Command::UndoFileOperation);
+    assert_eq!(desk.backend.in_folder(DESKTOP).len(), 1);
+    assert!(refusal(&desk.ask(Command::TrashItems { items: vec![ItemId::new("/desk/ghost")] })).is_some());
+
+    // Another name, and back; it keeps its place in the zone.
+    desk.put(&zone, &old);
+    desk.does(Command::RenameItem { item: old.clone(), name: " older.txt ".to_string() });
+    assert_eq!(desk.names_in(&zone), ["older.txt"]);
+    assert!(refusal(&desk.ask(Command::RenameItem { item: ItemId::new("/desk/older.txt"), name: "a/b".to_string() })).is_some());
+    desk.does(Command::UndoFileOperation);
+    assert_eq!(desk.names_in(&zone), ["old.txt"]);
+    desk.does(Command::RemoveItem { item: old.clone() });
+
+    // A file from elsewhere, copied to the desktop and into the zone.
+    let folder = desk.backend.desktop_folder().unwrap();
+    desk.does(Command::BringIn {
+        paths: vec!["/elsewhere/new.txt".to_string()],
+        folder: folder.clone(),
+        copy: true,
+        zone: Some(zone.clone()),
+        at: None,
+    });
+    assert_eq!(desk.names_in(&zone), ["new.txt"]);
+    assert_eq!(desk.backend.in_folder("/elsewhere").len(), 2, "copied: the original stays");
+    // Another, moved to a place of its own on the bare desktop.
+    let at = crate::placement::LoosePosition { display: DisplayId::new("fake-1"), x: 700, y: 500 };
+    desk.does(Command::BringIn {
+        paths: vec!["/elsewhere/other.txt".to_string()],
+        folder,
+        copy: false,
+        zone: None,
+        at: Some(at.clone()),
+    });
+    assert_eq!(desk.backend.in_folder("/elsewhere").len(), 1);
+    assert_eq!(desk.core.state().placements.loose.get(&ItemId::new("/desk/other.txt")), Some(&at));
+    // Taken back: it is where it came from.
+    desk.does(Command::UndoFileOperation);
+    assert_eq!(desk.backend.in_folder("/elsewhere").len(), 2);
+    assert!(desk.core.item(&ItemId::new("/desk/other.txt")).is_none());
+    assert!(refusal(&desk.ask(Command::BringIn {
+        paths: vec!["/elsewhere/new.txt".to_string()],
+        folder: "/desk".to_string(),
+        copy: true,
+        zone: Some(ZoneId::new("nowhere")),
+        at: None
+    }))
+    .is_some());
+}
+
+#[test]
 fn a_portal_onto_a_folder_that_is_not_there_is_an_empty_zone() {
     let mut desk = Desk::new();
     desk.does(Command::CreateZone {

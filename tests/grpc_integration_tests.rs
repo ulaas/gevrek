@@ -1313,3 +1313,499 @@ async fn shutdown_rpc_stops_the_server() {
     }
     panic!("server remained reachable after shutdown");
 }
+
+// ---- the zones: the shell's line, the state it tells, what is asked ----
+
+const NO_SHELL: &str =
+    "Zones are not running: no gevrek-shell that runs them is attached to this window manager";
+
+/// Wait until the window manager says of the zones what is looked for.
+async fn zones_state_when(
+    client: &mut WMClient,
+    wanted: impl Fn(&gevrek_protocol::proto::ZonesStateResponse) -> bool,
+) -> gevrek_protocol::proto::ZonesStateResponse {
+    for _ in 0..300 {
+        let state = client.get_zones_state().await.unwrap();
+        if wanted(&state) {
+            return state;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the zones' state never became what was waited for");
+}
+
+/// The next thing a line that runs the zones is told.
+async fn zones_heard(link: &gevrek_link::Link) -> gevrek_link::ZonesHeard {
+    for _ in 0..500 {
+        let mut heard = link.poll_zones();
+        if !heard.is_empty() {
+            assert_eq!(heard.len(), 1, "more than one thing was told: {heard:?}");
+            return heard.remove(0);
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the line was told nothing of the zones");
+}
+
+/// The next event of a kind that begins with `zones.`.
+async fn next_zones_event(
+    events: &mut tonic::Streaming<gevrek_protocol::proto::ExecutionEvent>,
+) -> gevrek_protocol::proto::RuntimeEvent {
+    loop {
+        let event = tokio::time::timeout(Duration::from_secs(5), events.message())
+            .await
+            .expect("an event of the zones should arrive")
+            .unwrap()
+            .expect("the event stream stays open");
+        if let Some(Event::RuntimeEvent(event)) = event.event {
+            if event.kind.starts_with("zones.") {
+                return event;
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn without_a_shell_zones_are_said_not_to_run() {
+    let server = start_test_server().await;
+    let mut client = WMClient::connect(server.address.clone()).await.unwrap();
+
+    let state = client.get_zones_state().await.unwrap();
+    assert!(!state.running && !state.stale);
+    assert_eq!((state.sequence, state.json.as_str()), (0, ""));
+    assert_eq!(state.message, NO_SHELL);
+
+    // Asked something, the answer is the same sentence: an answer, not a
+    // call that failed.
+    let reply = client
+        .send_zones_command(r#"{"command":"quick_hide"}"#, 1, 0)
+        .await
+        .unwrap();
+    assert!(!reply.success && !reply.delivered);
+    assert_eq!(reply.error.as_deref(), Some(NO_SHELL));
+
+    // The same by the command every client can send.
+    let status = client
+        .dispatch_command(r#"{"command":"zones","action":{"command":"quick_hide"}}"#)
+        .await
+        .unwrap();
+    assert!(!status.success);
+    assert_eq!(status.error.as_deref(), Some(NO_SHELL));
+
+    // What is no command is refused as one.
+    assert!(client.send_zones_command("quick_hide", 1, 0).await.is_err());
+
+    let capabilities = client.get_capabilities().await.unwrap();
+    assert!(capabilities
+        .features
+        .iter()
+        .any(|feature| feature == "zones_ipc_v1"));
+}
+
+#[tokio::test]
+async fn what_a_shell_tells_of_the_zones_is_served_and_stale_once_it_is_gone() {
+    use gevrek_protocol::proto::{zones_report::Report, ZonesReport, ZonesSnapshotReport};
+    let server = start_test_server().await;
+    let mut client = WMClient::connect(server.address.clone()).await.unwrap();
+    let mut events = client.subscribe_to_events().await.unwrap();
+    let snapshot = |json: &str| ZonesReport {
+        report: Some(Report::Snapshot(ZonesSnapshotReport {
+            version: 1,
+            json: json.to_string(),
+        })),
+    };
+
+    // A shell, by the call itself (the line is tried in the next test).
+    let mut shell = WMClient::connect(server.address.clone()).await.unwrap();
+    let (reports, outgoing) = tokio::sync::mpsc::channel(8);
+    let requests = shell
+        .attach_zones(tokio_stream::wrappers::ReceiverStream::new(outgoing))
+        .await
+        .unwrap();
+    assert_eq!(next_zones_event(&mut events).await.kind, "zones.attached");
+    let state = client.get_zones_state().await.unwrap();
+    assert!(state.running && !state.stale && state.json.is_empty());
+    assert_eq!(state.message, "The shell has not reported the zones yet");
+
+    reports
+        .send(snapshot(r#"{"version":1,"zones":[]}"#))
+        .await
+        .unwrap();
+    reports
+        .send(snapshot(r#"{"version":1,"zones":[{"id":"work"}]}"#))
+        .await
+        .unwrap();
+    let state = zones_state_when(&mut client, |state| state.sequence == 2).await;
+    assert!(state.running && !state.stale && state.message.is_empty());
+    assert_eq!(state.json, r#"{"version":1,"zones":[{"id":"work"}]}"#);
+    assert_eq!(state.version, 1);
+
+    // Another shell is not let in while this one is there.
+    let mut second = WMClient::connect(server.address.clone()).await.unwrap();
+    let (_second_reports, second_outgoing) = tokio::sync::mpsc::channel(8);
+    let refused = second
+        .attach_zones(tokio_stream::wrappers::ReceiverStream::new(second_outgoing))
+        .await
+        .unwrap_err();
+    assert!(
+        format!("{refused:?}").contains("Another gevrek-shell"),
+        "{refused:?}"
+    );
+
+    // The shell goes (its connection with it).
+    drop(reports);
+    drop(requests);
+    drop(shell);
+    assert_eq!(next_zones_event(&mut events).await.kind, "zones.detached");
+    let state = zones_state_when(&mut client, |state| !state.running).await;
+    assert!(state.stale);
+    assert_eq!(state.sequence, 2);
+    assert!(state.json.contains("work"));
+    assert!(state.message.starts_with(NO_SHELL));
+    let reply = client
+        .send_zones_command(r#"{"command":"quick_hide"}"#, 1, 0)
+        .await
+        .unwrap();
+    assert_eq!(reply.error.as_deref(), Some(NO_SHELL));
+
+    // And the next one is let in.
+    let (_third_reports, third_outgoing) = tokio::sync::mpsc::channel::<ZonesReport>(8);
+    let _third_requests = second
+        .attach_zones(tokio_stream::wrappers::ReceiverStream::new(third_outgoing))
+        .await
+        .unwrap();
+    let state = client.get_zones_state().await.unwrap();
+    assert!(
+        state.running && state.stale,
+        "old until the new shell has told"
+    );
+}
+
+#[tokio::test]
+async fn a_zones_command_reaches_the_shells_line_and_its_answer_comes_back() {
+    use gevrek_link::{ZonesAsk, ZonesHeard};
+    use gevrek_zones::ipc::{Answer, Request, ZonesSnapshot};
+    use gevrek_zones::{Command, ZoneId, ZonesEvent};
+
+    let server = start_test_server().await;
+    let mut client = WMClient::connect(server.address.clone()).await.unwrap();
+    let mut events = client.subscribe_to_events().await.unwrap();
+
+    // The shell's side, as the shell has it: a line that runs the zones.
+    // What it publishes before the window manager listens is told when
+    // it does.
+    let link = gevrek_link::Link::start(server.address.clone(), || {});
+    let told = ZonesSnapshot {
+        enabled: true,
+        quick_hidden: true,
+        ..ZonesSnapshot::default()
+    };
+    link.publish_zones(told.clone());
+    link.host_zones();
+    assert_eq!(zones_heard(&link).await, ZonesHeard::Attached);
+    let state = zones_state_when(&mut client, |state| state.sequence == 1).await;
+    assert!(state.running && !state.stale);
+    assert_eq!(ZonesSnapshot::from_json(&state.json).unwrap(), told);
+    assert_eq!(next_zones_event(&mut events).await.kind, "zones.attached");
+
+    // A command that is carried out: its answer has what happened.
+    let hide = r#"{"command":"quick_hide","hidden":false}"#;
+    let mut asker = client.clone();
+    let asked = tokio::spawn(async move { asker.send_zones_command(hide, 1, 0).await.unwrap() });
+    let ZonesHeard::Asked(ZonesAsk { request, ask }) = zones_heard(&link).await else {
+        panic!("a command was to be told");
+    };
+    assert_eq!(
+        ask,
+        Request::Command(Command::QuickHide {
+            hidden: Some(false)
+        })
+    );
+    let visibility = ZonesEvent::VisibilityChanged {
+        quick_hidden: false,
+        peeking: false,
+    };
+    link.publish_zones_event(visibility.clone());
+    link.answer_zones(
+        request.expect("someone waits"),
+        Answer {
+            ok: true,
+            error: None,
+            events: vec![visibility.clone()],
+        },
+    );
+    let reply = asked.await.unwrap();
+    assert!(reply.success && reply.delivered && reply.error.is_none());
+    assert_eq!(
+        serde_json::from_str::<ZonesEvent>(&reply.events[0]).unwrap(),
+        visibility
+    );
+    // Whoever listens was told of it, under the event's own name.
+    let event = next_zones_event(&mut events).await;
+    assert_eq!(event.kind, "zones.visibility_changed");
+    assert_eq!(
+        serde_json::from_str::<ZonesEvent>(&event.fields["json"]).unwrap(),
+        visibility
+    );
+    assert_eq!(event.fields["sequence"], "1");
+
+    // A command the zones refuse: the reason is the zones' own, by the
+    // call for it and by the command every client can send.
+    let delete = r#"{"command":"delete_zone","zone":"nowhere"}"#;
+    let mut asker = client.clone();
+    let asked = tokio::spawn(async move {
+        let reply = asker.send_zones_command(delete, 1, 0).await.unwrap();
+        let status = asker
+            .dispatch_command(format!(r#"{{"command":"zones","action":{delete}}}"#))
+            .await
+            .unwrap();
+        (reply, status)
+    });
+    for _ in 0..2 {
+        let ZonesHeard::Asked(ZonesAsk { request, ask }) = zones_heard(&link).await else {
+            panic!("a command was to be told");
+        };
+        assert_eq!(
+            ask,
+            Request::Command(Command::DeleteZone {
+                zone: ZoneId::new("nowhere")
+            })
+        );
+        link.answer_zones(
+            request.unwrap(),
+            Answer::refused("there is no zone nowhere"),
+        );
+    }
+    let (reply, status) = asked.await.unwrap();
+    assert!(!reply.success && reply.delivered);
+    assert_eq!(reply.error.as_deref(), Some("there is no zone nowhere"));
+    assert!(!status.success);
+    assert_eq!(status.error.as_deref(), Some("there is no zone nowhere"));
+
+    // What is not a zones command is answered by the line itself: the
+    // shell is not told, and whoever asked hears why.
+    let reply = client
+        .send_zones_command(r#"{"command":"fly"}"#, 1, 0)
+        .await
+        .unwrap();
+    assert!(!reply.success && reply.delivered);
+    assert!(reply.error.unwrap().starts_with("not a zones command"));
+
+    // A shell that does not answer is waited for as long as was said.
+    let began = std::time::Instant::now();
+    let reply = client
+        .send_zones_command(r#"{"command":"restore_system_icons"}"#, 1, 150)
+        .await
+        .unwrap();
+    assert!(began.elapsed() < Duration::from_secs(4));
+    assert!(!reply.success && reply.delivered);
+    assert!(reply
+        .error
+        .unwrap()
+        .starts_with("The shell did not answer within 150 ms"));
+    let ZonesHeard::Asked(late) = zones_heard(&link).await else {
+        panic!("the command was told all the same");
+    };
+    assert_eq!(late.ask, Request::RestoreSystemIcons);
+
+    // A key's command comes as an event of the window manager's loop,
+    // and nobody waits for an answer.
+    let command: DispatchCommand =
+        serde_json::from_str(r#"{"command":"zones","action":{"command":"peek","on":true}}"#)
+            .unwrap();
+    server
+        .events
+        .send(gevrek_protocol::proto::ExecutionEvent {
+            event: Some(Event::RuntimeEvent(gevrek_protocol::proto::RuntimeEvent {
+                kind: "shell.command".to_string(),
+                timestamp_ms: 1,
+                window_id: None,
+                fields: command.shell_fields().unwrap().into_iter().collect(),
+            })),
+        })
+        .unwrap();
+    assert_eq!(
+        zones_heard(&link).await,
+        ZonesHeard::Asked(ZonesAsk {
+            request: None,
+            ask: Request::Command(Command::Peek { on: true })
+        })
+    );
+
+    // The shell ends: what it told last is served as old.
+    drop(link);
+    let state = zones_state_when(&mut client, |state| !state.running).await;
+    assert!(state.stale && state.sequence == 1);
+    assert_eq!(ZonesSnapshot::from_json(&state.json).unwrap(), told);
+}
+
+/// Run the command line itself against a test server: whether it ended
+/// well, what it printed, and what it said went wrong.
+fn gevrek_cli(address: &str, arguments: &[&str]) -> tokio::task::JoinHandle<(bool, String, String)> {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_gevrek"));
+    command.arg("--address").arg(address).args(arguments);
+    tokio::task::spawn_blocking(move || {
+        let output = command.output().expect("the command line runs");
+        (
+            output.status.success(),
+            String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+            String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n"),
+        )
+    })
+}
+
+#[tokio::test]
+async fn the_command_line_lists_shows_and_asks_the_zones() {
+    use gevrek_link::{ZonesAsk, ZonesHeard};
+    use gevrek_zones::backend::{BackendEvent, Location};
+    use gevrek_zones::config::{ZoneDefinition, ZonesConfig};
+    use gevrek_zones::geometry::Display;
+    use gevrek_zones::ipc::{Answer, Request, ZonesSnapshot};
+    use gevrek_zones::{Command, Item, ItemId, Rect, ZoneId, ZonesCore, ZonesState};
+    const NOW: u64 = 1_800_000_000;
+
+    let server = start_test_server().await;
+    let address = server.address.as_str();
+
+    // No shell: said in words, and the command line ends badly.
+    let (ok, printed, said) = gevrek_cli(address, &["zones", "list"]).await.unwrap();
+    assert!(!ok && printed.is_empty());
+    assert!(said.contains(NO_SHELL), "{said}");
+    let (ok, printed, _) = gevrek_cli(address, &["zones", "list", "--json"])
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_str(&printed).unwrap();
+    assert!(ok, "the JSON says it; a script reads it there");
+    assert_eq!(json["running"], false);
+    assert_eq!(json["message"], NO_SHELL);
+    assert!(json["state"].is_null());
+    let (ok, _, said) = gevrek_cli(address, &["zones", "restore-explorer"])
+        .await
+        .unwrap();
+    assert!(!ok);
+    assert!(said.contains(NO_SHELL), "{said}");
+
+    // A shell with real zones: a core, as the shell has one.
+    let config = ZonesConfig {
+        enabled: true,
+        zones: vec![ZoneDefinition::manual("work", "Work")],
+        ..ZonesConfig::default()
+    };
+    let mut core = ZonesCore::new(config, ZonesState::default());
+    core.event(
+        BackendEvent::Displays {
+            displays: vec![Display {
+                primary: true,
+                ..Display::new("DEL-A1B2-77", Rect::new(0, 0, 1920, 1080))
+            }],
+            reserved: Vec::new(),
+        },
+        NOW,
+    );
+    core.event(
+        BackendEvent::Listed {
+            location: Location::Desktop,
+            items: vec![
+                Item::file("/home/ada/Desktop/report.pdf"),
+                Item::file("/home/ada/Desktop/notes.txt"),
+            ],
+        },
+        NOW,
+    );
+    core.command(
+        Command::AddItem {
+            zone: ZoneId::new("work"),
+            item: ItemId::new("/home/ada/Desktop/report.pdf"),
+            index: None,
+            cell: None,
+        },
+        NOW,
+    );
+    let link = gevrek_link::Link::start(address.to_string(), || {});
+    link.host_zones();
+    link.publish_zones(ZonesSnapshot::of(&core, NOW));
+    assert_eq!(zones_heard(&link).await, ZonesHeard::Attached);
+    let mut client = WMClient::connect(address.to_string()).await.unwrap();
+    zones_state_when(&mut client, |state| state.sequence == 1).await;
+
+    let (ok, printed, said) = gevrek_cli(address, &["zones", "list"]).await.unwrap();
+    assert!(ok, "{said}");
+    println!("$ gevrek zones list\n{printed}");
+    let (_, as_json, _) = gevrek_cli(address, &["zones", "list", "--json"])
+        .await
+        .unwrap();
+    println!("$ gevrek zones list --json\n{as_json}");
+    let as_json: serde_json::Value = serde_json::from_str(&as_json).unwrap();
+    assert_eq!(as_json["running"], true);
+    assert_eq!(as_json["state"]["zones"][0]["item_count"], 1);
+    assert!(printed.starts_with(
+        "Zones: 1 · profile: DEL-A1B2-77 1920x1080@1.00 · snapshot 1\n"
+    ));
+    assert!(printed.contains("  work  Work   manual  DEL-A1B2-77  "), "{printed}");
+    assert!(printed.ends_with("Loose items: 1\n"));
+
+    let (ok, printed, said) = gevrek_cli(address, &["zones", "show", "work"])
+        .await
+        .unwrap();
+    assert!(ok, "{said}");
+    println!("$ gevrek zones show work\n{printed}");
+    assert!(printed.contains("    file      report.pdf  /home/ada/Desktop/report.pdf\n"));
+    let (ok, printed, _) = gevrek_cli(address, &["zones", "show", "work", "--json"])
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_str(&printed).unwrap();
+    assert!(ok);
+    println!("$ gevrek zones show work --json\n{printed}");
+    assert_eq!(json["zone"]["items"][0]["id"], "/home/ada/Desktop/report.pdf");
+    assert_eq!(json["zone"]["display"], "DEL-A1B2-77");
+    let (ok, _, said) = gevrek_cli(address, &["zones", "show", "play"])
+        .await
+        .unwrap();
+    assert!(!ok);
+    assert!(said.contains("There is no zone 'play'. The zones are: work"), "{said}");
+
+    // A command, carried out by the core, with what the core said.
+    let asked = gevrek_cli(
+        address,
+        &["zones", "send", r#"{"command":"create_zone","title":"Play"}"#],
+    );
+    let ZonesHeard::Asked(ZonesAsk { request, ask: Request::Command(command) }) =
+        zones_heard(&link).await
+    else {
+        panic!("a command for the core was to be told");
+    };
+    link.answer_zones(request.unwrap(), Answer::of(&core.command(command, NOW)));
+    let (ok, printed, said) = asked.await.unwrap();
+    assert!(ok, "{said}");
+    println!("$ gevrek zones send '{{\"command\":\"create_zone\",\"title\":\"Play\"}}'\n{printed}");
+    assert!(printed.starts_with("Done\n{\"event\":\"zone_created\",\"zone\":\""), "{printed}");
+
+    // One the core refuses: its reason, and a bad end.
+    let asked = gevrek_cli(
+        address,
+        &["zones", "send", r#"{"command":"delete_zone","zone":"nowhere"}"#],
+    );
+    let ZonesHeard::Asked(ZonesAsk { request, ask: Request::Command(command) }) =
+        zones_heard(&link).await
+    else {
+        panic!("a command for the core was to be told");
+    };
+    let answer = Answer::of(&core.command(command, NOW));
+    let reason = answer.error.clone().expect("the core refuses it");
+    link.answer_zones(request.unwrap(), answer);
+    let (ok, printed, said) = asked.await.unwrap();
+    println!("$ gevrek zones send '{{\"command\":\"delete_zone\",\"zone\":\"nowhere\"}}'\n{said}");
+    assert!(!ok && printed.is_empty());
+    assert!(said.contains(&reason), "{said}");
+
+    // Putting the system's icons back is asked of the shell, not the core.
+    let asked = gevrek_cli(address, &["zones", "restore-explorer"]);
+    let ZonesHeard::Asked(ZonesAsk { request, ask }) = zones_heard(&link).await else {
+        panic!("the request was to be told");
+    };
+    assert_eq!(ask, Request::RestoreSystemIcons);
+    link.answer_zones(request.unwrap(), Answer::done());
+    let (ok, printed, said) = asked.await.unwrap();
+    assert!(ok, "{said}");
+    assert_eq!(printed, "The system's own desktop icons were put back\n");
+}

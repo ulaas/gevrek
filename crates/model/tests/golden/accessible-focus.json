@@ -133,6 +133,7 @@
         "corners": "Round",
         "shadow": "enabled",
         "hide_taskbar": true,
+        "hide_desktop_icons": true,
         "own_windows_key": true,
         "drag_with_windows_key": true,
         "cut_columns_at_displays": false,

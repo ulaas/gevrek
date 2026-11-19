@@ -796,6 +796,18 @@ pub enum DispatchCommand {
         #[serde(default)]
         released: bool,
     },
+    /// Something asked of the zones on the desktop (`desktop.zones`): a
+    /// zones command as its own JSON (`{"command": "quick_hide"}`; the
+    /// words are `gevrek_zones::Command`'s, which this crate cannot name,
+    /// since the zones are built on it). The shell that runs the zones
+    /// reads it and carries it out. From a key, subscribers are told
+    /// (`shell.command` with the action `zones` and the command as
+    /// `json`) and nothing is answered; sent through the window manager's
+    /// endpoint, the shell's own answer comes back. Without a shell
+    /// nothing happens.
+    Zones {
+        action: serde_json::Value,
+    },
     /// Start a program: the file to run and its arguments, as they are
     /// (no shell reads them). Every use starts another one.
     Exec {
@@ -998,6 +1010,7 @@ impl DispatchCommand {
             Self::Osd { .. } => "Show a value on the screen",
             Self::NightLightPreview { .. } => "Show a colour temperature for a moment",
             Self::AppShortcut { .. } => "An application's own shortcut",
+            Self::Zones { .. } => "Ask something of the zones",
             Self::Exec { .. } => "Start a program",
             Self::LaunchStartup { .. } => "Launch startup application",
             Self::StopStartup { .. } => "Stop startup application",
@@ -1488,6 +1501,10 @@ pub const SHELL_SHORTCUTS: &str = "shortcuts";
 /// Windows; a compositor shows the workspaces itself).
 pub const SHELL_WORKSPACE_OVERVIEW: &str = "workspace_overview";
 
+/// The action `shell.command` names for something asked of the zones
+/// (`DispatchCommand::Zones`); the command itself is the field `json`.
+pub const SHELL_ZONES: &str = "zones";
+
 impl DispatchCommand {
     /// What subscribers are told (`shell.command`) for a command that asks
     /// the shell to show something said with it: the action and what goes
@@ -1512,6 +1529,10 @@ impl DispatchCommand {
                 pair("app", app),
                 pair("id", id),
                 pair("released", if *released { "true" } else { "false" }),
+            ]),
+            Self::Zones { action } => Some(vec![
+                pair("action", SHELL_ZONES),
+                pair("json", &action.to_string()),
             ]),
             _ => None,
         }
@@ -1703,6 +1724,28 @@ mod command_line_tests {
             .iter()
             .any(|(name, _)| name == "level"));
         assert!(DispatchCommand::Quit.shell_fields().is_none());
+    }
+
+    #[test]
+    fn what_is_asked_of_the_zones_is_told_as_it_was_written() {
+        let text = r#"{"command":"zones","action":{"command":"peek","on":true}}"#;
+        let zones: DispatchCommand = serde_json::from_str(text).unwrap();
+        let DispatchCommand::Zones { action } = &zones else {
+            panic!("read as {zones:?}");
+        };
+        assert_eq!(action["command"], "peek");
+        assert_eq!(serde_json::to_string(&zones).unwrap(), text);
+        let fields = zones.shell_fields().expect("told to the shell");
+        assert_eq!(fields[0], ("action".to_string(), SHELL_ZONES.to_string()));
+        assert_eq!(
+            fields[1],
+            ("json".to_string(), r#"{"command":"peek","on":true}"#.to_string())
+        );
+        // Without what is asked it is no command, as any that is mistyped.
+        assert!(matches!(
+            serde_json::from_str::<DispatchCommand>(r#"{"command":"zones"}"#),
+            Ok(DispatchCommand::Unknown(_)) | Err(_)
+        ));
     }
 
     #[test]

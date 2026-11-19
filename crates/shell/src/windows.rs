@@ -125,6 +125,9 @@ enum Message {
     Bluetooth(Option<gevrek_system::bluetooth::Bluetooth>),
     /// What is playing is another piece, or plays, or no longer.
     Playing(Option<crate::media::Playing>),
+    /// The zones of the desktop have something to do: their backend has
+    /// news, or their state is due to be written.
+    Zones,
 }
 
 /// The pixels an application's icon is asked for at: twice what it is
@@ -293,6 +296,8 @@ struct State {
     spaces: Vec<crate::overview::Display>,
     pictures: crate::overview::Remembered,
     had_keyboard: Option<u64>,
+    /// The zones of the desktop, once `desktop.zones.enabled` was set.
+    zones: Option<crate::zones::surfaces::Running>,
 }
 
 pub fn run() -> anyhow::Result<()> {
@@ -411,6 +416,7 @@ pub fn run() -> anyhow::Result<()> {
         spaces: Vec::new(),
         pictures: Default::default(),
         had_keyboard: None,
+        zones: None,
     }));
     // The network: read once, and again each time the system says that
     // something about the machine's addresses changed. Nothing is asked
@@ -446,6 +452,14 @@ pub fn run() -> anyhow::Result<()> {
                 break;
             }
         })?;
+    // This shell is the one that runs the zones of the desktop: what is
+    // asked of them through the window manager comes here. Told how they
+    // are at once, which is: not there, until the configuration is read.
+    {
+        let state = state.borrow();
+        state.link.host_zones();
+        state.link.publish_zones(Default::default());
+    }
     // The applications are there when the launcher is first asked for.
     read_apps(&state);
     // `--launcher` goes through the same door as the key does.
@@ -454,6 +468,7 @@ pub fn run() -> anyhow::Result<()> {
     }
     shell.run(false, move |message, control| match message {
         Message::Line => take_in(&state, control),
+        Message::Zones => zones_woken(&state, control),
         Message::Look => {
             let mut state = state.borrow_mut();
             state.link.send(Request::State);
@@ -1057,6 +1072,62 @@ fn apply_configuration(state: &mut State, changed: Box<gevrek_model::Config>) {
         client_id: "gevrek-shell".to_string(),
     });
     state.config = Some(changed);
+}
+
+/// The running configuration is another: the zones of the desktop are
+/// started, told, or put away, as it says (`desktop.zones.enabled`).
+fn zones_configured(state: &Rc<RefCell<State>>, control: &mut Control) {
+    let mut shared = state.borrow_mut();
+    let shared = &mut *shared;
+    let Some((config, hide_icons)) = shared.config.as_ref().map(|config| {
+        (config.desktop.zones.clone(), config.desktop.platform.windows.hide_desktop_icons)
+    }) else {
+        return;
+    };
+    let sender = shared.sender.clone();
+    let look = Rc::clone(state);
+    crate::zones::surfaces::Running::configured(
+        &mut shared.zones,
+        &config,
+        control,
+        move || {
+            sender.send(Message::Zones);
+        },
+        move || {
+            Rc::new(move |ui: &egui::Ui, fonts: &mut bool| {
+                let state = look.borrow();
+                (themed(&state, ui, fonts), state.settings)
+            })
+        },
+        // (Windows opens an item through its own shell.)
+        crate::zones::Starter::none,
+        // Explorer's own icons are put away while zones show, unless the
+        // configuration leaves them alone.
+        hide_icons,
+    );
+}
+
+/// The zones asked to be looked at. What they changed of the
+/// configuration (a zone made, renamed, rolled up) is written as the
+/// shell writes any change of its own.
+fn zones_woken(state: &Rc<RefCell<State>>, control: &mut Control) {
+    let changed = {
+        let state = state.borrow();
+        let Some(zones) = &state.zones else {
+            return;
+        };
+        let changed = zones.woken(control);
+        zones.publish(&state.link);
+        changed
+    };
+    let Some(changed) = changed else {
+        return;
+    };
+    let mut state = state.borrow_mut();
+    if let Some(mut config) = state.config.clone() {
+        config.desktop.zones = changed;
+        apply_configuration(&mut state, config);
+    }
 }
 
 /// Open the power menu, or close it when it is open. It has the keyboard
@@ -2442,6 +2513,14 @@ const NOTICE_STAY_MS: i32 = 12_000;
 
 /// What the window manager said since the last time.
 fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
+    // What was asked of the zones (a key, `gevrek zones ...`).
+    let asked = state.borrow().link.poll_zones();
+    for heard in asked {
+        if let gevrek_link::ZonesHeard::Asked(ask) = heard {
+            let state = state.borrow();
+            crate::zones::surfaces::asked(&state.zones, &state.link, ask);
+        }
+    }
     let events = state.borrow().link.poll();
     for event in events {
         match &event {
@@ -2528,11 +2607,16 @@ fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
                     }
                 }
                 sync_panels(state, control);
+                zones_configured(state, control);
             }
             Event::State(wm) => {
                 let arisen = {
                     let mut state = state.borrow_mut();
                     let state = &mut *state;
+                    // The zones are on the displays the state names.
+                    if let Some(zones) = &state.zones {
+                        zones.told(&wm);
+                    }
                     state.facts = gevrek_tutorial::Facts::of(&wm);
                     crate::tutoring::tidy_after_a_stop(&wm, &mut state.tidy_asked, state.link.teller());
                     if let Some((surface, ..)) = &state.tutorial {

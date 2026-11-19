@@ -386,6 +386,11 @@ impl ZonesBackend for FakeBackend {
         self.reserved.clone()
     }
 
+    fn desktop_folder(&mut self) -> Option<String> {
+        self.calls += 1;
+        Some(DESKTOP.to_string())
+    }
+
     fn journal_system_icons(&mut self) -> Result<(), BackendError> {
         self.calls += 1;
         self.journal_open = true;

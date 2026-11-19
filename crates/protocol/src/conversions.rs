@@ -39,6 +39,7 @@ pub fn dispatch_command_to_proto(
         | DispatchCommand::Shell { .. }
         | DispatchCommand::Notify { .. }
         | DispatchCommand::AppShortcut { .. }
+        | DispatchCommand::Zones { .. }
         | DispatchCommand::Osd { .. } => {}
         DispatchCommand::FocusNext => request.command = proto::DispatchType::FocusNext as i32,
         DispatchCommand::FocusPrevious => {

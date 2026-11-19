@@ -15,6 +15,8 @@ pub mod apps;
 pub mod bluetooth;
 pub mod brightness;
 pub mod clipboard;
+#[cfg(windows)]
+pub mod display_ids;
 pub mod every_key;
 pub mod icons;
 pub mod idle;
@@ -30,6 +32,7 @@ pub mod start_menu;
 pub mod status;
 pub mod tray_host;
 pub mod wifi;
+pub mod zones;
 
 /// Windows' way of letting a thread talk to the shell's objects.
 #[cfg(windows)]

@@ -18,6 +18,8 @@
 //!   passes between it and the core.
 //! - `core`: the state machine. Events and commands in, effects out.
 //! - `host`: carries events and requests between a core and a backend.
+//! - `ipc`: what is asked from outside, what is answered, and the zones
+//!   as they are told to other programs.
 //! - `testing`: a backend in memory.
 
 pub mod backend;
@@ -26,6 +28,7 @@ pub mod core;
 pub mod geometry;
 pub mod host;
 pub mod ids;
+pub mod ipc;
 pub mod item;
 pub mod layout;
 pub mod paths;

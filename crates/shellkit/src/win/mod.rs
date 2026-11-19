@@ -36,13 +36,19 @@
 //! happened on a surface, when egui asks for another, and never
 //! otherwise: the loop sleeps in between, and a still panel costs nothing.
 //!
+//! A surface that asks for it takes what other programs drag onto it and
+//! can drag files out ([`dnd`], and [`crate::dnd`] for what both systems
+//! share).
+//!
 //! Not here: input methods (composed text arrives only once it is
 //! committed), the clipboard, touch, and the session lock, which is the
 //! system's own on Windows.
 
+pub mod dnd;
 pub mod input;
 pub mod place;
 
+use crate::dnd::{DragActions, DragEvent, DragImage, DragOutcome, DragStart, DropAnswer};
 use crate::{Edge, Flow, Keyboard, Level, Place, Timings};
 use anyhow::Context as _;
 use egui_wgpu::wgpu;
@@ -58,6 +64,7 @@ use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, MonitorFromPoint, ValidateRect, HDC, HMONITOR,
     MONITORINFO, MONITORINFOEXW, MONITOR_DEFAULTTOPRIMARY,
 };
+use windows::Win32::System::Com::IDataObject;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
@@ -67,7 +74,8 @@ use windows::Win32::UI::HiDpi::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, ReleaseCapture, SendInput, SetCapture, SetFocus, TrackMouseEvent, INPUT,
-    INPUT_MOUSE, TME_LEAVE, TRACKMOUSEEVENT, VK_CONTROL, VK_ESCAPE, VK_F4, VK_MENU, VK_SHIFT,
+    INPUT_MOUSE, TME_LEAVE, TRACKMOUSEEVENT, VK_CONTROL, VK_ESCAPE, VK_F4, VK_LBUTTON, VK_MBUTTON,
+    VK_MENU, VK_RBUTTON, VK_SHIFT,
 };
 use windows::Win32::UI::Shell::{
     SHAppBarMessage, ABM_ACTIVATE, ABM_NEW, ABM_QUERYPOS, ABM_REMOVE, ABM_SETPOS,
@@ -126,6 +134,31 @@ pub struct Control {
     /// which a mouse button was pressed elsewhere on the desktop since
     /// they last asked (`pressed_outside`).
     outside: Vec<SurfaceId>,
+    /// Surfaces that begin or cease to take drops, with what they take
+    /// of any drag.
+    drops: Vec<(SurfaceId, Option<DropAnswer>)>,
+    /// What a surface would do with the drag that is over it now.
+    answers: Vec<(SurfaceId, DropAnswer)>,
+    /// Drags to begin.
+    drags: Vec<(SurfaceId, Dragged)>,
+    /// What happened to the surfaces' drags and is not asked for yet.
+    drag_news: Vec<(SurfaceId, DragEvent)>,
+    /// What was last dropped on a surface, as Windows handed it over.
+    dropped: Vec<(SurfaceId, IDataObject)>,
+    /// The window of each surface that is open, as Windows names it.
+    windows: Vec<(SurfaceId, isize)>,
+}
+
+/// What a drag out of a surface carries.
+enum Dragged {
+    /// Paths and text: an object is made for them.
+    Plain(DragStart),
+    /// An object someone else made.
+    Object {
+        object: IDataObject,
+        allowed: DragActions,
+        image: Option<DragImage>,
+    },
 }
 
 impl Control {
@@ -240,6 +273,98 @@ impl Control {
         self.outside.len() != before
     }
 
+    /// Let other programs' drags be dropped on a surface, or no longer
+    /// (`None`). `standing` is what the surface takes of any drag until
+    /// it says more of the one that is over it ([`Control::answer_drag`]):
+    /// the program a drag comes from shows its pointer by it from the
+    /// first moment. What happens is asked for with
+    /// [`Control::drag_events`]. A surface that never calls this is told
+    /// nothing and is no place to drop on.
+    pub fn accept_drops(&mut self, id: SurfaceId, standing: Option<DropAnswer>) {
+        self.drops.push((id, standing));
+    }
+
+    /// What the surface would do with the drag that is over it, where it
+    /// is now: said by the drawing when it was told of a move, and held
+    /// until it says otherwise or the drag is gone. (The source's pointer
+    /// follows a frame later.)
+    pub fn answer_drag(&mut self, id: SurfaceId, answer: DropAnswer) {
+        self.answers.push((id, answer));
+    }
+
+    /// What happened to drags over the surface, and to the drag it began,
+    /// since this was last asked; the surface is drawn again whenever
+    /// there is something.
+    pub fn drag_events(&mut self, id: SurfaceId) -> Vec<DragEvent> {
+        let mut mine = Vec::new();
+        let mut index = 0;
+        while index < self.drag_news.len() {
+            if self.drag_news[index].0 == id {
+                mine.push(self.drag_news.remove(index).1);
+            } else {
+                index += 1;
+            }
+        }
+        mine
+    }
+
+    /// Begin a drag of files (or text) out of a surface, while the mouse
+    /// button that will drop it is held on it. The surface is told that
+    /// the button was let go and the pointer is gone (it is the drag's
+    /// from here on), and, when the drag is over, how it ended
+    /// ([`DragEvent::Ended`]).
+    pub fn start_drag(&mut self, from: SurfaceId, drag: DragStart) {
+        self.drags.push((from, Dragged::Plain(drag)));
+    }
+
+    /// As [`Control::start_drag`], with an object made elsewhere: things
+    /// of Windows' shell that are no files (the zones' backend makes
+    /// those). Windows only.
+    pub fn start_drag_of(
+        &mut self,
+        from: SurfaceId,
+        object: IDataObject,
+        allowed: DragActions,
+        image: Option<DragImage>,
+    ) {
+        self.drags.push((
+            from,
+            Dragged::Object {
+                object,
+                allowed,
+                image,
+            },
+        ));
+    }
+
+    /// What was last dropped on a surface, as Windows handed it over: for
+    /// what the payload of [`DragEvent::Dropped`] cannot say (things
+    /// without a path). There from the drop until it is taken or the next
+    /// drag comes. Windows only.
+    pub fn dropped_object(&mut self, id: SurfaceId) -> Option<IDataObject> {
+        let at = self.dropped.iter().position(|(on, _)| *on == id)?;
+        Some(self.dropped.remove(at).1)
+    }
+
+    /// The window a surface is drawn on, as Windows names it (an `HWND`,
+    /// as a number). For what Windows itself shows on a surface's behalf
+    /// and wants an owner for: the shell's own menu for a file, and the
+    /// windows that tell how far copying or moving has come. Nothing for a
+    /// surface that has no window yet (asked for in this pass, it has one
+    /// from the next) or is closed. The number names the window only
+    /// while the surface is open: it is asked for when needed and not
+    /// kept, since Windows gives a closed window's number to another.
+    /// Windows only: a Wayland surface has nothing of the kind.
+    pub fn native_window(&self, id: SurfaceId) -> Option<isize> {
+        if self.close.contains(&id) {
+            return None;
+        }
+        self.windows
+            .iter()
+            .find(|(open, _)| *open == id)
+            .map(|(_, window)| *window)
+    }
+
     /// Whether a surface is open now.
     pub fn is_open(&self, id: SurfaceId) -> bool {
         // (Also one asked for earlier in this pass, which is made when
@@ -333,6 +458,7 @@ impl<M: 'static> Shell<M> {
             timings: Timings::default(),
             total_ms: 0.0,
             control: Control::default(),
+            ole: None,
         };
         // A window nobody sees, to be told when displays come, go or
         // change (such news is for top-level windows only), and so that
@@ -358,6 +484,7 @@ impl<M: 'static> Shell<M> {
         host.watcher = Some(Window {
             handle: watcher,
             reserved: false,
+            accepts: false,
         });
         let (channel, messages) = std::sync::mpsc::channel();
         Ok(Self {
@@ -457,28 +584,21 @@ impl<M: 'static> Shell<M> {
                     DispatchMessageW(&message);
                 }
             }
-            // What the windows were told, in the order it came.
-            let heard = HEARD.with(|heard| std::mem::take(&mut *heard.borrow_mut()));
-            for news in heard {
-                self.host.take_in(news);
+            turn(&mut self.host, &self.messages, &mut on_message);
+            // A drag out of a surface: Windows runs it in a loop of its
+            // own and returns when it is over. The shell's own pass is
+            // made from inside that loop meanwhile.
+            while let Some((from, dragged)) = self.host.next_drag() {
+                let Some(ready) = self.host.begin_drag(from, dragged) else {
+                    continue;
+                };
+                let (host, messages) = (&mut self.host, &self.messages);
+                let outcome =
+                    dnd::run(&ready.object, ready.allowed, ready.image.as_ref(), &mut || {
+                        turn(host, messages, &mut on_message)
+                    });
+                self.host.end_drag(from, outcome);
             }
-            for message in self.messages.try_iter() {
-                on_message(message, &mut self.host.control);
-            }
-            self.host.carry_out();
-            self.host.access_news();
-            let now = Instant::now();
-            for index in 0..self.host.surfaces.len() {
-                let surface = &mut self.host.surfaces[index];
-                if surface.again_at.is_some_and(|at| now >= at) {
-                    surface.again_at = None;
-                    surface.redraw = true;
-                }
-                if surface.redraw {
-                    self.host.draw(index);
-                }
-            }
-            self.host.carry_out();
         }
         // Surfaces first: they draw with the device.
         self.host.hooks = None;
@@ -488,6 +608,45 @@ impl<M: 'static> Shell<M> {
         }
         Ok(self.host.timings)
     }
+}
+
+/// One pass of the shell: what the windows were told becomes input, the
+/// messages of other threads are handled, and every surface that is due
+/// is drawn. Made by the loop after Windows' messages, and from inside a
+/// drag (which has a loop of its own, see [`dnd::run`]).
+fn turn<M>(
+    host: &mut Host,
+    messages: &std::sync::mpsc::Receiver<M>,
+    on_message: &mut impl FnMut(M, &mut Control),
+) {
+    // What the windows were told, in the order it came.
+    let heard = HEARD.with(|heard| {
+        heard
+            .try_borrow_mut()
+            .map(|mut heard| std::mem::take(&mut *heard))
+            .unwrap_or_default()
+    });
+    for news in heard {
+        host.take_in(news);
+    }
+    host.take_in_drags();
+    for message in messages.try_iter() {
+        on_message(message, &mut host.control);
+    }
+    host.carry_out();
+    host.access_news();
+    let now = Instant::now();
+    for index in 0..host.surfaces.len() {
+        let surface = &mut host.surfaces[index];
+        if surface.again_at.is_some_and(|at| now >= at) {
+            surface.again_at = None;
+            surface.redraw = true;
+        }
+        if surface.redraw {
+            host.draw(index);
+        }
+    }
+    host.carry_out();
 }
 
 /// Show one surface at `place` and draw `ui` on it until it says to close
@@ -957,10 +1116,16 @@ struct Window {
     handle: HWND,
     /// Registered as an application bar.
     reserved: bool,
+    /// Registered as a place to drop on.
+    accepts: bool,
 }
 
 impl Drop for Window {
     fn drop(&mut self) {
+        if self.accepts {
+            // (Before the window goes: Windows holds the target for it.)
+            dnd::revoke(self.handle);
+        }
         unsafe {
             if self.reserved {
                 // The room it kept is given back.
@@ -1181,9 +1346,171 @@ struct Host {
     total_ms: f64,
     /// What handlers asked for and is not carried out yet.
     control: Control,
+    /// Drag and drop on this thread, from the first surface that asks
+    /// for it: `Some(None)` when Windows refused, which is not asked
+    /// again. (After the surfaces, whose windows are places to drop on
+    /// until they go.)
+    ole: Option<Option<dnd::Ole>>,
+}
+
+/// A drag that can begin.
+struct ReadyDrag {
+    object: IDataObject,
+    allowed: DragActions,
+    image: Option<DragImage>,
 }
 
 impl Host {
+    /// Whether this thread can drag and be dropped on; set up at the
+    /// first asking.
+    fn ole(&mut self) -> bool {
+        self.ole.get_or_insert_with(dnd::Ole::new).is_some()
+    }
+
+    /// The next drag a surface asked to begin.
+    fn next_drag(&mut self) -> Option<(SurfaceId, Dragged)> {
+        (!self.control.drags.is_empty()).then(|| self.control.drags.remove(0))
+    }
+
+    /// Make a drag ready: what is dragged as an object, and the surface
+    /// it comes from told that the pointer is no longer its own. Windows
+    /// takes the mouse for the drag, so the button's release never comes
+    /// to the surface; told nothing, it would think the button held for
+    /// ever.
+    fn begin_drag(&mut self, from: SurfaceId, dragged: Dragged) -> Option<ReadyDrag> {
+        if !self.surfaces.iter().any(|surface| surface.id == from) {
+            return None;
+        }
+        let ready = if self.ole() {
+            match dragged {
+                Dragged::Plain(start) => match dnd::object_for(&start.payload) {
+                    Ok(object) => Some(ReadyDrag {
+                        object,
+                        allowed: start.payload.allowed,
+                        image: start.image,
+                    }),
+                    Err(error) => {
+                        log::warn!("nothing to drag could be made: {error}");
+                        None
+                    }
+                },
+                Dragged::Object {
+                    object,
+                    allowed,
+                    image,
+                } => Some(ReadyDrag {
+                    object,
+                    allowed,
+                    image,
+                }),
+            }
+        } else {
+            None
+        };
+        let Some(ready) = ready else {
+            self.end_drag(from, DragOutcome::Cancelled);
+            return None;
+        };
+        let surface = self.by_id(from)?;
+        // SAFETY (both): a point of ours; no other pointers.
+        let held = |key: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY| unsafe {
+            GetKeyState(i32::from(key.0)) < 0
+        };
+        let mut pointer = POINT::default();
+        unsafe {
+            let _ = GetCursorPos(&mut pointer);
+            let _ = ReleaseCapture();
+        }
+        let at = crate::dnd::points(
+            pointer.x - surface.area.x,
+            pointer.y - surface.area.y,
+            surface.scale,
+        );
+        for (key, button) in [
+            (VK_LBUTTON, egui::PointerButton::Primary),
+            (VK_RBUTTON, egui::PointerButton::Secondary),
+            (VK_MBUTTON, egui::PointerButton::Middle),
+        ] {
+            if held(key) {
+                surface.events.push(egui::Event::PointerButton {
+                    pos: at,
+                    button,
+                    pressed: false,
+                    modifiers: egui::Modifiers::default(),
+                });
+            }
+        }
+        surface.events.push(egui::Event::PointerGone);
+        surface.redraw = true;
+        if self.pointer_on == Some(from) {
+            self.pointer_on = None;
+        }
+        Some(ready)
+    }
+
+    /// A drag out of a surface is over: the surface is told how.
+    fn end_drag(&mut self, from: SurfaceId, outcome: DragOutcome) {
+        if let Some(surface) = self.by_id(from) {
+            surface.redraw = true;
+            self.control
+                .drag_news
+                .push((from, DragEvent::Ended { outcome }));
+        }
+    }
+
+    /// What the drop targets were told becomes what the surfaces are
+    /// told: places in the surface's points, whatever its display's scale.
+    fn take_in_drags(&mut self) {
+        for told in dnd::told() {
+            let window = match &told {
+                dnd::Told::Entered { window, .. }
+                | dnd::Told::Moved { window, .. }
+                | dnd::Told::Left { window }
+                | dnd::Told::Dropped { window, .. } => *window,
+            };
+            let Some(surface) = self
+                .surfaces
+                .iter_mut()
+                .find(|surface| surface.window.handle.0 as isize == window)
+            else {
+                continue;
+            };
+            let (id, scale) = (surface.id, surface.scale);
+            surface.redraw = true;
+            let event = match told {
+                dnd::Told::Entered { x, y, offered, .. } => {
+                    // (What an earlier drag left is that drag's.)
+                    self.control.dropped.retain(|(on, _)| *on != id);
+                    DragEvent::Entered {
+                        at: crate::dnd::points(x, y, scale),
+                        offered,
+                    }
+                }
+                dnd::Told::Moved { x, y, .. } => DragEvent::Moved {
+                    at: crate::dnd::points(x, y, scale),
+                },
+                dnd::Told::Left { .. } => DragEvent::Left,
+                dnd::Told::Dropped {
+                    x,
+                    y,
+                    payload,
+                    action,
+                    object,
+                    ..
+                } => {
+                    self.control.dropped.retain(|(on, _)| *on != id);
+                    self.control.dropped.push((id, object));
+                    DragEvent::Dropped {
+                        at: crate::dnd::points(x, y, scale),
+                        payload,
+                        action,
+                    }
+                }
+            };
+            self.control.drag_news.push((id, event));
+        }
+    }
+
     fn by_id(&mut self, id: SurfaceId) -> Option<&mut Surface> {
         self.surfaces.iter_mut().find(|surface| surface.id == id)
     }
@@ -1225,6 +1552,8 @@ impl Host {
             if self.pointer_on == Some(id) {
                 self.pointer_on = None;
             }
+            self.control.drag_news.retain(|(on, _)| *on != id);
+            self.control.dropped.retain(|(on, _)| *on != id);
         }
         for (id, place, draw) in std::mem::take(&mut self.control.open) {
             let name = place.name.clone();
@@ -1278,6 +1607,32 @@ impl Host {
                 surface.redraw = true;
             }
         }
+        for (id, standing) in std::mem::take(&mut self.control.drops) {
+            let can = standing.is_none() || self.ole();
+            let Some(surface) = self.by_id(id) else {
+                continue;
+            };
+            let window = surface.window.handle;
+            match standing {
+                Some(standing) if can => {
+                    if !surface.window.accepts {
+                        surface.window.accepts = dnd::register(window);
+                    }
+                    dnd::set_standing(window, standing);
+                }
+                Some(_) => {}
+                None => {
+                    if std::mem::take(&mut surface.window.accepts) {
+                        dnd::revoke(window);
+                    }
+                }
+            }
+        }
+        for (id, answer) in std::mem::take(&mut self.control.answers) {
+            if let Some(surface) = self.by_id(id) {
+                dnd::set_answer(surface.window.handle, answer);
+            }
+        }
         // Listening to the whole desktop only while there is a popup to
         // close.
         // (And while a surface is open that stands beside the windows
@@ -1296,6 +1651,11 @@ impl Host {
             self.hooks = None;
         }
         self.control.known = self.surfaces.iter().map(|surface| surface.id).collect();
+        self.control.windows = self
+            .surfaces
+            .iter()
+            .map(|surface| (surface.id, surface.window.handle.0 as isize))
+            .collect();
     }
 
     fn make(&mut self, id: SurfaceId, place: Place, draw: Draw) -> anyhow::Result<Surface> {
@@ -1353,6 +1713,7 @@ impl Host {
         let window = Window {
             handle,
             reserved: false,
+            accepts: false,
         };
         change_facts(handle, |facts| {
             facts.activates = place.keyboard != Keyboard::Never;
@@ -1417,6 +1778,7 @@ impl Host {
         let window = Window {
             handle,
             reserved: false,
+            accepts: false,
         };
         if hint {
             // (A window of this kind is not shown until it is said how

@@ -61,10 +61,13 @@ pub struct AppAction {
     pub command: Vec<String>,
 }
 
-/// Read one desktop entry. `locales` are the user's languages, the most
-/// wanted first (`tr_TR`, `tr`). `None` when the entry is not an
-/// application to show on this desktop.
-pub fn parse(text: &str, id: &str, entry: &Path, locales: &[String]) -> Option<App> {
+/// The fields of a desktop entry's main group, as they are written.
+#[derive(Debug, Clone, Default)]
+pub struct Fields<'a>(Vec<(&'a str, &'a str)>);
+
+/// The main group (`[Desktop Entry]`) of an entry's text. The actions
+/// have groups of their own, which are not in it.
+pub fn main_group(text: &str) -> Fields<'_> {
     let mut fields: Vec<(&str, &str)> = Vec::new();
     let mut in_main = false;
     for line in text.lines() {
@@ -73,7 +76,6 @@ pub fn parse(text: &str, id: &str, entry: &Path, locales: &[String]) -> Option<A
             continue;
         }
         if line.starts_with('[') {
-            // Only the main group; the actions have groups of their own.
             in_main = line == "[Desktop Entry]";
             continue;
         }
@@ -84,24 +86,35 @@ pub fn parse(text: &str, id: &str, entry: &Path, locales: &[String]) -> Option<A
             fields.push((key.trim(), value.trim()));
         }
     }
-    let plain = |key: &str| {
-        fields
+    Fields(fields)
+}
+
+impl<'a> Fields<'a> {
+    /// A field as it is written.
+    pub fn plain(&self, key: &str) -> Option<&'a str> {
+        self.0
             .iter()
             .find(|(name, _)| *name == key)
             .map(|(_, value)| *value)
-    };
-    // `Name[tr]` before `Name`.
-    let localised = |key: &str| {
+    }
+
+    /// A field as text in the user's language: `Name[tr]` before `Name`.
+    pub fn localised(&self, key: &str, locales: &[String]) -> String {
         locales
             .iter()
-            .find_map(|locale| plain(&format!("{key}[{locale}]")))
-            .or_else(|| plain(key))
+            .find_map(|locale| self.plain(&format!("{key}[{locale}]")))
+            .or_else(|| self.plain(key))
             .map(unescape)
             .unwrap_or_default()
-    };
-    let yes = |key: &str| plain(key) == Some("true");
-    let list = |key: &str| -> Vec<String> {
-        plain(key)
+    }
+
+    pub fn yes(&self, key: &str) -> bool {
+        self.plain(key) == Some("true")
+    }
+
+    /// A field that is a list (`a;b;`).
+    pub fn list(&self, key: &str) -> Vec<String> {
+        self.plain(key)
             .map(|value| {
                 value
                     .split(';')
@@ -110,23 +123,55 @@ pub fn parse(text: &str, id: &str, entry: &Path, locales: &[String]) -> Option<A
                     .collect()
             })
             .unwrap_or_default()
-    };
-    if plain("Type") != Some("Application") || yes("Hidden") || yes("NoDisplay") {
+    }
+}
+
+/// Read one desktop entry. `locales` are the user's languages, the most
+/// wanted first (`tr_TR`, `tr`). `None` when the entry is not an
+/// application to show on this desktop.
+pub fn parse(text: &str, id: &str, entry: &Path, locales: &[String]) -> Option<App> {
+    parse_as(text, id, entry, locales, true)
+}
+
+/// Read one desktop entry as [`parse`] does. With `for_showing` false,
+/// an entry that asks not to be listed (`NoDisplay`, `OnlyShowIn`,
+/// `NotShowIn`) is read all the same: such an entry is not for a
+/// launcher's list, but it still is the program files are opened with,
+/// and it is what a launcher lying on the desktop is. One that says it
+/// was deleted (`Hidden`) is no application either way.
+pub fn parse_as(
+    text: &str,
+    id: &str,
+    entry: &Path,
+    locales: &[String],
+    for_showing: bool,
+) -> Option<App> {
+    let fields = main_group(text);
+    let plain = |key: &str| fields.plain(key);
+    let localised = |key: &str| fields.localised(key, locales);
+    let yes = |key: &str| fields.yes(key);
+    let list = |key: &str| fields.list(key);
+    if plain("Type") != Some("Application") || yes("Hidden") {
         return None;
     }
-    let only = list("OnlyShowIn");
-    if !only.is_empty()
-        && !only
+    if for_showing {
+        if yes("NoDisplay") {
+            return None;
+        }
+        let only = list("OnlyShowIn");
+        if !only.is_empty()
+            && !only
+                .iter()
+                .any(|desktop| desktop.eq_ignore_ascii_case(DESKTOP))
+        {
+            return None;
+        }
+        if list("NotShowIn")
             .iter()
             .any(|desktop| desktop.eq_ignore_ascii_case(DESKTOP))
-    {
-        return None;
-    }
-    if list("NotShowIn")
-        .iter()
-        .any(|desktop| desktop.eq_ignore_ascii_case(DESKTOP))
-    {
-        return None;
+        {
+            return None;
+        }
     }
     let name = localised("Name");
     if name.is_empty() {
@@ -255,11 +300,29 @@ fn unescape(value: &str) -> String {
 /// places for files and addresses are dropped, `%i`, `%c` and `%k` are
 /// filled in.
 pub fn command_of(exec: &str, name: &str, icon: &str, entry: &Path) -> Vec<String> {
+    commands_for(exec, name, icon, entry, &[])
+        .pop()
+        .unwrap_or_default()
+}
+
+/// One thing an application is started with, both ways an `Exec` line
+/// can ask for it: as a file (`%f`: a path) and as an address (`%u`: a
+/// URI).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Opened {
+    pub file: String,
+    pub address: String,
+}
+
+/// The words of an `Exec` line: parts between blanks, a quoted part one
+/// word, a backslash inside quotes taking the next letter as it is. No
+/// shell reads the line, here or later.
+fn exec_words(exec: &str) -> Vec<String> {
     let mut words: Vec<String> = Vec::new();
     let mut word = String::new();
     let mut has_word = false;
     let mut quoted = false;
-    let mut letters = exec.chars().peekable();
+    let mut letters = exec.chars();
     while let Some(letter) = letters.next() {
         match letter {
             '"' => {
@@ -286,35 +349,105 @@ pub fn command_of(exec: &str, name: &str, icon: &str, entry: &Path) -> Vec<Strin
     if has_word {
         words.push(word);
     }
-    let mut command = Vec::new();
-    for word in words {
-        match word.as_str() {
-            // Files and addresses: none are given.
-            "%f" | "%F" | "%u" | "%U" | "%d" | "%D" | "%n" | "%N" | "%v" | "%m" => {}
-            "%i" => {
-                if !icon.is_empty() {
-                    command.push("--icon".to_string());
-                    command.push(icon.to_string());
+    words
+}
+
+/// The programs to start, each with its arguments, for an `Exec` line
+/// and the things to open with it.
+///
+/// `%F` and `%U` take all of them, each an argument of its own, in one
+/// program. `%f` and `%u` take one, so a line with only those is started
+/// once for each thing, as the specification says. A line with no place
+/// for a file gets each as its last argument, as if it ended in `%f`
+/// (what GLib and KDE do). The codes the specification retired (`%d`,
+/// `%D`, `%n`, `%N`, `%v`, `%m`) are dropped; `%i`, `%c`, `%k` and `%%`
+/// are filled in. With nothing to open there is one program, without
+/// the places for files. An empty line gives nothing.
+pub fn commands_for(
+    exec: &str,
+    name: &str,
+    icon: &str,
+    entry: &Path,
+    opened: &[Opened],
+) -> Vec<Vec<String>> {
+    let words = exec_words(exec);
+    if words.is_empty() {
+        return Vec::new();
+    }
+    // (`%%` is a percent sign, not the start of a code.)
+    let codes = |word: &str, of: &[&str]| {
+        let plain = word.replace("%%", "");
+        of.iter().any(|code| plain.contains(code))
+    };
+    let takes_all = words.iter().any(|word| codes(word, &["%F", "%U"]));
+    let takes_one = words.iter().any(|word| codes(word, &["%f", "%u"]));
+    let build = |one: Option<&Opened>, all: &[Opened], append: bool| {
+        let mut command = Vec::new();
+        for word in &words {
+            match word.as_str() {
+                "%f" => command.extend(one.map(|opened| opened.file.clone())),
+                "%u" => command.extend(one.map(|opened| opened.address.clone())),
+                "%F" => command.extend(all.iter().map(|opened| opened.file.clone())),
+                "%U" => command.extend(all.iter().map(|opened| opened.address.clone())),
+                "%d" | "%D" | "%n" | "%N" | "%v" | "%m" => {}
+                "%i" => {
+                    if !icon.is_empty() {
+                        command.push("--icon".to_string());
+                        command.push(icon.to_string());
+                    }
                 }
-            }
-            "%c" => command.push(name.to_string()),
-            "%k" => command.push(entry.to_string_lossy().into_owned()),
-            _ => {
-                // A code inside a word (`--name=%c`), and `%%` for a percent sign.
-                let filled = word
-                    .replace("%%", "\u{0}")
-                    .replace("%c", name)
-                    .replace("%k", &entry.to_string_lossy())
-                    .replace("%f", "")
-                    .replace("%F", "")
-                    .replace("%u", "")
-                    .replace("%U", "")
-                    .replace('\u{0}', "%");
-                command.push(filled);
+                "%c" => command.push(name.to_string()),
+                "%k" => command.push(entry.to_string_lossy().into_owned()),
+                _ => command.push(fill(word, name, entry, one)),
             }
         }
+        if append {
+            command.extend(one.map(|opened| opened.file.clone()));
+        }
+        command
+    };
+    if opened.is_empty() {
+        return vec![build(None, &[], false)];
     }
-    command
+    if takes_all {
+        // (A line with both kinds of place: the single ones get the first.)
+        return vec![build(opened.first(), opened, false)];
+    }
+    opened
+        .iter()
+        .map(|one| build(Some(one), &[], !takes_one))
+        .collect()
+}
+
+/// A word of an `Exec` line with the codes inside it filled in
+/// (`--name=%c`), read once from the left: what is put in is never read
+/// again, so a file named `%c` stays that name. `%%` is a percent sign;
+/// the lists (`%F`, `%U`) and the retired codes have no place inside a
+/// word and leave nothing.
+fn fill(word: &str, name: &str, entry: &Path, one: Option<&Opened>) -> String {
+    let mut filled = String::with_capacity(word.len());
+    let mut letters = word.chars();
+    while let Some(letter) = letters.next() {
+        if letter != '%' {
+            filled.push(letter);
+            continue;
+        }
+        match letters.next() {
+            Some('%') => filled.push('%'),
+            Some('c') => filled.push_str(name),
+            Some('k') => filled.push_str(&entry.to_string_lossy()),
+            Some('f') => filled.push_str(one.map_or("", |opened| opened.file.as_str())),
+            Some('u') => filled.push_str(one.map_or("", |opened| opened.address.as_str())),
+            Some('F' | 'U' | 'd' | 'D' | 'n' | 'N' | 'v' | 'm' | 'i') => {}
+            // Not a code: as it is written.
+            Some(other) => {
+                filled.push('%');
+                filled.push(other);
+            }
+            None => filled.push('%'),
+        }
+    }
+    filled
 }
 
 /// The directories applications are looked for in, the user's first.
@@ -795,6 +928,73 @@ mod tests {
             ["sh", "-c", "echo 100% \"done\""]
         );
         assert!(command("").is_empty());
+    }
+
+    #[test]
+    fn an_exec_line_takes_what_is_opened_where_it_asks_for_it() {
+        let entry = Path::new("/usr/share/applications/a.desktop");
+        let opened = |path: &str| Opened {
+            file: path.to_string(),
+            address: format!("file://{}", path.replace(' ', "%20")),
+        };
+        let two = [opened("/home/ada/a b.txt"), opened("/home/ada/c.txt")];
+        let commands = |exec: &str, opened: &[Opened]| commands_for(exec, "App", "", entry, opened);
+        // All of them in one program, each an argument of its own.
+        assert_eq!(
+            commands("edit --new %F", &two),
+            [vec!["edit", "--new", "/home/ada/a b.txt", "/home/ada/c.txt"]]
+        );
+        assert_eq!(
+            commands("view %U", &two),
+            [vec!["view", "file:///home/ada/a%20b.txt", "file:///home/ada/c.txt"]]
+        );
+        // One at a time: a program for each.
+        assert_eq!(
+            commands("show %f", &two),
+            [vec!["show", "/home/ada/a b.txt"], vec!["show", "/home/ada/c.txt"]]
+        );
+        assert_eq!(
+            commands("show --uri=%u", &two[..1]),
+            [vec!["show", "--uri=file:///home/ada/a%20b.txt"]]
+        );
+        // No place for a file: it comes last.
+        assert_eq!(
+            commands("old-tool --flag", &two[..1]),
+            [vec!["old-tool", "--flag", "/home/ada/a b.txt"]]
+        );
+        // The retired codes are dropped, a percent sign stays one, and
+        // nothing a file is named can become a second argument or a code.
+        let odd = [opened("/tmp/%F $(rm -rf) ;.txt"), opened("/tmp/%c%k")];
+        assert_eq!(
+            commands("tool %d %n %m 100%% %f", &odd[..1]),
+            [vec!["tool", "100%", "/tmp/%F $(rm -rf) ;.txt"]]
+        );
+        assert_eq!(
+            commands("tool --file=%f --name=%c", &odd[1..]),
+            [vec!["tool", "--file=/tmp/%c%k", "--name=App"]]
+        );
+        // `%%f` is the text `%f`, and no place for a file.
+        assert_eq!(
+            commands("tool %%f", &two[..1]),
+            [vec!["tool", "%f", "/home/ada/a b.txt"]]
+        );
+        assert_eq!(commands("show %f", &[]), [vec!["show"]]);
+        assert!(commands("", &two).is_empty());
+    }
+
+    #[test]
+    fn an_entry_that_is_not_for_the_list_still_opens_files() {
+        let hidden = "[Desktop Entry]\nType=Application\nName=Viewer\nExec=viewer %f\nNoDisplay=true\nOnlyShowIn=GNOME;\n";
+        let path = Path::new("/x/viewer.desktop");
+        assert!(parse(hidden, "viewer", path, &[]).is_none());
+        let app = parse_as(hidden, "viewer", path, &[], false).expect("an application");
+        assert_eq!(app.command, ["viewer"]);
+        // Deleted is deleted.
+        assert!(parse_as(&format!("{hidden}Hidden=true\n"), "viewer", path, &[], false).is_none());
+        let fields = main_group(hidden);
+        assert_eq!(fields.plain("Exec"), Some("viewer %f"));
+        assert_eq!(fields.list("OnlyShowIn"), ["GNOME"]);
+        assert!(fields.yes("NoDisplay"));
     }
 
     #[test]

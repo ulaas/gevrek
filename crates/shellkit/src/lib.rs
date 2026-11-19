@@ -16,7 +16,11 @@
 //! program is built for: what is written against it needs no word about
 //! the system. The session lock is in the Linux half only; on Windows the
 //! system has its own.
+//!
+//! Files dragged between a surface and other programs are in [`dnd`]: a
+//! surface asks for them, and one that does not is as it was.
 
+pub mod dnd;
 #[cfg(target_os = "linux")]
 pub mod layer;
 #[cfg(windows)]

@@ -1122,6 +1122,53 @@ enum Commands {
 
     /// Return to the default advanced-binding submap
     SubmapReset,
+
+    /// The zones on the desktop (the containers that hold its icons):
+    /// `list` them, `show` one with its items, `send` them a command,
+    /// follow their `events`, or `restore-explorer` to put Explorer's own
+    /// desktop icons back. (Snap zones for windows are `snap-zone`.)
+    Zones {
+        #[command(subcommand)]
+        action: ZonesAction,
+    },
+}
+
+/// What `gevrek zones` does.
+#[derive(Subcommand, Debug, PartialEq)]
+enum ZonesAction {
+    /// The zones: where each is, how it is, and how much it holds
+    List {
+        /// Everything the shell tells of the zones, as one JSON object
+        #[arg(long)]
+        json: bool,
+    },
+    /// One zone, by its id, with its items
+    Show {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Send the zones a command as JSON (`'{"command":"quick_hide"}'`)
+    /// and print what they answer: `Done` with what happened, or why not
+    Send {
+        command: String,
+        /// The answer as one JSON object
+        #[arg(long)]
+        json: bool,
+        /// How long to wait for the answer (the window manager waits 5
+        /// seconds where none is said, and never more than 30)
+        #[arg(long, value_name = "MS")]
+        timeout_ms: Option<u32>,
+    },
+    /// Print what happens to the zones, as it happens
+    Events {
+        /// One JSON object a line
+        #[arg(long)]
+        json: bool,
+    },
+    /// Put Explorer's own desktop icons back as they were before the
+    /// zones took them over (Windows; elsewhere there is nothing to do)
+    RestoreExplorer,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -2944,6 +2991,92 @@ fn osd_command(said: &[String]) -> Result<gevrek_model::command::DispatchCommand
         text: text.clone(),
         level,
     })
+}
+
+/// `gevrek zones ...`. What is printed is made in `gevrek::zones_cli`.
+async fn zones_command(address: &str, action: ZonesAction) -> Result<()> {
+    use gevrek::zones_cli;
+    let mut client = WMClient::connect(address.to_string()).await?;
+    // Sent with the number of the shapes this program writes, so that a
+    // shell that reads older ones says so instead of misreading.
+    let version = gevrek_zones::ipc::VERSION;
+    match action {
+        ZonesAction::List { json: true } => {
+            let state = client.get_zones_state().await?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&zones_cli::state_json(&state))?
+            );
+        }
+        ZonesAction::List { json: false } => {
+            let state = client.get_zones_state().await?;
+            println!("{}", zones_cli::list_text(&state).map_err(|why| anyhow!(why))?);
+        }
+        ZonesAction::Show { id, json } => {
+            let state = client.get_zones_state().await?;
+            if json {
+                let zone = zones_cli::show_json(&state, &id).map_err(|why| anyhow!(why))?;
+                println!("{}", serde_json::to_string_pretty(&zone)?);
+            } else {
+                println!(
+                    "{}",
+                    zones_cli::show_text(&state, &id).map_err(|why| anyhow!(why))?
+                );
+            }
+        }
+        ZonesAction::Send {
+            command,
+            json,
+            timeout_ms,
+        } => {
+            let reply = client
+                .send_zones_command(command, version, timeout_ms.unwrap_or(0))
+                .await?;
+            if json {
+                println!("{}", serde_json::to_string(&zones_cli::reply_json(&reply))?);
+                if !reply.success {
+                    // Said in the JSON already; the exit code says it too.
+                    std::process::exit(1);
+                }
+            } else {
+                println!("{}", zones_cli::reply_text(&reply).map_err(|why| anyhow!(why))?);
+            }
+        }
+        ZonesAction::Events { json } => {
+            use gevrek_protocol::proto::execution_event::Event;
+            let mut stream = client.subscribe_to_events().await?;
+            while let Some(event) = stream.message().await? {
+                match event.event {
+                    Some(Event::RuntimeEvent(event)) => {
+                        if let Some(line) = zones_cli::event_line(&event, json) {
+                            println!("{line}");
+                        }
+                    }
+                    // Some were missed: whoever keeps the zones' state
+                    // from the events asks for it anew.
+                    Some(Event::EventsDropped(dropped)) => {
+                        if json {
+                            println!(
+                                "{}",
+                                serde_json::json!({"event": "events.dropped", "count": dropped.count})
+                            );
+                        } else {
+                            println!("[zones] {} events were missed", dropped.count);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        ZonesAction::RestoreExplorer => {
+            let reply = client
+                .send_zones_command(zones_cli::restore_explorer_command(), version, 0)
+                .await?;
+            zones_cli::reply_text(&reply).map_err(|why| anyhow!(why))?;
+            println!("The system's own desktop icons were put back");
+        }
+    }
+    Ok(())
 }
 
 async fn run_json_command(
@@ -5341,6 +5474,10 @@ async fn run() -> Result<()> {
             )
             .await?;
         }
+
+        Commands::Zones { action } => {
+            zones_command(&cli.address, action).await?;
+        }
     }
 
     Ok(())
@@ -5899,8 +6036,66 @@ mod tests {
                 Commands::SnapZonePrevious
             ));
         }
-        // The plural is not one of them: it is kept for something else.
+        // The plural is not one of them: it is the zones on the desktop,
+        // which are asked for something (`gevrek zones list`).
         assert!(read(["gevrek", "zones"]).is_err());
+    }
+
+    #[test]
+    fn the_zones_commands_parse_and_are_not_the_snap_zones() {
+        use super::ZonesAction;
+        let zones = |arguments: &[&str]| -> ZonesAction {
+            let mut line = vec!["gevrek", "zones"];
+            line.extend_from_slice(arguments);
+            match read(line).unwrap().command {
+                Commands::Zones { action } => action,
+                _ => panic!("{arguments:?} was read as another command"),
+            }
+        };
+        assert_eq!(zones(&["list"]), ZonesAction::List { json: false });
+        assert_eq!(zones(&["list", "--json"]), ZonesAction::List { json: true });
+        assert_eq!(
+            zones(&["show", "work", "--json"]),
+            ZonesAction::Show {
+                id: "work".to_string(),
+                json: true
+            }
+        );
+        assert_eq!(
+            zones(&["send", r#"{"command":"quick_hide"}"#]),
+            ZonesAction::Send {
+                command: r#"{"command":"quick_hide"}"#.to_string(),
+                json: false,
+                timeout_ms: None
+            }
+        );
+        assert_eq!(
+            zones(&["send", "{}", "--json", "--timeout-ms", "800"]),
+            ZonesAction::Send {
+                command: "{}".to_string(),
+                json: true,
+                timeout_ms: Some(800)
+            }
+        );
+        assert_eq!(zones(&["events"]), ZonesAction::Events { json: false });
+        assert_eq!(zones(&["events", "--json"]), ZonesAction::Events { json: true });
+        assert_eq!(zones(&["restore-explorer"]), ZonesAction::RestoreExplorer);
+        // The address is said before or after, as for every command.
+        assert_eq!(
+            read(["gevrek", "zones", "list", "--address", "local:test"])
+                .unwrap()
+                .address,
+            "local:test"
+        );
+        // What is not one of them is refused, not sent anywhere.
+        assert!(read(["gevrek", "zones", "show"]).is_err());
+        assert!(read(["gevrek", "zones", "send"]).is_err());
+        assert!(read(["gevrek", "zones", "2"]).is_err());
+        // `zone 2` is still the snap zone of a window.
+        assert!(matches!(
+            read(["gevrek", "zone", "2"]).unwrap().command,
+            Commands::SnapZone { index: 2 }
+        ));
     }
 
     #[test]

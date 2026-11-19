@@ -23,6 +23,8 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 gevrek-tutorial = { path = "../tutorial" }
 gevrek-schema = { path = "../schema" }
 gevrek-model = { path = "../model" }
+# The zones of the desktop: what they are and do; the shell draws them.
+gevrek-zones = { path = "../zones" }
 gevrek-protocol = { path = "../protocol" }
 gevrek-link = { path = "../link" }
 jiff = { workspace = true }
@@ -62,3 +64,5 @@ embed-resource = "3"
 [dev-dependencies]
 # The surfaces drawn into pictures without a window, to be looked at.
 gevrek-ui = { path = "../ui", features = ["picture"] }
+# The zones on a desktop in memory.
+gevrek-zones = { path = "../zones", features = ["test-support"] }

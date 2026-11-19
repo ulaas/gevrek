@@ -247,6 +247,13 @@ pub trait ZonesBackend {
     /// The room panels keep at the displays' sides.
     fn reserved_areas(&mut self) -> Vec<ReservedArea>;
 
+    /// The folder the desktop's own files lie in (the person's Desktop
+    /// folder): where a file dropped on the desktop from elsewhere is
+    /// copied or moved to. `None` where the backend cannot say.
+    fn desktop_folder(&mut self) -> Option<String> {
+        None
+    }
+
     /// Write down how the system's own desktop icons are, before anything
     /// of them is changed (Windows: Explorer's view and where its icons
     /// are). Nothing to do where the system draws none.

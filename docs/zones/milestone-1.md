@@ -116,7 +116,7 @@ in WSL).
   be on none, for now) and the guide does not mention it: it is off and
   has nothing to show.
 - The display ids come from `MonitorInfo::stable_id`
-  (`engine/src/outputs_edid.rs`), which already tells two displays of one
+  (`model/src/edid.rs`), which already tells two displays of one
   model without serial numbers apart. Nothing hands them to the zones
   yet: that is the backend's part.
 - An item can be put into a portal (the file moves there) but not dragged

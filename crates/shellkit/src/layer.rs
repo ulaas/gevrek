@@ -11,7 +11,14 @@
 //! still panel costs nothing.
 //!
 //! [`run`] is the short form for one surface.
+//!
+//! A surface that asks for it takes what other programs drag onto it and
+//! can drag files out ([`dnd`], and [`crate::dnd`] for what both systems
+//! share).
 
+mod dnd;
+
+use crate::dnd::{DragEvent, DragStart, DropAnswer};
 use crate::{Edge, Flow, Keyboard, Level, Place, Timings};
 use anyhow::Context as _;
 use egui_wgpu::wgpu;
@@ -101,6 +108,15 @@ pub struct Control {
     /// Which of the keyboard's layouts is in use (its place, from 0), as
     /// the compositor last told it.
     layout: u32,
+    /// Surfaces that begin or cease to take drops, with what they take
+    /// of any drag.
+    drops: Vec<(SurfaceId, Option<DropAnswer>)>,
+    /// What a surface would do with the drag that is over it now.
+    answers: Vec<(SurfaceId, DropAnswer)>,
+    /// Drags to begin.
+    drags: Vec<(SurfaceId, DragStart)>,
+    /// What happened to the surfaces' drags and is not asked for yet.
+    drag_news: Vec<(SurfaceId, DragEvent)>,
 }
 
 impl Control {
@@ -190,6 +206,50 @@ impl Control {
     pub fn redraw_all(&mut self) {
         let all = self.known.clone();
         self.redraw.extend(all);
+    }
+
+    /// Let other programs' drags be dropped on a surface, or no longer
+    /// (`None`). `standing` is what the surface takes of any drag until
+    /// it says more of the one that is over it ([`Control::answer_drag`]):
+    /// the program a drag comes from shows its pointer by it from the
+    /// first moment. What happens is asked for with
+    /// [`Control::drag_events`]. A surface that never calls this is told
+    /// nothing and is no place to drop on.
+    pub fn accept_drops(&mut self, id: SurfaceId, standing: Option<DropAnswer>) {
+        self.drops.push((id, standing));
+    }
+
+    /// What the surface would do with the drag that is over it, where it
+    /// is now: said by the drawing when it was told of a move, and held
+    /// until it says otherwise or the drag is gone. (The source's pointer
+    /// follows a frame later.)
+    pub fn answer_drag(&mut self, id: SurfaceId, answer: DropAnswer) {
+        self.answers.push((id, answer));
+    }
+
+    /// What happened to drags over the surface, and to the drag it began,
+    /// since this was last asked; the surface is drawn again whenever
+    /// there is something.
+    pub fn drag_events(&mut self, id: SurfaceId) -> Vec<DragEvent> {
+        let mut mine = Vec::new();
+        let mut index = 0;
+        while index < self.drag_news.len() {
+            if self.drag_news[index].0 == id {
+                mine.push(self.drag_news.remove(index).1);
+            } else {
+                index += 1;
+            }
+        }
+        mine
+    }
+
+    /// Begin a drag of files (or text) out of a surface, while the mouse
+    /// button (or the finger) that will drop it is held on it. The
+    /// surface is told that the button was let go and the pointer is gone
+    /// (it is the drag's from here on), and, when the drag is over, how
+    /// it ended ([`DragEvent::Ended`]).
+    pub fn start_drag(&mut self, from: SurfaceId, drag: DragStart) {
+        self.drags.push((from, drag));
     }
 
     /// Whether a surface is open now.
@@ -288,7 +348,23 @@ impl<M: 'static> Shell<M> {
             .handle()
             .insert_source(woken, |_, _, _| {})
             .map_err(|error| anyhow::anyhow!("the wake for accessibility: {error}"))?;
+        // What the threads that read a dropped thing's pipe have read.
+        let (was_read, read) =
+            smithay_client_toolkit::reexports::calloop::channel::channel::<dnd::WasRead>();
+        event_loop
+            .handle()
+            .insert_source(read, |event, _, host: &mut Host| {
+                if let smithay_client_toolkit::reexports::calloop::channel::Event::Msg((
+                    read,
+                    bytes,
+                )) = event
+                {
+                    host.drop_read(read, bytes);
+                }
+            })
+            .map_err(|error| anyhow::anyhow!("the source of what was dropped: {error}"))?;
         let host = Host {
+            dnd: dnd::Dnd::new(&globals, &handle, was_read),
             access_wake,
             surfaces: Vec::new(),
             upright: Vec::new(),
@@ -398,6 +474,7 @@ impl<M: 'static> Shell<M> {
                 .surfaces
                 .iter()
                 .filter_map(|surface| surface.again_at)
+                .chain(self.host.dnd.wake_at())
                 .min()
                 .map(|at| at.saturating_duration_since(now));
             self.event_loop
@@ -506,6 +583,8 @@ struct Surface {
 }
 
 struct Host {
+    /// Drags over the surfaces and out of them.
+    dnd: dnd::Dnd,
     /// Wakes the loop for a screen reader's sake (see [`Access`]).
     access_wake: smithay_client_toolkit::reexports::calloop::ping::Ping,
     // Dropped before the connection they live on.
@@ -625,6 +704,7 @@ impl Host {
                 self.pointer_on = None;
             }
             self.upright.retain(|upright| *upright != id);
+            self.forget_drags(id);
         }
         for (id, place, draw) in std::mem::take(&mut self.control.open) {
             match self.make(id, &place, draw, handle) {
@@ -702,6 +782,7 @@ impl Host {
             }
             self.control.quit = true;
         }
+        self.carry_out_drags();
         self.control.known = self.surfaces.iter().map(|surface| surface.id).collect();
     }
 
@@ -1396,6 +1477,7 @@ impl SeatHandler for Host {
             self.touch = self.seats.get_touch(handle, &seat).ok();
         }
         self.seat.get_or_insert(seat);
+        self.drag_seat_known();
     }
 
     fn remove_capability(
@@ -1449,6 +1531,10 @@ impl PointerHandler for Host {
                         0x112 => egui::PointerButton::Middle,
                         _ => continue,
                     };
+                    self.dnd.held.retain(|held| *held != button);
+                    if pressed {
+                        self.dnd.held.push(button);
+                    }
                     surface.events.push(egui::Event::PointerButton {
                         pos: at,
                         button,

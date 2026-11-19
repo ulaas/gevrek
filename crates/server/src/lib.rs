@@ -9,6 +9,8 @@
 
 use anyhow::Result;
 pub mod node_registry;
+/// What the window manager keeps and passes on of the shell's zones.
+pub mod zones;
 use gevrek_host::command::{ManualCommand, RuntimeCommand};
 use gevrek_host::config_store::{wait_for_request, ConfigRequest, ConfigWatch};
 use gevrek_model::command::{
@@ -421,6 +423,8 @@ pub struct WMServer {
     backend: gevrek_host::backend_info::BackendInfo,
     /// Whether made-up input is accepted (a WM started for testing).
     input_injection: bool,
+    /// The zones of the shell: what it last said of them, and its line.
+    zones: Arc<zones::ZonesHub>,
 }
 
 /// While the session is locked nobody sees what a command does, and the
@@ -577,6 +581,7 @@ impl WMServer {
         }
 
         Self {
+            zones: Arc::new(zones::ZonesHub::new(Arc::clone(&event_broadcaster))),
             config,
             config_write,
             announced_revision,
@@ -1828,6 +1833,18 @@ impl WMService for WMServer {
                 "This window manager does not know the command {json}"
             )));
         }
+        // What is asked of the zones goes to the shell that runs them and
+        // not through the window manager's loop, so that whoever asks is
+        // told what the zones said. (A key's command does go through the
+        // loop, and is told to the shell as an event: nobody waits there.)
+        if let gevrek_model::command::DispatchCommand::Zones { action } = &command {
+            refuse_while_locked(&command)?;
+            let reply = self.zones.command(action.to_string(), 0, 0).await?;
+            return Ok(Response::new(StatusResponse {
+                success: reply.success,
+                error: reply.error,
+            }));
+        }
         self.run_command(command).await
     }
 
@@ -2176,6 +2193,9 @@ impl WMService for WMServer {
             "graph_json_v1",
             "focus_steal_prevention",
             "zones_v1",
+            // AttachZones, GetZonesState, SendZonesCommand, the command
+            // `zones` and the events `zones.*`.
+            "zones_ipc_v1",
         ]
         .iter()
         .map(|feature| feature.to_string())
@@ -2427,6 +2447,54 @@ impl WMService for WMServer {
             success: true,
             error: None,
         }))
+    }
+
+    type AttachZonesStream = tokio_stream::wrappers::ReceiverStream<Result<ZonesRequest, Status>>;
+
+    async fn attach_zones(
+        &self,
+        request: Request<tonic::Streaming<ZonesReport>>,
+    ) -> Result<Response<Self::AttachZonesStream>, Status> {
+        let (session, requests) = self.zones.attach()?;
+        let hub = Arc::clone(&self.zones);
+        let mut reports = request.into_inner();
+        // Until the shell's side of the call ends, by its own doing or
+        // because the shell is gone: that is the end of the session.
+        tokio::spawn(async move {
+            while let Ok(Some(report)) = reports.message().await {
+                hub.report(session, report);
+            }
+            hub.detach(session);
+        });
+        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
+            requests,
+        )))
+    }
+
+    async fn get_zones_state(
+        &self,
+        _request: Request<Empty>,
+    ) -> Result<Response<ZonesStateResponse>, Status> {
+        Ok(Response::new(self.zones.state()))
+    }
+
+    async fn send_zones_command(
+        &self,
+        request: Request<ZonesCommandDocument>,
+    ) -> Result<Response<ZonesCommandReply>, Status> {
+        // As every command: nothing of the desktop is changed from
+        // outside while the session is locked.
+        if gevrek_host::lock::is_locked() {
+            return Err(locked_status());
+        }
+        let ZonesCommandDocument {
+            json,
+            version,
+            timeout_ms,
+        } = request.into_inner();
+        Ok(Response::new(
+            self.zones.command(json, version, timeout_ms).await?,
+        ))
     }
 }
 
