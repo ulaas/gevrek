@@ -48,43 +48,12 @@ impl ShortcutsWindow {
         if rows.is_empty() {
             return;
         }
-        let palette = theme::pal(ui.ctx());
         ui.add_space(10.0);
         widgets::caption(ui, title);
         ui.add_space(2.0);
-        let height = ui.spacing().interact_size.y + 4.0;
         for shortcut in rows {
-            let (rect, response) = ui.allocate_exact_size(
-                egui::vec2(ui.available_width(), height),
-                egui::Sense::hover(),
-            );
-            widgets::list_row_bg(ui, &response, rect, false);
-            let end = widgets::keycaps(
-                ui,
-                egui::pos2(rect.left() + 6.0, rect.center().y),
-                &shortcut.keys,
-                palette.text,
-            );
-            let at = egui::pos2((end + 14.0).max(rect.left() + 230.0), rect.center().y);
-            let after = ui
-                .painter()
-                .text(
-                    at,
-                    egui::Align2::LEFT_CENTER,
-                    &shortcut.action,
-                    egui::FontId::proportional(14.0),
-                    palette.text,
-                )
-                .right();
-            if shortcut.submap != "default" {
-                ui.painter().text(
-                    egui::pos2(after + 12.0, rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    format!("in the {} mode", shortcut.submap),
-                    egui::FontId::proportional(12.0),
-                    palette.accent_fg(),
-                );
-            }
+            let mode = (shortcut.submap != "default").then_some(shortcut.submap.as_str());
+            widgets::shortcut_row(ui, &shortcut.keys, &shortcut.action, mode);
         }
     }
 }

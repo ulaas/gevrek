@@ -241,6 +241,24 @@ pub fn list_row_bg(ui: &Ui, r: &egui::Response, rect: egui::Rect, selected: bool
     }
 }
 
+/// How wide [`keycaps`] paints a key combination, gap after it included:
+/// to make room for it before it is painted.
+pub fn keycaps_width(ui: &Ui, combo: &str) -> f32 {
+    let painter = ui.painter();
+    combo
+        .split('+')
+        .filter(|k| !k.is_empty())
+        .map(|key| {
+            painter
+                .layout_no_wrap(key.to_owned(), egui::FontId::monospace(12.0), Color32::WHITE)
+                .size()
+                .x
+                + 12.0
+                + 4.0
+        })
+        .sum()
+}
+
 /// Paints a key combination such as `Mod+Shift+T` as key caps starting at `left`; returns the
 /// x coordinate where they end.
 pub fn keycaps(ui: &Ui, left: egui::Pos2, combo: &str, color: Color32) -> f32 {
@@ -263,6 +281,85 @@ pub fn keycaps(ui: &Ui, left: egui::Pos2, combo: &str, color: Color32) -> f32 {
         x = cap.right() + 4.0;
     }
     x
+}
+
+/// One line of a list of shortcuts: the keys as key caps, what they do,
+/// and the mode they belong to where that is not the usual one. What
+/// they do is broken into lines as wide as there is room for, and the
+/// line grows with it: drawn on one line, a long one ran out of the
+/// window. Where the keys leave too little room beside them, the words
+/// go under them.
+pub fn shortcut_row(ui: &mut Ui, keys: &str, action: &str, mode: Option<&str>) {
+    let p = theme::pal(ui.ctx());
+    let least = ui.spacing().interact_size.y + 4.0;
+    let width = ui.available_width();
+    let place = words_place(width, keycaps_width(ui, keys));
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = place.width;
+    job.append(
+        action,
+        0.0,
+        egui::TextFormat::simple(egui::FontId::proportional(14.0), p.text),
+    );
+    if let Some(mode) = mode {
+        job.append(
+            &format!("in the {mode} mode"),
+            12.0,
+            egui::TextFormat::simple(egui::FontId::proportional(12.0), p.accent_fg()),
+        );
+    }
+    let words = ui.painter().layout_job(job);
+    let first_line = words
+        .rows
+        .first()
+        .map_or(words.size().y, |row| row.rect().height());
+    let height = if place.under {
+        CAP + GAP + words.size().y + 2.0 * PAD
+    } else {
+        (words.size().y + 2.0 * PAD).max(least)
+    };
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), Sense::hover());
+    list_row_bg(ui, &response, rect, false);
+    // The keys stand by the words' first line, or above the words.
+    let (words_top, keys_y) = if place.under {
+        (rect.top() + PAD + CAP + GAP, rect.top() + PAD + CAP / 2.0)
+    } else {
+        let top = rect.top() + (height - words.size().y) / 2.0;
+        (top, (top + first_line / 2.0).max(rect.top() + PAD + CAP / 2.0))
+    };
+    keycaps(ui, egui::pos2(rect.left() + 6.0, keys_y), keys, p.text);
+    ui.painter()
+        .galley(egui::pos2(rect.left() + place.x, words_top), words, p.text);
+}
+
+/// The height of a key cap, and the room above, below and between.
+const CAP: f32 = 20.0;
+const PAD: f32 = 4.0;
+const GAP: f32 = 4.0;
+
+/// Where the words of a shortcut's line go: from `x` (from the line's
+/// left), at most `width` wide, beside the keys or `under` them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct WordsPlace {
+    x: f32,
+    width: f32,
+    under: bool,
+}
+
+/// The words stand in a column of their own, 230 points in (nearer in a
+/// narrow window), or after the keys where those are wider. Where that
+/// leaves them too little room to be read, they go under the keys,
+/// across the whole line.
+fn words_place(row: f32, keys: f32) -> WordsPlace {
+    const COLUMN: f32 = 230.0;
+    const LEAST: f32 = 160.0;
+    let x = (6.0 + keys + 10.0).max(COLUMN.min(row / 2.0));
+    let beside = row - x - 6.0;
+    if beside >= LEAST {
+        WordsPlace { x, width: beside, under: false }
+    } else {
+        WordsPlace { x: 6.0, width: (row - 12.0).max(1.0), under: true }
+    }
 }
 
 /// A checkbox in the app's style: a rounded box filled with the accent and a drawn check when on.
@@ -1103,6 +1200,23 @@ pub fn ellipsize(s: &str, width: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_words_of_a_shortcut_have_room_beside_the_keys_or_go_under_them() {
+        // Short keys: the words' own column, the rest of the line wide.
+        let place = words_place(604.0, 80.0);
+        assert_eq!((place.x, place.under), (230.0, false));
+        assert_eq!(place.width, 604.0 - 230.0 - 6.0);
+        // Wide keys: after them.
+        let place = words_place(604.0, 300.0);
+        assert_eq!((place.x, place.under), (316.0, false));
+        // Keys that leave too little: under them, across the line.
+        let place = words_place(604.0, 480.0);
+        assert!(place.under);
+        assert_eq!((place.x, place.width), (6.0, 592.0));
+        // A narrow window: the column comes nearer.
+        assert!(!words_place(400.0, 60.0).under);
+    }
 
     #[test]
     fn a_path_is_made_whole_and_looked_for() {

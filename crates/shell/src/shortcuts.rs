@@ -39,46 +39,16 @@ pub fn counts(list: &[Shortcut], typed: &str) -> Counts {
     }
 }
 
-fn section(ui: &mut egui::Ui, palette: &theme::Palette, title: &str, rows: &[&Shortcut]) {
+fn section(ui: &mut egui::Ui, title: &str, rows: &[&Shortcut]) {
     if rows.is_empty() {
         return;
     }
     ui.add_space(10.0);
     widgets::caption(ui, title);
     ui.add_space(2.0);
-    let height = ui.spacing().interact_size.y + 4.0;
     for shortcut in rows {
-        let (rect, response) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width(), height),
-            egui::Sense::hover(),
-        );
-        widgets::list_row_bg(ui, &response, rect, false);
-        let end = widgets::keycaps(
-            ui,
-            egui::pos2(rect.left() + 6.0, rect.center().y),
-            &shortcut.keys,
-            palette.text,
-        );
-        let at = egui::pos2((end + 14.0).max(rect.left() + 230.0), rect.center().y);
-        let after = ui
-            .painter()
-            .text(
-                at,
-                egui::Align2::LEFT_CENTER,
-                &shortcut.action,
-                egui::FontId::proportional(14.0),
-                palette.text,
-            )
-            .right();
-        if shortcut.submap != "default" {
-            ui.painter().text(
-                egui::pos2(after + 12.0, rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                format!("in the {} mode", shortcut.submap),
-                egui::FontId::proportional(12.0),
-                palette.accent_fg(),
-            );
-        }
+        let mode = (shortcut.submap != "default").then_some(shortcut.submap.as_str());
+        widgets::shortcut_row(ui, &shortcut.keys, &shortcut.action, mode);
     }
 }
 
@@ -164,8 +134,8 @@ pub fn draw(
                         ui.add_space(8.0);
                         ui.label(egui::RichText::new("Nothing matches.").color(palette.muted));
                     }
-                    section(ui, palette, "Key bindings", &of(ShortcutSource::Binding));
-                    section(ui, palette, "Automation graph", &of(ShortcutSource::Graph));
+                    section(ui, "Key bindings", &of(ShortcutSource::Binding));
+                    section(ui, "Automation graph", &of(ShortcutSource::Graph));
                     ui.add_space(10.0);
                     ui.label(
                         egui::RichText::new(
@@ -199,6 +169,48 @@ mod tests {
             assert_eq!(found.with_super, all.super_of_all, "{name}");
         }
         assert_eq!(counts(&list, "no such thing").lines, 0);
+    }
+
+    #[test]
+    fn a_long_description_is_broken_into_lines_within_the_window() {
+        let mut list = shortcuts_of(&gevrek_model::examples::starting_configuration());
+        let long = "Move the chosen items to the zone on the right, and keep them in \
+                    the order they had, even where that zone sorts by name";
+        list[0].action = long.to_string();
+        let context = egui::Context::default();
+        let palette = gevrek_ui::Settings::default()
+            .resolve(egui::Theme::Dark, egui::Color32::from_rgb(64, 224, 208));
+        let mut typed = String::new();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(SIZE.0 as f32, SIZE.1 as f32),
+            )),
+            ..Default::default()
+        };
+        // (The first frame only measures; the second is what is seen.)
+        let mut first = context.run_ui(input.clone(), |ui| draw(ui, &palette, Some(&list), &mut typed));
+        first.textures_delta.clear();
+        let mut output = context.run_ui(input, |ui| draw(ui, &palette, Some(&list), &mut typed));
+        output.textures_delta.clear();
+        // Every word drawn lies inside the window; the long one is on
+        // more than one line.
+        let mut lines_of_it = 0;
+        for clipped in &output.shapes {
+            if let egui::epaint::Shape::Text(text) = &clipped.shape {
+                if text.galley.job.text.is_empty() {
+                    continue;
+                }
+                // (Where it is seen: a galley set to the right reaches
+                // left of its place.)
+                let right = clipped.shape.visual_bounding_rect().right();
+                assert!(right <= SIZE.0 as f32, "drawn past the window: {right} {:?}", text.galley.job.text);
+                if text.galley.job.text.starts_with("Move the chosen items") {
+                    lines_of_it = text.galley.rows.len();
+                }
+            }
+        }
+        assert!(lines_of_it > 1, "the long description was not broken: {lines_of_it}");
     }
 
     #[test]
