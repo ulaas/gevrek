@@ -183,14 +183,24 @@ pub fn minimized(world: &mut World, id: WindowId, changes: &mut Changes) -> Mini
     if world.outputs.is_window_floating(id) {
         return Minimize::Kept;
     }
-    let workspace_id = world
+    let workspace = world
         .outputs
         .get_workspaces(output)
-        .and_then(|workspaces| workspaces.get(index))
-        .map(|workspace| workspace.id);
+        .and_then(|workspaces| workspaces.get(index));
+    let workspace_id = workspace.map(|workspace| workspace.id);
+    // (Where it stood among the tiled ones: the panel lists it there.)
+    let place = workspace.and_then(|workspace| {
+        workspace
+            .containers
+            .iter()
+            .flat_map(|container| container.windows.iter().copied())
+            .position(|window| window == id)
+    });
     world.outputs.find_and_remove_window(id);
     if let Some(workspace_id) = workspace_id {
-        world.windows.get_mut(id).minimized_origin = Some(workspace_id);
+        let state = world.windows.get_mut(id);
+        state.minimized_origin = Some(workspace_id);
+        state.minimized_place = place;
     }
     changes.relayout.insert(output);
     Minimize::LeftLayout(output)
@@ -218,6 +228,7 @@ pub fn restored(world: &mut World, id: WindowId, fallback: Option<OutputId>) -> 
     state.minimized = false;
     state.hidden_by_wm = false;
     let origin = state.minimized_origin.take();
+    state.minimized_place = None;
     if world.outputs.find_window(id).is_some() {
         return Restore::StillMember;
     }
@@ -281,6 +292,7 @@ pub fn unmapped(world: &mut World, id: WindowId, changes: &mut Changes) -> Optio
     state.known = false;
     state.minimized = false;
     state.minimized_origin = None;
+    state.minimized_place = None;
     left
 }
 

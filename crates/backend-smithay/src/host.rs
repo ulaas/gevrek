@@ -1160,6 +1160,7 @@ impl State {
             active_animations: self.desktop.animations.active_count(),
             active_binding_submap: self.active_submap.clone(),
             tiling_suspended: self.core.executor.tiling_suspended(),
+            desktop_shown: self.core.executor.desktop_shown(),
             gesture: GestureStateData {
                 available: self.gestures_available,
                 backend: if self.gestures_available {

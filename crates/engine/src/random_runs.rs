@@ -331,25 +331,123 @@ fn broken(core: &WmCore, desktop: &FakeDesktop) -> Option<String> {
     }
     // What is published of the outputs (what each panel draws its own
     // output's part of) lists every window of a workspace once, for the
-    // output that workspace is on, and no window that is on none.
+    // output that workspace is on, and no window that is on none. A tiled
+    // window the person minimized is its workspace's still: listed once,
+    // as minimized, for the output the workspace it left is on (and on
+    // none where that workspace has gone).
     let (published, _) = core.monitor_data(desktop, &Default::default());
     if let Some(amiss) = crate::overlay_data::listed_amiss(&published) {
         return Some(format!("published: {amiss}"));
     }
     let homes = crate::overlay_data::homes(&published);
-    if homes.len() != seen.len() {
+    let mut expected: BTreeMap<WindowHandle, MonitorHandle> = BTreeMap::new();
+    for window in &seen {
+        if let Some((output, _)) = core.monitor_manager.find_window(*window) {
+            expected.insert(*window, output);
+        }
+    }
+    let mut minimized_away = Vec::new();
+    for (window, state) in core.executor.window_state.iter() {
+        let origin = state
+            .minimized_origin
+            .filter(|_| state.minimized && !seen.contains(&window) && desktop.exists_window(window))
+            .and_then(|origin| core.monitor_manager.find_workspace_by_id(origin));
+        if let Some((output, _)) = origin {
+            expected.insert(window, output);
+            minimized_away.push(window);
+        }
+    }
+    if homes.len() != expected.len() {
         return Some(format!(
-            "{} windows are published and {} are on a workspace",
+            "{} windows are published and {} are on a workspace or minimized from one",
             homes.len(),
-            seen.len()
+            expected.len()
         ));
     }
-    for window in &seen {
-        let on = core.monitor_manager.find_window(*window).map(|(output, _)| output);
+    for (window, on) in &expected {
         let published_for = homes.get(window).map(|home| home.output);
-        if on != published_for {
+        if Some(*on) != published_for {
             return Some(format!(
                 "{window:?} is on a workspace of {on:?} and published for {published_for:?}"
+            ));
+        }
+    }
+    for window in minimized_away {
+        let told = published
+            .iter()
+            .flat_map(|monitor| &monitor.workspaces)
+            .flat_map(|workspace| &workspace.detailed_windows)
+            .any(|listed| listed.handle == window && listed.is_minimized);
+        if !told {
+            return Some(format!("{window:?} was minimized and is not published as such"));
+        }
+    }
+    None
+}
+
+/// What must hold of showing the desktop after every step: while it is
+/// shown, no window of a workspace a display shows is in sight; when it is
+/// not, no window is marked as put away by it; and when it ended in this
+/// step, every window it had put away that is on a workspace a display
+/// shows, as one that workspace shows (not a tab behind another, not a
+/// column out of view), is in sight again. Returns what does not hold.
+fn desktop_broken(
+    core: &WmCore,
+    desktop: &FakeDesktop,
+    shown_before: bool,
+    away_before: &[WindowHandle],
+) -> Option<String> {
+    let in_sight = |window: WindowHandle| {
+        desktop
+            .windows
+            .get(&window)
+            .is_some_and(|w| w.visible && !w.hidden_by_wm && !w.minimized)
+    };
+    let shown_workspace_of = |window: WindowHandle| {
+        let (output, index) = core.monitor_manager.find_window(window)?;
+        let ring = core.monitor_manager.get_workspaces(output)?;
+        (ring.focused_idx() == index).then(|| &ring.elements()[index])
+    };
+    if core.executor.desktop_shown() {
+        for monitor in core.monitor_manager.get_all_monitors() {
+            let Some(workspace) = core.monitor_manager.get_focused_workspace(monitor.handle) else {
+                continue;
+            };
+            if let Some(window) = workspace.all_windows().into_iter().find(|w| in_sight(*w)) {
+                return Some(format!(
+                    "{window:?} is in sight on workspace {} while the desktop is shown",
+                    workspace.name
+                ));
+            }
+        }
+        return None;
+    }
+    let marked = core
+        .executor
+        .window_state
+        .ids_where(|state| state.away_for_desktop);
+    if !marked.is_empty() {
+        return Some(format!(
+            "{marked:?} are still marked as away though the desktop is not shown"
+        ));
+    }
+    if !shown_before {
+        return None;
+    }
+    for window in away_before {
+        // (A workspace in the overview of its windows places and shows
+        // them itself, and no layout pass touches it until it is left.)
+        let Some(workspace) =
+            shown_workspace_of(*window).filter(|workspace| workspace.expose_state.is_none())
+        else {
+            continue;
+        };
+        let shows_it = crate::workspaces::reveal_of(workspace).shown.contains(window);
+        let minimized = desktop.windows.get(window).is_none_or(|w| w.minimized);
+        if shows_it && !minimized && !in_sight(*window) {
+            return Some(format!(
+                "{window:?} stays out of sight on workspace {} after the desktop ended",
+                workspace.name
             ));
         }
     }
@@ -384,6 +482,12 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
     const TITLES: [&str; 5] = ["window", "Picture in picture", "Slack", "Terminal", "Notes"];
     const PROGRAMS: [&str; 4] = ["app.exe", "kitty", "wt.exe", "slack.exe"];
     for step in 0..steps {
+        // What showing the desktop had put away before this step.
+        let shown_before = core.executor.desktop_shown();
+        let away_before = core
+            .executor
+            .window_state
+            .ids_where(|state| state.away_for_desktop);
         let windows: Vec<WindowHandle> = desktop.windows.keys().copied().collect();
         let some = |chance: &mut Chance| windows.get(chance.below(windows.len())).copied();
         let said = match chance.below(23) {
@@ -422,6 +526,18 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
                 None => "nothing".to_string(),
             },
             6 => match some(&mut chance) {
+                // A minimized one is brought back by a press on its button
+                // in the taskbar now and then (the panel asks for it to be
+                // focused), and otherwise the system tells it came back.
+                Some(id) if desktop.window(id).minimized && chance.below(2) == 0 => {
+                    let _ = core.dispatch(
+                        &mut desktop,
+                        DispatchCommand::FocusWindow {
+                            selector: gevrek_model::command::WindowSelector::Handle(id.0 as i64),
+                        },
+                    );
+                    format!("{id:?} is pressed on the taskbar")
+                }
                 Some(id) => {
                     let now = !desktop.window(id).minimized;
                     if let Some(window) = desktop.windows.get_mut(&id) {
@@ -575,6 +691,13 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
                 }
                 None => "nothing".to_string(),
             },
+            // The desktop is shown, or the windows brought back (more
+            // often than a command of chance would ask for it).
+            12 => {
+                let on = [None, Some(true), Some(false)][chance.below(3)];
+                let _ = core.dispatch(&mut desktop, DispatchCommand::ShowDesktop { on });
+                format!("show the desktop: {on:?}")
+            }
             8 if two && chance.below(4) == 0 => {
                 second_there = !second_there;
                 display_changed(&mut core, &mut desktop, second_there);
@@ -636,7 +759,9 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
       {} | hidden {hidden:?}", places.join("; "));
         }
         trail.push(said);
-        if let Some(what) = broken(&core, &desktop) {
+        let what = broken(&core, &desktop)
+            .or_else(|| desktop_broken(&core, &desktop, shown_before, &away_before));
+        if let Some(what) = what {
             let from = trail.len().saturating_sub(12);
             return Err(format!(
                 "seed {seed:#x}, step {step}: {what}\n    after:\n      {}",

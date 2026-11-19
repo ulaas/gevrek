@@ -211,11 +211,22 @@ async fn health_and_node_definitions_are_available() {
         .any(|name| name == "extension_events_v1"));
     // (Features only one backend has are covered by
     // `capabilities_name_the_backend_and_only_its_features`.)
-    assert_eq!(capabilities.dispatchers.len(), 140);
+    // (Every typed dispatcher up to the newest, `show_desktop`: the two
+    // before it, putting the floating windows aside and a window to the
+    // middle, are listed too.)
+    assert_eq!(capabilities.dispatchers.len(), 143);
     assert!(capabilities
         .dispatchers
         .iter()
         .any(|dispatcher| dispatcher.id == "show_shortcuts"));
+    for id in ["toggle_floating_aside", "toggle_window_centered"] {
+        assert!(capabilities.dispatchers.iter().any(|dispatcher| dispatcher.id == id), "{id}");
+    }
+    assert!(capabilities.dispatchers.iter().any(|dispatcher| {
+        dispatcher.id == "show_desktop"
+            && dispatcher.argument_kind == "optional_on_off"
+            && dispatcher.display_name == "Show Desktop"
+    }));
     assert!(capabilities.dispatchers.iter().any(|dispatcher| {
         dispatcher.id == "toggle_stackbar" && dispatcher.argument_kind == "none"
     }));

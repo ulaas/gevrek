@@ -153,6 +153,15 @@ pub fn dispatch_command_to_proto(
         DispatchCommand::ToggleFloatingAside => {
             request.command = proto::DispatchType::ToggleFloatingAside as i32
         }
+        DispatchCommand::ShowDesktop { on } => {
+            request.command = proto::DispatchType::ShowDesktop as i32;
+            request.argument = match on {
+                Some(true) => "on",
+                Some(false) => "off",
+                None => "",
+            }
+            .to_string();
+        }
         DispatchCommand::CenterWindow { selector } => {
             request.command = proto::DispatchType::CenterWindow as i32;
             request.argument = selector.expression();
@@ -1112,6 +1121,11 @@ mod tests {
             dispatch_command_to_proto(DispatchCommand::CloseWorkspace).command,
             proto::DispatchType::CloseWorkspace as i32
         );
+        for (on, argument) in [(None, ""), (Some(true), "on"), (Some(false), "off")] {
+            let request = dispatch_command_to_proto(DispatchCommand::ShowDesktop { on });
+            assert_eq!(request.command, proto::DispatchType::ShowDesktop as i32);
+            assert_eq!(request.argument, argument);
+        }
         let request = dispatch_command_to_proto(DispatchCommand::EnsureWorkspaces {
             target: gevrek_model::command::MonitorTarget::Index(1),
             count: 4,

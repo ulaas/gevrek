@@ -50,6 +50,7 @@ mod commands_other;
 mod commands_rules;
 mod commands_window;
 mod commands_workspace;
+mod desktop;
 mod dispatch;
 mod events;
 mod graph;
@@ -199,6 +200,16 @@ pub enum RuntimeEventKind {
     /// (empty: none). One picture, a screenshot, is not told. Only where
     /// the window manager is the one that makes such pictures (Wayland).
     ScreenShared,
+    /// The desktop is shown: the windows of the workspaces the displays
+    /// show went out of sight (`DispatchCommand::ShowDesktop`). `windows`
+    /// is how many.
+    DesktopShown,
+    /// The desktop is shown no longer: the windows it put out of sight
+    /// are back. `reason` says what ended it: `command` (asked for),
+    /// `workspace` (another workspace was shown), `focus` (a window was
+    /// given the keyboard), `window` (a new window opened), `displays`
+    /// (a display came or went), `restore` (every hidden window was shown).
+    DesktopHidden,
 }
 
 impl RuntimeEventKind {
@@ -241,13 +252,15 @@ impl RuntimeEventKind {
             Self::DesktopPressed => "desktop.pressed",
             Self::WindowPicked => "window.picked",
             Self::ScreenShared => "screen.shared",
+            Self::DesktopShown => "desktop.shown",
+            Self::DesktopHidden => "desktop.hidden",
         }
     }
 }
 
 impl RuntimeEventKind {
     /// Every kind, for lists and tests.
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 39] = [
         Self::RuntimeStarted,
         Self::RuntimeStopping,
         Self::ConfigurationReloaded,
@@ -285,6 +298,8 @@ impl RuntimeEventKind {
         Self::DesktopPressed,
         Self::WindowPicked,
         Self::ScreenShared,
+        Self::DesktopShown,
+        Self::DesktopHidden,
     ];
 
     /// The event subscribers are told of for a window event of the
@@ -431,6 +446,10 @@ pub struct Executor {
     /// it belongs to, which is not shown: it is out of sight, and does not
     /// take the keyboard.
     opened_out_of_sight: bool,
+    /// The desktop is shown (`DispatchCommand::ShowDesktop`): what it has
+    /// to give back when it ends. The windows it put out of sight are
+    /// marked in their state (`WindowState::away_for_desktop`).
+    desktop_shown: Option<desktop::DesktopShown>,
 }
 
 /// Carry out one engine effect on the desktop. The executor says what should
@@ -606,6 +625,7 @@ impl Executor {
             last_expose_transition: Instant::now(),
             opening: None,
             opened_out_of_sight: false,
+            desktop_shown: None,
         }
     }
 

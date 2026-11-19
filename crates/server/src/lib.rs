@@ -866,6 +866,18 @@ fn dispatch_request_to_core(request: DispatchRequest) -> Result<DispatchCommand,
         },
         DispatchType::CenterActive => DispatchCommand::CenterActive,
         DispatchType::ToggleFloatingAside => DispatchCommand::ToggleFloatingAside,
+        DispatchType::ShowDesktop => DispatchCommand::ShowDesktop {
+            on: match request.argument.trim().to_ascii_lowercase().as_str() {
+                "" | "toggle" => None,
+                "on" => Some(true),
+                "off" => Some(false),
+                other => {
+                    return Err(Status::invalid_argument(format!(
+                        "ShowDesktop takes on, off or toggle, not '{other}'"
+                    )))
+                }
+            },
+        },
         DispatchType::CenterWindow => DispatchCommand::CenterWindow {
             selector: window_selector()?,
         },
@@ -1432,6 +1444,7 @@ fn dispatcher_argument_kind(command: DispatchType) -> &'static str {
         DispatchType::SnapActiveToZone => "zone_index",
         DispatchType::SetBindingSubmap => "submap_name",
         DispatchType::Exec => "program",
+        DispatchType::ShowDesktop => "optional_on_off",
         DispatchType::LaunchStartup | DispatchType::StopStartup | DispatchType::RestartStartup => {
             "startup_id"
         }
@@ -2060,6 +2073,9 @@ impl WMService for WMServer {
                 .as_ref()
                 .map(|data| data.tiling_suspended)
                 .unwrap_or(false),
+            desktop_shown: overlay_data
+                .as_ref()
+                .is_some_and(|data| data.desktop_shown),
             dim_inactive: appearance.dim_inactive,
             inactive_window_opacity: appearance.inactive_window_opacity as u32,
             dim_fullscreen: appearance.dim_fullscreen,
@@ -2166,7 +2182,7 @@ impl WMService for WMServer {
         _request: Request<Empty>,
     ) -> Result<Response<CapabilitiesResponse>, Status> {
         // Up to the newest command; a new one goes at the end.
-        let dispatchers = (1..=DispatchType::Exec as i32)
+        let dispatchers = (1..=DispatchType::ShowDesktop as i32)
             .filter_map(|value| DispatchType::try_from(value).ok())
             .map(|command| {
                 let id = command
@@ -2865,6 +2881,7 @@ mod overlay_conversion_tests {
             active_animations: 0,
             active_binding_submap: "default".to_string(),
             tiling_suspended: false,
+            desktop_shown: false,
             gesture: GestureStateData::default(),
             rule_states: Vec::new(),
             scratchpad_states: Vec::new(),
@@ -3485,6 +3502,32 @@ mod overlay_conversion_tests {
         );
         assert!(
             dispatch_request_to_core(request(DispatchType::ForceFocusWindow, "mystery:1")).is_err()
+        );
+    }
+
+    #[test]
+    fn show_desktop_dispatch_requests_parse() {
+        let request = |argument: &str| DispatchRequest {
+            command: DispatchType::ShowDesktop as i32,
+            argument: argument.to_string(),
+            ..DispatchRequest::default()
+        };
+        for (argument, on) in [
+            ("", None),
+            ("toggle", None),
+            ("on", Some(true)),
+            (" OFF ", Some(false)),
+        ] {
+            assert_eq!(
+                dispatch_request_to_core(request(argument)).unwrap(),
+                DispatchCommand::ShowDesktop { on },
+                "{argument:?}"
+            );
+        }
+        assert!(dispatch_request_to_core(request("sometimes")).is_err());
+        assert_eq!(
+            dispatcher_argument_kind(DispatchType::ShowDesktop),
+            "optional_on_off"
         );
     }
 

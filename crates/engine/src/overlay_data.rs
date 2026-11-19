@@ -18,6 +18,9 @@ pub struct OverlayData {
     pub active_binding_submap: String,
     /// Whether global tiling is currently suspended.
     pub tiling_suspended: bool,
+    /// Whether the desktop is shown: the windows of the shown workspaces
+    /// are out of sight until it ends (`DispatchCommand::ShowDesktop`).
+    pub desktop_shown: bool,
     pub gesture: GestureStateData,
     pub rule_states: Vec<RuleStateData>,
     pub scratchpad_states: Vec<ScratchpadStateData>,

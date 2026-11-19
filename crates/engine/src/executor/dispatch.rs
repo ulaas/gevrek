@@ -397,7 +397,8 @@ impl Executor {
             | DispatchCommand::EnsureNamedWorkspace { .. }
             | DispatchCommand::ToggleWindowContainerBehaviour
             | DispatchCommand::ToggleWorkspaceWindowContainerBehaviour { .. }
-            | DispatchCommand::ToggleWorkspaceFloatOverride { .. } => Family::Workspace,
+            | DispatchCommand::ToggleWorkspaceFloatOverride { .. }
+            | DispatchCommand::ShowDesktop { .. } => Family::Workspace,
             DispatchCommand::Retile
             | DispatchCommand::ToggleTiling
             | DispatchCommand::ToggleWorkspaceTiling { .. }
@@ -482,6 +483,19 @@ impl Executor {
             | DispatchCommand::ToggleMouseFollowsFocus
             | DispatchCommand::ShowShortcuts => Family::Other,
         };
+        // A command about a window or a display to work with, given while
+        // the desktop is shown, brings the windows back first, and the
+        // keyboard to where it was, for the command to start from.
+        if self.desktop_shown() && Self::ends_shown_desktop(&command) {
+            self.end_show_desktop(
+                window_manager,
+                monitor_manager,
+                None,
+                true,
+                desktop::DesktopEnds::Focus,
+            );
+        }
+        let showing_desktop = matches!(command, DispatchCommand::ShowDesktop { .. });
         let result = match family {
             Family::Focus => self.dispatch_focus(
                 window_manager,
@@ -533,6 +547,24 @@ impl Executor {
                 command,
             ),
         };
+        // A command that left a window of a workspace with the keyboard
+        // (one gevrek does not know as a focus command: a graph's, a
+        // scratchpad's window that is a workspace's now) is the person
+        // working with the windows again.
+        if self.desktop_shown() && !showing_desktop {
+            let given = queries(window_manager)
+                .active_window()
+                .filter(|window| Some(*window) != focus_before);
+            if given.is_some_and(|window| monitor_manager.find_window(window).is_some()) {
+                self.end_show_desktop(
+                    window_manager,
+                    monitor_manager,
+                    None,
+                    false,
+                    desktop::DesktopEnds::Focus,
+                );
+            }
+        }
         // Mouse-follows-focus: when a
         // dispatch moved keyboard focus to a different window, warp the
         // cursor to its center. Focus changes caused by pointer movement

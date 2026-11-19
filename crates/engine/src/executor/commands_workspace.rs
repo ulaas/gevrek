@@ -136,6 +136,9 @@ impl Executor {
             DispatchCommand::ToggleWorkspaceFloatOverride { selector } => {
                 self.toggle_workspace_float_override(window_manager, monitor_manager, selector)
             }
+            DispatchCommand::ShowDesktop { on } => {
+                self.show_desktop(window_manager, monitor_manager, on)
+            }
             other => anyhow::bail!(
                 "'{}' is not handled by this command family",
                 other.display_name()

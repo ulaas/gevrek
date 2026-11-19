@@ -976,6 +976,23 @@
         }
       },
       {
+        "name": "Show the desktop",
+        "enabled": true,
+        "key": "D",
+        "ctrl": false,
+        "alt": false,
+        "shift": true,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "show_desktop"
+        }
+      },
+      {
         "name": "Control centre",
         "enabled": true,
         "key": "S",

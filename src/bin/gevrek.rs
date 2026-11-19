@@ -712,6 +712,13 @@ enum Commands {
     /// Put the shown workspace's floating windows out of the way, or bring them back
     FloatingAside,
 
+    /// Show the desktop (every display's windows out of sight), or bring the windows back
+    ShowDesktop {
+        /// on: show the desktop; off: bring the windows back; toggle (or nothing): whichever is not the case now
+        #[arg(value_enum, default_value_t = CliSwitch::Toggle)]
+        switch: CliSwitch,
+    },
+
     /// Raise the focused window to the top of its Z-order band
     Raise,
 
@@ -1160,6 +1167,25 @@ enum CliDwindleDirection {
     Alternate,
     Horizontal,
     Vertical,
+}
+
+/// On, off, or whichever is not the case now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum CliSwitch {
+    On,
+    Off,
+    Toggle,
+}
+
+impl CliSwitch {
+    /// As a dispatch request's argument says it.
+    fn argument(self) -> &'static str {
+        match self {
+            Self::On => "on",
+            Self::Off => "off",
+            Self::Toggle => "",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -2204,6 +2230,9 @@ async fn show_state(address: &str) -> Result<()> {
             "RUNNING"
         }
     );
+    if state.desktop_shown {
+        println!("Desktop: shown (the windows are out of sight until `gevrek show-desktop off`)");
+    }
     println!(
         "Animations: {} · {} active",
         if state.animations_enabled {
@@ -4979,6 +5008,17 @@ async fn run() -> Result<()> {
             .await?;
         }
 
+        Commands::ShowDesktop { switch } => {
+            let mut request = dispatch_request(proto::DispatchType::ShowDesktop);
+            request.argument = switch.argument().to_string();
+            let done = match switch {
+                CliSwitch::On => "The desktop is shown",
+                CliSwitch::Off => "The windows are back",
+                CliSwitch::Toggle => "The desktop is shown, or the windows are back",
+            };
+            dispatch_command(&cli.address, request, done).await?;
+        }
+
         Commands::Center => {
             dispatch_command(
                 &cli.address,
@@ -5803,7 +5843,7 @@ mod tests {
     use super::{
         autostart_script_contents, autostart_script_path_in, autostart_task_name,
         autostart_task_xml, ensure_wm_endpoint_available, execution_event_to_json, upsert_rule,
-        validate_complete_config, Cli, CliAxis, CliDirection, CliSizing, Commands,
+        validate_complete_config, Cli, CliAxis, CliDirection, CliSizing, CliSwitch, Commands,
     };
     use clap::Parser;
     use gevrek_model::settings::WindowRuleProfile;
@@ -6693,6 +6733,24 @@ mod tests {
             read(["gevrek", "restore-windows"]).unwrap().command,
             Commands::RestoreWindows
         ));
+        for (words, switch) in [
+            (&["gevrek", "show-desktop"][..], CliSwitch::Toggle),
+            (&["gevrek", "show-desktop", "toggle"][..], CliSwitch::Toggle),
+            (&["gevrek", "show-desktop", "on"][..], CliSwitch::On),
+            (&["gevrek", "show-desktop", "off"][..], CliSwitch::Off),
+        ] {
+            assert!(
+                matches!(
+                    read(words.iter().copied()).unwrap().command,
+                    Commands::ShowDesktop { switch: given } if given == switch
+                ),
+                "{words:?}"
+            );
+        }
+        assert!(read(["gevrek", "show-desktop", "sometimes"]).is_err());
+        assert_eq!(CliSwitch::On.argument(), "on");
+        assert_eq!(CliSwitch::Off.argument(), "off");
+        assert_eq!(CliSwitch::Toggle.argument(), "");
         assert!(matches!(
             read(["gevrek", "toggle-mouse-follows-focus"])
                 .unwrap()

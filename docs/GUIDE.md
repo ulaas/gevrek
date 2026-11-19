@@ -324,6 +324,7 @@ with Super (the Windows key) held:
 | Super+C, Super+V | centre the window; floating or tiled |
 | Super+- =, Super+Shift+- = | narrower / wider; lower / taller |
 | Super+D or Space, Super+S, Super+N | launcher, control centre, notifications |
+| Super+Shift+D | show the desktop, and again the windows |
 | Super+Alt+L, Super+Shift+P | lock the screen, displays off (on Windows: the system's own lock screen, and the system's command for the displays) |
 | Print, Ctrl+Print, Alt+Print | screenshot of a region, the screen, the window |
 | the volume, media and brightness keys | what they say |
@@ -340,6 +341,31 @@ are live pictures of them, so no program is resized. It is the same on Linux, wh
 the compositor draws the pictures itself. How large a
 window is shown follows from the room the overview has, not from the window:
 one window alone is still shown smaller than it is.
+
+**Showing the desktop** (Super+Shift+D, `gevrek show-desktop`, the command
+`show_desktop`). As Win+D on Windows: the windows of the workspace every
+display shows go out of sight, and the desktop, with its zones, is seen and
+has the keyboard. The same key again brings them back, each where it was and
+as it was (a maximized window maximized, the tabs as they were), and the
+window that had the keyboard has it again. The windows are not minimized,
+only put away as on a change of workspace, so nothing about them changes.
+`gevrek show-desktop on` only shows the desktop, `off` only brings the
+windows back.
+
+It also ends by itself, with the windows back, as soon as you work with a
+window again: when you show another workspace (the windows of the other
+displays come back, those of the workspace you leave go with it), when a
+window gets the keyboard (a press on its button in the panel, Alt+Tab, a key
+that focuses a window, a window brought back from the taskbar), when a new
+window opens on a workspace that is shown, and when a display comes or goes.
+A new window brings the others back with it, where Windows would show it
+alone: here it is laid out among them, and alone it would stand in a part of
+an empty-looking workspace. A window that closes meanwhile is forgotten; one
+moved to another workspace meanwhile stays out of sight with that workspace.
+A scratchpad you call up over the desktop stays as you leave it. While the
+desktop is shown, `gevrek state` says so (`desktop_shown` in the state a
+client asks for), and the events
+`desktop.shown` and `desktop.hidden` (with the `reason` it ended) are told.
 
 **Hot corners** (`desktop.hot_corners`; in the studio under *Mouse and
 gestures*). The pointer, put into a corner of a display and left there for a

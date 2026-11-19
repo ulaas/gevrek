@@ -307,6 +307,10 @@ enum DispatchType {
   // A window to the middle of a display's shown workspace, floating;
   // again for that window, back as it was.
   DISPATCH_TYPE_TOGGLE_WINDOW_CENTERED = 144;
+  // Show the desktop (the windows of the shown workspaces out of sight), or
+  // bring the windows back: `argument` is "on", "off", or empty (or
+  // "toggle") for whichever is not the case now.
+  DISPATCH_TYPE_SHOW_DESKTOP = 145;
 }
 
 enum Direction {
@@ -679,6 +683,9 @@ message WMState {
   repeated AnimationChannelState animation_channels = 21;
   GestureState gesture = 22;
   bool tiling_suspended = 23;
+  // The desktop is shown: the windows of the shown workspaces are out of
+  // sight until it ends (`show_desktop`).
+  bool desktop_shown = 24;
 }
 
 // Stable external extension event envelope. Event names and field keys are

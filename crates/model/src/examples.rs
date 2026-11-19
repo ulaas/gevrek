@@ -251,6 +251,7 @@ fn showcase_graph() -> NodeGraph {
 /// | Super+- =, Super+Shift+- = | narrower / wider; lower / taller |
 ///
 /// | Super+D / Space, Super+S, Super+N | launcher, control centre, notifications |
+/// | Super+Shift+D | show the desktop, or the windows again |
 /// | Super+Alt+L, Super+Shift+P | lock the screen, displays off |
 /// | Print, Ctrl+Print, Alt+Print | screenshot of a region, the screen, the window |
 /// | the volume, media and brightness keys | what they say |
@@ -338,6 +339,14 @@ pub fn standard_bindings() -> Vec<BindingProfile> {
     list.extend([
         binding("Launcher", "D", shell(ShellAction::Launcher)),
         binding("Launcher", "SPACE", shell(ShellAction::Launcher)),
+        // (Windows has it on Win+D; there D is the launcher's, as in niri.)
+        chord(
+            "Show the desktop",
+            "D",
+            false,
+            true,
+            DispatchCommand::ShowDesktop { on: None },
+        ),
         binding("Control centre", "S", shell(ShellAction::ControlCenter)),
         binding("Notifications", "N", shell(ShellAction::NotificationCenter)),
         // Alt+Tab: held, with Tab on to the next window; let go, there.
@@ -2344,6 +2353,56 @@ mod tests {
         }
     }
     use std::collections::HashSet;
+
+    /// Super+Shift+D shows the desktop (Windows' own Win+D, with Shift: D
+    /// alone is the launcher's), and in no example is that key, or the
+    /// command, anything else.
+    #[test]
+    fn super_shift_d_shows_the_desktop_and_is_nobody_elses() {
+        let is_it = |binding: &BindingProfile| {
+            binding.normalized_key() == "D"
+                && binding.win
+                && binding.shift
+                && !binding.ctrl
+                && !binding.alt
+                && binding.normalized_submap() == "default"
+        };
+        let standard = standard_bindings();
+        let on_it: Vec<&BindingProfile> = standard.iter().filter(|binding| is_it(binding)).collect();
+        assert_eq!(on_it.len(), 1);
+        assert_eq!(on_it[0].command, DispatchCommand::ShowDesktop { on: None });
+        assert_eq!(on_it[0].trigger, BindingTrigger::Press);
+        for example in built_in_examples() {
+            for binding in &example.config.desktop.bindings {
+                if is_it(binding) {
+                    assert_eq!(
+                        binding.command,
+                        DispatchCommand::ShowDesktop { on: None },
+                        "{}: {}",
+                        example.id,
+                        binding.name
+                    );
+                }
+                if matches!(binding.command, DispatchCommand::ShowDesktop { .. }) {
+                    assert!(is_it(binding), "{}: {} shows the desktop", example.id, binding.name);
+                }
+            }
+            // (Where an example has the standard keys, it has this one.)
+            let standard_keys = example
+                .config
+                .desktop
+                .bindings
+                .iter()
+                .any(|binding| binding.name == "Show shortcuts");
+            if standard_keys {
+                assert!(
+                    example.config.desktop.bindings.iter().any(is_it),
+                    "{} has the standard keys but not Super+Shift+D",
+                    example.id
+                );
+            }
+        }
+    }
 
     #[test]
     fn the_keys_of_the_zones_are_standard_and_nobody_elses() {

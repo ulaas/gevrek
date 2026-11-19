@@ -78,6 +78,7 @@ fn published() -> OverlayData {
         active_animations: 0,
         active_binding_submap: "default".to_string(),
         tiling_suspended: false,
+        desktop_shown: false,
         gesture: Default::default(),
         rule_states: Vec::new(),
         scratchpad_states: core.scratchpad_data(),

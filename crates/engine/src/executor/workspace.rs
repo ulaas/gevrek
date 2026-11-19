@@ -334,6 +334,8 @@ impl Executor {
     /// `RestoreWindows` dispatch. Returns the
     /// number of windows that were actually shown again.
     pub fn restore_hidden_windows(&mut self, window_manager: &mut dyn Desktop) -> usize {
+        // (The desktop is not shown once every window is.)
+        self.forget_shown_desktop();
         let mut handles = self.window_state.ids_where(|state| state.hidden_by_wm);
         handles.extend(self.scratchpads.hidden_windows());
         handles.sort_by_key(|h| h.0);
@@ -607,7 +609,7 @@ impl Executor {
     /// away from a window of another output: the keys go where the command
     /// went, and with nobody there they are gevrek's alone. A window that
     /// belongs to no output (a launcher, a menu) keeps them.
-    fn focus_on_output(
+    pub(super) fn focus_on_output(
         &mut self,
         window_manager: &mut dyn Desktop,
         monitor_manager: &MonitorManager,
@@ -1190,6 +1192,23 @@ impl Executor {
         selector: WorkspaceSelector,
     ) -> Result<()> {
         let target = self.resolve_workspace_selector(monitor_manager, monitor, &selector, true)?;
+        // Another workspace is to be seen: the desktop is not shown any
+        // more. The windows of the other displays come back; those of the
+        // workspace this display leaves go on out of sight with it, and the
+        // change gives the keyboard. Asked for the workspace it shows, the
+        // display shows it again, as it was.
+        if self.desktop_shown() {
+            let changes = monitor_manager
+                .get_workspaces(monitor)
+                .is_some_and(|workspaces| workspaces.focused_idx() != target);
+            self.end_show_desktop(
+                window_manager,
+                monitor_manager,
+                changes.then_some(monitor),
+                !changes,
+                desktop::DesktopEnds::Workspace,
+            );
+        }
         // Floating windows that were put out of the way are where they
         // belong when the workspace is seen next.
         if monitor_manager
@@ -1760,6 +1779,11 @@ impl Executor {
                 .and_then(|workspaces| workspaces.get_mut(target_index))
             {
                 workspace.focus_window(window);
+                // (Where it joined others as a tab behind them, it is the
+                // tab in front now: shown, and they behind it, at the next
+                // layout pass. It used to stay out of sight behind a tab
+                // that was put back.)
+                workspace.visibility_stale = true;
             }
             effect(window_manager, Effect::Focus(Some(window)))?;
         }

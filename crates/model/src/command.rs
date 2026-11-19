@@ -704,6 +704,19 @@ pub enum DispatchCommand {
     /// Windows the shell draws them from pictures it remembers of the
     /// windows: `SHELL_WORKSPACE_OVERVIEW`.)
     WorkspaceOverview,
+    /// Show the desktop: every window of the workspace each display shows
+    /// goes out of sight (as on a change of workspace, so each comes back
+    /// where and as it was), and the desktop has the keyboard. Asked
+    /// again, they come back, and the window that had the keyboard has it
+    /// again. It also ends by itself, with the windows back, when another
+    /// workspace is shown, when the person gives a window the keyboard,
+    /// and when a new window opens on a workspace that is shown. `on`:
+    /// `Some(true)` only shows the desktop, `Some(false)` only brings the
+    /// windows back, `None` does whichever is not the case now.
+    ShowDesktop {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on: Option<bool>,
+    },
     /// The next press of the left mouse button picks the window under
     /// the pointer instead of reaching it: subscribers are told which
     /// (`window.picked`, with its `class` and `title`). Escape, or a
@@ -991,6 +1004,7 @@ impl DispatchCommand {
             Self::AdjustContainerPadding { .. } => "Adjust container padding",
             Self::ToggleExpose => "Toggle overview",
             Self::WorkspaceOverview => "Overview of every workspace",
+            Self::ShowDesktop { .. } => "Show the desktop",
             Self::PickWindow => "Pick a window by clicking it",
             Self::ShowShortcuts => "Show shortcuts",
             Self::ToggleScratchpad { .. } => "Toggle scratchpad",
@@ -1038,6 +1052,23 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<DispatchCommand>(&json).unwrap(),
             command
+        );
+    }
+
+    /// Showing the desktop is `show_desktop`; without `on` it is the
+    /// toggle, which is also how it is written.
+    #[test]
+    fn show_desktop_is_written_with_its_switch_only_when_there_is_one() {
+        let toggle: DispatchCommand =
+            serde_json::from_str(r#"{"command":"show_desktop"}"#).unwrap();
+        assert_eq!(toggle, DispatchCommand::ShowDesktop { on: None });
+        assert_eq!(
+            serde_json::to_string(&toggle).unwrap(),
+            r#"{"command":"show_desktop"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&DispatchCommand::ShowDesktop { on: Some(false) }).unwrap(),
+            r#"{"command":"show_desktop","on":false}"#
         );
     }
 
@@ -1163,6 +1194,9 @@ mod tests {
             DispatchCommand::SetFloating { enabled: false },
             DispatchCommand::CenterActive,
             DispatchCommand::ToggleFloatingAside,
+            DispatchCommand::ShowDesktop { on: None },
+            DispatchCommand::ShowDesktop { on: Some(true) },
+            DispatchCommand::ShowDesktop { on: Some(false) },
             DispatchCommand::RaiseActive,
             DispatchCommand::LowerActive,
             DispatchCommand::ClearWindowTags,

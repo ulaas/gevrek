@@ -51,6 +51,9 @@ pub struct Task {
     pub focused: bool,
     /// Its workspace is the one the display shows.
     pub shown: bool,
+    /// The person minimized it: its button is drawn apart from the
+    /// others (`task_look`), and a press brings it back.
+    pub minimized: bool,
 }
 
 /// What a window's picture is looked for by. The picture its program
@@ -310,6 +313,7 @@ fn tasks_of(workspace: &Value, shown: bool) -> Vec<Task> {
                 icon: task_icon(said("icon"), said("app_id"), said("class"), said("exe")),
                 focused: window["is_focused"].as_bool().unwrap_or(false),
                 shown,
+                minimized: window["is_minimized"].as_bool().unwrap_or(false),
             })
         })
         .collect()
@@ -2940,7 +2944,69 @@ pub fn tasks_of_ids(view: &View, ids: &[u64]) -> Vec<Task> {
         .collect()
 }
 
-/// The command that gives a window the keyboard.
+/// How strong the words and the line around a minimized window's button
+/// are, of the panel's text: fainter than any other button's, and still
+/// above seven to one in the high-contrast palettes (white on black, and
+/// black on white).
+const MINIMIZED_INK: f32 = 0.7;
+
+/// How a window's button in the taskbar is drawn.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TaskLook {
+    fill: egui::Color32,
+    /// The line around it, where it has one.
+    outline: Option<egui::Color32>,
+    /// The accent's line at its edge: it has the keyboard.
+    keys_line: bool,
+    /// What its picture is drawn through (white: as it is).
+    picture: egui::Color32,
+}
+
+/// The look of a window's button: `text` is the colour its words have,
+/// `hovered` that the pointer is over it, `has_keys` that its window has
+/// the keyboard, `minimized` that every window it stands for was
+/// minimized by the person.
+///
+/// A minimized window's button is hollow: a line around it in place of a
+/// fill, its picture faded, and no line of the accent's (nothing of it is
+/// to be seen). That it is hollow says it as well as its colour does, so
+/// it reads in a high-contrast palette too.
+fn task_look(
+    text: egui::Color32,
+    accent: egui::Color32,
+    hovered: bool,
+    has_keys: bool,
+    minimized: bool,
+) -> TaskLook {
+    if minimized {
+        return TaskLook {
+            fill: if hovered {
+                text.gamma_multiply(0.10)
+            } else {
+                egui::Color32::TRANSPARENT
+            },
+            outline: Some(text.gamma_multiply(MINIMIZED_INK)),
+            keys_line: false,
+            picture: egui::Color32::WHITE.gamma_multiply(0.5),
+        };
+    }
+    let fill = match (hovered, has_keys) {
+        (true, true) => accent.gamma_multiply(0.36),
+        (false, true) => accent.gamma_multiply(0.24),
+        (true, false) => text.gamma_multiply(0.14),
+        (false, false) => text.gamma_multiply(0.06),
+    };
+    TaskLook {
+        fill,
+        outline: None,
+        keys_line: has_keys,
+        picture: egui::Color32::WHITE,
+    }
+}
+
+/// The command that gives a window the keyboard. One the person minimized
+/// is brought back by it first, to its own workspace, on its display (the
+/// window manager does that for a window it is asked to focus).
 pub fn go_to_window(id: u64) -> String {
     serde_json::json!({"command": "focus_window", "selector": {"kind": "handle", "value": id}})
         .to_string()
@@ -3000,6 +3066,8 @@ fn draw_tasks(ui: &mut egui::Ui, shown: &Shown, ink: &Ink, asked: &mut Asked) {
         chosen: &'a Task,
         picture: Option<egui::TextureHandle>,
         has_keys: bool,
+        /// Every window it stands for is minimized.
+        minimized: bool,
         colour: egui::Color32,
         long: f32,
     }
@@ -3012,8 +3080,10 @@ fn draw_tasks(ui: &mut egui::Ui, shown: &Shown, ink: &Ink, asked: &mut Asked) {
                 .iter()
                 .find(|task| task.focused && task.shown)
                 .or_else(|| windows.iter().find(|task| task.focused))
+                .or_else(|| windows.iter().find(|task| !task.minimized))
                 .copied()
                 .unwrap_or(windows[0]);
+            let minimized = windows.iter().all(|task| task.minimized);
             // The one with the keyboard stands out, as the shown
             // workspace does among the tabs, more quietly.
             let has_keys = view.focused && windows.iter().any(|task| task.focused && task.shown);
@@ -3028,8 +3098,11 @@ fn draw_tasks(ui: &mut egui::Ui, shown: &Shown, ink: &Ink, asked: &mut Asked) {
                 chosen,
                 picture: task_picture(ui.ctx(), &chosen.icon),
                 has_keys,
+                minimized,
                 colour: if has_keys {
                     text
+                } else if minimized {
+                    text.gamma_multiply(MINIMIZED_INK)
                 } else {
                     text.gamma_multiply(0.78)
                 },
@@ -3146,14 +3219,23 @@ fn draw_tasks(ui: &mut egui::Ui, shown: &Shown, ink: &Ink, asked: &mut Asked) {
                 let words = ui.fonts_mut(|fonts| fonts.layout_job(job));
                 let (place, response) =
                     ui.allocate_exact_size(along(button.long), egui::Sense::click());
-                let fill = match (response.hovered(), button.has_keys) {
-                    (true, true) => accent.gamma_multiply(0.36),
-                    (false, true) => accent.gamma_multiply(0.24),
-                    (true, false) => ink.text.gamma_multiply(0.14),
-                    (false, false) => ink.text.gamma_multiply(0.06),
-                };
-                ui.painter().rect_filled(place, 8.0, fill);
-                if button.has_keys {
+                let look = task_look(
+                    ink.text,
+                    accent,
+                    response.hovered(),
+                    button.has_keys,
+                    button.minimized,
+                );
+                ui.painter().rect_filled(place, 8.0, look.fill);
+                if let Some(outline) = look.outline {
+                    ui.painter().rect_stroke(
+                        place,
+                        8.0,
+                        egui::Stroke::new(1.0, outline),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+                if look.keys_line {
                     // A line of the accent's at its edge says it again.
                     let line = if upright {
                         egui::Rect::from_min_max(
@@ -3176,7 +3258,7 @@ fn draw_tasks(ui: &mut egui::Ui, shown: &Shown, ink: &Ink, asked: &mut Asked) {
                             picture.id(),
                             egui::Rect::from_center_size(place.center(), egui::Vec2::splat(side)),
                             whole,
-                            egui::Color32::WHITE,
+                            look.picture,
                         );
                     }
                     (Some(picture), false) => {
@@ -3187,7 +3269,7 @@ fn draw_tasks(ui: &mut egui::Ui, shown: &Shown, ink: &Ink, asked: &mut Asked) {
                                 egui::Vec2::splat(16.0),
                             ),
                             whole,
-                            egui::Color32::WHITE,
+                            look.picture,
                         );
                         ui.painter().galley(
                             egui::pos2(
@@ -3243,7 +3325,14 @@ fn draw_tasks(ui: &mut egui::Ui, shown: &Shown, ink: &Ink, asked: &mut Asked) {
                         asked.task_menu = Some((response.rect, ids));
                     }
                 } else {
-                    let response = response.hint(&button.chosen.title);
+                    let response = if button.minimized {
+                        response.hint(format!(
+                            "{} (minimized). A press brings it back.",
+                            button.chosen.title
+                        ))
+                    } else {
+                        response.hint(&button.chosen.title)
+                    };
                     if response.clicked() && !button.has_keys {
                         asked.go = Some(button.chosen.id);
                     }
@@ -3339,11 +3428,25 @@ pub fn task_menu(ui: &mut egui::Ui, palette: &theme::Palette, tasks: &[Task]) ->
                             task.title.trim()
                         };
                         let name: String = words.chars().take(42).collect();
-                        let label = egui::RichText::new(name).size(13.0);
+                        // (A minimized one in the quiet colour, its
+                        // picture faded, and said to be: as its button.)
+                        let label = if task.minimized {
+                            egui::RichText::new(format!("{name} (minimized)"))
+                                .size(13.0)
+                                .color(palette.muted)
+                        } else {
+                            egui::RichText::new(name).size(13.0)
+                        };
                         let marked = task.focused && task.shown;
+                        let faded = if task.minimized {
+                            egui::Color32::WHITE.gamma_multiply(0.5)
+                        } else {
+                            egui::Color32::WHITE
+                        };
                         let button = match task_picture(ui.ctx(), &task.icon) {
                             Some(picture) => egui::Button::image_and_text(
-                                egui::Image::new((picture.id(), egui::Vec2::splat(16.0))),
+                                egui::Image::new((picture.id(), egui::Vec2::splat(16.0)))
+                                    .tint(faded),
                                 label,
                             )
                             .selected(marked),
@@ -3609,6 +3712,7 @@ mod tests {
             icon: String::new(),
             focused: false,
             shown: true,
+            minimized: false,
         };
         let label = task_label(&long);
         // (Cut at 24 letters; a space the cut ends on is left out.)
@@ -4599,6 +4703,7 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
                 icon: String::new(),
                 focused: id == 3,
                 shown: true,
+                minimized: false,
             })
             .collect();
         let system = SystemView {
@@ -4704,6 +4809,7 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
             icon: icon.to_string(),
             focused: false,
             shown: true,
+            minimized: false,
         };
         let tasks = [
             task(1, "firefox", "Navigator"),
@@ -4810,6 +4916,7 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
                 icon: String::new(),
                 focused: id == 3,
                 shown: true,
+                minimized: false,
             })
             .collect()
     }
@@ -4936,6 +5043,135 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
         assert!(listed.iter().all(|id| program(id) == program(&listed[0])), "{listed:?}");
     }
 
+    /// A window the person minimized is read from the state as such, in
+    /// its place among the others, on the shown workspace and in the list
+    /// of every workspace's.
+    #[test]
+    fn a_minimized_window_is_a_task_that_says_so() {
+        let monitor = serde_json::json!({
+            "workspace": {"id": 2},
+            "workspaces": [
+                {"id": 1, "name": "1", "detailed_windows": [
+                    {"window_id": 7, "title": "away", "is_minimized": true}]},
+                {"id": 2, "name": "2", "detailed_windows": [
+                    {"window_id": 1, "title": "editor", "is_focused": true},
+                    {"window_id": 2, "title": "notes", "is_minimized": true},
+                    {"window_id": 3, "title": "mail"}]},
+            ]
+        });
+        let view = view_of(&monitor);
+        let flags: Vec<(u64, bool)> = view.tasks.iter().map(|task| (task.id, task.minimized)).collect();
+        assert_eq!(flags, [(1, false), (2, true), (3, false)]);
+        let away = view.all_tasks.iter().find(|task| task.id == 7).expect("listed");
+        assert!(away.minimized && !away.shown);
+        // (The list under a button has it as the view does.)
+        assert!(tasks_of_ids(&view, &[2])[0].minimized);
+    }
+
+    /// A minimized window's button is hollow: a line around it in place
+    /// of the fill, its picture faded, never the accent's line; the
+    /// pointer over it fills it a little. The others are as they were.
+    #[test]
+    fn a_minimized_windows_button_is_hollow() {
+        let (text, accent) = (egui::Color32::WHITE, egui::Color32::from_rgb(64, 224, 208));
+        let resting = task_look(text, accent, false, false, true);
+        assert_eq!(resting.fill, egui::Color32::TRANSPARENT);
+        assert!(resting.outline.is_some() && !resting.keys_line);
+        assert!(resting.picture.a() < 255, "its picture is faded");
+        let hovered = task_look(text, accent, true, false, true);
+        assert_ne!(hovered.fill, egui::Color32::TRANSPARENT);
+        // (Even were it told to have the keyboard, nothing of it is seen.)
+        assert!(!task_look(text, accent, false, true, true).keys_line);
+        for (hovered, has_keys) in [(false, false), (true, false), (false, true), (true, true)] {
+            let look = task_look(text, accent, hovered, has_keys, false);
+            assert!(look.outline.is_none() && look.fill != egui::Color32::TRANSPARENT);
+            assert_eq!(look.keys_line, has_keys);
+            assert_eq!(look.picture, egui::Color32::WHITE);
+        }
+        // Its words and its line stand out seven to one in the
+        // high-contrast palettes: white on black, and black on white.
+        for (ink, ground) in [
+            (egui::Color32::WHITE, egui::Color32::BLACK),
+            (egui::Color32::BLACK, egui::Color32::WHITE),
+        ] {
+            let faded = ink.gamma_multiply(MINIMIZED_INK);
+            let seen = blend(faded, ground);
+            assert!(theme::contrast(seen, ground) >= 7.0, "{ink:?} on {ground:?}");
+        }
+    }
+
+    /// A colour with some of it see-through, as it is seen over `ground`.
+    fn blend(colour: egui::Color32, ground: egui::Color32) -> egui::Color32 {
+        let over = colour.a() as f32 / 255.0;
+        let mix = |front: u8, back: u8| {
+            // (Premultiplied: what is in front is already as strong as
+            // it is see-through.)
+            (front as f32 + back as f32 * (1.0 - over)).round().min(255.0) as u8
+        };
+        egui::Color32::from_rgb(
+            mix(colour.r(), ground.r()),
+            mix(colour.g(), ground.g()),
+            mix(colour.b(), ground.b()),
+        )
+    }
+
+    /// A press on a minimized window's button asks for it to be given the
+    /// keyboard: the window manager brings it back for that.
+    #[test]
+    fn a_press_on_a_minimized_windows_button_brings_it_back() {
+        use gevrek_model::settings::PanelEdge;
+        let size = egui::vec2(700.0, 36.0);
+        let bar = PanelProfile {
+            edge: PanelEdge::Top,
+            task_grouping: TaskGrouping::Never,
+            left: vec![PanelModule::Taskbar],
+            centre: Vec::new(),
+            right: vec![PanelModule::Power],
+            ..Default::default()
+        };
+        let mut view = view(&windows_state(), "Monitor ACM2702 (1)").expect("the display");
+        view.tasks = vec![Task {
+            minimized: true,
+            ..many_tasks(1).remove(0)
+        }];
+        let mut went = None;
+        for from_start in (30..200).step_by(6) {
+            let at = egui::pos2(from_start as f32, size.y / 2.0);
+            let asked = panel_drawn(&bar, &view, size, 8, Some(at));
+            if asked.go.is_some() {
+                went = asked.go;
+                break;
+            }
+        }
+        assert_eq!(went, Some(1), "a press on its button");
+        let command: serde_json::Value =
+            serde_json::from_str(&go_to_window(1)).expect("a command");
+        assert_eq!(command["command"], "focus_window");
+        assert_eq!(command["selector"]["value"], 1);
+        let parsed: gevrek_model::command::DispatchCommand =
+            serde_json::from_value(command).expect("the window manager reads it");
+        assert!(matches!(
+            parsed,
+            gevrek_model::command::DispatchCommand::FocusWindow { .. }
+        ));
+    }
+
+    /// The windows of a program stand under one button with a minimized
+    /// one among them, in its place; a press on it lists them all.
+    #[test]
+    fn a_minimized_window_is_counted_with_its_programs_others() {
+        let mut tasks = many_tasks(14);
+        tasks[7].minimized = true;
+        let buttons = task_buttons(&tasks, TaskGrouping::Always, false);
+        let group = buttons
+            .iter()
+            .find(|button| button.iter().any(|task| task.minimized))
+            .expect("its program's button");
+        let ids: Vec<u64> = group.iter().map(|task| task.id).collect();
+        assert_eq!(ids, [1, 8], "with the other window of its program, in its place");
+        assert!(!group.iter().all(|task| task.minimized), "the button itself is not hollow");
+    }
+
     /// A panel drawn into a picture, to be looked at while it is worked
     /// on:
     ///
@@ -5015,6 +5251,7 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
             icon: String::new(),
             focused,
             shown: true,
+            minimized: false,
         };
         let view = View {
             tabs: vec![
@@ -5034,6 +5271,10 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
                     task(1, "Terminal", false),
                     task(2, "Firefox", true),
                     task(3, "Files", false),
+                    Task {
+                        minimized: true,
+                        ..task(4, "Notes (minimized)", false)
+                    },
                 ],
             },
             all_tasks: Vec::new(),

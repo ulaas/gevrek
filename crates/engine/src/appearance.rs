@@ -344,14 +344,26 @@ impl WmCore {
         let mut windows = Vec::new();
         let mut detailed_windows = Vec::new();
 
-        let mut collect_window = |handle: WindowHandle, is_tiled: bool| {
+        let states = &self.executor.window_state;
+        // (`place`: where among the others it is listed; at the end
+        // without one.)
+        let mut collect_window = |handle: WindowHandle, is_tiled: bool, place: Option<usize>| {
             let Some(window_info) = known.get(&handle) else {
                 return;
             };
-            windows.push(window_info.clone());
+            let at = place.map_or(detailed_windows.len(), |place| {
+                place.min(detailed_windows.len())
+            });
+            let state = states.get(handle);
+            // Minimized as the panel tells it: by the person (or their
+            // program) while the window could be seen. One the system
+            // minimized while its workspace was put away is not: it comes
+            // back with its workspace (`switch_workspace_on`).
+            let is_minimized = state.minimized || (window_info.is_minimized && !state.hidden_by_wm);
+            windows.insert(at, window_info.clone());
             let (effective_opacity, is_dimmed, shadow_policy) =
                 self.window_effect_state(desktop, config, handle, &workspace.name, workspace_index);
-            detailed_windows.push(DetailedWindowInfo {
+            let detailed = DetailedWindowInfo {
                 handle,
                 title: window_info.title.clone(),
                 class: desktop.class(handle),
@@ -363,7 +375,7 @@ impl WmCore {
                 width: window_info.width,
                 height: window_info.height,
                 is_focused: focused_window == Some(handle),
-                is_minimized: window_info.is_minimized,
+                is_minimized,
                 is_maximized: window_info.is_maximized,
                 is_managed: !desktop.ignored_by_rules(handle),
                 is_tiled,
@@ -382,16 +394,38 @@ impl WmCore {
                 effective_opacity,
                 is_dimmed,
                 shadow_policy,
-            });
+            };
+            detailed_windows.insert(at, detailed);
         };
 
         for container in workspace.containers.iter() {
             for handle in container.windows.iter().copied() {
-                collect_window(handle, true);
+                collect_window(handle, true, None);
             }
         }
         for handle in workspace.floating_windows.iter().copied() {
-            collect_window(handle, false);
+            collect_window(handle, false, None);
+        }
+        // A tiled window the person minimized left the layout, and is
+        // still this workspace's: it is listed (so a panel can give it
+        // back) where it stood among the others when it was minimized,
+        // under the workspace it goes back to when it is restored. Only
+        // here, once: workspace ids are not shared, and one that is a
+        // member again is listed as one. (Those that stood first are put
+        // back first, so each comes to its own place.)
+        let outputs = &self.monitor_manager;
+        let mut minimized: Vec<(usize, WindowHandle)> = states
+            .iter()
+            .filter(|(handle, state)| {
+                state.minimized
+                    && state.minimized_origin == Some(workspace.id)
+                    && outputs.find_window(*handle).is_none()
+            })
+            .map(|(handle, state)| (state.minimized_place.unwrap_or(usize::MAX), handle))
+            .collect();
+        minimized.sort();
+        for (place, handle) in minimized {
+            collect_window(handle, true, Some(place));
         }
 
         WorkspaceData {

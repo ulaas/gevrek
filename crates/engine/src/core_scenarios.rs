@@ -1723,6 +1723,229 @@ fn a_window_is_listed_for_its_workspaces_output_wherever_it_lies() {
     assert_eq!(listed(&minimized, notes), home);
 }
 
+// ---- minimized windows on the panel ----------------------------------------
+
+/// The person minimizes a window (the system tells it, as it does).
+fn minimize(core: &mut WmCore, desktop: &mut FakeDesktop, window: WindowHandle) {
+    desktop.windows.get_mut(&window).expect("the window").minimized = true;
+    core.handle_window_event(desktop, WindowEvent::Minimized(window))
+        .expect("minimized");
+    core.flush_pending_layouts(desktop).expect("layout");
+}
+
+/// A press on a window's button in the taskbar: what the panel sends.
+fn press(core: &mut WmCore, desktop: &mut FakeDesktop, window: WindowHandle) {
+    command(
+        core,
+        desktop,
+        DispatchCommand::FocusWindow {
+            selector: gevrek_model::command::WindowSelector::Handle(window.0 as i64),
+        },
+    );
+}
+
+/// What is published of a window, wherever it is listed.
+fn entry(
+    monitors: &[crate::overlay_data::MonitorData],
+    window: WindowHandle,
+) -> Option<&crate::overlay_data::DetailedWindowInfo> {
+    monitors
+        .iter()
+        .flat_map(|monitor| &monitor.workspaces)
+        .flat_map(|workspace| &workspace.detailed_windows)
+        .find(|listed| listed.handle == window)
+}
+
+/// The windows a workspace is published with, in their order.
+fn listed_on(monitors: &[crate::overlay_data::MonitorData], name: &str) -> Vec<WindowHandle> {
+    monitors
+        .iter()
+        .flat_map(|monitor| &monitor.workspaces)
+        .find(|workspace| workspace.name == name)
+        .map(|workspace| workspace.detailed_windows.iter().map(|w| w.handle).collect())
+        .unwrap_or_default()
+}
+
+/// A tiled window the person minimized leaves the layout and is listed
+/// still, once, under its workspace and where it stood (its button stays
+/// on the panel, in its place, and says it is minimized). A press on it
+/// brings it back to its tile and gives it the keyboard.
+#[test]
+fn a_minimized_tile_is_listed_in_its_place_and_a_press_brings_it_back() {
+    let (mut core, mut desktop) = setup(&["main", "two"]);
+    let editor = open(&mut core, &mut desktop, "editor");
+    let notes = open(&mut core, &mut desktop, "notes");
+    let mail = open(&mut core, &mut desktop, "mail");
+    minimize(&mut core, &mut desktop, notes);
+    assert_eq!(tiled(&core), [editor, mail], "it left the layout");
+
+    let minimized = published(&core, &desktop);
+    assert_eq!(listed(&minimized, notes), Some((OUTPUT, "main".to_string())));
+    assert_eq!(listed_on(&minimized, "main"), [editor, notes, mail]);
+    let listed_notes = entry(&minimized, notes).expect("listed");
+    assert!(listed_notes.is_minimized && !listed_notes.is_focused);
+    assert!(!entry(&minimized, editor).expect("listed").is_minimized);
+    assert!(listed_on(&minimized, "two").is_empty());
+
+    press(&mut core, &mut desktop, notes);
+    let mut back = tiled(&core);
+    back.sort();
+    assert_eq!(back, [editor, notes, mail], "back in a tile");
+    assert!(!desktop.window(notes).minimized, "the system shows it again");
+    assert_eq!(desktop.focused, Some(notes));
+    let restored = published(&core, &desktop);
+    let listed_notes = entry(&restored, notes).expect("listed");
+    assert!(!listed_notes.is_minimized && listed_notes.is_focused);
+    assert_eq!(listed_on(&restored, "main").len(), 3, "listed once");
+    assert!(core.executor.window_state.get(notes).minimized_origin.is_none());
+
+    // The system telling of the restore afterwards changes nothing more.
+    core.handle_window_event(&mut desktop, WindowEvent::Restored(notes))
+        .expect("restored");
+    core.flush_pending_layouts(&mut desktop).expect("layout");
+    assert_eq!(tiled(&core).len(), 3);
+    assert_eq!(listed_on(&published(&core, &desktop), "main").len(), 3);
+}
+
+/// One minimized on a workspace that is then put away is listed under
+/// that workspace (as its other windows are), and a press shows its
+/// workspace and brings it back there, not to the one shown.
+#[test]
+fn a_window_minimized_on_a_workspace_put_away_comes_back_to_its_own() {
+    let (mut core, mut desktop) = setup(&["main", "two"]);
+    let editor = open(&mut core, &mut desktop, "editor");
+    let notes = open(&mut core, &mut desktop, "notes");
+    minimize(&mut core, &mut desktop, notes);
+    switch_to(&mut core, &mut desktop, "two");
+    let away = published(&core, &desktop);
+    assert_eq!(away[0].workspace.name, "two");
+    assert_eq!(listed_on(&away, "main"), [editor, notes]);
+    assert!(entry(&away, notes).expect("listed").is_minimized);
+    assert!(listed_on(&away, "two").is_empty());
+
+    press(&mut core, &mut desktop, notes);
+    let back = published(&core, &desktop);
+    assert_eq!(back[0].workspace.name, "main", "its workspace is shown");
+    let mut on_main = tiled(&core);
+    on_main.sort();
+    assert_eq!(on_main, [editor, notes]);
+    assert!(!entry(&back, notes).expect("listed").is_minimized);
+    assert_eq!(desktop.focused, Some(notes));
+}
+
+/// One minimized on the other display is that display's panel's alone,
+/// and comes back there.
+#[test]
+fn a_window_minimized_on_the_other_display_is_listed_and_brought_back_there() {
+    let (mut core, mut desktop) = setup(&["main"]);
+    second_display(&mut core, &mut desktop, &["side"]);
+    let editor = open(&mut core, &mut desktop, "editor");
+    let viewer = desktop.open_at("viewer", Rect::new(2200, 300, 800, 600));
+    core.handle_window_event(&mut desktop, WindowEvent::Created(viewer))
+        .expect("created");
+    core.flush_pending_layouts(&mut desktop).expect("layout");
+    assert_eq!(
+        core.monitor_manager.find_window(viewer).map(|(output, _)| output),
+        Some(BESIDE)
+    );
+    focus(&mut core, &mut desktop, editor);
+    minimize(&mut core, &mut desktop, viewer);
+    let minimized = published(&core, &desktop);
+    assert_eq!(listed(&minimized, viewer), Some((BESIDE, "side".to_string())));
+    assert_eq!(listed_on(&minimized, "main"), [editor]);
+
+    press(&mut core, &mut desktop, viewer);
+    assert_eq!(
+        core.monitor_manager.find_window(viewer).map(|(output, _)| output),
+        Some(BESIDE),
+        "back on its own display"
+    );
+    assert_eq!(core.executor.focused_monitor(), Some(BESIDE));
+    assert_eq!(desktop.focused, Some(viewer));
+    assert!(!entry(&published(&core, &desktop), viewer).expect("listed").is_minimized);
+}
+
+/// The display of the workspace a window was minimized on goes: it is
+/// listed on one panel or on none, never on two, and a press brings it
+/// back on a display that is there.
+#[test]
+fn a_window_minimized_on_a_display_that_went_is_listed_once_at_most() {
+    let (mut core, mut desktop) = setup(&["main"]);
+    second_display(&mut core, &mut desktop, &["side"]);
+    let editor = open(&mut core, &mut desktop, "editor");
+    let viewer = desktop.open_at("viewer", Rect::new(2200, 300, 800, 600));
+    core.handle_window_event(&mut desktop, WindowEvent::Created(viewer))
+        .expect("created");
+    core.flush_pending_layouts(&mut desktop).expect("layout");
+    minimize(&mut core, &mut desktop, viewer);
+
+    let monitors: Vec<_> = core
+        .monitor_manager
+        .get_all_monitors()
+        .into_iter()
+        .filter(|monitor| monitor.handle != BESIDE)
+        .collect();
+    desktop.more_outputs.clear();
+    let changes = core.monitor_manager.reconcile_with(monitors);
+    core.executor
+        .apply_monitor_changes(&mut desktop, &core.monitor_manager, &changes);
+    core.flush_pending_layouts(&mut desktop).expect("layout");
+
+    // (`published` holds that nothing is listed twice.)
+    let one = published(&core, &desktop);
+    assert_eq!(one.len(), 1);
+    assert!(
+        listed(&one, viewer).is_none_or(|(output, _)| output == OUTPUT),
+        "{:?}",
+        listed(&one, viewer)
+    );
+    assert_eq!(listed(&one, editor).map(|(output, _)| output), Some(OUTPUT));
+
+    press(&mut core, &mut desktop, viewer);
+    assert_eq!(
+        core.monitor_manager.find_window(viewer).map(|(output, _)| output),
+        Some(OUTPUT)
+    );
+    assert!(!desktop.window(viewer).minimized);
+    assert_eq!(listed(&published(&core, &desktop), viewer).map(|(o, _)| o), Some(OUTPUT));
+}
+
+/// A floating window stays a member while it is minimized: listed once,
+/// as minimized, and a press brings it back.
+#[test]
+fn a_minimized_floating_window_is_listed_as_minimized_and_brought_back() {
+    let (mut core, mut desktop) = setup(&["main"]);
+    let editor = open(&mut core, &mut desktop, "editor");
+    let viewer = open(&mut core, &mut desktop, "viewer");
+    focus(&mut core, &mut desktop, viewer);
+    command(&mut core, &mut desktop, DispatchCommand::ToggleFloating);
+    minimize(&mut core, &mut desktop, viewer);
+    let minimized = published(&core, &desktop);
+    assert_eq!(listed_on(&minimized, "main"), [editor, viewer]);
+    let listed_viewer = entry(&minimized, viewer).expect("listed");
+    assert!(listed_viewer.is_minimized && listed_viewer.is_floating);
+
+    press(&mut core, &mut desktop, viewer);
+    assert!(!desktop.window(viewer).minimized);
+    assert_eq!(desktop.focused, Some(viewer));
+    let back = published(&core, &desktop);
+    assert!(!entry(&back, viewer).expect("listed").is_minimized);
+    assert_eq!(listed_on(&back, "main"), [editor, viewer]);
+}
+
+/// A window the system minimized while its workspace was put away is not
+/// told as minimized: it comes back with its workspace.
+#[test]
+fn a_window_minimized_while_its_workspace_is_away_is_not_told_as_minimized() {
+    let (mut core, mut desktop) = setup(&["main", "two"]);
+    let editor = open(&mut core, &mut desktop, "editor");
+    switch_to(&mut core, &mut desktop, "two");
+    minimize(&mut core, &mut desktop, editor);
+    let away = published(&core, &desktop);
+    assert_eq!(listed_on(&away, "main"), [editor]);
+    assert!(!entry(&away, editor).expect("listed").is_minimized);
+}
+
 /// What was reported. A floating window let go of on the other output is
 /// that output's workspace's from then on: published for it and for no
 /// other, and told as moved, so that both panels ask for the state.
@@ -2435,4 +2658,640 @@ fn a_floating_window_is_not_taken_to_another_display_for_a_move_that_is_not_its_
         .apply_monitor_changes(&mut desktop, &core.monitor_manager, &changes);
     assert!(at_rest(&mut core, &mut desktop).is_empty());
     assert_eq!(home(&core, viewer), Some(OUTPUT));
+}
+
+// ---- showing the desktop ----------------------------------------------------
+
+/// The events of the desktop that were told: each kind with its fields.
+type Heard = Arc<Mutex<Vec<(String, std::collections::BTreeMap<String, String>)>>>;
+
+/// What showing the desktop is tried on: workspaces `main`, `two` and
+/// `empty` on the first display and `side` and `more` on the second, with
+/// on `main` two tiled windows (`editor` with the keyboard, and `browser`,
+/// maximized) and a floating one, `notes`, and on `side` the tiled
+/// `viewer`. The events the window manager tells are heard.
+struct Desk {
+    core: WmCore,
+    desktop: FakeDesktop,
+    heard: Heard,
+    editor: WindowHandle,
+    browser: WindowHandle,
+    notes: WindowHandle,
+    viewer: WindowHandle,
+}
+
+impl Desk {
+    fn new() -> Self {
+        use crate::executor::{NodeExecutionEvent, RuntimeEventKind};
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let told = heard.clone();
+        let rules = Arc::new(Mutex::new(RuleEngine::new()));
+        let executor = Executor::new_with_events(
+            NodeGraph::new(),
+            Arc::new(Mutex::new(Vec::new())),
+            None,
+            Some(Arc::new(move |event: NodeExecutionEvent| {
+                if let NodeExecutionEvent::Runtime(event) = event {
+                    if matches!(
+                        event.kind,
+                        RuntimeEventKind::DesktopShown | RuntimeEventKind::DesktopHidden
+                    ) {
+                        told.lock()
+                            .unwrap()
+                            .push((event.kind.as_str().to_string(), event.fields));
+                    }
+                }
+            })),
+            rules,
+        );
+        let mut outputs = Outputs::with_workspace_count(0);
+        outputs.add_test_monitor(OUTPUT, "Primary");
+        for name in ["main", "two", "empty"] {
+            outputs
+                .create_workspace(OUTPUT, name.to_string(), LayoutType::BSP)
+                .expect("workspace created");
+        }
+        let mut core = WmCore::new(
+            executor,
+            outputs,
+            FocusManager::new(),
+            SnapZoneManager::new(Default::default()),
+        );
+        let mut desktop = FakeDesktop::new(OUTPUT);
+        second_display(&mut core, &mut desktop, &["side", "more"]);
+        let editor = open(&mut core, &mut desktop, "editor");
+        let browser = open(&mut core, &mut desktop, "browser");
+        let notes = desktop.open_at("notes", Rect::new(300, 200, 500, 400));
+        desktop.windows.get_mut(&notes).unwrap().floats = true;
+        core.handle_window_event(&mut desktop, WindowEvent::Created(notes))
+            .expect("created");
+        core.flush_pending_layouts(&mut desktop).expect("layout");
+        let viewer = desktop.open_at("viewer", Rect::new(2400, 300, 800, 600));
+        core.handle_window_event(&mut desktop, WindowEvent::Created(viewer))
+            .expect("created");
+        core.flush_pending_layouts(&mut desktop).expect("layout");
+        assert!(core.monitor_manager.is_window_floating(notes));
+        assert_eq!(
+            core.monitor_manager.find_window(viewer).map(|(output, _)| output),
+            Some(BESIDE)
+        );
+        focus(&mut core, &mut desktop, browser);
+        command(&mut core, &mut desktop, DispatchCommand::ToggleMaximized);
+        assert!(desktop.window(browser).maximized);
+        focus(&mut core, &mut desktop, editor);
+        Self {
+            core,
+            desktop,
+            heard,
+            editor,
+            browser,
+            notes,
+            viewer,
+        }
+    }
+
+    fn all(&self) -> [WindowHandle; 4] {
+        [self.editor, self.browser, self.notes, self.viewer]
+    }
+
+    fn in_sight(&self, window: WindowHandle) -> bool {
+        let window = self.desktop.window(window);
+        window.visible && !window.hidden_by_wm && !window.minimized
+    }
+
+    fn places(&self) -> Vec<Rect> {
+        self.all().map(|window| self.desktop.window(window).rect).to_vec()
+    }
+
+    fn show(&mut self, on: Option<bool>) {
+        command(
+            &mut self.core,
+            &mut self.desktop,
+            DispatchCommand::ShowDesktop { on },
+        );
+    }
+
+    fn heard(&self) -> Vec<(String, Option<String>)> {
+        self.heard
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(kind, fields)| (kind.clone(), fields.get("reason").cloned()))
+            .collect()
+    }
+
+    /// Nothing is marked as away for the desktop any more.
+    fn nothing_away(&self) -> bool {
+        self.core
+            .executor
+            .window_state
+            .ids_where(|state| state.away_for_desktop)
+            .is_empty()
+    }
+}
+
+/// Both displays' windows go out of sight, as on a change of workspace
+/// (not minimized), and the desktop has the keyboard; again, each is back
+/// where and as it was (the maximized one maximized, the floating one
+/// floating), and the window that had the keyboard has it again. The
+/// display with the keyboard stays the one it was all the while.
+#[test]
+fn showing_the_desktop_puts_every_displays_windows_away_and_back_as_they_were() {
+    let mut desk = Desk::new();
+    let places = desk.places();
+    assert_eq!(desk.core.executor.focused_monitor(), Some(OUTPUT));
+
+    desk.show(None);
+    assert!(desk.core.executor.desktop_shown());
+    for window in desk.all() {
+        assert!(!desk.in_sight(window), "{window:?} is out of sight");
+        assert!(desk.desktop.window(window).hidden_by_wm, "{window:?} is hidden, as on a switch");
+        assert!(!desk.desktop.window(window).minimized, "{window:?} is not minimized");
+    }
+    assert_eq!(desk.desktop.focused, None, "the desktop has the keyboard");
+    assert_eq!(desk.core.executor.focused_monitor(), Some(OUTPUT));
+    // (Nothing moved them meanwhile, nor did a layout pass.)
+    command(&mut desk.core, &mut desk.desktop, DispatchCommand::Retile);
+    for window in desk.all() {
+        assert!(!desk.in_sight(window), "{window:?} stays away through a layout pass");
+    }
+
+    desk.show(None);
+    assert!(!desk.core.executor.desktop_shown());
+    for window in desk.all() {
+        assert!(desk.in_sight(window), "{window:?} is back");
+    }
+    assert_eq!(desk.places(), places, "every window is where it was");
+    assert!(desk.desktop.window(desk.browser).maximized);
+    assert!(desk.core.monitor_manager.is_window_floating(desk.notes));
+    assert_eq!(desk.desktop.focused, Some(desk.editor));
+    assert_eq!(desk.core.executor.focused_monitor(), Some(OUTPUT));
+    assert!(desk.nothing_away());
+    assert_eq!(
+        desk.heard(),
+        [
+            ("desktop.shown".to_string(), None),
+            ("desktop.hidden".to_string(), Some("command".to_string())),
+        ]
+    );
+    assert_eq!(
+        desk.heard.lock().unwrap()[0].1.get("windows").map(String::as_str),
+        Some("4")
+    );
+
+    // With the keyboard on the other display, it is that display's again.
+    focus(&mut desk.core, &mut desk.desktop, desk.viewer);
+    desk.show(None);
+    assert_eq!(desk.core.executor.focused_monitor(), Some(BESIDE));
+    desk.show(None);
+    assert_eq!(desk.desktop.focused, Some(desk.viewer));
+    assert_eq!(desk.core.executor.focused_monitor(), Some(BESIDE));
+}
+
+/// `on` and `off` do only that: asked for what is the case already,
+/// nothing happens (and nothing is told).
+#[test]
+fn showing_the_desktop_on_and_off_twice_does_it_once() {
+    let mut desk = Desk::new();
+    desk.show(Some(true));
+    desk.show(Some(true));
+    assert!(desk.core.executor.desktop_shown());
+    for window in desk.all() {
+        assert!(!desk.in_sight(window));
+    }
+    desk.show(Some(false));
+    desk.show(Some(false));
+    assert!(!desk.core.executor.desktop_shown());
+    for window in desk.all() {
+        assert!(desk.in_sight(window));
+    }
+    assert_eq!(desk.desktop.focused, Some(desk.editor));
+    assert_eq!(desk.heard().len(), 2);
+
+    // And the toggle twice over: away, back, away, back.
+    for shown in [true, false, true, false] {
+        desk.show(None);
+        assert_eq!(desk.core.executor.desktop_shown(), shown);
+        assert!(desk.all().iter().all(|window| desk.in_sight(*window) != shown));
+    }
+    assert_eq!(desk.desktop.focused, Some(desk.editor));
+}
+
+/// Another workspace shown on one display ends it: the other display's
+/// windows come back, those of the workspace that was left stay away with
+/// it, and the change goes on as always. Back on that workspace, its
+/// windows are where they were.
+#[test]
+fn another_workspace_ends_the_shown_desktop() {
+    let mut desk = Desk::new();
+    let places = desk.places();
+    desk.show(None);
+    switch_to(&mut desk.core, &mut desk.desktop, "two");
+    assert!(!desk.core.executor.desktop_shown());
+    assert!(desk.in_sight(desk.viewer), "the other display's window is back");
+    for window in [desk.editor, desk.browser, desk.notes] {
+        assert!(!desk.in_sight(window), "{window:?} is away with its workspace");
+    }
+    assert!(desk.nothing_away());
+    assert_eq!(
+        desk.heard().last().cloned(),
+        Some(("desktop.hidden".to_string(), Some("workspace".to_string())))
+    );
+    switch_to(&mut desk.core, &mut desk.desktop, "main");
+    for window in desk.all() {
+        assert!(desk.in_sight(window), "{window:?}");
+    }
+    assert_eq!(desk.places(), places);
+
+    // Asked for the workspace it shows, a display shows it again.
+    desk.show(None);
+    switch_to(&mut desk.core, &mut desk.desktop, "main");
+    assert!(!desk.core.executor.desktop_shown());
+    for window in desk.all() {
+        assert!(desk.in_sight(window), "{window:?}");
+    }
+    assert_eq!(desk.desktop.focused, Some(desk.editor));
+}
+
+/// A window given the keyboard (a press on its button in the panel,
+/// Alt+Tab) ends it: every window is back, and that window keeps the
+/// keyboard. So does a command that focuses a window.
+#[test]
+fn a_window_given_the_keyboard_ends_the_shown_desktop() {
+    let mut desk = Desk::new();
+    desk.show(None);
+    focus(&mut desk.core, &mut desk.desktop, desk.browser);
+    assert!(!desk.core.executor.desktop_shown());
+    for window in desk.all() {
+        assert!(desk.in_sight(window), "{window:?}");
+    }
+    assert_eq!(desk.desktop.focused, Some(desk.browser), "not the one that had it before");
+    assert_eq!(
+        desk.heard().last().cloned(),
+        Some(("desktop.hidden".to_string(), Some("focus".to_string())))
+    );
+
+    // A key that focuses a window.
+    desk.show(None);
+    command(
+        &mut desk.core,
+        &mut desk.desktop,
+        DispatchCommand::FocusWindow {
+            selector: gevrek_model::command::WindowSelector::Handle(desk.viewer.0 as _),
+        },
+    );
+    assert!(!desk.core.executor.desktop_shown());
+    for window in desk.all() {
+        assert!(desk.in_sight(window), "{window:?}");
+    }
+    assert_eq!(desk.desktop.focused, Some(desk.viewer));
+
+    // A window of no workspace that takes the keyboard (a launcher) does
+    // not end it.
+    desk.show(None);
+    let launcher = desk.desktop.open("launcher", "launcher.exe");
+    desk.core
+        .executor
+        .window_state
+        .get_mut(launcher)
+        .session_unmanaged = true;
+    desk.core
+        .handle_window_event(&mut desk.desktop, WindowEvent::Focused(launcher))
+        .expect("focused");
+    desk.core.flush_pending_layouts(&mut desk.desktop).expect("layout");
+    assert!(desk.core.executor.desktop_shown());
+    assert!(desk.all().iter().all(|window| !desk.in_sight(*window)));
+}
+
+/// A new window on a shown workspace ends it, and the others come back
+/// with it (it is laid out among them); it has the keyboard, as a new
+/// window does.
+#[test]
+fn a_new_window_ends_the_shown_desktop() {
+    let mut desk = Desk::new();
+    desk.show(None);
+    let mail = open(&mut desk.core, &mut desk.desktop, "mail");
+    assert!(!desk.core.executor.desktop_shown());
+    for window in desk.all().into_iter().chain([mail]) {
+        assert!(desk.in_sight(window), "{window:?}");
+    }
+    assert_eq!(desk.desktop.focused, Some(mail));
+    assert!(desk.nothing_away());
+    assert_eq!(
+        desk.heard().last().cloned(),
+        Some(("desktop.hidden".to_string(), Some("window".to_string())))
+    );
+    let tiles: Vec<Rect> = tiled(&desk.core)
+        .into_iter()
+        .map(|window| desk.desktop.window(window).rect)
+        .collect();
+    assert_eq!(tiles.len(), 3, "{tiles:?}");
+}
+
+/// A window closed while the desktop is shown is forgotten: the others
+/// come back, laid out without it, and the keyboard, which it had, goes
+/// to what its workspace has to give it.
+#[test]
+fn a_window_closed_while_the_desktop_is_shown_is_forgotten() {
+    let mut desk = Desk::new();
+    let shared = desk.desktop.window(desk.browser).rect;
+    desk.show(None);
+    desk.desktop.close(desk.editor);
+    desk.core
+        .handle_window_event(&mut desk.desktop, WindowEvent::Destroyed(desk.editor))
+        .expect("destroyed");
+    desk.core.flush_pending_layouts(&mut desk.desktop).expect("layout");
+    assert!(desk.core.executor.desktop_shown(), "a window closing does not end it");
+    assert!(!desk.in_sight(desk.browser));
+
+    desk.show(None);
+    for window in [desk.browser, desk.notes, desk.viewer] {
+        assert!(desk.in_sight(window), "{window:?}");
+    }
+    assert!(
+        desk.desktop.window(desk.browser).rect.width > shared.width,
+        "the browser has the room the editor left"
+    );
+    assert_eq!(desk.desktop.focused, Some(desk.browser));
+    assert!(desk.nothing_away());
+}
+
+/// A window sent to another workspace while the desktop is shown stays
+/// away with that workspace when the desktop ends; one sent to a shown
+/// workspace (of the other display) stays away until it ends, and comes
+/// back there.
+#[test]
+fn a_window_moved_while_the_desktop_is_shown_comes_back_where_it_went() {
+    use gevrek_model::command::{MonitorTarget, WindowSelector};
+    let mut desk = Desk::new();
+    desk.show(None);
+    command(
+        &mut desk.core,
+        &mut desk.desktop,
+        DispatchCommand::MoveWindowToWorkspace {
+            window: WindowSelector::Handle(desk.browser.0 as _),
+            workspace: WorkspaceSelector::Name("two".to_string()),
+        },
+    );
+    command(
+        &mut desk.core,
+        &mut desk.desktop,
+        DispatchCommand::MoveWindowToMonitor {
+            window: WindowSelector::Handle(desk.notes.0 as _),
+            target: MonitorTarget::Name("Second".to_string()),
+        },
+    );
+    assert!(desk.core.executor.desktop_shown());
+    assert_eq!(
+        desk.core.monitor_manager.find_window(desk.notes).map(|(output, _)| output),
+        Some(BESIDE)
+    );
+    for window in desk.all() {
+        assert!(!desk.in_sight(window), "{window:?} is out of sight while the desktop is shown");
+    }
+
+    desk.show(None);
+    assert!(desk.in_sight(desk.editor));
+    assert!(desk.in_sight(desk.viewer));
+    assert!(desk.in_sight(desk.notes), "back on the display it went to");
+    assert!(!desk.in_sight(desk.browser), "away with the workspace it went to");
+    assert!(desk.nothing_away());
+    switch_to(&mut desk.core, &mut desk.desktop, "two");
+    assert!(desk.in_sight(desk.browser));
+}
+
+/// Tabs: only the tab in front comes back, as on a change of workspace;
+/// the one behind it stays behind. A tab chosen while the desktop is
+/// shown (by a command that does not end it) stays away too.
+#[test]
+fn only_the_tab_in_front_comes_back() {
+    let mut desk = Desk::new();
+    command(&mut desk.core, &mut desk.desktop, DispatchCommand::StackAll);
+    assert!(desk.in_sight(desk.editor));
+    assert!(!desk.in_sight(desk.browser), "the browser is behind the editor");
+    desk.show(None);
+    command(
+        &mut desk.core,
+        &mut desk.desktop,
+        DispatchCommand::SetLayoutGap { gap: 12 },
+    );
+    assert!(desk.all().iter().all(|window| !desk.in_sight(*window)));
+    desk.show(None);
+    assert!(desk.in_sight(desk.editor));
+    assert!(!desk.in_sight(desk.browser), "still behind");
+    assert!(desk.in_sight(desk.notes) && desk.in_sight(desk.viewer));
+}
+
+/// A window that was minimized is left as it is; brought back from the
+/// taskbar while the desktop is shown, it ends it.
+#[test]
+fn a_minimized_window_is_left_minimized_and_brought_back_ends_the_desktop() {
+    let mut desk = Desk::new();
+    desk.desktop.windows.get_mut(&desk.notes).unwrap().minimized = true;
+    desk.core
+        .handle_window_event(&mut desk.desktop, WindowEvent::Minimized(desk.notes))
+        .expect("minimized");
+    desk.core.flush_pending_layouts(&mut desk.desktop).expect("layout");
+    desk.show(None);
+    assert!(!desk.desktop.window(desk.notes).hidden_by_wm, "it is not put away");
+    desk.desktop.windows.get_mut(&desk.notes).unwrap().minimized = false;
+    desk.core
+        .handle_window_event(&mut desk.desktop, WindowEvent::Restored(desk.notes))
+        .expect("restored");
+    desk.core.flush_pending_layouts(&mut desk.desktop).expect("layout");
+    assert!(!desk.core.executor.desktop_shown());
+    for window in desk.all() {
+        assert!(desk.in_sight(window), "{window:?}");
+    }
+    assert!(desk.nothing_away());
+}
+
+/// A display that goes while the desktop is shown ends it: its windows
+/// are on the other display's workspaces then, and every window is back.
+#[test]
+fn a_display_that_goes_ends_the_shown_desktop() {
+    let mut desk = Desk::new();
+    desk.show(None);
+    let monitors: Vec<_> = desk
+        .core
+        .monitor_manager
+        .get_all_monitors()
+        .into_iter()
+        .filter(|monitor| monitor.handle != BESIDE)
+        .collect();
+    desk.desktop.more_outputs.clear();
+    let changes = desk.core.monitor_manager.reconcile_with(monitors);
+    desk.core
+        .executor
+        .apply_monitor_changes(&mut desk.desktop, &desk.core.monitor_manager, &changes);
+    desk.core.flush_pending_layouts(&mut desk.desktop).expect("layout");
+    assert!(!desk.core.executor.desktop_shown());
+    for window in desk.all() {
+        assert!(desk.in_sight(window), "{window:?}");
+    }
+    assert!(desk.nothing_away());
+    assert_eq!(
+        desk.heard().last().cloned(),
+        Some(("desktop.hidden".to_string(), Some("displays".to_string())))
+    );
+}
+
+/// Every hidden window shown (`restore-windows`, or gevrek stopping): the
+/// desktop is not shown any more either.
+#[test]
+fn restoring_every_window_ends_the_shown_desktop() {
+    let mut desk = Desk::new();
+    desk.show(None);
+    desk.core
+        .executor
+        .restore_hidden_windows(&mut desk.desktop);
+    assert!(!desk.core.executor.desktop_shown());
+    assert!(desk.all().iter().all(|window| desk.in_sight(*window)));
+    assert!(desk.nothing_away());
+}
+
+/// The rule of a workspace with no window holds with the desktop shown:
+/// the display that changes to one keeps the keyboard, and it is not the
+/// other display's window (which comes back) that gets it, also where the
+/// system gives it to a window shown as the others go.
+#[test]
+fn a_workspace_with_no_window_keeps_the_keyboard_after_the_desktop() {
+    let mut desk = Desk::new();
+    desk.desktop.hides_later = true;
+    desk.show(None);
+    desk.desktop.settle();
+    assert_eq!(desk.desktop.focused, None);
+    switch_to(&mut desk.core, &mut desk.desktop, "empty");
+    desk.desktop.settle();
+    assert!(desk.in_sight(desk.viewer), "the other display's window is back");
+    assert_eq!(desk.desktop.focused, None, "the keyboard is nobody's");
+    assert_eq!(desk.core.executor.focused_monitor(), Some(OUTPUT));
+    switch_to(&mut desk.core, &mut desk.desktop, "main");
+    desk.desktop.settle();
+    assert_eq!(desk.desktop.focused, Some(desk.editor));
+    assert_eq!(desk.core.executor.focused_monitor(), Some(OUTPUT));
+}
+
+/// A command for the window with the keyboard, given while the desktop is
+/// shown, finds none; one for the workspace (its window made to float, or
+/// tiled again) leaves the desktop shown and the windows away.
+#[test]
+fn a_command_for_the_window_with_the_keyboard_finds_none_while_the_desktop_is_shown() {
+    let mut desk = Desk::new();
+    desk.show(None);
+    assert!(desk
+        .core
+        .dispatch(&mut desk.desktop, DispatchCommand::SetPinned { enabled: true })
+        .is_err());
+    for _ in 0..2 {
+        let _ = desk
+            .core
+            .dispatch(&mut desk.desktop, DispatchCommand::ToggleFloating);
+        desk.core.flush_pending_layouts(&mut desk.desktop).expect("layout");
+    }
+    assert!(desk.core.executor.desktop_shown());
+    assert!(desk.all().iter().all(|window| !desk.in_sight(*window)));
+}
+
+/// Minimized windows and the shown desktop agree: one minimized before it
+/// stays minimized after it ends, and one minimized while the desktop is
+/// shown is not brought into sight when it ends (it is minimized still,
+/// and only its button is back).
+#[test]
+fn minimized_windows_stay_minimized_through_the_shown_desktop() {
+    let mut desk = Desk::new();
+    let minimize = |desk: &mut Desk, window: WindowHandle| {
+        desk.desktop.windows.get_mut(&window).unwrap().minimized = true;
+        desk.core
+            .handle_window_event(&mut desk.desktop, WindowEvent::Minimized(window))
+            .expect("minimized");
+        desk.core.flush_pending_layouts(&mut desk.desktop).expect("layout");
+    };
+    let (notes, browser) = (desk.notes, desk.browser);
+    minimize(&mut desk, notes);
+    desk.show(None);
+    minimize(&mut desk, browser);
+    assert!(desk.core.executor.desktop_shown(), "a window minimized does not end it");
+    desk.show(None);
+    assert!(!desk.core.executor.desktop_shown());
+    for window in [desk.notes, desk.browser] {
+        assert!(desk.desktop.window(window).minimized, "{window:?} is minimized still");
+        assert!(!desk.in_sight(window), "{window:?} is not in sight");
+    }
+    assert!(desk.in_sight(desk.editor) && desk.in_sight(desk.viewer));
+    assert!(desk.nothing_away());
+}
+/// A floating window put away for the desktop on the second display stays
+/// out of sight with its workspace when another workspace is shown there
+/// (here by a graph, which does not end the desktop first); dragged onto
+/// the first display afterwards, it is on the workspace shown there, and
+/// in sight. It used to join that workspace out of sight, for good (seed
+/// 0xcdf1a3ae49d44796 of the long runs).
+#[test]
+fn a_window_away_with_its_workspace_and_dragged_onto_a_shown_one_is_in_sight() {
+    let mut desk = Desk::new();
+    let palette = desk.desktop.open_at("palette", Rect::new(2600, 400, 400, 300));
+    desk.desktop.windows.get_mut(&palette).unwrap().floats = true;
+    desk.core
+        .handle_window_event(&mut desk.desktop, WindowEvent::Created(palette))
+        .expect("created");
+    desk.core.flush_pending_layouts(&mut desk.desktop).expect("layout");
+    assert!(desk.core.monitor_manager.is_window_floating(palette));
+    desk.show(None);
+    // (`more`, the second display's other workspace.)
+    desk.core
+        .executor
+        .show_workspace(&mut desk.desktop, &mut desk.core.monitor_manager, BESIDE, 1)
+        .expect("shown");
+    desk.core.flush_pending_layouts(&mut desk.desktop).expect("layout");
+    assert!(!desk.core.executor.desktop_shown());
+    assert!(!desk.in_sight(palette), "away with its workspace");
+    assert!(desk.in_sight(desk.editor), "the first display's windows are back");
+
+    let dropped = Rect::new(600, 300, 400, 300);
+    desk.core
+        .handle_window_event(&mut desk.desktop, WindowEvent::DragStarted(palette))
+        .expect("drag");
+    desk.desktop.windows.get_mut(&palette).unwrap().rect = dropped;
+    desk.core
+        .handle_window_event(&mut desk.desktop, WindowEvent::Moved(palette, dropped.x, dropped.y))
+        .expect("moved");
+    desk.core
+        .handle_window_event(&mut desk.desktop, WindowEvent::DragEnded(palette))
+        .expect("dropped");
+    desk.core.flush_pending_layouts(&mut desk.desktop).expect("layout");
+    assert_eq!(
+        desk.core.monitor_manager.find_window(palette).map(|(output, _)| output),
+        Some(OUTPUT)
+    );
+    assert!(desk.in_sight(palette), "on the workspace that is shown, in sight");
+    assert!(desk.nothing_away());
+}
+/// A window moved to a workspace "and follow", where it joins a window
+/// there as a tab (the workspace appends new windows to the focused
+/// tile), is the tab in front, in sight, with the other behind it. It
+/// used to be made the focused tab after the workspace was shown, and
+/// stayed out of sight (found by the long runs, seed 0xb2b290c37f612c33).
+#[test]
+fn a_window_followed_into_tabs_is_the_tab_in_front_and_in_sight() {
+    let (mut core, mut desktop) = setup(&["main", "two"]);
+    let editor = open(&mut core, &mut desktop, "editor");
+    switch_to(&mut core, &mut desktop, "two");
+    let terminal = open(&mut core, &mut desktop, "terminal");
+    command(&mut core, &mut desktop, DispatchCommand::ToggleWindowContainerBehaviour);
+    switch_to(&mut core, &mut desktop, "main");
+    focus(&mut core, &mut desktop, editor);
+    command(
+        &mut core,
+        &mut desktop,
+        DispatchCommand::MoveToWorkspaceAndFollow {
+            selector: WorkspaceSelector::Name("two".to_string()),
+        },
+    );
+    let workspace = core.monitor_manager.get_focused_workspace(OUTPUT).unwrap();
+    assert_eq!(workspace.containers.len(), 1, "they share a tile");
+    assert_eq!(workspace.focused_window(), Some(editor));
+    assert!(desktop.window(editor).visible && !desktop.window(editor).hidden_by_wm);
+    assert!(!desktop.window(terminal).visible, "the terminal is behind it");
+    assert_eq!(desktop.focused, Some(editor));
 }

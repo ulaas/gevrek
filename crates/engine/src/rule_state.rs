@@ -348,10 +348,17 @@ pub struct WindowState {
     /// Hidden by the WM (workspace switch, group tab, scratchpad); not
     /// restored when seen hidden.
     pub hidden_by_wm: bool,
+    /// Out of sight because the desktop is shown (it is `hidden_by_wm`
+    /// too): it comes back when that ends, if its workspace is shown then.
+    pub away_for_desktop: bool,
     pub minimized: bool,
     /// Workspace (by id) a minimized tiled window left; it returns there on
     /// restore if that workspace is visible.
     pub minimized_origin: Option<usize>,
+    /// Where it stood among the tiled windows of that workspace: the
+    /// panel keeps listing it there while it is minimized, so its button
+    /// does not move.
+    pub minimized_place: Option<usize>,
     pub drag: Option<DragState>,
     /// It was brought to the middle of a display, and was so before.
     pub centered_from: Option<BeforeCentered>,

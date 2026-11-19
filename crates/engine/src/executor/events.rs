@@ -209,6 +209,21 @@ impl Executor {
                 .or(Some(focused))
                 .filter(|m| live(*m));
         }
+        // A display came or went (or windows were carried onto a workspace
+        // that is shown): what the desktop put away is on other workspaces
+        // and displays than it was, and it is not shown any more. (A
+        // display that only changed its size or its room leaves it shown.)
+        if self.desktop_shown()
+            && (changes.topology_changed() || !changes.windows_to_show.is_empty())
+        {
+            self.end_show_desktop(
+                window_manager,
+                monitor_manager,
+                None,
+                true,
+                desktop::DesktopEnds::Displays,
+            );
+        }
         self.pending_layout_monitors = self
             .pending_layout_monitors
             .iter()
@@ -690,6 +705,28 @@ impl Executor {
             // another) had nothing to act on then. Now it has.
             self.apply_initial_window_rules(window_manager, monitor_manager, handle)?;
         }
+        // A new window on a workspace that is shown: the desktop is not
+        // shown any more, and the other windows come back with it. (It
+        // has its tile among theirs: alone it would stand in a part of a
+        // workspace that seems empty. Windows itself shows a new window
+        // alone and leaves the others minimized.) It takes the keyboard
+        // as a new window does.
+        let on_a_shown_workspace = monitor_manager
+            .find_window(handle)
+            .is_some_and(|(output, index)| {
+                monitor_manager
+                    .get_workspaces(output)
+                    .is_some_and(|workspaces| workspaces.focused_idx() == index)
+            });
+        if self.desktop_shown() && on_a_shown_workspace {
+            self.end_show_desktop(
+                window_manager,
+                monitor_manager,
+                None,
+                false,
+                desktop::DesktopEnds::Window,
+            );
+        }
         // A window that opened on the workspace of the window it belongs
         // to, out of sight: the keyboard is where it was. (The window took
         // it as it opened, as a new window does, and hiding the window
@@ -858,6 +895,19 @@ impl Executor {
         focus_manager: &mut FocusManager,
         handle: WindowHandle,
     ) -> Result<()> {
+        // A window of a workspace was given the keyboard (a press on its
+        // button in the panel, Alt+Tab, a key): the person works with the
+        // windows again, and the desktop is not shown any more. The window
+        // keeps the keyboard it was given.
+        if self.desktop_shown() && monitor_manager.find_window(handle).is_some() {
+            self.end_show_desktop(
+                window_manager,
+                monitor_manager,
+                None,
+                false,
+                super::desktop::DesktopEnds::Focus,
+            );
+        }
         let decision = focus::on_focused(
             &mut World {
                 outputs: monitor_manager,
@@ -1510,7 +1560,7 @@ impl Executor {
     /// output shows no workspace.
     fn floating_window_is_on(
         &mut self,
-        window_manager: &dyn Desktop,
+        window_manager: &mut dyn Desktop,
         monitor_manager: &mut MonitorManager,
         handle: WindowHandle,
         output: Option<MonitorHandle>,
@@ -1531,6 +1581,16 @@ impl Executor {
                 "Floating window on another output: now on workspace '{}'",
                 workspace.name
             );
+        }
+        // One that was out of sight with the workspace it left (moved by
+        // its program, or the workspace was changed while it was put away
+        // for the desktop) is on a workspace that is shown now: it is
+        // shown as a window moved there by a command is. (While the
+        // desktop is shown it stays away with the others: `apply_changes`.)
+        if self.window_state.get(handle).hidden_by_wm && !self.window_state.get(handle).minimized {
+            let mut changes = Changes::default();
+            workspaces::show_windows(&mut self.window_state, &[handle], &mut changes);
+            self.apply_changes(window_manager, changes);
         }
         if queries(window_manager).active_window() == Some(handle) {
             self.focused_monitor = Some(to);
@@ -1793,6 +1853,20 @@ impl Executor {
         handle: WindowHandle,
     ) -> Result<()> {
         log::info!("🔼 Window restored (via event)");
+        // A window of a workspace brought back from the taskbar after it
+        // was minimized is one the person works with: the desktop is not
+        // shown any more (and the window is not put away as it comes).
+        let ours = monitor_manager.find_window(handle).is_some()
+            || self.window_state.get(handle).minimized;
+        if self.desktop_shown() && ours {
+            self.end_show_desktop(
+                window_manager,
+                monitor_manager,
+                None,
+                false,
+                desktop::DesktopEnds::Focus,
+            );
+        }
         self.on_window_restored(window_manager, monitor_manager, handle)?;
         Ok(())
     }

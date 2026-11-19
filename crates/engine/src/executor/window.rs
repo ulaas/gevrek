@@ -307,6 +307,11 @@ impl Executor {
             if window_manager.is_hidden_by_backend(window)
                 || self.window_state.get(window).hidden_by_wm
             {
+                // (While the desktop is shown it stays away, and comes
+                // back with the others.)
+                if self.hold_back_for_desktop(window) {
+                    continue;
+                }
                 effect(
                     window_manager,
                     Effect::SetVisible {
@@ -815,6 +820,24 @@ impl Executor {
         // Failures are logged and skipped: one window refusing must not
         // stop the rest.
         for effect in &changes.effects {
+            // While the desktop is shown, what would come into sight on a
+            // workspace that is shown (they are the only ones whose
+            // windows are shown) stays away with the others: hidden, if
+            // it is not hidden already.
+            let held;
+            let effect = match effect {
+                Effect::SetVisible { id, visible: true } if self.hold_back_for_desktop(*id) => {
+                    if window_manager.is_hidden_by_backend(*id) {
+                        continue;
+                    }
+                    held = Effect::SetVisible {
+                        id: *id,
+                        visible: false,
+                    };
+                    &held
+                }
+                other => other,
+            };
             if let Err(error) = window_manager.apply(effect) {
                 log::debug!("Effect {effect:?} failed: {error:#}");
             }
@@ -1206,6 +1229,25 @@ impl Executor {
             target,
             bypass_no_focus,
         )?;
+        // A tiled window the person minimized is in no workspace's layout:
+        // it is brought back to its own first (a press on its button in
+        // the taskbar asks for this).
+        let located = match located {
+            None if self.window_state.get(target).minimized
+                && self.window_state.get(target).minimized_origin.is_some() =>
+            {
+                self.bring_back_minimized_tile(window_manager, monitor_manager, target)?;
+                focus::locate_target(
+                    &World {
+                        outputs: monitor_manager,
+                        windows: &mut self.window_state,
+                    },
+                    target,
+                    bypass_no_focus,
+                )?
+            }
+            located => located,
+        };
         if let Some(found) = located {
             self.focused_monitor = Some(found.output);
             if found.needs_switch {
@@ -1252,6 +1294,48 @@ impl Executor {
             self.window_state.get_mut(target).minimized = false;
         }
         effect(window_manager, Effect::Focus(Some(target)))
+    }
+
+    /// A tiled window the person minimized, brought back: the workspace
+    /// it left is shown on its display (so it comes back to its own, not
+    /// to whichever another display shows), the system shows the window
+    /// again, and it rejoins that workspace's layout as a restore told by
+    /// the system does (`on_window_restored`). That the system tells of
+    /// the restore afterwards changes nothing more: it is a member then.
+    /// (On Windows giving the keyboard to a minimized window does not
+    /// bring it back of itself.)
+    fn bring_back_minimized_tile(
+        &mut self,
+        window_manager: &mut dyn Desktop,
+        monitor_manager: &mut MonitorManager,
+        target: WindowHandle,
+    ) -> Result<()> {
+        let origin = self.window_state.get(target).minimized_origin;
+        let left = origin.and_then(|id| monitor_manager.find_workspace_by_id(id));
+        if let Some((output, index)) = left {
+            let shown = monitor_manager
+                .get_workspaces(output)
+                .is_some_and(|workspaces| workspaces.focused_idx() == index);
+            if !shown {
+                self.switch_workspace_on(
+                    window_manager,
+                    monitor_manager,
+                    output,
+                    WorkspaceSelector::Index(index),
+                )?;
+            }
+            self.focused_monitor = Some(output);
+        }
+        if queries(window_manager).is_minimized(target) {
+            effect(
+                window_manager,
+                Effect::State {
+                    id: target,
+                    change: StateChange::Minimized(false),
+                },
+            )?;
+        }
+        self.on_window_restored(window_manager, monitor_manager, target)
     }
 }
 

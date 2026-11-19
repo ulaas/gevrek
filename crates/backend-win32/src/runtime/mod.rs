@@ -2492,6 +2492,12 @@ impl Runtime {
     /// already given it to a window of that workspace. Left to itself,
     /// Windows goes by its own order of windows, across displays.
     fn focus_successor_on(&mut self, output: crate::dwm::MonitorHandle) {
+        // While the desktop is shown the desktop has the keyboard: a window
+        // put away with the others that closes leaves it there (given to
+        // another, that one would end the shown desktop).
+        if self.core.executor.desktop_shown() {
+            return;
+        }
         let on_that_workspace = |runtime: &Self, window: crate::dwm::WindowHandle| {
             runtime
                 .core
@@ -2559,6 +2565,7 @@ impl Runtime {
                 active_animations: self.window_manager.active_animation_count(),
                 active_binding_submap: self.active_binding_submap.clone(),
                 tiling_suspended: self.core.executor.tiling_suspended(),
+                desktop_shown: self.core.executor.desktop_shown(),
                 gesture: {
                     let backend = self.hotkey_manager.gesture_backend_status();
                     crate::dwm::GestureStateData {

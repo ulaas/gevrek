@@ -228,6 +228,7 @@ impl Executor {
                 )?;
                 effect(window_manager, Effect::Focus(Some(handle)))?;
                 self.scratchpads.set_visible(id, true);
+                self.scratchpad_shown_over_desktop(handle);
                 return Ok(());
             }
             Toggle::Find { profile, assigned } => (profile, assigned),

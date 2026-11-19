@@ -29,6 +29,7 @@ impl Executor {
         monitor_manager: &mut MonitorManager,
     ) -> Result<()> {
         self.flush_dirty_monitor_layouts(window_manager, monitor_manager)?;
+        self.keep_desktop_clear(window_manager, monitor_manager);
         for (workspace, launch) in std::mem::take(&mut self.pending_workspace_launches) {
             match window_manager.launch(&launch) {
                 Ok(pid) => log::info!(
