@@ -4,6 +4,13 @@ on:
   push:
   pull_request:
 
+# A newer push to the same branch, tag or pull request ends the run of
+# the one before it: only the newest is of interest, and the machines are
+# not kept busy with what is already out of date.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # The backend-neutral crates must build and test on Linux.
   portable:
