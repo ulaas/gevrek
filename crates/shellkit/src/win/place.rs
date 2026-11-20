@@ -291,6 +291,20 @@ pub fn order_of(level: Level, covered: bool) -> Order {
     }
 }
 
+/// Whether a window of this class and at this place covers a display, so
+/// that a bar steps down for it: a window of a program that fills the
+/// whole display. Not the desktop, which always does, and nothing of
+/// gevrek's own (the surface the zones of the desktop are drawn on fills
+/// its display too).
+pub fn covers_display(class: &str, window: Area, display: Area) -> bool {
+    let own_or_desktop = class.starts_with("Gevrek") || matches!(class, "Progman" | "WorkerW");
+    !own_or_desktop
+        && window.x <= display.x
+        && window.y <= display.y
+        && window.right() >= display.right()
+        && window.bottom() >= display.bottom()
+}
+
 /// Whether a window of this level keeps itself below the others,
 /// whatever tries to raise it (a click, another program).
 pub fn stays_below(level: Level) -> bool {
@@ -378,6 +392,41 @@ pub fn is_display(wanted: &str, device: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A bar steps down for a program's window that fills its display,
+    /// and for nothing else: not for the desktop, not for the surface the
+    /// zones are drawn on, not for a window that leaves room.
+    #[test]
+    fn only_a_programs_window_that_fills_the_display_covers_it() {
+        let second = Area {
+            x: 2560,
+            y: 0,
+            width: 2560,
+            height: 1440,
+        };
+        assert!(covers_display("UnrealWindow", second, second));
+        // (A game that reaches over the display's rim, as some do.)
+        let over = Area {
+            x: 2559,
+            y: -1,
+            width: 2562,
+            height: 1442,
+        };
+        assert!(covers_display("UnrealWindow", over, second));
+        for class in ["Progman", "WorkerW", "Gevrek_Shell_gevrek-zones", "Gevrek_Border"] {
+            assert!(!covers_display(class, second, second), "{class}");
+        }
+        // A maximized window leaves the bar's strip.
+        let maximized = Area {
+            y: 36,
+            height: 1404,
+            ..second
+        };
+        assert!(!covers_display("Chrome_WidgetWin_1", maximized, second));
+        // One that fills the display beside it.
+        let first = Area { x: 0, ..second };
+        assert!(!covers_display("UnrealWindow", first, second));
+    }
 
     const DISPLAY: Area = Area {
         x: 0,

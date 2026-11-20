@@ -562,6 +562,7 @@ impl<M: 'static> Shell<M> {
             hooks: None,
             pointer_on: None,
             displays_changed: false,
+            covered_looked: None,
             started,
             timings: Timings::default(),
             total_ms: 0.0,
@@ -673,7 +674,8 @@ impl<M: 'static> Shell<M> {
             let wait = if heard || self.host.surfaces.iter().any(|surface| surface.redraw) {
                 0
             } else {
-                self.host
+                let drawn_again = self
+                    .host
                     .surfaces
                     .iter()
                     .filter_map(|surface| surface.again_at)
@@ -683,7 +685,14 @@ impl<M: 'static> Shell<M> {
                         // would go round with nothing to do.
                         let left = at.saturating_duration_since(now);
                         (left.as_micros().div_ceil(1000)).min(u128::from(u32::MAX - 1)) as u32
-                    })
+                    });
+                // (A bar that stepped down is looked at again without
+                // any message: `look_at_the_covered`.)
+                if self.host.surfaces.iter().any(|surface| surface.covered) {
+                    drawn_again.min(COVERED_LOOK.as_millis() as u32)
+                } else {
+                    drawn_again
+                }
             };
             unsafe {
                 MsgWaitForMultipleObjectsEx(None, wait, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
@@ -745,6 +754,7 @@ fn turn<M>(
     }
     host.carry_out();
     host.access_news();
+    host.look_at_the_covered();
     let now = Instant::now();
     for index in 0..host.surfaces.len() {
         let surface = &mut host.surfaces[index];
@@ -793,6 +803,10 @@ const SUB_GAP: i32 = -3;
 
 /// How many presses are kept for the surfaces to ask for.
 const PRESSES_KEPT: usize = 32;
+
+/// How often a bar that stepped down for a window that covers its display
+/// is looked at again (`Host::look_at_the_covered`).
+const COVERED_LOOK: Duration = Duration::from_secs(1);
 
 /// The room between a hint beside a panel and what it is about.
 const HINT_GAP: i32 = 6;
@@ -1070,6 +1084,47 @@ unsafe extern "system" fn front_heard(
 }
 
 impl Host {
+    /// A bar that stepped down for a window that covers its display comes
+    /// up again when no window covers it any more, whether or not Windows
+    /// told of it.
+    ///
+    /// Windows tells a bar when a window covers its display and when that
+    /// is over (`ABN_FULLSCREENAPP`), and does not always tell the second:
+    /// a window that covered the display and was hidden or closed leaves
+    /// the bar told nothing. The bar then stayed below every window, and
+    /// under the surface the zones of the desktop are drawn on: a press
+    /// on it was a press on the desktop to the window manager, which gave
+    /// that display the keyboard, and the bar did nothing until it was
+    /// pressed a second time.
+    fn look_at_the_covered(&mut self) {
+        if !self.surfaces.iter().any(|surface| surface.covered) {
+            return;
+        }
+        let now = Instant::now();
+        if self
+            .covered_looked
+            .is_some_and(|at| now.duration_since(at) < COVERED_LOOK)
+        {
+            return;
+        }
+        self.covered_looked = Some(now);
+        let all = displays();
+        for surface in &mut self.surfaces {
+            if !surface.covered {
+                continue;
+            }
+            let Some(display) = all.iter().find(|display| display.device == surface.display)
+            else {
+                continue;
+            };
+            if !display_is_covered(display.whole) {
+                log::debug!("no window covers the display of {:?} any more", surface.id);
+                surface.covered = false;
+                surface.restack();
+            }
+        }
+    }
+
     /// What screen readers asked since the last pass: a surface that is
     /// listened to is described from its next frame on, and what was
     /// asked to be done is input for it.
@@ -1160,6 +1215,76 @@ struct Display {
     scale: f32,
     primary: bool,
     handle: isize,
+}
+
+/// Whether a window of a program fills this display now: shown, not
+/// minimized, not kept out of sight by the system (`covers_display`).
+fn display_is_covered(display: Area) -> bool {
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetClassNameW, GetWindowRect, IsIconic, IsWindowVisible,
+    };
+    struct Search {
+        display: Area,
+        covered: bool,
+    }
+    unsafe extern "system" fn each(window: HWND, lparam: LPARAM) -> BOOL {
+        let search = &mut *(lparam.0 as *mut Search);
+        if !IsWindowVisible(window).as_bool() || IsIconic(window).as_bool() {
+            return true.into();
+        }
+        let mut rect = RECT::default();
+        if GetWindowRect(window, &mut rect).is_err() {
+            return true.into();
+        }
+        let mut name = [0u16; 128];
+        let length = GetClassNameW(window, &mut name) as usize;
+        let class = String::from_utf16_lossy(&name[..length.min(name.len())]);
+        if !place::covers_display(&class, area_of(rect), search.display) {
+            return true.into();
+        }
+        let mut cloaked = 0u32;
+        let _ = DwmGetWindowAttribute(
+            window,
+            DWMWA_CLOAKED,
+            &mut cloaked as *mut u32 as *mut _,
+            std::mem::size_of::<u32>() as u32,
+        );
+        if cloaked != 0 {
+            return true.into();
+        }
+        search.covered = true;
+        false.into()
+    }
+    let mut search = Search {
+        display,
+        covered: false,
+    };
+    // SAFETY: the callback runs before the call returns and gets a pointer
+    // to `search`, which outlives it; the rest are plain questions about
+    // windows that may be gone.
+    unsafe {
+        let _ = EnumWindows(Some(each), LPARAM(&mut search as *mut Search as isize));
+    }
+    search.covered
+}
+
+/// Whether the window that has the keyboard is the desktop or one of
+/// gevrek's own, which a bar never steps down for.
+fn front_is_no_programs() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::GetClassNameW;
+    // SAFETY: plain questions about a window that may be gone.
+    let class = unsafe {
+        let front = GetForegroundWindow();
+        if front.is_invalid() {
+            return false;
+        }
+        let mut name = [0u16; 128];
+        let length = GetClassNameW(front, &mut name) as usize;
+        String::from_utf16_lossy(&name[..length.min(name.len())])
+    };
+    let anywhere = Area::default();
+    !place::covers_display(&class, anywhere, anywhere)
 }
 
 fn area_of(rect: RECT) -> Area {
@@ -1506,6 +1631,8 @@ struct Host {
     /// Displays came, went or changed: every surface finds its place
     /// again.
     displays_changed: bool,
+    /// When the bars that stepped down were last looked at again.
+    covered_looked: Option<Instant>,
     started: Instant,
     timings: Timings,
     total_ms: f64,
@@ -2590,7 +2717,11 @@ impl Host {
                     // A window covers the whole display, or no longer: a
                     // bar is not shown over a film or a game.
                     ABN_FULLSCREENAPP => {
-                        let covered = news.lparam != 0;
+                        // (Not for the desktop or a surface of gevrek's
+                        // own that has the keyboard: the one the zones
+                        // are drawn on fills its display, and Windows
+                        // takes it for a window that covers it.)
+                        let covered = news.lparam != 0 && !front_is_no_programs();
                         // (Kept whatever its level is now: a surface
                         // that becomes a bar while a film runs steps
                         // down at once.)
