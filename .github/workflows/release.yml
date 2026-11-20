@@ -109,6 +109,9 @@ jobs:
           Said 'the programs are gone' (-not (Test-Path (Join-Path $app 'gevrek.exe')))
           Said 'the helper''s task is gone' (-not (Registered))
           Said 'the kept helper is gone' (-not (Test-Path $kept))
+          # The last schtasks asked for a task that is gone and left exit code
+          # 1 behind, which the step would end with; every check has passed.
+          exit 0
 
       - uses: actions/upload-artifact@v4
         with:
