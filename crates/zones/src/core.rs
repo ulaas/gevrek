@@ -50,7 +50,7 @@ use crate::export::LayoutDocument;
 use crate::focus::{Direction, Focus, SelectMode, Step};
 use crate::geometry::{display_of, fallback_display, work_area, Display, ReservedArea, ZoneGeometry};
 use crate::ids::{DisplayId, ItemId, ZoneId};
-use crate::item::Item;
+use crate::item::{Item, ItemKind};
 use crate::layout::{self, ItemLayout, Metrics, PlacedItem};
 use crate::paths;
 use crate::placement::{Cell, LoosePosition};
@@ -872,6 +872,10 @@ pub struct ZonesCore {
     /// Files that were brought to the desktop and are not told of yet,
     /// by their paths: where each goes when it is.
     arriving: BTreeMap<String, (Option<ZoneId>, Option<LoosePosition>)>,
+    /// The system's own desktop icons are put away (on Windows,
+    /// Explorer's): what the zones do not draw is not on the desktop at
+    /// all. Told by whoever shows the zones; not so until it is.
+    system_icons_away: bool,
 }
 
 type Outcome = Result<Vec<Effect>, String>;
@@ -903,6 +907,7 @@ impl ZonesCore {
             pending: BTreeMap::new(),
             file_undo: Vec::new(),
             arriving: BTreeMap::new(),
+            system_icons_away: false,
         }
     }
 
@@ -978,6 +983,27 @@ impl ZonesCore {
     /// Whether the configuration has the zones switched on.
     pub fn enabled(&self) -> bool {
         self.config.enabled
+    }
+
+    /// The system's own desktop icons are put away, or no longer. Says
+    /// whether something is drawn that was not, or the other way round.
+    pub fn set_system_icons_away(&mut self, away: bool) -> bool {
+        let changed = self.system_icons_away != away;
+        self.system_icons_away = away;
+        changed && !self.state.withheld.is_empty()
+    }
+
+    /// Whether the system's own desktop icons are put away, as it was told.
+    pub fn system_icons_away(&self) -> bool {
+        self.system_icons_away
+    }
+
+    /// Whether an item of the desktop is not drawn because nobody asked
+    /// for it there: it came by itself while no zone could take it and
+    /// the system's own desktop was put away (`ZonesState::withheld`).
+    /// While the system shows its own icons, it is drawn like the rest.
+    pub fn is_withheld(&self, item: &ItemId) -> bool {
+        self.system_icons_away && self.state.withheld.contains(item) && self.zone_of(item).is_none()
     }
 
     /// Another configuration is in force (the file was changed).
@@ -1261,6 +1287,9 @@ impl ZonesCore {
         };
         let mut by_display: BTreeMap<DisplayId, Vec<&Item>> = BTreeMap::new();
         for item in self.loose_items() {
+            if self.is_withheld(&item.id) {
+                continue;
+            }
             let own = self.state.placements.loose.get(&item.id).map(|position| &position.display);
             let display = own
                 .filter(|wanted| self.displays.iter().any(|display| &display.id == *wanted))
@@ -1596,6 +1625,8 @@ impl ZonesCore {
         match event {
             BackendEvent::Listed { location: Location::Desktop, items } => {
                 self.items = items.into_iter().map(|item| (item.id.clone(), item)).collect();
+                let items = &self.items;
+                self.state.withheld.retain(|item| items.contains_key(item));
                 vec![Effect::Notify(ZonesEvent::LayoutChanged)]
             }
             BackendEvent::Listed { location: Location::Directory { path }, items } => {
@@ -1649,6 +1680,7 @@ impl ZonesCore {
                 }
                 self.state.placements.take(&item);
                 self.state.always_visible_items.remove(&item);
+                self.state.withheld.remove(&item);
                 vec![Effect::Notify(ZonesEvent::ItemsChanged { zone }), Effect::SaveState]
             }
             BackendEvent::ItemRenamed { location: Location::Desktop, from, item } => {
@@ -1656,6 +1688,9 @@ impl ZonesCore {
                 self.state.placements.rename(&from, &item.id);
                 if self.state.always_visible_items.remove(&from) {
                     self.state.always_visible_items.insert(item.id.clone());
+                }
+                if self.state.withheld.remove(&from) {
+                    self.state.withheld.insert(item.id.clone());
                 }
                 let zone = self.zone_of(&item.id).cloned();
                 self.items.insert(item.id.clone(), item);
@@ -1751,11 +1786,36 @@ impl ZonesCore {
             .collect()
     }
 
+    /// The zone an icon goes to that came to the desktop by itself and
+    /// that no rule decides about: the one made for its type, or else the
+    /// first that is filled by hand and takes items, of those shown here
+    /// before the others. None where no zone takes anything.
+    fn zone_for_newcomer(&self, item: &Item) -> Option<ZoneId> {
+        if self.config.lock.members {
+            return None;
+        }
+        let takes = |zone: &&ZoneDefinition| zone.kind == ZoneKind::Manual && !zone.lock.members;
+        let open = || self.config.zones.iter().filter(takes);
+        let category = crate::auto::category_of(&self.config.auto.categories, item).map(|category| &category.id);
+        open()
+            .find(|zone| category.is_some() && zone.auto.as_ref() == category)
+            .or_else(|| open().find(|zone| self.is_about(&zone.id)))
+            .or_else(|| open().next())
+            .map(|zone| zone.id.clone())
+    }
+
     /// An item came to the desktop. Where the configuration says so, the
-    /// zone its rule names takes it at once.
+    /// zone its rule names takes it at once. An icon nobody put there (a
+    /// shortcut or a launcher, as a program's installation leaves one)
+    /// that no rule decides about goes into a zone that takes it; where
+    /// there is none it lies loose, and where the system's own desktop is
+    /// put away as well it is not drawn at all (`ZonesState::withheld`).
     fn arrived(&mut self, item: Item, now: u64) -> Vec<Effect> {
         let id = item.id.clone();
         let mut effects = Vec::new();
+        // (Told of twice, or known from before with a place of its own:
+        // it is where the person has it.)
+        let new = !self.items.contains_key(&id) && !self.state.placements.loose.contains_key(&id);
         // Brought here by the person: where they let it go, before any rule.
         let brought = item.path.as_ref().and_then(|path| self.arriving.remove(path));
         if let Some(place) = brought {
@@ -1764,19 +1824,40 @@ impl ZonesCore {
             let zone = self.zone_of(&id).cloned();
             return vec![Effect::Notify(ZonesEvent::ItemsChanged { zone }), Effect::SaveState];
         }
-        if self.config.enabled && self.config.rules_on_arrival && self.zone_of(&id).is_none() {
-            let decided = rules::decide(&self.config.rules, self.config.catch_all.as_ref(), &item, now);
-            if let Some((_, RuleAction::AssignToZone { zone })) = decided {
-                let takes = self
-                    .config
-                    .zone(zone)
-                    .is_some_and(|zone| zone.kind == ZoneKind::Manual && !zone.lock.members)
-                    && !self.config.lock.members;
-                if takes {
-                    let zone = zone.clone();
-                    self.state.placements.assign(&id, &zone, None, None);
-                    effects.push(Effect::SaveState);
+        if self.config.enabled && self.zone_of(&id).is_none() {
+            let decided = self
+                .config
+                .rules_on_arrival
+                .then(|| rules::decide(&self.config.rules, self.config.catch_all.as_ref(), &item, now))
+                .flatten()
+                .map(|(_, action)| action.clone());
+            let by_itself = new && matches!(item.kind, ItemKind::Shortcut | ItemKind::Launcher);
+            match decided {
+                Some(RuleAction::AssignToZone { zone }) => {
+                    let takes = self
+                        .config
+                        .zone(&zone)
+                        .is_some_and(|zone| zone.kind == ZoneKind::Manual && !zone.lock.members)
+                        && !self.config.lock.members;
+                    if takes {
+                        self.state.placements.assign(&id, &zone, None, None);
+                        effects.push(Effect::SaveState);
+                    }
                 }
+                // (A rule that moves the file itself waits to be applied.)
+                Some(RuleAction::MoveToFolder { .. }) => {}
+                None if by_itself => match self.zone_for_newcomer(&item) {
+                    Some(zone) => {
+                        self.state.placements.assign(&id, &zone, None, None);
+                        effects.push(Effect::SaveState);
+                    }
+                    None if self.system_icons_away => {
+                        self.state.withheld.insert(id.clone());
+                        effects.push(Effect::SaveState);
+                    }
+                    None => {}
+                },
+                None => {}
             }
         }
         self.items.insert(id.clone(), item);
@@ -2048,6 +2129,12 @@ impl ZonesCore {
                 }
             }
         }
+        // What was put somewhere is drawn from then on, wherever it goes
+        // afterwards.
+        let placements = &self.state.placements;
+        self.state
+            .withheld
+            .retain(|item| placements.zone_of(item).is_none() && !placements.loose.contains_key(item));
         let stray: Vec<ItemId> =
             self.view.selection.iter().filter(|item| self.item(item).is_none()).cloned().collect();
         for item in stray {

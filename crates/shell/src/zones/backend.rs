@@ -173,6 +173,11 @@ impl Desk for System {
     }
 
     #[cfg(windows)]
+    fn has_system_icons(&self) -> bool {
+        true
+    }
+
+    #[cfg(windows)]
     fn online_only(&mut self, item: &ItemId) -> bool {
         matches!(self.backend.cloud_state(item), Some(gevrek_system::zones::cloud::CloudState::OnlineOnly))
     }

@@ -4,7 +4,8 @@
 
 use crate::access;
 use crate::auto::{AutoPlan, AutoUndo};
-use crate::config::{Matcher, RuleAction, ZoneKind, ZonesConfig};
+use crate::backend::{BackendEvent, Location};
+use crate::config::{Matcher, RuleAction, ZoneDefinition, ZoneKind, ZonesConfig};
 use crate::core::{Command, Effect, Scene, ZonesEvent, DESK};
 use crate::core_scenarios::{events, refusal, second, Desk, NOW};
 use crate::geometry::{Edge, ReservedArea};
@@ -605,4 +606,126 @@ fn the_new_commands_events_and_keys_are_written_as_they_are_read() {
     // The rule a type is given is one the configuration reads.
     let matcher = Matcher::Extension { any_of: vec!["png".to_string()] };
     assert_eq!(serde_json::to_value(&matcher).unwrap(), json!({"match": "extension", "any_of": ["png"]}));
+}
+
+/// An icon as a program's installation leaves one on the desktop.
+fn shortcut(name: &str) -> Item {
+    Item { kind: ItemKind::Shortcut, ..Item::file(&format!("{DESKTOP}/{name}")) }
+}
+
+fn installed(desk: &mut Desk, name: &str) -> ItemId {
+    let item = shortcut(name);
+    desk.backend.add(DESKTOP, item.clone());
+    desk.pump();
+    item.id
+}
+
+/// The names of what is drawn on the bare desktop.
+fn drawn_loose(desk: &Desk) -> Vec<String> {
+    let scene = desk.core.scene(NOW);
+    scene.loose.iter().flat_map(|loose| loose.items.iter().map(|placed| placed.name.clone())).collect()
+}
+
+#[test]
+fn an_icon_that_comes_by_itself_goes_into_a_zone_that_takes_it() {
+    let config = ZonesConfig {
+        zones: vec![
+            ZoneDefinition::manual("things", "Things"),
+            ZoneDefinition { auto: Some("programs".to_string()), ..ZoneDefinition::manual("programs", "Programs") },
+        ],
+        ..ZonesConfig::default()
+    };
+    let mut desk = Desk::with(config, ZonesState::default());
+    let (things, programs) = (ZoneId::new("things"), ZoneId::new("programs"));
+    // A file the person saved there lies where files lie: loose.
+    desk.file("notes.txt");
+    assert_eq!(drawn_loose(&desk), ["notes.txt"]);
+    // The zone made for its type takes a new icon, before the first one.
+    let editor = installed(&mut desk, "Editor.lnk");
+    assert_eq!(desk.names_in(&programs), ["Editor.lnk"]);
+    assert!(desk.core.state().withheld.is_empty());
+    // That one locked: the first that takes items.
+    desk.does(Command::Lock { zone: programs.clone(), geometry: None, members: Some(true) });
+    installed(&mut desk, "Player.lnk");
+    assert_eq!(desk.names_in(&things), ["Player.lnk"]);
+    // A launcher is such an icon too.
+    let launcher = Item { kind: ItemKind::Launcher, ..Item::file(&format!("{DESKTOP}/Terminal.desktop")) };
+    desk.backend.add(DESKTOP, launcher);
+    desk.pump();
+    assert_eq!(desk.names_in(&things), ["Player.lnk", "Terminal.desktop"]);
+    // Every zone locked: in none.
+    desk.does(Command::LockAll { geometry: None, members: Some(true) });
+    installed(&mut desk, "Game.lnk");
+    assert_eq!(drawn_loose(&desk), ["Game.lnk", "notes.txt"]);
+    desk.does(Command::LockAll { geometry: None, members: Some(false) });
+    // Taken out by the person and told of once more, an icon stays out.
+    desk.does(Command::Lock { zone: programs.clone(), geometry: None, members: Some(false) });
+    desk.does(Command::RemoveItem { item: editor.clone() });
+    desk.core.event(BackendEvent::ItemAdded { location: Location::Desktop, item: shortcut("Editor.lnk") }, NOW);
+    assert_eq!(desk.core.zone_of(&editor), None);
+    // A rule that decides about it decides: the zone it names, also with
+    // another made for the type.
+    desk.does(Command::ModifySettings {
+        changes: json!({"rules": [{
+            "name": "Links",
+            "matchers": [{"match": "kind", "any_of": ["shortcut"]}],
+            "action": {"action": "assign_to_zone", "zone": "things"},
+        }]}),
+    });
+    installed(&mut desk, "Mail.lnk");
+    assert_eq!(desk.names_in(&things), ["Player.lnk", "Terminal.desktop", "Mail.lnk"]);
+}
+
+#[test]
+fn with_no_zone_and_the_systems_desktop_away_such_an_icon_is_not_drawn() {
+    let mut desk = Desk::new();
+    // The system shows its own icons (or has none): the icon lies loose.
+    installed(&mut desk, "Editor.lnk");
+    assert_eq!(drawn_loose(&desk), ["Editor.lnk"]);
+    assert!(desk.core.state().withheld.is_empty());
+    // They are put away: what comes now by itself is not drawn at all,
+    // and what was there, and what the person brings, is.
+    assert!(!desk.core.set_system_icons_away(true), "nothing is drawn otherwise for it");
+    let player = installed(&mut desk, "Player.lnk");
+    let game = installed(&mut desk, "Game.lnk");
+    desk.file("notes.txt");
+    assert_eq!(drawn_loose(&desk), ["Editor.lnk", "notes.txt"]);
+    assert_eq!(desk.core.state().withheld, [game.clone(), player.clone()].into());
+    assert!(desk.core.is_withheld(&player));
+    assert_eq!(desk.core.scene(NOW).loose[0].item_count, 2);
+    // It is an item of the desktop all the same: listed, and found.
+    assert!(desk.core.loose_items().iter().any(|item| item.id == player));
+    assert!(ZonesSnapshot::of(&desk.core, NOW).loose.iter().any(|item| item.id == player));
+    // Kept over a restart, and by another name.
+    let (read, _) = store::decode(&store::encode(desk.core.state())).unwrap();
+    assert_eq!(&read, desk.core.state());
+    let renamed = shortcut("Music.lnk");
+    let event = BackendEvent::ItemRenamed { location: Location::Desktop, from: player.clone(), item: renamed.clone() };
+    desk.core.event(event, NOW);
+    let player = renamed.id;
+    assert!(desk.core.is_withheld(&player) && !drawn_loose(&desk).contains(&"Music.lnk".to_string()));
+    // While the system shows its own icons, ours are all drawn.
+    assert!(desk.core.set_system_icons_away(false));
+    assert_eq!(drawn_loose(&desk), ["Editor.lnk", "Game.lnk", "Music.lnk", "notes.txt"]);
+    assert!(desk.core.set_system_icons_away(true));
+    assert_eq!(drawn_loose(&desk), ["Editor.lnk", "notes.txt"]);
+    // Put into a zone it is drawn, and stays so when the zone goes.
+    let zone = desk.zone("Things", Rect::new(100, 100, 400, 300));
+    desk.put(&zone, &player);
+    assert_eq!(desk.names_in(&zone), ["Music.lnk"]);
+    assert_eq!(desk.core.state().withheld, [game.clone()].into());
+    desk.does(Command::DeleteZone { zone });
+    assert_eq!(drawn_loose(&desk), ["Editor.lnk", "Music.lnk", "notes.txt"]);
+    // Given a place by hand it is drawn there.
+    let display = desk.core.displays()[0].id.clone();
+    desk.does(Command::PlaceLooseItem { item: game.clone(), display, x: 600, y: 400 });
+    assert!(desk.core.state().withheld.is_empty());
+    assert!(drawn_loose(&desk).contains(&"Game.lnk".to_string()));
+    // And one that is deleted again leaves nothing behind.
+    let late = installed(&mut desk, "Late.lnk");
+    assert!(desk.core.is_withheld(&late));
+    desk.backend.remove(&late);
+    desk.pump();
+    assert!(desk.core.state().withheld.is_empty());
+    assert!(!store::encode(desk.core.state()).contains("withheld"));
 }

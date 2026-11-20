@@ -53,6 +53,14 @@ pub struct ZonesState {
     /// How to take back the last making of zones by type.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_undo: Option<AutoUndo>,
+    /// The icons that came to the desktop by themselves (a program's
+    /// installation put them there) while no zone could take them and the
+    /// system's own desktop was put away: nobody asked for them on a
+    /// desktop that was cleared, so they are not drawn. Each is an item of
+    /// the desktop like any other (listed, found, sorted by the rules),
+    /// and is drawn from the moment it is put into a zone or at a place.
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    pub withheld: BTreeSet<ItemId>,
     /// Keys this version does not know: kept, and written back as they were.
     #[serde(flatten)]
     pub extra: Extra,
@@ -73,6 +81,7 @@ impl Default for ZonesState {
             always_visible_items: BTreeSet::new(),
             grey_icons: false,
             auto_undo: None,
+            withheld: BTreeSet::new(),
             extra: Extra::new(),
         }
     }

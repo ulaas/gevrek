@@ -102,7 +102,7 @@ impl ZonesCore {
             let own = self.state.placements.loose.get(&item.id).map(|position| &position.display);
             own.filter(|wanted| self.displays.iter().any(|display| &display.id == *wanted)).unwrap_or(fallback) == &display.id
         };
-        let stays: Vec<&crate::Item> = self.loose_items().into_iter().filter(|item| !goes.contains(&item.id)).filter(here).collect();
+        let stays: Vec<&crate::Item> = self.loose_items().into_iter().filter(|item| !goes.contains(&item.id) && !self.is_withheld(&item.id)).filter(here).collect();
         let ids: Vec<ItemId> = crate::layout::sorted(stays, crate::config::Sort::Name, false).iter().map(|item| item.id.clone()).collect();
         let own: std::collections::BTreeMap<ItemId, (i32, i32)> = ids
             .iter()

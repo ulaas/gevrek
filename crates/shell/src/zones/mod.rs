@@ -111,6 +111,13 @@ pub trait Desk: ZonesBackend {
         Ok(())
     }
 
+    /// Whether the system draws icons on the desktop itself (Windows:
+    /// Explorer's). Where it does and they are put away, an icon the
+    /// zones do not draw is not on the desktop at all.
+    fn has_system_icons(&self) -> bool {
+        false
+    }
+
     /// The window the zones are drawn in now (Windows: its handle), for
     /// what the system shows on their behalf: its menu for an item, and
     /// how far a copy has come.
@@ -644,6 +651,19 @@ impl Zones {
                 log::error!("the zones are not shown: {reason}");
                 self.heard.push(ZonesEvent::Refused { reason: reason.to_string() });
             }
+            self.stale = true;
+            self.redraw = true;
+            (self.wake_later)(Duration::ZERO);
+        }
+        self.tell_icons();
+    }
+
+    /// Tell the core whether the system's own icons are away: an icon
+    /// that comes by itself then, with no zone to take it, is not drawn
+    /// (`ZonesCore::is_withheld`).
+    fn tell_icons(&mut self) {
+        let away = self.icons == explorer::SystemIcons::Away && self.desk.has_system_icons();
+        if self.core.set_system_icons_away(away) {
             self.stale = true;
             self.redraw = true;
             (self.wake_later)(Duration::ZERO);
@@ -1856,6 +1876,7 @@ impl Zones {
             self.redraw = true;
             (self.wake_later)(Duration::ZERO);
         }
+        self.tell_icons();
         Ok(())
     }
 
@@ -2304,6 +2325,7 @@ mod tests {
         // Started switched on: written down, put away, and only then shown.
         assert_eq!(zones.icons, SystemIcons::Away);
         assert_eq!(said(), ["journal", "hide"]);
+        assert!(zones.core().system_icons_away(), "the core is told");
         assert_eq!(zones.spots().len(), 1);
         assert_eq!(zones.not_shown(), None);
         // Another change of the configuration does nothing more to them.
@@ -2320,6 +2342,7 @@ mod tests {
         zones.set_hide_icons(true);
         assert_eq!(said(), ["journal", "hide", "restore"]);
         assert_eq!(zones.icons, SystemIcons::Theirs);
+        assert!(!zones.core().system_icons_away());
         assert_eq!(zones.spots().len(), 1);
         // Zones off: nothing to put back any more. On again: away again.
         config.enabled = false;
@@ -2331,9 +2354,11 @@ mod tests {
         // The switch for trying zones without touching the desktop: back.
         zones.set_hide_icons(false);
         assert_eq!(zones.icons, SystemIcons::Theirs);
+        assert!(!zones.core().system_icons_away());
         assert_eq!(zones.spots().len(), 1, "zones are shown all the same");
         zones.set_hide_icons(true);
         assert_eq!(zones.icons, SystemIcons::Away);
+        assert!(zones.core().system_icons_away());
         // Off while they are away: put back.
         config.enabled = false;
         zones.configure(&config);

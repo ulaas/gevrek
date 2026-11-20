@@ -1803,6 +1803,10 @@ pub(crate) mod tests {
     impl Desk for FakeDesk {
         fn on_news(&mut self, _wake: Box<dyn Fn() + Send>) {}
 
+        fn has_system_icons(&self) -> bool {
+            true
+        }
+
         fn hide_system_icons(&mut self) -> Result<(), BackendError> {
             self.say("hide".to_string());
             // (As the real one: not without the desktop written down.)
