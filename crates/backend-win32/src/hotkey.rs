@@ -405,9 +405,16 @@ pub fn run_helper_hooks(heard: impl Fn(RawInputEvent) + Send + 'static) -> Resul
                 _ => return,
             };
             let timer = SetTimer(None, 0, HOOKS_RENEWED_EVERY.as_millis() as u32, None);
+            use crate::input_watch::{part, Part};
+            crate::input_watch::renewed();
+            crate::input_watch::start("the helper's");
             let mut message = MSG::default();
-            while GetMessageW(&mut message, HWND::default(), 0, 0).as_bool() {
+            while {
+                part(Part::Waiting);
+                GetMessageW(&mut message, HWND::default(), 0, 0).as_bool()
+            } {
                 if message.message == WM_TIMER && message.wParam.0 == timer {
+                    part(Part::Renewing);
                     let _ = UnhookWindowsHookEx(keyboard);
                     let _ = UnhookWindowsHookEx(mouse);
                     if let Ok(renewed) = SetWindowsHookExW(
@@ -426,8 +433,10 @@ pub fn run_helper_hooks(heard: impl Fn(RawInputEvent) + Send + 'static) -> Resul
                     ) {
                         mouse = renewed;
                     }
+                    crate::input_watch::renewed();
                     continue;
                 }
+                part(Part::Messages);
                 let _ = TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
@@ -934,6 +943,9 @@ fn run_input_loop(
 
     let _ = startup_sender.send(Ok(()));
     log::info!("Unified keyboard and mouse input engine started");
+    crate::input_watch::renewed();
+    crate::input_watch::start("the window manager's");
+    use crate::input_watch::{part, Part};
     let mut running = true;
     let mut hooks_renewed = Instant::now();
     while running {
@@ -952,6 +964,7 @@ fn run_input_loop(
         }
         if forget || hooks_renewed.elapsed() >= HOOKS_RENEWED_EVERY {
             hooks_renewed = Instant::now();
+            part(Part::Renewing);
             // (Taken out and put in on the thread they are called on,
             // between two of its looks at its messages: no key is told
             // to neither, and none to both.)
@@ -971,6 +984,7 @@ fn run_input_loop(
                     (Ok(keyboard), Ok(mouse)) => {
                         keyboard_hook = keyboard;
                         mouse_hook = mouse;
+                        crate::input_watch::renewed();
                     }
                     (keyboard, mouse) => {
                         log::error!(
@@ -988,6 +1002,7 @@ fn run_input_loop(
                 }
             }
         }
+        part(Part::Control);
         while let Ok(message) = control_receiver.try_recv() {
             match message {
                 ControlMessage::Register(hotkey, id) => {
@@ -1015,6 +1030,7 @@ fn run_input_loop(
             }
         }
 
+        part(Part::Keys);
         while let Ok(raw) = raw_receiver.try_recv() {
             let identity = (raw.device, raw.key.clone());
             if raw.momentary {
@@ -1115,6 +1131,7 @@ fn run_input_loop(
             }
         }
 
+        part(Part::Touchpad);
         while let Ok(frame) = touchpad_frame_receiver.try_recv() {
             for event in gesture_recognizer.feed_frame(frame, elapsed_ms_u64(gesture_clock)) {
                 if gesture_event_sender.send(event).is_err() {
@@ -1130,6 +1147,7 @@ fn run_input_loop(
             gevrek_host::wake::now();
         }
 
+        part(Part::Messages);
         unsafe {
             let mut message = MSG::default();
             while PeekMessageW(&mut message, HWND::default(), 0, 0, PM_REMOVE).as_bool() {
@@ -1145,6 +1163,7 @@ fn run_input_loop(
         // The hooks of this thread are called only while it waits for or
         // takes messages: asleep, every key and every movement of the
         // mouse, of every program, waited for it to wake.
+        part(Part::Waiting);
         unsafe {
             use windows::Win32::UI::WindowsAndMessaging::{
                 MsgWaitForMultipleObjectsEx, MWMO_INPUTAVAILABLE, QS_ALLINPUT,
@@ -1222,6 +1241,9 @@ fn elapsed_ms_u64(started: Instant) -> u64 {
 }
 
 unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    // (Counted and timed, so that hooks that stopped hearing are said:
+    // `input_watch`.)
+    let _inside = crate::input_watch::KEYBOARD.enter();
     if code < 0 || input_suspended() {
         return CallNextHookEx(HHOOK::default(), code, wparam, lparam);
     }
@@ -1352,6 +1374,7 @@ fn mask_modifier_release(raw: &RawInputEvent) {
 }
 
 unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    let _inside = crate::input_watch::MOUSE.enter();
     if code < 0 || input_suspended() {
         return CallNextHookEx(HHOOK::default(), code, wparam, lparam);
     }

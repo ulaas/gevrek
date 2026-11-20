@@ -24,6 +24,7 @@ pub mod elevated_helper;
 #[path = "../../engine/src/spoil.rs"]
 mod spoil;
 pub mod hotkey;
+mod input_watch;
 pub mod idle;
 pub mod night_light;
 pub mod persistence;
