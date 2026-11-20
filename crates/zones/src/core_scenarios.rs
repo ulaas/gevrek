@@ -88,6 +88,16 @@ impl Desk {
         item.id
     }
 
+    /// A file that lies on the bare desktop: where a zone took it as it
+    /// came, the person took it out again.
+    pub(crate) fn loose(&mut self, name: &str) -> ItemId {
+        let item = self.file(name);
+        if self.core.zone_of(&item).is_some() {
+            self.does(Command::RemoveItem { item: item.clone() });
+        }
+        item
+    }
+
     pub(crate) fn put(&mut self, zone: &ZoneId, item: &ItemId) {
         self.does(Command::AddItem { zone: zone.clone(), item: item.clone(), index: None, cell: None });
     }
@@ -528,10 +538,14 @@ fn an_item_that_comes_goes_to_its_zone_but_no_file_is_moved_unasked() {
     desk.pump();
     assert_eq!(desk.core.zone_of(&ancient.id), None);
     assert_eq!(desk.backend.performed, []);
-    // Switched off, nothing is sorted by itself.
+    // Switched off, no rule is asked: what comes goes into the first zone
+    // that takes items, whatever it is.
     let mut desk = sorting_desk(false);
-    let dog = desk.file("dog.png");
-    assert_eq!(desk.core.zone_of(&dog), None);
+    let first = desk.core.config().zones[0].id.clone();
+    let (dog, letter) = (desk.file("dog.png"), desk.file("letter.doc"));
+    assert_eq!(desk.core.zone_of(&dog), Some(&first));
+    assert_eq!(desk.core.zone_of(&letter), Some(&first));
+    assert_eq!(desk.backend.performed, []);
 }
 
 #[test]

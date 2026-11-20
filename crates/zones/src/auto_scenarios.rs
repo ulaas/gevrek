@@ -119,7 +119,7 @@ fn the_one_key_takes_the_loose_items_with_the_zones_and_the_scene_says_so() {
     let zone = desk.zone("Papers", Rect::new(600, 100, 300, 300));
     let inside = desk.file("inside.txt");
     desk.put(&zone, &inside);
-    let loose = desk.file("loose.txt");
+    let loose = desk.loose("loose.txt");
     assert!(!desk.core.scene(NOW).loose_hidden && !desk.core.loose_hidden());
     desk.does(Command::FocusZone { zone: Some(ZoneId::new(DESK)) });
     assert!(desk.core.focus().is_some_and(|focus| focus.desk.is_some()));
@@ -314,8 +314,12 @@ fn a_type_that_has_its_zone_takes_what_is_new_whatever_the_number() {
     desk.does(auto(false));
     let pictures = zone_for(&desk, "pictures");
     let rules = desk.core.config().rules.len();
-    // One picture more, loose (nothing sorts on arrival here).
+    // One picture more: its type's zone takes it as it comes, though no
+    // rule sorts on arrival here. Taken out again by the person, it is
+    // what making zones by type finds loose.
     let one = desk.file("one.gif");
+    assert_eq!(desk.core.zone_of(&one), Some(&pictures));
+    desk.does(Command::RemoveItem { item: one.clone() });
     assert_eq!(desk.core.zone_of(&one), None);
     let plan = planned(&desk.does(auto(true)));
     assert_eq!(plan.zones.len(), 1);
@@ -340,7 +344,7 @@ fn a_type_that_has_its_zone_takes_what_is_new_whatever_the_number() {
     assert_eq!((plan.zones[0].title.as_str(), plan.zones[0].rect), ("Photos", desk.rect(&pictures)));
     // Given to another purpose, it is not: a zone would be made (with
     // two pictures loose, enough for one).
-    desk.file("two.gif");
+    desk.loose("two.gif");
     desk.does(Command::ModifyZone { zone: pictures.clone(), changes: json!({"auto": null}) });
     let plan = planned(&desk.does(auto(true)));
     assert_eq!((plan.zones[0].zone.clone(), plan.zones[0].items.len()), (None, 2));
@@ -608,6 +612,8 @@ fn the_new_commands_events_and_keys_are_written_as_they_are_read() {
     assert_eq!(serde_json::to_value(&matcher).unwrap(), json!({"match": "extension", "any_of": ["png"]}));
 }
 
+// ---- what comes to the desktop by itself -------------------------------------
+
 /// An icon as a program's installation leaves one on the desktop.
 fn shortcut(name: &str) -> Item {
     Item { kind: ItemKind::Shortcut, ..Item::file(&format!("{DESKTOP}/{name}")) }
@@ -627,7 +633,7 @@ fn drawn_loose(desk: &Desk) -> Vec<String> {
 }
 
 #[test]
-fn an_icon_that_comes_by_itself_goes_into_a_zone_that_takes_it() {
+fn what_comes_by_itself_goes_into_a_zone_that_takes_it() {
     let config = ZonesConfig {
         zones: vec![
             ZoneDefinition::manual("things", "Things"),
@@ -637,26 +643,40 @@ fn an_icon_that_comes_by_itself_goes_into_a_zone_that_takes_it() {
     };
     let mut desk = Desk::with(config, ZonesState::default());
     let (things, programs) = (ZoneId::new("things"), ZoneId::new("programs"));
-    // A file the person saved there lies where files lie: loose.
+    // A file of a type that has no zone: the first of the person's own.
     desk.file("notes.txt");
-    assert_eq!(drawn_loose(&desk), ["notes.txt"]);
+    assert_eq!(desk.names_in(&things), ["notes.txt"]);
+    assert!(drawn_loose(&desk).is_empty());
     // The zone made for its type takes a new icon, before the first one.
     let editor = installed(&mut desk, "Editor.lnk");
     assert_eq!(desk.names_in(&programs), ["Editor.lnk"]);
     assert!(desk.core.state().withheld.is_empty());
+    // What is no file (the person switched it on) lies where it lay.
+    let bin = Item { kind: ItemKind::Virtual, path: None, ..Item::file(&format!("{DESKTOP}/Bin")) };
+    desk.backend.add(DESKTOP, bin);
+    desk.pump();
+    assert_eq!(drawn_loose(&desk), ["Bin"]);
     // That one locked: the first that takes items.
     desk.does(Command::Lock { zone: programs.clone(), geometry: None, members: Some(true) });
     installed(&mut desk, "Player.lnk");
-    assert_eq!(desk.names_in(&things), ["Player.lnk"]);
+    assert_eq!(desk.names_in(&things), ["notes.txt", "Player.lnk"]);
     // A launcher is such an icon too.
     let launcher = Item { kind: ItemKind::Launcher, ..Item::file(&format!("{DESKTOP}/Terminal.desktop")) };
     desk.backend.add(DESKTOP, launcher);
     desk.pump();
-    assert_eq!(desk.names_in(&things), ["Player.lnk", "Terminal.desktop"]);
+    assert_eq!(desk.names_in(&things), ["notes.txt", "Player.lnk", "Terminal.desktop"]);
+    // A zone made for another type is not for it: with only that one
+    // open, a file of no type that has a zone is in none.
+    desk.does(Command::Lock { zone: programs.clone(), geometry: None, members: Some(false) });
+    desk.does(Command::Lock { zone: things.clone(), geometry: None, members: Some(true) });
+    desk.file("song.mp3");
+    assert_eq!(drawn_loose(&desk), ["Bin", "song.mp3"]);
+    desk.does(Command::Lock { zone: things.clone(), geometry: None, members: Some(false) });
+    desk.does(Command::Lock { zone: programs.clone(), geometry: None, members: Some(true) });
     // Every zone locked: in none.
     desk.does(Command::LockAll { geometry: None, members: Some(true) });
     installed(&mut desk, "Game.lnk");
-    assert_eq!(drawn_loose(&desk), ["Game.lnk", "notes.txt"]);
+    assert_eq!(drawn_loose(&desk), ["Bin", "Game.lnk", "song.mp3"]);
     desk.does(Command::LockAll { geometry: None, members: Some(false) });
     // Taken out by the person and told of once more, an icon stays out.
     desk.does(Command::Lock { zone: programs.clone(), geometry: None, members: Some(false) });
@@ -673,26 +693,33 @@ fn an_icon_that_comes_by_itself_goes_into_a_zone_that_takes_it() {
         }]}),
     });
     installed(&mut desk, "Mail.lnk");
-    assert_eq!(desk.names_in(&things), ["Player.lnk", "Terminal.desktop", "Mail.lnk"]);
+    assert_eq!(desk.names_in(&things), ["notes.txt", "Player.lnk", "Terminal.desktop", "Mail.lnk"]);
 }
 
 #[test]
-fn with_no_zone_and_the_systems_desktop_away_such_an_icon_is_not_drawn() {
+fn with_no_zone_and_the_systems_desktop_away_what_comes_is_not_drawn() {
     let mut desk = Desk::new();
     // The system shows its own icons (or has none): the icon lies loose.
     installed(&mut desk, "Editor.lnk");
     assert_eq!(drawn_loose(&desk), ["Editor.lnk"]);
     assert!(desk.core.state().withheld.is_empty());
     // They are put away: what comes now by itself is not drawn at all,
-    // and what was there, and what the person brings, is.
+    // an icon or a file, and what was there is. So is what is no file.
     assert!(!desk.core.set_system_icons_away(true), "nothing is drawn otherwise for it");
     let player = installed(&mut desk, "Player.lnk");
     let game = installed(&mut desk, "Game.lnk");
-    desk.file("notes.txt");
-    assert_eq!(drawn_loose(&desk), ["Editor.lnk", "notes.txt"]);
-    assert_eq!(desk.core.state().withheld, [game.clone(), player.clone()].into());
-    assert!(desk.core.is_withheld(&player));
+    let notes = desk.file("notes.txt");
+    let bin = Item { kind: ItemKind::Virtual, path: None, ..Item::file(&format!("{DESKTOP}/Bin")) };
+    desk.backend.add(DESKTOP, bin);
+    desk.pump();
+    assert_eq!(drawn_loose(&desk), ["Bin", "Editor.lnk"]);
+    assert_eq!(desk.core.state().withheld, [game.clone(), player.clone(), notes.clone()].into());
+    assert!(desk.core.is_withheld(&player) && desk.core.is_withheld(&notes));
     assert_eq!(desk.core.scene(NOW).loose[0].item_count, 2);
+    // The file put at a place by the person is drawn there.
+    let display = desk.core.displays()[0].id.clone();
+    desk.does(Command::PlaceLooseItem { item: notes.clone(), display, x: 300, y: 300 });
+    assert_eq!(drawn_loose(&desk), ["Bin", "Editor.lnk", "notes.txt"]);
     // It is an item of the desktop all the same: listed, and found.
     assert!(desk.core.loose_items().iter().any(|item| item.id == player));
     assert!(ZonesSnapshot::of(&desk.core, NOW).loose.iter().any(|item| item.id == player));
@@ -706,16 +733,16 @@ fn with_no_zone_and_the_systems_desktop_away_such_an_icon_is_not_drawn() {
     assert!(desk.core.is_withheld(&player) && !drawn_loose(&desk).contains(&"Music.lnk".to_string()));
     // While the system shows its own icons, ours are all drawn.
     assert!(desk.core.set_system_icons_away(false));
-    assert_eq!(drawn_loose(&desk), ["Editor.lnk", "Game.lnk", "Music.lnk", "notes.txt"]);
+    assert_eq!(drawn_loose(&desk), ["Bin", "Editor.lnk", "Game.lnk", "Music.lnk", "notes.txt"]);
     assert!(desk.core.set_system_icons_away(true));
-    assert_eq!(drawn_loose(&desk), ["Editor.lnk", "notes.txt"]);
+    assert_eq!(drawn_loose(&desk), ["Bin", "Editor.lnk", "notes.txt"]);
     // Put into a zone it is drawn, and stays so when the zone goes.
     let zone = desk.zone("Things", Rect::new(100, 100, 400, 300));
     desk.put(&zone, &player);
     assert_eq!(desk.names_in(&zone), ["Music.lnk"]);
     assert_eq!(desk.core.state().withheld, [game.clone()].into());
     desk.does(Command::DeleteZone { zone });
-    assert_eq!(drawn_loose(&desk), ["Editor.lnk", "Music.lnk", "notes.txt"]);
+    assert_eq!(drawn_loose(&desk), ["Bin", "Editor.lnk", "Music.lnk", "notes.txt"]);
     // Given a place by hand it is drawn there.
     let display = desk.core.displays()[0].id.clone();
     desk.does(Command::PlaceLooseItem { item: game.clone(), display, x: 600, y: 400 });

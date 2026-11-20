@@ -233,7 +233,7 @@ fn what_is_said_to_stay_stays_when_the_rest_is_put_away_and_that_is_remembered()
     let kept = desk.zone("Kept", Rect::new(100, 100, 300, 300));
     let away = desk.zone("Away", Rect::new(500, 100, 300, 300));
     let todo = desk.file("todo.txt");
-    desk.file("loose.txt");
+    desk.loose("loose.txt");
     desk.put(&away, &todo);
 
     let effects = desk.does(Command::QuickHide { hidden: Some(true) });
@@ -1283,7 +1283,7 @@ fn what_is_private_is_covered_until_asked_for_and_again_when_the_screen_is_share
     let open = desk.zone("Open", Rect::new(500, 100, 300, 300));
     let secret = desk.file("secret.txt");
     let plain = desk.file("plain.txt");
-    desk.file("loose.txt");
+    desk.loose("loose.txt");
     desk.put(&bank, &secret);
     desk.put(&open, &plain);
     modify(&mut desk, &bank, json!({"private": true}));
@@ -1386,7 +1386,7 @@ fn the_system_is_asked_once_at_the_start_whether_the_screen_is_shared() {
 #[test]
 fn a_screen_reader_is_told_what_is_drawn() {
     let (mut desk, a, b, c) = keyboard_desk();
-    desk.file("loose.txt");
+    desk.loose("loose.txt");
     desk.does(Command::Tab { zone: c.clone(), with: b.clone() });
     desk.does(Command::Lock { zone: a.clone(), geometry: None, members: Some(true) });
     desk.does(Command::FocusItem { item: Some(id("a2.txt")) });
@@ -1735,13 +1735,14 @@ fn a_program_that_ends_while_a_file_is_on_its_way_loses_nothing_and_shows_nothin
     assert!(again.core.item(&id("big.iso")).is_none(), "no item that is not there");
     assert_eq!(again.names_in(&papers), ["report.pdf"]);
     // The copy ends all the same (the system was doing it): its answer is
-    // for nobody, and the file is on the desktop like any that comes.
+    // for nobody, and the file is on the desktop like any that comes:
+    // in the zone that takes what comes.
     again.backend.finish_operations();
     let heard = events(&again.pump());
     assert!(!heard.iter().any(|event| matches!(event, ZonesEvent::OperationEnded { .. })));
     assert!(again.core.item(&id("big.iso")).is_some());
-    assert_eq!(again.core.zone_of(&id("big.iso")), None);
-    assert_eq!(again.names_in(&papers), ["report.pdf"]);
+    assert_eq!(again.core.zone_of(&id("big.iso")), Some(&papers));
+    assert_eq!(again.names_in(&papers), ["report.pdf", "big.iso"]);
     assert_eq!(again.backend.in_folder("/elsewhere").len(), 2, "and the one it was copied from is there");
 }
 
@@ -1834,7 +1835,7 @@ fn the_keyboard_walks_the_loose_items_of_the_bare_desktop_as_it_walks_a_zone() {
     let inside = desk.file("inside.txt");
     desk.put(&zone, &inside);
     // Three loose items, laid down the first column of the display.
-    let loose: Vec<ItemId> = (1..=3).map(|number| desk.file(&format!("l{number}.txt"))).collect();
+    let loose: Vec<ItemId> = (1..=3).map(|number| desk.loose(&format!("l{number}.txt"))).collect();
     let display = DisplayId::new("fake-1");
     let the_desk = ZoneId::new(DESK);
     let go = |desk: &mut Desk, direction: Direction| desk.does(Command::FocusNeighbour { direction });

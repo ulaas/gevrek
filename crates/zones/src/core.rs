@@ -837,6 +837,22 @@ impl Pending {
     }
 }
 
+/// Where an operation puts its file, if it goes exactly as asked.
+fn lands_at(operation: &FileOperation) -> Option<String> {
+    match operation {
+        FileOperation::Copy { from, to_folder } | FileOperation::Move { from, to_folder } => {
+            Some(paths::join(to_folder, paths::file_name(from)))
+        }
+        FileOperation::Rename { path, new_name } => Some(paths::join(paths::parent(path)?, new_name)),
+        FileOperation::NewFolder { parent, name } => Some(paths::join(parent, name)),
+        FileOperation::Restore { path } => Some(path.clone()),
+        FileOperation::Trash { .. } => None,
+    }
+}
+
+/// How many paths of files the zones moved themselves are remembered.
+const RETURNING_KEPT: usize = 64;
+
 /// The zones.
 #[derive(Debug, Clone)]
 pub struct ZonesCore {
@@ -872,6 +888,11 @@ pub struct ZonesCore {
     /// Files that were brought to the desktop and are not told of yet,
     /// by their paths: where each goes when it is.
     arriving: BTreeMap<String, (Option<ZoneId>, Option<LoosePosition>)>,
+    /// Where the files lie that the zones themselves moved a moment ago
+    /// (something taken back, something dropped on a portal), by their
+    /// paths: one of them that shows up on the desktop did not come by
+    /// itself. Only the last few.
+    returning: Vec<String>,
     /// The system's own desktop icons are put away (on Windows,
     /// Explorer's): what the zones do not draw is not on the desktop at
     /// all. Told by whoever shows the zones; not so until it is.
@@ -907,6 +928,7 @@ impl ZonesCore {
             pending: BTreeMap::new(),
             file_undo: Vec::new(),
             arriving: BTreeMap::new(),
+            returning: Vec::new(),
             system_icons_away: false,
         }
     }
@@ -1786,10 +1808,11 @@ impl ZonesCore {
             .collect()
     }
 
-    /// The zone an icon goes to that came to the desktop by itself and
+    /// The zone an item goes to that came to the desktop by itself and
     /// that no rule decides about: the one made for its type, or else the
-    /// first that is filled by hand and takes items, of those shown here
-    /// before the others. None where no zone takes anything.
+    /// first of the person's own that is filled by hand and takes items,
+    /// of those shown here before the others. (A zone made for another
+    /// type is not for it.) None where no zone takes it.
     fn zone_for_newcomer(&self, item: &Item) -> Option<ZoneId> {
         if self.config.lock.members {
             return None;
@@ -1797,25 +1820,34 @@ impl ZonesCore {
         let takes = |zone: &&ZoneDefinition| zone.kind == ZoneKind::Manual && !zone.lock.members;
         let open = || self.config.zones.iter().filter(takes);
         let category = crate::auto::category_of(&self.config.auto.categories, item).map(|category| &category.id);
+        let own = || open().filter(|zone| zone.auto.is_none());
         open()
             .find(|zone| category.is_some() && zone.auto.as_ref() == category)
-            .or_else(|| open().find(|zone| self.is_about(&zone.id)))
-            .or_else(|| open().next())
+            .or_else(|| own().find(|zone| self.is_about(&zone.id)))
+            .or_else(|| own().next())
             .map(|zone| zone.id.clone())
     }
 
     /// An item came to the desktop. Where the configuration says so, the
-    /// zone its rule names takes it at once. An icon nobody put there (a
-    /// shortcut or a launcher, as a program's installation leaves one)
-    /// that no rule decides about goes into a zone that takes it; where
-    /// there is none it lies loose, and where the system's own desktop is
-    /// put away as well it is not drawn at all (`ZonesState::withheld`).
+    /// zone its rule names takes it at once. One that no rule decides
+    /// about (an icon a program's installation leaves, a file saved
+    /// there) goes into a zone that takes it; where there is none it
+    /// lies loose, and where the system's own desktop is put away as
+    /// well it is not drawn at all (`ZonesState::withheld`). What the
+    /// person let go on the desktop is where they let it go.
     fn arrived(&mut self, item: Item, now: u64) -> Vec<Effect> {
         let id = item.id.clone();
         let mut effects = Vec::new();
+        // What the zones moved here themselves (something taken back) did
+        // not come by itself: it lies where it lay.
+        let ours = item.path.as_ref().is_some_and(|path| {
+            let returned = self.returning.iter().position(|known| known == path);
+            returned.map(|at| self.returning.remove(at)).is_some()
+                || self.pending.values().any(|pending| lands_at(pending.operation()).as_ref() == Some(path))
+        });
         // (Told of twice, or known from before with a place of its own:
         // it is where the person has it.)
-        let new = !self.items.contains_key(&id) && !self.state.placements.loose.contains_key(&id);
+        let new = !ours && !self.items.contains_key(&id) && !self.state.placements.loose.contains_key(&id);
         // Brought here by the person: where they let it go, before any rule.
         let brought = item.path.as_ref().and_then(|path| self.arriving.remove(path));
         if let Some(place) = brought {
@@ -1831,7 +1863,9 @@ impl ZonesCore {
                 .then(|| rules::decide(&self.config.rules, self.config.catch_all.as_ref(), &item, now))
                 .flatten()
                 .map(|(_, action)| action.clone());
-            let by_itself = new && matches!(item.kind, ItemKind::Shortcut | ItemKind::Launcher);
+            // (What is no file, as This PC or the bin, is on the desktop
+            // because the person switched it on.)
+            let by_itself = new && item.kind != ItemKind::Virtual;
             match decided {
                 Some(RuleAction::AssignToZone { zone }) => {
                     let takes = self
@@ -1962,6 +1996,7 @@ impl ZonesCore {
                 }
             }
             (Pending::Portal { operation }, None) => {
+                self.moved_by_us(&operation, undo.as_ref());
                 if let Some(undo) = undo.or_else(|| operation.reversed()) {
                     self.file_undo.push(undo);
                     if self.file_undo.len() > FILE_UNDO_DEPTH {
@@ -1970,7 +2005,27 @@ impl ZonesCore {
                 }
                 Vec::new()
             }
-            (Pending::TakingBack { .. }, None) => Vec::new(),
+            (Pending::TakingBack { operation }, None) => {
+                self.moved_by_us(&operation, undo.as_ref());
+                Vec::new()
+            }
+        }
+    }
+
+    /// The zones moved a file themselves: remember where it lies now
+    /// (what takes the operation back says it best), for when it is told
+    /// of as an item that came.
+    fn moved_by_us(&mut self, operation: &FileOperation, undo: Option<&FileOperation>) {
+        let path = match undo {
+            Some(FileOperation::Trash { path }) => Some(path.clone()),
+            Some(FileOperation::Move { from, .. }) => Some(from.clone()),
+            _ => lands_at(operation),
+        };
+        if let Some(path) = path {
+            self.returning.push(path);
+            if self.returning.len() > RETURNING_KEPT {
+                self.returning.remove(0);
+            }
         }
     }
 

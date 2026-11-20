@@ -1093,11 +1093,19 @@ pub(crate) mod tests {
             self.core.config().zones.last().unwrap().id.clone()
         }
 
+        /// A file in a zone, or (with none named) on the bare desktop:
+        /// where a zone took it as it came, the person took it out again.
         pub fn file(&mut self, name: &str, zone: Option<&ZoneId>) -> ItemId {
             let item = self.backend.add_file(name).id;
             self.host.pump(&mut self.core, &mut self.backend, NOW);
-            if let Some(zone) = zone {
-                self.does(Command::AddItem { zone: zone.clone(), item: item.clone(), index: None, cell: None });
+            match zone {
+                Some(zone) => {
+                    self.does(Command::AddItem { zone: zone.clone(), item: item.clone(), index: None, cell: None });
+                }
+                None if self.core.zone_of(&item).is_some() => {
+                    self.does(Command::RemoveItem { item: item.clone() });
+                }
+                None => {}
             }
             item
         }

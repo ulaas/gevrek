@@ -535,14 +535,18 @@ globs (`*`, `?`), without regard to case.
 `rules_on_arrival` (on by default) puts an item that comes to the
 desktop into the zone its rule names, at once.
 
-**Icons that come by themselves.** A program's installation leaves a
-shortcut on the desktop that nobody put there. Such an icon (a shortcut
-or a launcher that comes while gevrek runs) goes into a zone at once,
-also where no rule decides about it: into the zone made for its type
-(`gevrek zones auto-create`), or else into the first zone filled by hand
-that is not locked, of those shown on this workspace before the others.
-A rule that matches it decides instead, and what you bring to the
-desktop yourself lies where you let it go.
+**What comes by itself.** A program's installation leaves a shortcut on
+the desktop that nobody put there; a program saves a file there. Such an
+item (anything that comes to the desktop while gevrek runs) goes into a
+zone at once, also where no rule decides about it, and also with
+`rules_on_arrival` off: into the zone made for its type
+(`gevrek zones auto-create`), or else into the first zone of your own
+that is filled by hand and not locked, of those shown on this workspace
+before the others. A zone made for another type does not take it. A rule
+that matches it decides instead (one that moves the file leaves it loose
+until the rules are applied). What you bring to the desktop yourself
+lies where you let it go, what gevrek puts back there (something taken
+back) lies where it lay, and so does what is no file (This PC, the bin).
 
 Where no zone takes it, it lies loose. On Windows, where Explorer's own
 icons are put away (`desktop.platform.windows.hide_desktop_icons`, see
@@ -551,8 +555,7 @@ drawn at all: a desktop that was cleared stays clear. It is still an
 item of the desktop (`gevrek zones list` names it among the loose ones,
 the search finds it, the rules and `auto-create` sort it), and it is
 drawn from the moment it is put somewhere: `gevrek zones add` puts it
-into a zone, `gevrek zones place` at a place of its own. Files and
-folders that come to the desktop are always drawn.
+into a zone, `gevrek zones place` at a place of its own.
 
 **See first, then do.** A dry run changes nothing:
 
