@@ -8,7 +8,9 @@
 //!   programs to `<prefix>/bin` (default `~/.local`). The session you are
 //!   logged into runs these, never the build in `target/` you are working
 //!   on. The build installed before is kept as
-//!   `<prefix>/lib/gevrek/previous`. With `--session` (Linux) the files of
+//!   `<prefix>/lib/gevrek/previous`. On Windows, where the helper for
+//!   administrator windows is registered, it is registered anew for this
+//!   build (`keep_elevated_helper`). With `--session` (Linux) the files of
 //!   a login session are installed too (`resources/README.md`), and the
 //!   two commands that need root are printed.
 //! - `uninstall [--prefix <dir>]`: remove what `install` put there.
@@ -260,13 +262,57 @@ fn install(arguments: &[String]) -> Result<()> {
         "The build installed before is in {}. Programs that are running keep running the old build until they are restarted.",
         previous.display()
     );
-    if !cfg!(windows) {
+    if cfg!(windows) {
+        keep_elevated_helper(&bin);
+    } else {
         install_entries(&bin)?;
     }
     if arguments.iter().any(|argument| argument == "--session") {
         install_session(&prefix, &bin, &previous)?;
     }
     Ok(())
+}
+
+/// The task that starts the helper for administrator windows, of the
+/// instance every install has (`gevrek_win32::elevated::helper_task_name`).
+const ELEVATED_TASK: &str = "gevrek elevated helper (main)";
+
+/// Windows: where the helper for the windows of administrator programs is
+/// registered (`gevrek elevated install`, once), it is registered anew, as
+/// the setup program and `install.ps1` do when they update.
+///
+/// The task starts a copy of the helper that is kept where only an
+/// administrator can write, and that copy stayed the one of the build it
+/// was registered with, whatever was installed since: it served until the
+/// window manager and the helper no longer spoke the same, and then the
+/// windows of administrator programs were left alone without a word but
+/// one line in the log. Windows asks for an administrator each time.
+/// Where the task is not registered nothing is done, and nothing is asked.
+///
+/// Whatever comes of it, the programs are installed: what went wrong is
+/// said, and how to do it by hand.
+fn keep_elevated_helper(bin: &Path) {
+    let registered = Command::new("schtasks.exe")
+        .args(["/query", "/tn", ELEVATED_TASK])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    if !registered {
+        return;
+    }
+    println!(
+        "The helper for administrator windows is registered: it is registered anew, for this build (Windows asks for an administrator)."
+    );
+    let gevrek = bin.join(program_file("gevrek"));
+    let done = Command::new(&gevrek).args(["elevated", "install"]).status();
+    if !done.is_ok_and(|status| status.success()) {
+        println!(
+            "The helper was not registered anew: the one kept from before is still the one that is started. A helper that runs holds its file; stop gevrek, then: {} elevated install",
+            gevrek.display()
+        );
+    }
 }
 
 /// The programs a launcher lists (Linux): their entries, with the user's
