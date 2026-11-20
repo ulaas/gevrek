@@ -82,32 +82,36 @@ pub fn seconds_of(time: FILETIME) -> Option<u64> {
 
 /// Read one shortcut as it is written. The shell is not asked to look
 /// for a target that moved (which can take long, and can ask the person).
+/// Nothing (`Ok(None)`) where it leads to no file; an error where it could
+/// not be read at all, as while the shell that writes it still holds it.
 ///
 /// # Safety
 /// Called on a thread that is set up for the shell's objects.
-unsafe fn read_link(file: &Path) -> Option<Link> {
+unsafe fn read_link(file: &Path) -> Result<Option<Link>, ()> {
     let wide = HSTRING::from(file.as_os_str());
-    let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
-    let stored: IPersistFile = link.cast().ok()?;
-    stored.Load(PCWSTR(wide.as_ptr()), STGM_READ).ok()?;
+    let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(|_| ())?;
+    let stored: IPersistFile = link.cast().map_err(|_| ())?;
+    stored.Load(PCWSTR(wide.as_ptr()), STGM_READ).map_err(|_| ())?;
     let mut target = [0u16; 1024];
     let mut data = WIN32_FIND_DATAW::default();
-    link.GetPath(&mut target, &mut data, 0).ok()?;
+    if link.GetPath(&mut target, &mut data, 0).is_err() {
+        return Ok(None);
+    }
     let end = target.iter().position(|unit| *unit == 0).unwrap_or(target.len());
     let target = String::from_utf16_lossy(&target[..end]);
     if !super::facts::is_path(&target) {
         // (It leads to something that is no file: a place of the
         // shell's, a setting.)
-        return None;
+        return Ok(None);
     }
     const DIRECTORY: u32 = 0x10;
-    Some(Link {
+    Ok(Some(Link {
         target,
         folder: data.dwFileAttributes & DIRECTORY != 0,
         size: (u64::from(data.nFileSizeHigh) << 32) | u64::from(data.nFileSizeLow),
         created: seconds_of(data.ftCreationTime),
         modified: seconds_of(data.ftLastWriteTime),
-    })
+    }))
 }
 
 /// Whether asking the file system about a path can take long: it is on
@@ -195,12 +199,21 @@ impl Reader {
         for (file, written) in shortcuts {
             let link = match self.links.get(&file) {
                 Some((known, link)) if *known == written => link.clone(),
-                _ => {
-                    // SAFETY: this thread is set up for the shell (`_com`).
-                    let link = unsafe { read_link(&file) };
-                    self.links.insert(file.clone(), (written, link.clone()));
-                    link
-                }
+                // SAFETY: this thread is set up for the shell (`_com`).
+                _ => match unsafe { read_link(&file) } {
+                    Ok(link) => {
+                        self.links.insert(file.clone(), (written, link.clone()));
+                        link
+                    }
+                    // (Not to be read yet: the shell is still writing it.
+                    // It is read again at the next reading, which its
+                    // being written asks for, though its time may be the
+                    // one it has now.)
+                    Err(()) => {
+                        self.links.remove(&file);
+                        None
+                    }
+                },
             };
             let (Some(link), Some(when)) = (link, super::facts::seconds(Ok(written))) else {
                 continue;
@@ -357,6 +370,35 @@ mod tests {
         assert_eq!(then.items.iter().map(|item| gevrek_zones::paths::file_name(item.id.as_str())).collect::<Vec<_>>(), ["old.txt", "new.png"]);
         assert_eq!(then.opened_anew, [file("old.txt")]);
         assert_eq!(opened.at(&file("old.txt")), Some(1_700_001_000));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A shortcut that is not to be read yet (the shell writing it holds
+    /// it) is read at the next reading, though its time of writing is the
+    /// same then: what could not be read is not taken for what it says.
+    #[test]
+    fn a_shortcut_held_while_it_is_written_is_read_when_it_is_let_go_of() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let root = folder("held");
+        let (recent, files) = (root.join("Recent"), root.join("files"));
+        std::fs::create_dir_all(&recent).expect("a folder");
+        std::fs::create_dir_all(&files).expect("a folder");
+        let target = files.join("held.txt");
+        std::fs::write(&target, b"x").expect("written");
+        let link = recent.join("held.lnk");
+        assert!(write_link(&link, &target.to_string_lossy()));
+        let written = std::fs::metadata(&link).and_then(|data| data.modified()).expect("a time");
+
+        let (opened, mut reader, mut types) = (Opened::default(), Reader::default(), Types::default());
+        let held = std::fs::File::options().read(true).share_mode(0).open(&link).expect("held");
+        assert_eq!(reader.read(&recent, &opened, &mut types, MOST).items, []);
+        drop(held);
+        assert_eq!(std::fs::metadata(&link).and_then(|data| data.modified()).expect("a time"), written);
+        let read = reader.read(&recent, &opened, &mut types, MOST);
+        assert_eq!(
+            read.items.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(),
+            [target.to_string_lossy().as_ref()]
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

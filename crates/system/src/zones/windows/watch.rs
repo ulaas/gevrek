@@ -130,13 +130,16 @@ pub struct Folder {
     pub seen: Shared,
     /// Said when the watching ends: the file system's own end of it comes
     /// a moment later, and what it still tells until then is not told on.
-    ended: Arc<AtomicBool>,
+    /// Held while a change is told, so that once the watching has ended
+    /// nothing more is told, also of a change that was being read then.
+    /// (Nothing else is waited for while it is held.)
+    ended: Arc<Mutex<bool>>,
     _watcher: notify::RecommendedWatcher,
 }
 
 impl Drop for Folder {
     fn drop(&mut self) {
-        self.ended.store(true, Ordering::SeqCst);
+        *self.ended.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
     }
 }
 
@@ -177,10 +180,10 @@ pub fn watch_into(
     let location = locked(&seen).location().clone();
     let (told, mut renamed_from) = (Arc::clone(&seen), None::<ItemId>);
     let itself = folder.clone();
-    let ended = Arc::new(AtomicBool::new(false));
+    let ended = Arc::new(Mutex::new(false));
     let over = Arc::clone(&ended);
     let handler = move |event: notify::Result<notify::Event>| {
-        if over.load(Ordering::SeqCst) {
+        if *over.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) {
             return;
         }
         // (The thread is the crate's own; the shell is asked for names
@@ -246,7 +249,12 @@ pub fn watch_into(
         for change in changes {
             events.extend(seen.apply(change));
         }
-        news.tell(events);
+        // (Ended while the change was read, as the shell can be slow to
+        // say what an item is: it is no more news.)
+        let over = over.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !*over {
+            news.tell(events);
+        }
     };
     let refused = |error: notify::Error| BackendError::Refused { what: format!("{folder}: {error}") };
     let mut watcher = notify::recommended_watcher(handler).map_err(refused)?;

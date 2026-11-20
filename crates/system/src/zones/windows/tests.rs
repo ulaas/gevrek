@@ -180,7 +180,10 @@ fn a_watched_folder_tells_through_the_backend_and_wakes_its_host() {
         matches!(event, BackendEvent::ItemRenamed { from, .. } if from.as_str() == format!("{shown}\\old.txt"))
     });
 
+    // (What was told before it was let go of, as of the renaming back
+    // after its last step, may still be there to be taken.)
     backend.unwatch(watch);
+    let _ = backend.drain_events();
     std::fs::remove_file(format!("{shown}\\new.txt")).expect("removed");
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(backend.drain_events(), []);
