@@ -275,12 +275,17 @@ impl State {
     /// A click on a layer surface that takes the keyboard on demand gives
     /// it the keyboard; a click anywhere else takes it back.
     pub(crate) fn click_layer_focus(&mut self, location: Point<f64, Logical>) {
+        // Only a layer surface that is what the press landed on: one below
+        // the windows (the zones' surface fills every display) is under
+        // each of them, and a press on a window is not a press on it.
+        let topmost = self.surface_under(location).1.map(|(surface, _)| surface);
         let clicked = self
             .layer_surface_under(
                 location,
                 &[Layer::Overlay, Layer::Top, Layer::Bottom, Layer::Background],
             )
-            .map(|(surface, _)| surface);
+            .map(|(surface, _)| surface)
+            .filter(|surface| topmost.as_ref() == Some(surface));
         let wanted = clicked.filter(|surface| {
             self.output_for_layer(surface).is_some_and(|(_, output)| {
                 layer_map_for_output(&output)

@@ -622,6 +622,52 @@ fn a_surface_given_the_keyboard_by_a_press_keeps_it_on_another_layer() {
 }
 
 #[test]
+fn a_press_on_a_window_over_a_surface_below_the_windows_gives_the_window_the_keyboard() {
+    let mut harness = Harness::new(Config::new());
+    let mut client = connect(&mut harness);
+    let handle = client.queue.handle();
+    // The zones' surface: all of the display, below the windows, with the
+    // keyboard at a press.
+    let desk = client.app.sheet(
+        &handle,
+        "test-zones",
+        Layer::Bottom,
+        everywhere(),
+        (0, 0),
+        [40, 40, 40, 255],
+    );
+    client.app.sheets[desk]
+        .layer
+        .set_keyboard_interactivity(KeyboardInteractivity::OnDemand);
+    client.app.sheets[desk].surface.commit();
+    pump(&mut harness, &mut client);
+    // Pressed where there is no window: it has the keyboard.
+    harness.state.pointer_moved((300.0, 300.0).into(), 0);
+    harness.state.pointer_button(LEFT, true, 0);
+    harness.state.pointer_button(LEFT, false, 0);
+    pump(&mut harness, &mut client);
+    assert_eq!(client.app.keyboard_on, Some(desk));
+
+    // A window opens over it and is pressed: the keyboard is the window's,
+    // not the surface's that lies under it.
+    let windows = harness.connect();
+    let (window, id) = harness.open(windows, "editor", "org.test.editor");
+    pump(&mut harness, &mut client);
+    let rect = harness.rect(id);
+    let middle = (
+        f64::from(rect.x + rect.width / 2),
+        f64::from(rect.y + rect.height / 2),
+    );
+    harness.state.pointer_moved(middle.into(), 0);
+    harness.state.pointer_button(LEFT, true, 0);
+    harness.state.pointer_button(LEFT, false, 0);
+    pump(&mut harness, &mut client);
+    harness.pump();
+    assert_eq!(client.app.keyboard_on, None, "the surface below gave it up");
+    assert!(harness.clients[windows].app.windows[window].activated);
+}
+
+#[test]
 fn a_drag_reaches_a_surface_over_the_windows_and_the_keys_say_what_it_does() {
     let mut harness = Harness::new(Config::new());
     let mut client = connect(&mut harness);
