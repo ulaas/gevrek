@@ -1097,7 +1097,7 @@ impl Runtime {
             let raw_event_count = events.len();
             events = event_coalescing::coalesce_window_events(events);
             if raw_event_count > 20 {
-                log::debug!(
+                log::trace!(
                     "Coalesced {} window events into {}",
                     raw_event_count,
                     events.len()
@@ -1108,21 +1108,19 @@ impl Runtime {
             let hotkey_events = self.hotkey_manager.poll_events();
             if !hotkey_events.is_empty() {
                 last_work = Some(std::time::Instant::now());
-                log::debug!(
+                log::trace!(
                     "Iteration {}: {} hotkey events received",
                     iteration,
                     hotkey_events.len()
                 );
                 for hotkey_event in hotkey_events {
-                    log::info!(
-                        "Input triggered: device={:?}, trigger={:?}, key={}, ctrl={}, alt={}, shift={}, win={}, held_ms={}",
+                    // (Only a shortcut that is registered comes here: its
+                    // name, never a key that was typed.)
+                    log::debug!(
+                        "the shortcut {} was used ({:?}, {:?}, held {} ms)",
+                        shortcut_name(&hotkey_event),
                         hotkey_event.device,
                         hotkey_event.trigger,
-                        hotkey_event.key,
-                        hotkey_event.ctrl,
-                        hotkey_event.alt,
-                        hotkey_event.shift,
-                        hotkey_event.win,
                         hotkey_event.held_ms,
                     );
                     self.emit_runtime_event(
@@ -1178,7 +1176,7 @@ impl Runtime {
                                     {
                                         log::error!("Error focusing window: {}", e);
                                     }
-                                    log::info!("Cycled to next window in focus history");
+                                    log::debug!("the keyboard goes to {window_handle:?}, the next window in the history of the focus");
                                 }
                             }
                             PendingFocusOp::CyclePrevious => {
@@ -1189,7 +1187,7 @@ impl Runtime {
                                     {
                                         log::error!("Error focusing window: {}", e);
                                     }
-                                    log::info!("Cycled to previous window in focus history");
+                                    log::debug!("the keyboard goes to {window_handle:?}, the window before in the history of the focus");
                                 }
                             }
                         }
@@ -1224,37 +1222,22 @@ impl Runtime {
             }
 
             for event in events {
-                // Only log important events (not move/resize which spam the console)
+                // What happens to a window, once each time (a move, a
+                // change of size or title comes with every step of a drag
+                // or every tick of a program's clock: at trace).
                 match &event {
-                    crate::dwm::WindowEvent::Created(_) => {
-                        log::info!("Processing window event: {:?}", event)
+                    crate::dwm::WindowEvent::Moved(..)
+                    | crate::dwm::WindowEvent::Resized(..)
+                    | crate::dwm::WindowEvent::MetadataChanged(_)
+                    // (A menu or a tooltip is shown and hidden as the
+                    // pointer passes: a window that is adopted, or left
+                    // alone and why, is said below.)
+                    | crate::dwm::WindowEvent::Created(_)
+                    | crate::dwm::WindowEvent::Unmapped(_)
+                    | crate::dwm::WindowEvent::Destroyed(_) => {
+                        log::trace!("window event: {event:?}")
                     }
-                    crate::dwm::WindowEvent::Destroyed(_) => {
-                        log::info!("Processing window event: {:?}", event)
-                    }
-                    crate::dwm::WindowEvent::Focused(_) => {
-                        log::info!("Processing window event: {:?}", event)
-                    }
-                    crate::dwm::WindowEvent::Moved(_, _, _) => {} // log::debug!("Processing window event: {:?}", event),
-                    crate::dwm::WindowEvent::Resized(_, _, _) => {} // log::debug!("Processing window event: {:?}", event),
-                    crate::dwm::WindowEvent::DragStarted(_) => {
-                        log::info!("Processing window event: {:?}", event)
-                    }
-                    crate::dwm::WindowEvent::DragEnded(_) => {
-                        log::info!("Processing window event: {:?}", event)
-                    }
-                    crate::dwm::WindowEvent::Minimized(_) => {
-                        log::info!("Processing window event: {:?}", event)
-                    }
-                    crate::dwm::WindowEvent::Restored(_) => {
-                        log::info!("Processing window event: {:?}", event)
-                    }
-                    crate::dwm::WindowEvent::MetadataChanged(_) => {
-                        log::debug!("Processing window metadata event: {:?}", event)
-                    }
-                    crate::dwm::WindowEvent::Unmapped(_) => {
-                        log::debug!("Processing window event: {:?}", event)
-                    }
+                    _ => log::debug!("window event: {event:?}"),
                 }
 
                 self.emit_window_extension_event(&event);
@@ -1271,6 +1254,18 @@ impl Runtime {
                         | crate::dwm::WindowEvent::Restored(_)
                 );
                 if let crate::dwm::WindowEvent::Created(handle) = event {
+                    // Left alone, and why. (Once a window is taken, its
+                    // taking is said by the engine.)
+                    let reason = log::log_enabled!(log::Level::Debug)
+                        .then(|| self.window_manager.ignore_reason(handle))
+                        .flatten();
+                    if let Some(reason) = reason {
+                        if reason.passes_by() {
+                            log::trace!("{handle:?} is left alone: {reason}");
+                        } else {
+                            log::debug!("{handle:?} is left alone: {reason}");
+                        }
+                    }
                     // What a program shows while its window is put away
                     // with its workspace (a dialog of that window, a
                     // notification of its own) is put away with it, and
@@ -1512,7 +1507,7 @@ impl Runtime {
             // for a moment, runs that corner's command.
             if self.config.desktop.hot_corners.watched() {
                 if let Some(command) = self.hot_corner_due() {
-                    log::info!("A hot corner runs: {}", command.display_name());
+                    log::debug!("a hot corner runs {}", command.display_name());
                     if let Err(error) = self.execute_runtime_dispatch(command) {
                         log::error!("A hot corner's command could not be run: {error}");
                     }
@@ -1534,7 +1529,10 @@ impl Runtime {
                         {
                             // Only focus tiled windows (skip floating/unmanaged)
                             if self.core.monitor_manager.find_window(handle).is_some() {
-                                let _ = self.window_manager.focus_window(handle);
+                                log::debug!("the keyboard follows the pointer to {handle:?}");
+                                if let Err(error) = self.window_manager.focus_window(handle) {
+                                    log::debug!("{handle:?} did not take the keyboard: {error:#}");
+                                }
                                 self.core.focus_manager.record_focus(handle);
                                 last_ffm_window = Some(handle);
                             }
@@ -1636,8 +1634,10 @@ impl Runtime {
                 pass_times.mark(now);
                 let (slow, summary) = pass_times.end(now);
                 if log::log_enabled!(target: pass_times::LOG, log::Level::Debug) {
+                    // (A slow pass can come with every frame of a motion:
+                    // at trace. The half minute's sum at debug.)
                     if let Some(pass) = slow {
-                        log::debug!(
+                        log::trace!(
                             target: pass_times::LOG,
                             "a pass of {:.1} ms: {}",
                             pass.whole.as_secs_f64() * 1000.0,
@@ -2784,13 +2784,9 @@ impl Runtime {
             if let Err(e) = self.hotkey_manager.register(hotkey, id) {
                 log::warn!("Failed to register hotkey for node {}: {}", node_id, e);
             } else {
-                log::info!(
-                    "Registered hotkey: key={}, ctrl={}, alt={}, shift={}, win={} (node_id={})",
-                    key,
-                    ctrl,
-                    alt,
-                    shift,
-                    win,
+                log::debug!(
+                    "the shortcut {} of the graph's node {} is registered",
+                    shortcut_name_of(&key, ctrl, alt, shift, win),
                     node_id
                 );
                 self.registered_hotkey_ids.push(id);
@@ -2824,6 +2820,11 @@ impl Runtime {
                     error
                 );
             } else {
+                log::debug!(
+                    "the shortcut '{}' ({}) is registered",
+                    binding.name,
+                    shortcut_name_of(&binding.key, binding.ctrl, binding.alt, binding.shift, binding.win)
+                );
                 self.registered_hotkey_ids.push(id);
                 hotkey_count += 1;
             }
@@ -2890,7 +2891,12 @@ impl Runtime {
                 ("delta_y".to_string(), format!("{:.4}", event.delta_y)),
             ],
         );
-        log::debug!(
+        log::log!(
+            if event.phase == GesturePhase::Updated {
+                log::Level::Trace
+            } else {
+                log::Level::Debug
+            },
             "Gesture {}: {} finger{} {} {:.0}%",
             event.phase.config_name(),
             event.fingers,
@@ -2950,7 +2956,7 @@ impl Runtime {
                 if self.active_binding_submap != name {
                     self.active_binding_submap = name;
                     self.register_hotkeys()?;
-                    log::info!(
+                    log::debug!(
                         "Active binding submap is now '{}'",
                         self.active_binding_submap
                     );
@@ -2964,7 +2970,7 @@ impl Runtime {
                 if self.active_binding_submap != "default" {
                     self.active_binding_submap = "default".to_string();
                     self.register_hotkeys()?;
-                    log::info!("Returned to the default binding submap");
+                    log::debug!("Returned to the default binding submap");
                     self.send_debug_overlay_data(Some("keys' mode".to_string()));
                 }
                 Ok(())
@@ -3102,7 +3108,7 @@ impl Runtime {
                     ..Default::default()
                 };
                 gevrek_engine::Desktop::launch(&mut self.window_manager, &launch).map(|pid| {
-                    log::info!("Started '{}' as PID {pid}", launch.program);
+                    log::debug!("Started '{}' as PID {pid}", launch.program);
                 })
             }
             DispatchCommand::LaunchStartup { id } => self.startup_process_manager.launch(&id),
@@ -3248,6 +3254,23 @@ impl Runtime {
         log::info!("Saved {} windows to state file", state.windows.len());
         Ok(())
     }
+}
+
+/// A shortcut as it is written (`Ctrl+Alt+T`), for the log.
+fn shortcut_name_of(key: &str, ctrl: bool, alt: bool, shift: bool, win: bool) -> String {
+    let mut name = String::new();
+    for (held, modifier) in [(win, "Win"), (ctrl, "Ctrl"), (alt, "Alt"), (shift, "Shift")] {
+        if held {
+            name.push_str(modifier);
+            name.push('+');
+        }
+    }
+    name.push_str(key);
+    name
+}
+
+fn shortcut_name(event: &gevrek_engine::input::HotkeyEvent) -> String {
+    shortcut_name_of(&event.key, event.ctrl, event.alt, event.shift, event.win)
 }
 
 #[cfg(test)]

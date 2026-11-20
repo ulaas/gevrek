@@ -4,11 +4,12 @@
 //! A pass is one turn of the loop in `run`: what was asked is carried
 //! out, the system's events are taken in, the windows are laid out and
 //! moved, the state is told. Its parts are marked as they end. Nothing
-//! is said of it unless the log is at its debug level: then a pass that
-//! took longer than a frame is told at once, part by part, and every
-//! half minute how many passes there were, how long one took and which
-//! was the slowest. To have only this and no other debug line, set
-//! `RUST_LOG=info,gevrek::passes=debug`.
+//! is said of it unless the log is at its debug level: then every half
+//! minute how many passes there were, how long one took and which was
+//! the slowest; at its trace level, a pass that took longer than a frame
+//! is told at once as well, part by part. To have only this and no other
+//! debug line, set `RUST_LOG=info,gevrek::passes=debug` (`=trace` for
+//! each slow pass).
 
 use std::time::{Duration, Instant};
 

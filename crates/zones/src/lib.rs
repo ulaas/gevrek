@@ -26,6 +26,8 @@
 //! - `host`: carries events and requests between a core and a backend.
 //! - `ipc`: what is asked from outside, what is answered, and the zones
 //!   as they are told to other programs.
+//! - `timed`: a call to the system said in the log with how long it
+//!   took, as a warning where the shell's thread waited too long.
 //! - `testing`: a backend in memory.
 
 pub mod access;
@@ -51,6 +53,7 @@ pub mod search;
 pub mod snap;
 pub mod state;
 pub mod store;
+pub mod timed;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;

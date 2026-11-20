@@ -30,6 +30,15 @@ pub enum Location {
     Directory { path: String },
 }
 
+impl std::fmt::Display for Location {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Location::Desktop => formatter.write_str("the desktop"),
+            Location::Directory { path } => formatter.write_str(path),
+        }
+    }
+}
+
 /// A watch that was started, to end it by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct WatchId(pub u64);
@@ -94,6 +103,20 @@ impl FileOperation {
     }
 }
 
+/// As the log says it: what is done, to what.
+impl std::fmt::Display for FileOperation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FileOperation::Copy { from, to_folder } => write!(formatter, "copying {from} into {to_folder}"),
+            FileOperation::Move { from, to_folder } => write!(formatter, "moving {from} into {to_folder}"),
+            FileOperation::Rename { path, new_name } => write!(formatter, "renaming {path} to {new_name}"),
+            FileOperation::NewFolder { parent, name } => write!(formatter, "making the folder {name} in {parent}"),
+            FileOperation::Trash { path } => write!(formatter, "putting {path} in the trash"),
+            FileOperation::Restore { path } => write!(formatter, "bringing {path} back from the trash"),
+        }
+    }
+}
+
 /// What is carried by something dragged over a zone.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -107,6 +130,28 @@ pub struct DropPayload {
     pub text: Option<String>,
     /// What the source lets be done with it.
     pub allowed: DragActions,
+}
+
+impl DropPayload {
+    /// What it carries, in words for the log: how many of each, never
+    /// the text itself.
+    pub fn summary(&self) -> String {
+        let mut parts = Vec::new();
+        if !self.items.is_empty() {
+            parts.push(crate::timed::count(self.items.len(), "item", "items"));
+        }
+        if !self.paths.is_empty() {
+            parts.push(crate::timed::count(self.paths.len(), "file", "files"));
+        }
+        if self.text.is_some() {
+            parts.push("text".to_string());
+        }
+        if parts.is_empty() {
+            "nothing".to_string()
+        } else {
+            parts.join(", ")
+        }
+    }
 }
 
 /// What may be done with what is dragged.

@@ -45,7 +45,7 @@ impl Executor {
                             if let Some(workspace) = workspaces.get_mut(workspace_idx) {
                                 // Set the new layout
                                 workspace.layout = *layout;
-                                log::info!(
+                                log::trace!(
                                     "Changed workspace {} layout to {:?}",
                                     workspace.name,
                                     layout
@@ -57,7 +57,7 @@ impl Executor {
                                     window_manager,
                                 )?;
 
-                                log::info!(
+                                log::trace!(
                                     "Retiled workspace {} with layout {:?}",
                                     workspace.name,
                                     layout

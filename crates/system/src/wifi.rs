@@ -170,11 +170,16 @@ fn tool() -> std::process::Command {
 
 #[cfg(target_os = "linux")]
 fn ask(arguments: &[&str]) -> Option<String> {
+    // (The arguments never hold a password: that goes on the input.)
     let output = tool()
         .args(arguments)
         .stdin(std::process::Stdio::null())
         .output()
+        .map_err(|error| log::debug!("nmcli did not start: {error}"))
         .ok()?;
+    if !output.status.success() {
+        log::debug!("nmcli {}: {}", arguments.join(" "), output.status);
+    }
     output
         .status
         .success()
@@ -209,6 +214,11 @@ pub fn read() -> Option<Wifi> {
     ])
     .map(|list| networks_in(&list, &known))
     .unwrap_or_default();
+    log::debug!(
+        "the wireless networks: {} in reach, {} known to the machine",
+        networks.len(),
+        known.len()
+    );
     Some(Wifi {
         enabled: true,
         networks,
@@ -220,7 +230,9 @@ pub fn read() -> Option<Wifi> {
 /// took the request: it refuses one that comes too soon after another.
 #[cfg(target_os = "linux")]
 pub fn rescan() -> bool {
-    ask(&["device", "wifi", "rescan"]).is_some()
+    let took = ask(&["device", "wifi", "rescan"]).is_some();
+    log::debug!("the system is asked to look for networks: {}", if took { "taken" } else { "refused" });
+    took
 }
 
 #[cfg(not(any(target_os = "linux", windows)))]
@@ -231,7 +243,9 @@ pub fn rescan() -> bool {
 /// Switch the radio on, or off. Whether the system took it.
 #[cfg(target_os = "linux")]
 pub fn set_enabled(on: bool) -> bool {
-    ask(&["radio", "wifi", if on { "on" } else { "off" }]).is_some()
+    let took = ask(&["radio", "wifi", if on { "on" } else { "off" }]).is_some();
+    log::debug!("the wireless radio is asked to be {}: {}", if on { "on" } else { "off" }, if took { "taken" } else { "refused" });
+    took
 }
 
 /// Join a network: one the machine keeps by its kept settings, another
@@ -243,23 +257,43 @@ pub fn set_enabled(on: bool) -> bool {
 pub fn join(name: &str, known: bool, password: Option<&str>) -> bool {
     use std::io::Write;
     if known {
-        return ask(&["--wait", "20", "connection", "up", "id", name]).is_some();
+        let joined = ask(&["--wait", "20", "connection", "up", "id", name]).is_some();
+        log::debug!("the known wireless network {name}: {}", if joined { "joined" } else { "not joined" });
+        return joined;
     }
     let Some(password) = password.filter(|password| !password.is_empty()) else {
-        return ask(&["--wait", "20", "device", "wifi", "connect", name]).is_some();
+        let joined = ask(&["--wait", "20", "device", "wifi", "connect", name]).is_some();
+        log::debug!("the open wireless network {name}: {}", if joined { "joined" } else { "not joined" });
+        return joined;
     };
-    let Ok(mut child) = tool()
+    let mut child = match tool()
         .args(["--wait", "20", "--ask", "device", "wifi", "connect", name])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .spawn()
-    else {
-        return false;
+    {
+        Ok(child) => child,
+        Err(error) => {
+            log::debug!("nmcli did not start to join {name}: {error}");
+            return false;
+        }
     };
+    // (The password goes to nmcli alone, never to the log.)
     if let Some(mut input) = child.stdin.take() {
-        let _ = writeln!(input, "{password}");
+        if let Err(error) = writeln!(input, "{password}") {
+            log::debug!("nmcli was not given the password for {name}: {error}");
+        }
     }
-    child.wait().is_ok_and(|status| status.success())
+    match child.wait() {
+        Ok(status) => {
+            log::debug!("the wireless network {name}, with a password: {status}");
+            status.success()
+        }
+        Err(error) => {
+            log::debug!("nmcli joining {name} was not waited for: {error}");
+            false
+        }
+    }
 }
 
 #[cfg(not(any(target_os = "linux", windows)))]
@@ -447,6 +481,7 @@ mod system {
                 None => networks.push(network),
             }
         }
+        log::debug!("the wireless networks: {} in reach", networks.len());
         Some(Wifi {
             enabled: true,
             networks: super::in_order(networks),
@@ -455,10 +490,12 @@ mod system {
 
     /// Ask the device to look for networks again.
     pub fn rescan() -> bool {
-        Service::open().is_some_and(|service| {
+        let took = Service::open().is_some_and(|service| {
             // SAFETY: a plain call.
             unsafe { WlanScan(service.handle, &service.device, None, None, None) == 0 }
-        })
+        });
+        log::debug!("the system is asked to look for networks: {}", if took { "taken" } else { "refused" });
+        took
     }
 
     /// Switch the radio on, or off. Whether the system took it.
@@ -492,6 +529,7 @@ mod system {
                 )
             } == 0;
         }
+        log::debug!("the wireless radio is asked to be {}: {}", if on { "on" } else { "off" }, if all { "taken" } else { "refused" });
         all
     }
 
@@ -573,6 +611,11 @@ mod system {
                 }
             }
         }
+        log::debug!(
+            "the wireless network {name}{}: {}",
+            if made { ", by a profile made for it" } else { "" },
+            if joined { "joined" } else if asked { "not joined in time" } else { "not asked for" }
+        );
         if !joined && made {
             // SAFETY: the text lives until the call returns.
             unsafe {

@@ -15,6 +15,7 @@ pub mod desktop;
 pub mod devices;
 pub mod dmabuf;
 pub mod dnd;
+pub(crate) mod failing;
 pub mod gestures;
 pub mod headless;
 pub mod host;

@@ -102,8 +102,9 @@ fn execute(item: &ItemId, verb: Option<&'static str>) -> Result<(), BackendError
         };
         // SAFETY: the structure is ours and says how large it is; the
         // list and the verb live until the call returns.
-        if let Err(error) = unsafe { ShellExecuteExW(&mut asked) } {
-            log::warn!("zones: {id} was not opened: {error}");
+        match unsafe { ShellExecuteExW(&mut asked) } {
+            Ok(()) => log::debug!("zones: {id} was opened by the shell"),
+            Err(error) => log::warn!("zones: {id} was not opened: {error}"),
         }
     })
 }
@@ -138,8 +139,9 @@ pub fn open_with(item: &ItemId, program: Option<&str>) -> Result<(), BackendErro
             ..Default::default()
         };
         // SAFETY: as in `execute`.
-        if let Err(error) = unsafe { ShellExecuteExW(&mut asked) } {
-            log::warn!("zones: {program} did not open {file}: {error}");
+        match unsafe { ShellExecuteExW(&mut asked) } {
+            Ok(()) => log::debug!("zones: {file} was opened with {program}"),
+            Err(error) => log::warn!("zones: {program} did not open {file}: {error}"),
         }
     })
 }
@@ -360,6 +362,7 @@ unsafe fn run_menu(owner: HWND, items: &[ItemId], at: POINT) {
         let _ = DestroyMenu(menu);
         let picked = picked.0 as u32;
         if picked < FIRST {
+            log::debug!("zones: the shell's menu was closed without a choice");
             return None;
         }
         // The entry by its number, said both ways (some menus read the
@@ -386,6 +389,8 @@ unsafe fn run_menu(owner: HWND, items: &[ItemId], at: POINT) {
             shell_menu.InvokeCommand(&asked as *const CMINVOKECOMMANDINFOEX as *const CMINVOKECOMMANDINFO)
         {
             log::warn!("zones: the menu's entry was not carried out: {error}");
+        } else {
+            log::debug!("zones: entry {number} of the shell's menu was carried out");
         }
         Some(shell_menu)
     })();

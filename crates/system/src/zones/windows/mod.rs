@@ -266,6 +266,7 @@ impl SystemBackend {
     /// to the pixel).
     pub fn set_displays(&mut self, displays: Vec<Display>, reserved: Vec<ReservedArea>) {
         if self.displays.tell(displays.clone(), reserved.clone()) {
+            log::debug!("zones: the displays or the room kept on them changed: {} displays, {} areas kept", displays.len(), reserved.len());
             self.events.push(BackendEvent::Displays { displays, reserved });
             self.news.wake();
         }
@@ -488,6 +489,16 @@ impl SystemBackend {
     }
 }
 
+/// How a file operation came out, said in the log.
+fn performed(operation: &FileOperation, done: Result<FileOperation, BackendError>) -> Result<FileOperation, BackendError> {
+    match &done {
+        Ok(undo) => log::debug!("zones: {operation}: done (taken back by {undo})"),
+        Err(BackendError::Cancelled) => log::debug!("zones: {operation}: called off"),
+        Err(error) => log::debug!("zones: {operation}: failed: {error}"),
+    }
+    done
+}
+
 fn locked(seen: &watch::Shared) -> std::sync::MutexGuard<'_, seen::Seen> {
     seen.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
@@ -518,6 +529,7 @@ impl ZonesBackend for SystemBackend {
         match location {
             Location::Desktop => {
                 if let Some(desktop) = &mut self.desktop {
+                    log::debug!("zones: the desktop is watched once more (watch {})", watch.0);
                     desktop.watches.push(watch);
                     return Ok(watch);
                 }
@@ -541,16 +553,24 @@ impl ZonesBackend for SystemBackend {
                     }
                 }
                 if !told && folders.is_empty() {
+                    log::debug!("zones: the desktop cannot be watched: neither the shell nor its folders tell");
                     return Err(BackendError::Refused {
                         what: "the desktop cannot be watched".to_string(),
                     });
                 }
+                log::debug!(
+                    "zones: the desktop is watched (watch {}): {} the shell, {} of its folders",
+                    watch.0,
+                    if told { "by" } else { "not by" },
+                    folders.len()
+                );
                 self.shown.add(&seen);
                 self.desktop = Some(DesktopWatch { seen, watches: vec![watch], _folders: folders });
             }
             Location::Directory { path } => {
                 // Answered at once: the folder is gone to on a thread of
                 // its own, and told when it was read (or as away).
+                log::debug!("zones: {path} is watched (watch {}), gone to on a thread of its own", watch.0);
                 let portal = portal::Portal::open(path, Arc::clone(&self.news), Arc::clone(&self.how));
                 self.shown.add(&portal.seen);
                 self.folders.insert(watch, portal);
@@ -560,7 +580,8 @@ impl ZonesBackend for SystemBackend {
     }
 
     fn unwatch(&mut self, watch: WatchId) {
-        if self.folders.remove(&watch).is_some() {
+        if let Some(portal) = self.folders.remove(&watch) {
+            log::debug!("zones: {} is no longer watched (watch {})", portal.path(), watch.0);
             return;
         }
         match self.smart.unwatch(watch) {
@@ -576,6 +597,7 @@ impl ZonesBackend for SystemBackend {
         if let Some(desktop) = &mut self.desktop {
             desktop.watches.retain(|known| *known != watch);
             if desktop.watches.is_empty() {
+                log::debug!("zones: the desktop is no longer watched");
                 self.desktop = None;
                 if let Some(window) = &self.window {
                     window.stop_listening_to_desktop();
@@ -597,6 +619,7 @@ impl ZonesBackend for SystemBackend {
             }
         }
         if self.news.displays_changed() && self.displays.system_changed() {
+            log::debug!("zones: Windows says its displays changed");
             events.push(BackendEvent::Displays {
                 displays: self.displays.displays(),
                 reserved: self.displays.reserved(),
@@ -631,8 +654,9 @@ impl ZonesBackend for SystemBackend {
             // (On a thread of its own: the shell may take its time to
             // start a program, and says itself what goes wrong.)
             let started = std::thread::Builder::new().name("gevrek-zones-start".to_string()).spawn(move || {
-                if let Err(error) = crate::apps::start(&app) {
-                    log::warn!("zones: {} did not start: {error}", app.name);
+                match crate::apps::start(&app) {
+                    Ok(_) => log::debug!("zones: {} was started", app.name),
+                    Err(error) => log::warn!("zones: {} did not start: {error}", app.name),
                 }
             });
             return started.map(|_| ()).map_err(|error| BackendError::Refused { what: error.to_string() });
@@ -651,6 +675,7 @@ impl ZonesBackend for SystemBackend {
         // (A program is no item of the shell's: it has no menu there.
         // What can be done with one is the renderer's to offer.)
         if items.iter().any(Smart::is_program) {
+            log::debug!("zones: a program has no menu of the shell's");
             return Err(BackendError::Unsupported);
         }
         // The point is the core's, in logical units; the menu opens at
@@ -666,7 +691,7 @@ impl ZonesBackend for SystemBackend {
     }
 
     fn perform(&mut self, operation: &FileOperation) -> Result<FileOperation, BackendError> {
-        self.files.perform(operation)
+        performed(operation, self.files.perform(operation))
     }
 
     fn begin_operation(&mut self, request: u64, operation: &FileOperation) -> bool {
@@ -677,7 +702,8 @@ impl ZonesBackend for SystemBackend {
             request,
             Box::new(move |watched| {
                 files.watched = Some(Arc::clone(watched));
-                files.perform(&operation)
+                log::debug!("zones: {operation}");
+                performed(&operation, files.perform(&operation))
             }),
         )
     }
@@ -739,6 +765,7 @@ impl ZonesBackend for SystemBackend {
             }
         }
         if !watched {
+            log::debug!("zones: {path} is read once, on a thread of its own");
             // Not watched: read once, on a thread of its own, and told.
             let (news, location, how) = (Arc::clone(&self.news), location.clone(), Arc::clone(&self.how));
             let started = std::thread::Builder::new().name("gevrek-zones-list".to_string()).spawn(move || {

@@ -1,0 +1,15 @@
+[package]
+name = "gevrek-logging"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "How much every gevrek program writes to its log: gevrek's own debug lines before 1.0, and where asked for after."
+build = "build.rs"
+
+[dependencies]
+gevrek-model = { path = "../model" }
+gevrek-build = { path = "../build" }
+log = { workspace = true }
+env_logger = { workspace = true }
+serde_json = { workspace = true }

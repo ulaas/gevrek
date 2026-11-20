@@ -41,7 +41,10 @@ pub fn spawn_then(
     let reaper = std::thread::Builder::new()
         .name("gevrek-reap".to_string())
         .spawn(move || {
-            let _ = child.wait();
+            match child.wait() {
+                Ok(status) => log::debug!("the program of pid {pid} ended ({status})"),
+                Err(error) => log::debug!("the end of pid {pid} could not be waited for: {error}"),
+            }
             ended();
         });
     if let Err(error) = reaper {

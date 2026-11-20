@@ -262,6 +262,13 @@ pub fn start(of: Of, folder: &Path, sound: bool) -> anyhow::Result<Recording> {
             let Some(mut pictures) = encoder.stdin.take() else {
                 return fail("the encoder takes no pictures".to_string());
             };
+            log::debug!(
+                "the recording begins: {}x{} at {RATE} pictures a second{}, into {}",
+                size.0,
+                size.1,
+                if sound { " with the sound" } else { "" },
+                written_to.display()
+            );
             let _ = begun.send(Ok(()));
             let started = Instant::now();
             let mut written = 0u64;
@@ -315,6 +322,7 @@ pub fn start(of: Of, folder: &Path, sound: bool) -> anyhow::Result<Recording> {
                 }
             }
             let ended = encoder.wait().map_err(|error| error.to_string())?;
+            log::debug!("the encoder ended: {ended} ({written} pictures written)");
             match failed {
                 Some(why) => Err(why),
                 None if !ended.success() => Err(format!("the encoder ended with {ended}")),
@@ -328,8 +336,12 @@ pub fn start(of: Of, folder: &Path, sound: bool) -> anyhow::Result<Recording> {
             sound,
             thread,
         }),
-        Ok(Err(why)) => anyhow::bail!(why),
+        Ok(Err(why)) => {
+            log::debug!("the recording did not begin: {why}");
+            anyhow::bail!(why)
+        }
         Err(_) => {
+            log::debug!("the recording did not begin in time: stopped");
             stop.store(true, Ordering::Relaxed);
             anyhow::bail!("the recording did not begin")
         }

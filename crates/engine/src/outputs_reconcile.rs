@@ -118,15 +118,43 @@ impl Outputs {
             match old_by_key.remove(&key) {
                 Some(old) => {
                     if old.handle != info.handle {
+                        log::debug!(
+                            "the display {} has another handle now ({:?} for {:?}): its workspaces go along",
+                            info.name,
+                            info.handle,
+                            old.handle
+                        );
                         self.move_monitor_state(old.handle, info.handle);
                         changes.remapped.push((old.handle, info.handle));
                     }
                     if !same_geometry(&old, info) {
+                        log::debug!(
+                            "the display {} changed: {}x{} at ({}, {}), room for windows {}x{} at ({}, {}), scale {}{}",
+                            info.name,
+                            info.width,
+                            info.height,
+                            info.x,
+                            info.y,
+                            info.work_width,
+                            info.work_height,
+                            info.work_x,
+                            info.work_y,
+                            info.dpi_scale,
+                            if info.is_primary { ", the primary one" } else { "" }
+                        );
                         changes.geometry_changed = true;
                     }
                 }
                 None if self.detached.contains_key(&key) => reattach_keys.push((key, info.handle)),
                 None => {
+                    log::debug!(
+                        "the display {} is new ({}x{} at ({}, {})): it gets an empty ring of workspaces",
+                        info.name,
+                        info.width,
+                        info.height,
+                        info.x,
+                        info.y
+                    );
                     self.workspaces.entry(info.handle).or_default();
                     changes.attached.push(info.handle);
                 }

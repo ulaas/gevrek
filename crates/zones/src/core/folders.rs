@@ -164,6 +164,7 @@ impl ZonesCore {
         if !self.watched_sources.contains(&source) {
             return Vec::new();
         }
+        log::debug!("the source {source:?} could not be asked: {error}");
         // A backend that cannot ask a source at all is not the one that
         // knows it: where whoever hosts the core told what it has (the
         // programs that run), that stands.

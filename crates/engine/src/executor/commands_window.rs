@@ -287,7 +287,7 @@ impl Executor {
             }
             DispatchCommand::RestoreWindows => {
                 let restored = self.restore_hidden_windows(window_manager);
-                log::info!("Restored {} hidden window(s)", restored);
+                log::debug!("Restored {} hidden window(s)", restored);
                 Ok(())
             }
             DispatchCommand::TogglePseudotile => {

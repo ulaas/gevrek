@@ -39,10 +39,14 @@ unsafe extern "C" fn converse(
         let message = &**messages.offset(index);
         let answer = &mut *list.offset(index);
         match PamMessageStyle::from(message.msg_style) {
+            // (What PAM is answered is never said; what it asks, only by
+            // its kind.)
             PamMessageStyle::Prompt_Echo_On => {
+                log::debug!("PAM asks for the name");
                 answer.resp = libc::strdup(credentials.user.as_ptr());
             }
             PamMessageStyle::Prompt_Echo_Off => {
+                log::debug!("PAM asks for the password");
                 answer.resp = libc::strdup(credentials.password.as_ptr());
             }
             PamMessageStyle::Text_Info | PamMessageStyle::Error_Msg => {
@@ -95,10 +99,12 @@ impl Session {
     /// Check the password, and that the account may log in now.
     pub fn authenticate(&mut self) -> Result<(), PamReturnCode> {
         let code = pam::authenticate(self.handle, PamFlag::None);
+        log::debug!("PAM's check of the password: {code:?}");
         if code != PamReturnCode::Success {
             return Err(code);
         }
         let code = pam::acct_mgmt(self.handle, PamFlag::None);
+        log::debug!("PAM's look at the account: {code:?}");
         if code != PamReturnCode::Success {
             return Err(code);
         }
@@ -109,16 +115,19 @@ impl Session {
     /// does it).
     pub fn open(&mut self) -> Result<(), PamReturnCode> {
         let code = pam::setcred(self.handle, PamFlag::Establish_Cred);
+        log::debug!("PAM set the credentials: {code:?}");
         if code != PamReturnCode::Success {
             return Err(code);
         }
         let code = pam::open_session(self.handle, false);
+        log::debug!("PAM opened the session: {code:?}");
         if code != PamReturnCode::Success {
             pam::setcred(self.handle, PamFlag::Delete_Cred);
             return Err(code);
         }
         self.opened = true;
         let code = pam::setcred(self.handle, PamFlag::Reinitialize_Cred);
+        log::debug!("PAM set the credentials again: {code:?}");
         if code != PamReturnCode::Success {
             return Err(code);
         }
@@ -163,9 +172,11 @@ pub fn pair_of(line: &[u8]) -> Option<(String, String)> {
 impl Drop for Session {
     fn drop(&mut self) {
         if self.opened {
-            pam::close_session(self.handle, false);
+            let code = pam::close_session(self.handle, false);
+            log::debug!("PAM closed the session: {code:?}");
         }
         let code = pam::setcred(self.handle, PamFlag::Delete_Cred);
+        log::debug!("PAM took back the credentials: {code:?}");
         pam::end(self.handle, code);
     }
 }

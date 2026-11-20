@@ -86,6 +86,12 @@ pub struct DesktopConfig {
     /// workspace it was on when the WM last stopped, and show the workspace
     /// each monitor showed. Needs `manage_existing_on_startup`. Off by default.
     pub restore_session_on_startup: bool,
+    /// Whether gevrek's own programs write their debug lines to their
+    /// logs, for tracking down what went wrong. `auto`: on before gevrek
+    /// 1.0 (and in a build made with `GEVREK_DEBUG_LOG=1`), off from 1.0
+    /// on. Each program reads it when it starts; `RUST_LOG`, where it is
+    /// set, says instead.
+    pub debug_log: DebugLog,
     pub appearance: AppearanceProfile,
     /// What only one backend can apply (`platform.windows`,
     /// `platform.wayland`).
@@ -142,6 +148,7 @@ impl Default for DesktopConfig {
             watch_configuration: true,
             manage_existing_on_startup: true,
             restore_session_on_startup: false,
+            debug_log: DebugLog::Auto,
             appearance: AppearanceProfile::default(),
             platform: Default::default(),
             animations: AnimationProfile::default(),
@@ -268,6 +275,27 @@ impl Default for ScreenshotsProfile {
             save: true,
             record_sound: false,
         }
+    }
+}
+
+/// Whether gevrek's programs write their debug lines (`desktop.debug_log`).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum DebugLog {
+    /// As the build says: on before 1.0, off from 1.0 on.
+    #[default]
+    Auto,
+    /// Always.
+    On,
+    /// Never (warnings and errors are still written).
+    Off,
+}
+
+impl DebugLog {
+    pub fn is_auto(&self) -> bool {
+        *self == DebugLog::Auto
     }
 }
 

@@ -17,7 +17,8 @@ OnFailure=getty@tty1.service plymouth-quit.service
 
 [Service]
 ExecStart=/usr/bin/gevrek-dm
-Environment=RUST_LOG=info
+# How much it logs is gevrek's own choice (gevrek-logging); a drop-in
+# with Environment=RUST_LOG=... says instead.
 # It gives up by itself after three greeters that did not come up.
 Restart=no
 

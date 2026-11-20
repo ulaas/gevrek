@@ -192,6 +192,7 @@ impl State {
     }
 
     pub fn device_removed(&mut self, device: &libinput::Device) {
+        log::debug!("the input device {} is gone", device.name());
         self.input_devices.retain(|known| known != device);
     }
 
@@ -230,14 +231,22 @@ fn configure_device(device: &mut libinput::Device, input: &InputConfig) {
 
 fn accel(device: &mut libinput::Device, speed: f64, profile: AccelProfile) {
     if device.config_accel_is_available() {
-        let _ = device.config_accel_set_speed(speed.clamp(-1.0, 1.0));
+        said(
+            device.config_accel_set_speed(speed.clamp(-1.0, 1.0)),
+            device,
+            "accel set speed",
+        );
         let wanted = match profile {
             AccelProfile::Default => device.config_accel_default_profile(),
             AccelProfile::Adaptive => Some(libinput::AccelProfile::Adaptive),
             AccelProfile::Flat => Some(libinput::AccelProfile::Flat),
         };
         if let Some(wanted) = wanted {
-            let _ = device.config_accel_set_profile(wanted);
+            said(
+                device.config_accel_set_profile(wanted),
+                device,
+                "accel set profile",
+            );
         }
     }
 }
@@ -245,28 +254,60 @@ fn accel(device: &mut libinput::Device, speed: f64, profile: AccelProfile) {
 fn configure_mouse(device: &mut libinput::Device, mouse: &PointerConfig) {
     accel(device, mouse.speed, mouse.accel_profile);
     if device.config_scroll_has_natural_scroll() {
-        let _ = device.config_scroll_set_natural_scroll_enabled(mouse.natural_scroll);
+        said(
+            device.config_scroll_set_natural_scroll_enabled(mouse.natural_scroll),
+            device,
+            "scroll set natural scroll enabled",
+        );
     }
     if device.config_left_handed_is_available() {
-        let _ = device.config_left_handed_set(mouse.left_handed);
+        said(
+            device.config_left_handed_set(mouse.left_handed),
+            device,
+            "left handed set",
+        );
     }
 }
 
 fn configure_touchpad(device: &mut libinput::Device, touchpad: &TouchpadConfig) {
-    let _ = device.config_tap_set_enabled(touchpad.tap);
-    let _ = device.config_tap_set_drag_enabled(touchpad.tap_drag);
+    said(
+        device.config_tap_set_enabled(touchpad.tap),
+        device,
+        "tap set enabled",
+    );
+    said(
+        device.config_tap_set_drag_enabled(touchpad.tap_drag),
+        device,
+        "tap set drag enabled",
+    );
     accel(device, touchpad.speed, touchpad.accel_profile);
     if device.config_scroll_has_natural_scroll() {
-        let _ = device.config_scroll_set_natural_scroll_enabled(touchpad.natural_scroll);
+        said(
+            device.config_scroll_set_natural_scroll_enabled(touchpad.natural_scroll),
+            device,
+            "scroll set natural scroll enabled",
+        );
     }
     if device.config_dwt_is_available() {
-        let _ = device.config_dwt_set_enabled(touchpad.disable_while_typing);
+        said(
+            device.config_dwt_set_enabled(touchpad.disable_while_typing),
+            device,
+            "dwt set enabled",
+        );
     }
     if device.config_left_handed_is_available() {
-        let _ = device.config_left_handed_set(touchpad.left_handed);
+        said(
+            device.config_left_handed_set(touchpad.left_handed),
+            device,
+            "left handed set",
+        );
     }
     if device.config_middle_emulation_is_available() {
-        let _ = device.config_middle_emulation_set_enabled(touchpad.middle_emulation);
+        said(
+            device.config_middle_emulation_set_enabled(touchpad.middle_emulation),
+            device,
+            "middle emulation set enabled",
+        );
     }
     let method = match touchpad.scroll_method {
         ScrollMethod::Default => device.config_scroll_default_method(),
@@ -275,6 +316,21 @@ fn configure_touchpad(device: &mut libinput::Device, touchpad: &TouchpadConfig) 
         ScrollMethod::None => Some(libinput::ScrollMethod::NoScroll),
     };
     if let Some(method) = method {
-        let _ = device.config_scroll_set_method(method);
+        said(
+            device.config_scroll_set_method(method),
+            device,
+            "scroll set method",
+        );
+    }
+}
+
+/// What libinput answered to a setting: a device that has the setting
+/// and still refused it is said at debug.
+fn said(answer: Result<(), libinput::DeviceConfigError>, device: &libinput::Device, setting: &str) {
+    if let Err(error) = answer {
+        log::debug!(
+            "the input device {} refused the setting {setting}: {error:?}",
+            device.name()
+        );
     }
 }

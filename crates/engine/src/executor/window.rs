@@ -82,7 +82,7 @@ impl Executor {
         };
         self.focus_managed_window(window_manager, monitor_manager, target)?;
         focus_manager.record_focus(target);
-        log::info!(
+        log::debug!(
             "Suppressed initial focus for {:?}; restored focus to {:?}",
             excluded,
             target
@@ -294,7 +294,7 @@ impl Executor {
         for window in hidden {
             if !window_manager.is_hidden_by_backend(window) {
                 self.hide_workspace_window(window_manager, window)?;
-                let _ = effect(
+                try_effect(
                     window_manager,
                     Effect::Border {
                         id: window,
@@ -320,7 +320,7 @@ impl Executor {
                     },
                 )?;
                 self.window_state.get_mut(window).hidden_by_wm = false;
-                let _ = effect(
+                try_effect(
                     window_manager,
                     Effect::Border {
                         id: window,
@@ -355,7 +355,7 @@ impl Executor {
         if let Some(focused) = focused {
             effect(window_manager, Effect::Focus(Some(focused)))?;
         }
-        log::info!("Stacked all windows on the focused workspace");
+        log::debug!("Stacked all windows on the focused workspace");
         Ok(())
     }
 
@@ -382,7 +382,7 @@ impl Executor {
         if let Some(focused) = focused {
             effect(window_manager, Effect::Focus(Some(focused)))?;
         }
-        log::info!("Unstacked the focused group into {} windows", count);
+        log::debug!("Unstacked the focused group into {} windows", count);
         Ok(())
     }
 
@@ -392,9 +392,9 @@ impl Executor {
         window: WindowHandle,
     ) -> Result<()> {
         if groups::toggle_lock(monitor_manager, &mut self.locked_groups, window)? {
-            log::info!("Locked selected window group");
+            log::debug!("Locked selected window group");
         } else {
-            log::info!("Unlocked selected window group");
+            log::debug!("Unlocked selected window group");
         }
         Ok(())
     }
@@ -412,7 +412,7 @@ impl Executor {
             workspaces::hide_windows(&mut self.window_state, &change.hidden, &mut changes);
             self.apply_changes(window_manager, changes);
             for window in &change.hidden {
-                let _ = effect(
+                try_effect(
                     window_manager,
                     Effect::Border {
                         id: *window,
@@ -423,7 +423,7 @@ impl Executor {
             let mut changes = Changes::default();
             workspaces::show_windows(&mut self.window_state, &[change.selected], &mut changes);
             self.apply_changes(window_manager, changes);
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::Border {
                     id: change.selected,
@@ -571,21 +571,21 @@ impl Executor {
         if !was_floating {
             self.mark_layout_dirty(source);
         }
-        let _ = effect(
+        try_effect(
             window_manager,
             Effect::Border {
                 id: window,
                 change: BorderChange::Remove,
             },
         );
-        let _ = effect(
+        try_effect(
             window_manager,
             Effect::Platform(PlatformEffect::Windows(WindowsEffect::CaptionButtons {
                 id: window,
                 shown: true,
             })),
         );
-        let _ = effect(
+        try_effect(
             window_manager,
             Effect::SetVisible {
                 id: window,
@@ -593,7 +593,7 @@ impl Executor {
             },
         );
         self.window_state.get_mut(window).session_unmanaged = true;
-        log::info!("Unmanaged window {:?} for this session", window);
+        log::debug!("Unmanaged window {:?} for this session", window);
         Ok(())
     }
 
@@ -734,7 +734,7 @@ impl Executor {
             return Ok(false);
         }
         self.opened_out_of_sight = true;
-        log::info!(
+        log::debug!(
             "New window {window:?} belongs to a window on a workspace that is not shown: it opened there"
         );
         Ok(true)
@@ -807,10 +807,13 @@ impl Executor {
         if first {
             self.apply_initial_window_rules(window_manager, monitor_manager, window)?;
         }
-        log::info!(
-            "Adopted new window {:?} by default (no graph routing)",
-            window
-        );
+        if let Some((output, index)) = monitor_manager.find_window(window) {
+            log::debug!(
+                "{window:?} is taken{}: it {} on workspace {index} of {output:?}",
+                if just_opened { " as it opens" } else { "" },
+                if floating { "floats" } else { "is tiled" },
+            );
+        }
         Ok(true)
     }
 
@@ -876,7 +879,7 @@ impl Executor {
         let first_adoption = !self.window_state.get(window).known;
         self.window_state.get_mut(window).session_unmanaged = false;
         self.window_state.get_mut(window).known = true;
-        let _ = effect(
+        try_effect(
             window_manager,
             Effect::SetVisible {
                 id: window,
@@ -887,7 +890,7 @@ impl Executor {
         if first_adoption {
             self.apply_initial_window_rules(window_manager, monitor_manager, window)?;
         }
-        log::info!("Managing window {:?} again", window);
+        log::debug!("Managing window {:?} again", window);
         Ok(())
     }
 

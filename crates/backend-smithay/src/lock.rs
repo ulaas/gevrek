@@ -93,8 +93,17 @@ impl SessionLockHandler for State {
                 .find(|(_, known)| *known == output)
                 .map(|(id, _)| *id)
         }) else {
+            log::debug!("a lock screen's surface is for a display that is gone: not shown");
             return;
         };
+        log::debug!(
+            "{} gives the lock screen's surface for {}",
+            self.client_named(surface.wl_surface()),
+            self.outputs
+                .iter()
+                .find(|(known, _)| *known == id)
+                .map_or_else(String::new, |(_, output)| output.name()),
+        );
         if let Some(rect) = self.desktop.output_rectangle(id) {
             surface.with_pending_state(|state| {
                 state.size = Some((rect.width.max(1) as u32, rect.height.max(1) as u32).into());

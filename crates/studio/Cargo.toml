@@ -30,7 +30,7 @@ log = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 clap = { workspace = true }
-env_logger = { workspace = true }
+gevrek-logging = { path = "../logging" }
 dirs = { workspace = true }
 # The time of the day, marked on the night light's band.
 jiff = { workspace = true }

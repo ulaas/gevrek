@@ -196,10 +196,15 @@ fn actions_of(actions: DragActions) -> DndAction {
 fn read_pipe(pipe: ReadPipe, read: u64, to: channel::Sender<WasRead>) {
     let work = move || {
         let mut bytes = Vec::new();
-        let _ = std::fs::File::from(OwnedFd::from(pipe))
+        if let Err(error) = std::fs::File::from(OwnedFd::from(pipe))
             .take(MOST)
-            .read_to_end(&mut bytes);
-        let _ = to.send((read, bytes));
+            .read_to_end(&mut bytes)
+        {
+            log::debug!("what was dropped was read only in part: {error}");
+        }
+        if to.send((read, bytes)).is_err() {
+            log::debug!("what was dropped was read after the shell ended");
+        }
     };
     if let Err(error) = std::thread::Builder::new()
         .name("gevrek-drop-read".to_string())
@@ -213,7 +218,9 @@ fn read_pipe(pipe: ReadPipe, read: u64, to: channel::Sender<WasRead>) {
 fn write_pipe(pipe: WritePipe, bytes: Vec<u8>) {
     let work = move || {
         // (A target that stops reading early is its own business.)
-        let _ = std::fs::File::from(OwnedFd::from(pipe)).write_all(&bytes);
+        if let Err(error) = std::fs::File::from(OwnedFd::from(pipe)).write_all(&bytes) {
+            log::debug!("what is dragged was not all taken: {error}");
+        }
     };
     if let Err(error) = std::thread::Builder::new()
         .name("gevrek-drag-write".to_string())

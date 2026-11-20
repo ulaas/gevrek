@@ -28,6 +28,12 @@ pub struct ConfigFileWatcher {
 impl ConfigFileWatcher {
     pub fn new(path: PathBuf, enabled: bool) -> Self {
         let acknowledged = modification_time(&path);
+        log::debug!(
+            "{} is {}watched for changes{}",
+            path.display(),
+            if enabled { "" } else { "not " },
+            if acknowledged.is_none() { " (it is not there yet)" } else { "" }
+        );
         Self {
             path,
             enabled,
@@ -54,6 +60,13 @@ impl ConfigFileWatcher {
         if enabled && !self.enabled {
             self.acknowledged = modification_time(&self.path);
             self.pending = None;
+        }
+        if enabled != self.enabled {
+            log::debug!(
+                "{} is {}watched for changes from now on",
+                self.path.display(),
+                if enabled { "" } else { "not " }
+            );
         }
         self.enabled = enabled;
     }
@@ -86,6 +99,11 @@ impl ConfigFileWatcher {
             // deletion). Acknowledge so we do not report it again.
             self.acknowledged = current;
             self.pending = None;
+            log::debug!(
+                "{} was {} outside gevrek",
+                self.path.display(),
+                if current.is_some() { "changed" } else { "removed" }
+            );
             return true;
         }
         self.pending = Some(current);

@@ -1537,7 +1537,13 @@ fn component_pids(component: &Component) -> Vec<u32> {
             let running = is_process_running(pid) && process_matches_component(pid, component);
             if !running {
                 // Left behind by a process that ended.
-                let _ = std::fs::remove_file(file);
+                log::debug!(
+                    "{} said that process {pid} is {instance}'s, which has ended: the note is removed",
+                    file.display()
+                );
+                if let Err(error) = std::fs::remove_file(&file) {
+                    log::debug!("{} was not removed: {error}", file.display());
+                }
             }
             (instance, pid, running)
         })
@@ -1551,6 +1557,10 @@ fn component_pids(component: &Component) -> Vec<u32> {
         if is_process_running(pid) && process_matches_component(pid, component) {
             pids.push(pid);
         } else {
+            log::debug!(
+                "the pid file of {} names process {pid}, which is not it any more",
+                component.name()
+            );
             remove_pid(component);
         }
     }
@@ -1571,13 +1581,20 @@ fn read_pid(component: &Component) -> Option<u32> {
 fn write_pid(component: &Component, pid: u32) -> Result<()> {
     let dir = pid_dir();
     std::fs::create_dir_all(&dir)?;
-    std::fs::write(pid_file(component.name()), pid.to_string())?;
+    let file = pid_file(component.name());
+    std::fs::write(&file, pid.to_string())?;
+    log::debug!("process {pid} was written to {}", file.display());
     Ok(())
 }
 
 /// Remove PID file
 fn remove_pid(component: &Component) {
-    let _ = std::fs::remove_file(pid_file(component.name()));
+    let file = pid_file(component.name());
+    match std::fs::remove_file(&file) {
+        Ok(()) => log::debug!("{} was removed", file.display()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => log::debug!("{} was not removed: {error}", file.display()),
+    }
 }
 
 /// File name of the autostart script inside the user's Startup folder.
@@ -1864,6 +1881,11 @@ fn start_component(
 ) -> Result<Option<Child>> {
     let (running, pid) = get_component_status(component);
     if running {
+        log::debug!(
+            "{} is not started: process {} is it already",
+            component.name(),
+            pid.unwrap_or_default()
+        );
         println!(
             "{} is already running (PID: {})",
             component.name(),
@@ -1915,8 +1937,17 @@ fn start_component(
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
-            .spawn()?;
+            .spawn()
+            .inspect_err(|error| {
+                log::debug!("{} could not be started: {error}", binary_path.display())
+            })?;
 
+        log::debug!(
+            "{} was started in the foreground: {} as process {}",
+            component.name(),
+            binary_path.display(),
+            child.id()
+        );
         write_pid(component, child.id())?;
         println!("{} started (PID: {})", component.name(), child.id());
         Ok(Some(child))
@@ -1937,22 +1968,30 @@ fn start_component(
         }
 
         // What the component logs goes to a file next to the pid files,
-        // started anew each time. `RUST_LOG` chooses how much.
+        // started anew each time. How much: as each program decides
+        // (gevrek-logging), or as `RUST_LOG` says where it is set.
         let log_path = log_file(component.name());
         let log = std::fs::create_dir_all(pid_dir())
             .and_then(|_| std::fs::File::create(&log_path))
             .map(Stdio::from)
             .unwrap_or_else(|_| Stdio::null());
-        if std::env::var_os("RUST_LOG").is_none() {
-            cmd.env("RUST_LOG", "info");
-        }
 
         let child = cmd
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(log)
-            .spawn()?;
+            .spawn()
+            .inspect_err(|error| {
+                log::debug!("{} could not be started: {error}", binary_path.display())
+            })?;
 
+        log::debug!(
+            "{} was started: {} as process {}, its log in {}",
+            component.name(),
+            binary_path.display(),
+            child.id(),
+            log_path.display()
+        );
         write_pid(component, child.id())?;
         println!(
             "{} started (PID: {}, log: {})",
@@ -2011,19 +2050,32 @@ fn ensure_wm_endpoint_available(address: &str) -> Result<()> {
 
 async fn wait_for_wm(address: &str, timeout: Duration) -> Result<()> {
     let deadline = tokio::time::Instant::now() + timeout;
+    log::debug!("the window manager at {address} is waited for, up to {timeout:?}");
+    // What was the matter the last time, said when it changes and when
+    // the wait is given up.
+    let mut last = String::new();
     loop {
-        if let Ok(mut client) = WMClient::connect(address.to_string()).await {
-            if client
-                .health_check()
-                .await
-                .map(|health| health.healthy)
-                .unwrap_or(false)
-            {
-                return Ok(());
-            }
+        let now = match WMClient::connect(address.to_string()).await {
+            Ok(mut client) => match client.health_check().await {
+                Ok(health) if health.healthy => {
+                    log::debug!("the window manager at {address} is healthy: {}", health.version);
+                    return Ok(());
+                }
+                Ok(health) => format!(
+                    "it is not healthy yet: {}",
+                    health.message.unwrap_or_default()
+                ),
+                Err(error) => format!("its health was not answered: {error:#}"),
+            },
+            Err(error) => format!("it is not reached: {error:#}"),
+        };
+        if now != last {
+            log::debug!("the window manager at {address} is waited for: {now}");
+            last = now;
         }
 
         if tokio::time::Instant::now() >= deadline {
+            log::debug!("the window manager at {address} was waited for in vain: {last}");
             return Err(anyhow!(
                 "Window manager did not become healthy at {} within {:?}",
                 address,
@@ -2047,14 +2099,25 @@ async fn stop_component(component: &Component, force: bool, address: &str) -> Re
             )
             .await
             {
-                if let Ok(Ok(response)) =
-                    tokio::time::timeout(Duration::from_secs(2), client.shutdown(false, 0)).await
+                match tokio::time::timeout(Duration::from_secs(2), client.shutdown(false, 0)).await
                 {
-                    if response.success {
+                    Ok(Ok(response)) if response.success => {
                         println!("{} was asked to stop", component.name());
                         return Ok(());
                     }
+                    Ok(Ok(response)) => log::debug!(
+                        "the window manager at {address} did not stop: {}",
+                        response.error.unwrap_or_default()
+                    ),
+                    Ok(Err(error)) => {
+                        log::debug!("the window manager at {address} was not asked to stop: {error:#}")
+                    }
+                    Err(_) => log::debug!(
+                        "the window manager at {address} did not answer the request to stop within 2 s"
+                    ),
                 }
+            } else {
+                log::debug!("no pid of the window manager, and nothing answers at {address}");
             }
         }
         println!("{} is not running", component.name());
@@ -2161,6 +2224,11 @@ async fn stop_component(component: &Component, force: bool, address: &str) -> Re
                     }
                 }
             };
+            log::debug!(
+                "{} (process {pid}) was {}ended by force",
+                component.name(),
+                if terminated { "" } else { "not " }
+            );
             if !terminated && is_process_running(*pid) {
                 return Err(anyhow!(
                     "Failed to terminate {} (PID: {})",
@@ -2174,8 +2242,15 @@ async fn stop_component(component: &Component, force: bool, address: &str) -> Re
     #[cfg(not(windows))]
     {
         for pid in &pids {
-            unsafe {
-                libc::kill(*pid as i32, libc::SIGTERM);
+            // SAFETY: a signal to a process of this component.
+            if unsafe { libc::kill(*pid as i32, libc::SIGTERM) } == 0 {
+                log::debug!("{} (process {pid}) was sent SIGTERM", component.name());
+            } else {
+                log::debug!(
+                    "{} (process {pid}) could not be sent SIGTERM: {}",
+                    component.name(),
+                    std::io::Error::last_os_error()
+                );
             }
         }
     }
@@ -3477,6 +3552,10 @@ fn start_updated(components: &[Component], foreground: bool) -> Option<std::proc
     }
     let (version, package) = gevrek_update::staged(&folder)?;
     if !gevrek_update::is_newer(&version, gevrek_update::current()) {
+        log::debug!(
+            "the staged gevrek {version} is not newer than this {}: it is taken away",
+            gevrek_update::current()
+        );
         gevrek_update::unstage(&folder);
         return None;
     }
@@ -3485,6 +3564,7 @@ fn start_updated(components: &[Component], foreground: bool) -> Option<std::proc
         .iter()
         .any(|component| get_component_status(component).0)
     {
+        log::debug!("the staged gevrek {version} waits: a part of gevrek runs");
         return None;
     }
     println!(
@@ -3497,14 +3577,25 @@ fn start_updated(components: &[Component], foreground: bool) -> Option<std::proc
     }
     gevrek_update::unstage(&folder);
     gevrek_update::note_installed_version(&version);
-    let _ = std::fs::write(updated_from_note(), gevrek_update::current());
+    if let Err(error) = std::fs::write(updated_from_note(), gevrek_update::current()) {
+        log::debug!(
+            "{} was not written, so the update is not told: {error}",
+            updated_from_note().display()
+        );
+    }
     // This program is the old build still (its file was moved aside): the
     // new one does the starting.
-    Command::new(install.join(format!("gevrek{}", std::env::consts::EXE_SUFFIX)))
+    let new = install.join(format!("gevrek{}", std::env::consts::EXE_SUFFIX));
+    log::debug!("gevrek {version} was put in place; {} does the starting", new.display());
+    let ended = Command::new(new)
         .args(std::env::args_os().skip(1))
         .status()
         .map_err(|error| eprintln!("The new gevrek could not be started: {error}"))
-        .ok()
+        .ok();
+    if let Some(status) = ended {
+        log::debug!("the new gevrek ended: {status}");
+    }
+    ended
 }
 
 /// After `gevrek start` has started the desktop: leave the look for a
@@ -3518,8 +3609,12 @@ fn look_for_update_behind(address: &str) {
     if !due && !updated_from_note().exists() {
         return;
     }
-    let Ok(program) = std::env::current_exe() else {
-        return;
+    let program = match std::env::current_exe() {
+        Ok(program) => program,
+        Err(error) => {
+            log::debug!("no look for an update: this program is not found: {error}");
+            return;
+        }
     };
     let mut command = Command::new(program);
     command.args(["--address", address, "update", "--background"]);
@@ -3530,11 +3625,15 @@ fn look_for_update_behind(address: &str) {
         command.creation_flags(CREATE_NO_WINDOW);
         keep_own_output_from_children();
     }
-    let _ = command
+    match command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn();
+        .spawn()
+    {
+        Ok(child) => log::debug!("the look for an update runs behind as process {}", child.id()),
+        Err(error) => log::debug!("the look for an update was not started: {error}"),
+    }
 }
 
 /// A notification of gevrek's own, if a window manager is there to pass it
@@ -3544,11 +3643,22 @@ async fn notify_quietly(address: &str, title: &str, text: &str) {
         title: title.to_string(),
         text: text.to_string(),
     };
-    if let (Ok(mut client), Ok(json)) = (
+    match (
         WMClient::connect(address.to_string()).await,
         serde_json::to_string(&command),
     ) {
-        let _ = client.dispatch_command(json).await;
+        (Ok(mut client), Ok(json)) => match client.dispatch_command(json).await {
+            Ok(response) if response.success => log::debug!("a notification of gevrek's was shown"),
+            Ok(response) => log::debug!(
+                "a notification of gevrek's was not shown: {}",
+                response.error.unwrap_or_default()
+            ),
+            Err(error) => log::debug!("a notification of gevrek's was not shown: {error:#}"),
+        },
+        (Err(error), _) => {
+            log::debug!("a notification of gevrek's was not shown: no window manager: {error:#}")
+        }
+        (_, Err(error)) => log::debug!("a notification of gevrek's was not written: {error}"),
     }
 }
 
@@ -3561,7 +3671,10 @@ async fn update_behind(address: &str) -> Result<()> {
     // at sign-in the network may not be there yet.
     sleep(Duration::from_secs(20)).await;
     if let Ok(from) = std::fs::read_to_string(updated_from_note()) {
-        let _ = std::fs::remove_file(updated_from_note());
+        log::debug!("gevrek was updated from {}: it is told", from.trim());
+        if let Err(error) = std::fs::remove_file(updated_from_note()) {
+            log::debug!("{} was not removed: {error}", updated_from_note().display());
+        }
         notify_quietly(
             address,
             &format!("gevrek {} is installed", gevrek_update::current()),
@@ -3574,17 +3687,21 @@ async fn update_behind(address: &str) -> Result<()> {
     }
     let mut settings = gevrek_update::Settings::load(&folder);
     if updatable_install().is_none() || !settings.check_due(gevrek_update::now()) {
+        log::debug!("no look for an update now: it is not due, or this install is not updated");
         return Ok(());
     }
+    log::debug!("a newer release is looked for (this is {})", gevrek_update::current());
     // Noted before asking: a check that fails is not made again at every start.
     settings.last_check = Some(gevrek_update::now());
     settings.save(&folder)?;
     let source = gevrek_update::Source::github();
     let release = gevrek_update::latest(&source, &folder)?;
     if !gevrek_update::is_newer(&release.version, gevrek_update::current()) {
+        log::debug!("no newer release: the latest is {}", release.version);
         return Ok(());
     }
     if gevrek_update::staged(&folder).is_some_and(|(version, _)| version == release.version) {
+        log::debug!("gevrek {} is staged already", release.version);
         return Ok(());
     }
     gevrek_update::stage(&source, &release, &folder)?;
@@ -3605,7 +3722,9 @@ async fn update_now(address: &str, check_only: bool) -> Result<()> {
     let release = gevrek_update::latest(&source, &folder)?;
     let mut settings = gevrek_update::Settings::load(&folder);
     settings.last_check = Some(gevrek_update::now());
-    let _ = settings.save(&folder);
+    if let Err(error) = settings.save(&folder) {
+        log::debug!("when the update was looked for is not kept: {error:#}");
+    }
     if !gevrek_update::is_newer(&release.version, current) {
         if release.version == current {
             println!("gevrek {current} is the newest release.");
@@ -3662,9 +3781,13 @@ async fn update_now(address: &str, check_only: bool) -> Result<()> {
         // By the program that is in place now: the new one, or, if the
         // update could not be put in place, the one that was there.
         println!("Starting gevrek again.");
-        let _ = Command::new(install.join(format!("gevrek{}", std::env::consts::EXE_SUFFIX)))
+        match Command::new(install.join(format!("gevrek{}", std::env::consts::EXE_SUFFIX)))
             .args(["--address", address, "start", "all"])
-            .status();
+            .status()
+        {
+            Ok(status) => log::debug!("gevrek start all ended: {status}"),
+            Err(error) => log::warn!("gevrek could not be started again after the update: {error}"),
+        }
     }
     applied
 }
@@ -3682,9 +3805,7 @@ fn main() -> Result<()> {
 
 #[tokio::main]
 async fn run() -> Result<()> {
-    env_logger::Builder::from_default_env()
-        .filter_level(log::LevelFilter::Warn)
-        .init();
+    gevrek_logging::Logging::new("gevrek", log::LevelFilter::Warn).only_where_asked().init();
 
     let cli = Cli::parse();
 

@@ -92,7 +92,9 @@ impl StartupProcessManager {
                 .get(&id)
                 .is_some_and(|profile| profile.terminate_on_exit)
             {
-                let _ = self.stop_record(&id, "removed");
+                if let Err(error) = self.stop_record(&id, "removed") {
+                    log::debug!("startup application '{id}' was removed but not stopped: {error:#}");
+                }
             }
             self.records.remove(&id);
         }
@@ -109,14 +111,22 @@ impl StartupProcessManager {
             };
             if !profile.enabled {
                 if profile.terminate_on_exit {
-                    let _ = self.stop_record(&id, "disabled");
+                    if let Err(error) = self.stop_record(&id, "disabled") {
+                        log::debug!(
+                            "startup application '{id}' was turned off but not stopped: {error:#}"
+                        );
+                    }
                 }
                 self.records.insert(id, ProcessRecord::disabled());
                 continue;
             }
 
             if reload && profile.restart_on_reload {
-                let _ = self.stop_record(&id, "reloading");
+                if let Err(error) = self.stop_record(&id, "reloading") {
+                    log::debug!(
+                        "startup application '{id}' is started again but was not stopped: {error:#}"
+                    );
+                }
                 self.records.insert(
                     id,
                     ProcessRecord::scheduled(now + Duration::from_millis(profile.delay_ms.into())),
@@ -139,7 +149,15 @@ impl StartupProcessManager {
                 .and_then(|record| record.next_launch)
                 .is_some_and(|deadline| deadline <= now);
             if due {
-                let _ = self.spawn_profile(&id);
+                let first = self.records.get(&id).is_none_or(|record| record.restart_count == 0);
+                if let Err(error) = self.spawn_profile(&id) {
+                    // Said once; the tries after it are at debug.
+                    if first {
+                        log::warn!("{error:#}");
+                    } else {
+                        log::debug!("{error:#}");
+                    }
+                }
             }
         }
     }
@@ -211,7 +229,9 @@ impl StartupProcessManager {
                 .get(&id)
                 .is_some_and(|profile| profile.terminate_on_exit)
             {
-                let _ = self.stop_record(&id, "stopped");
+                if let Err(error) = self.stop_record(&id, "stopped") {
+                    log::debug!("startup application '{id}' was not stopped: {error:#}");
+                }
             }
         }
     }
@@ -254,9 +274,9 @@ impl StartupProcessManager {
                 record.last_exit_code = None;
                 record.suppress_restart = false;
                 log::info!(
-                    "Started startup application '{}' as process {}",
+                    "startup application '{}' was started as process {pid} ({})",
                     profile.id,
-                    pid
+                    profile.launch.program.trim()
                 );
                 Ok(())
             }
@@ -275,6 +295,12 @@ impl StartupProcessManager {
                     record.status = "restart pending".to_string();
                     record.next_launch = Some(
                         Instant::now() + Duration::from_millis(profile.restart_delay_ms.into()),
+                    );
+                    log::debug!(
+                        "startup application '{}' is tried again in {} ms (try {})",
+                        profile.id,
+                        profile.restart_delay_ms,
+                        record.restart_count
                     );
                 }
                 Err(anyhow!(
@@ -307,9 +333,15 @@ impl StartupProcessManager {
             return;
         };
         let record = self.records.get_mut(id).expect("record disappeared");
+        let pid = record.child.as_ref().map(Child::id);
         record.child = None;
         match exit {
             Ok(status) => {
+                log::debug!(
+                    "startup application '{}' (process {}) ended: {status}",
+                    profile.id,
+                    pid.unwrap_or_default()
+                );
                 record.last_exit_code = status.code();
                 record.last_error = None;
                 let restart = !record.suppress_restart
@@ -319,6 +351,12 @@ impl StartupProcessManager {
                     record.status = "restart pending".to_string();
                     record.next_launch =
                         Some(now + Duration::from_millis(profile.restart_delay_ms.into()));
+                    log::debug!(
+                        "startup application '{}' is started again in {} ms (restart {})",
+                        profile.id,
+                        profile.restart_delay_ms,
+                        record.restart_count
+                    );
                 } else {
                     record.status = if status.success() {
                         "exited".to_string()
@@ -329,6 +367,10 @@ impl StartupProcessManager {
                 }
             }
             Err(error) => {
+                log::debug!(
+                    "whether startup application '{}' still runs is not known: {error}",
+                    profile.id
+                );
                 record.status = "failed".to_string();
                 record.last_error = Some(error.to_string());
                 record.next_launch = None;
@@ -344,10 +386,18 @@ impl StartupProcessManager {
         record.suppress_restart = true;
         record.next_launch = None;
         if let Some(mut child) = record.child.take() {
+            let pid = child.id();
             child
                 .kill()
                 .map_err(|error| anyhow!("Could not stop startup application '{id}': {error}"))?;
-            let _ = child.wait();
+            match child.wait() {
+                Ok(exit) => {
+                    log::debug!("startup application '{id}' (process {pid}) was stopped ({status}): {exit}")
+                }
+                Err(error) => log::debug!(
+                    "startup application '{id}' (process {pid}) was stopped ({status}), its end not seen: {error}"
+                ),
+            }
         }
         record.status = status.to_string();
         Ok(())

@@ -166,7 +166,7 @@ impl Executor {
                     // Try to parse as number
                     if let Ok(n) = s.parse::<f64>() {
                         self.set_output_value(node_id, 0, Value::Number(n));
-                        log::debug!("Parsed '{}' as number: {}", s, n);
+                        log::trace!("Parsed '{}' as number: {}", s, n);
                     } else {
                         log::warn!("Failed to parse '{}' as number, defaulting to 0.0", s);
                         self.set_output_value(node_id, 0, Value::Number(0.0));
@@ -231,7 +231,7 @@ impl Executor {
             NodeType::ForEach => {
                 // Get list input value (index 1)
                 let input_value = self.get_input_value(node_id, 1);
-                log::info!(
+                log::trace!(
                     "🔄 ForEach (node {}): Input value is {:?}",
                     node_id,
                     input_value
@@ -239,7 +239,7 @@ impl Executor {
 
                 // Handle WindowList
                 if let Some(Value::WindowList(windows)) = input_value {
-                    log::info!(
+                    log::trace!(
                         "🔄 ForEach (node {}): Starting iteration over {} windows",
                         node_id,
                         windows.len()
@@ -250,7 +250,7 @@ impl Executor {
                         if self.nodes_spent() {
                             break;
                         }
-                        log::info!(
+                        log::trace!(
                             "🔄 ForEach (node {}): Iteration {}/{} - window {:?}",
                             node_id,
                             index + 1,
@@ -270,7 +270,7 @@ impl Executor {
 
                         // Trigger loop body execution (output index 0)
                         // CRITICAL: Continue on error - don't let one bad window stop the entire loop
-                        log::debug!(
+                        log::trace!(
                             "🔄 ForEach (node {}): Triggering loop body for window {:?}",
                             node_id,
                             window_handle
@@ -284,14 +284,14 @@ impl Executor {
                         ) {
                             log::warn!("🔄 ForEach iteration {} failed for window {:?}: {:?} - continuing with next window", index, window_handle, e);
                         }
-                        log::debug!(
+                        log::trace!(
                             "🔄 ForEach (node {}): Completed iteration {} for window {:?}",
                             node_id,
                             index,
                             window_handle
                         );
                     }
-                    log::info!(
+                    log::trace!(
                         "🔄 ForEach (node {}): Completed all {} iterations",
                         node_id,
                         windows.len()
@@ -309,7 +309,7 @@ impl Executor {
                 // Handle MonitorList
                 else if let Some(Value::MonitorList(monitors)) = self.get_input_value(node_id, 1)
                 {
-                    log::info!("ForEach: Iterating over {} monitors", monitors.len());
+                    log::trace!("ForEach: Iterating over {} monitors", monitors.len());
 
                     // For each monitor in the list
                     for (index, monitor_handle) in monitors.iter().enumerate() {
@@ -389,7 +389,7 @@ impl Executor {
                 if step_val == 0 {
                     log::error!("ForLoop: Step cannot be zero, skipping loop");
                 } else {
-                    log::info!(
+                    log::trace!(
                         "ForLoop: Iterating from {} to {} with step {}",
                         start_val,
                         end_val,
@@ -445,7 +445,7 @@ impl Executor {
                         current = next;
                     }
 
-                    log::info!("ForLoop: Completed {} iterations", iteration_count);
+                    log::trace!("ForLoop: Completed {} iterations", iteration_count);
 
                     // After loop completes, trigger "Completed" output (output index 2)
                     self.trigger_output_execution(
@@ -473,7 +473,7 @@ impl Executor {
 
                     if idx < windows.len() {
                         self.set_output_value(node_id, 1, Value::WindowHandle(windows[idx]));
-                        log::debug!("Extracted window at index {}", idx);
+                        log::trace!("Extracted window at index {}", idx);
                     } else {
                         log::warn!(
                             "Index {} out of bounds (list has {} windows)",

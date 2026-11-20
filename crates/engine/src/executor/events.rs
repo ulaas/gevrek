@@ -24,7 +24,7 @@ impl Executor {
             let is_floating = monitor_manager.is_window_floating(handle)
                 || monitor_manager.find_window(handle).is_none();
             if !is_floating {
-                log::info!("🗖 Tiled window maximize detected - unmaximizing immediately");
+                log::debug!("🗖 Tiled window maximize detected - unmaximizing immediately");
                 effect(
                     window_manager,
                     Effect::State {
@@ -46,20 +46,20 @@ impl Executor {
                                 work_area,
                                 window_manager,
                             )?;
-                            log::info!("✅ Workspace retiled - maximize prevented");
+                            log::debug!("✅ Workspace retiled - maximize prevented");
                         }
                     }
                 }
                 return Ok(true);
             } else {
-                log::debug!("Floating window {:?} maximized - allowing", handle);
+                log::trace!("Floating window {:?} maximized - allowing", handle);
             }
         }
 
         // A restore whose EVENT_SYSTEM_MINIMIZEEND never arrived.
         if self.window_state.get(handle).minimized && !queries(window_manager).is_minimized(handle)
         {
-            log::info!("🔼 Window restored (detected via LOCATIONCHANGE)");
+            log::debug!("🔼 Window restored (detected via LOCATIONCHANGE)");
             self.on_window_restored(window_manager, monitor_manager, handle)?;
             // Don't process the normal move event for a restored window
             return Ok(true);
@@ -112,7 +112,7 @@ impl Executor {
         );
         if let Some((_, tiled)) = settled {
             if tiled && queries(window_manager).is_maximized(handle) {
-                log::info!("🗖 Tiled window was maximized during restore - unmaximizing");
+                log::debug!("🗖 Tiled window was maximized during restore - unmaximizing");
                 effect(
                     window_manager,
                     Effect::State {
@@ -121,7 +121,7 @@ impl Executor {
                     },
                 )?;
             }
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::Border {
                     id: handle,
@@ -264,7 +264,7 @@ impl Executor {
 
         for handle in &changes.windows_to_show {
             if queries(window_manager).exists(*handle) {
-                let _ = effect(
+                try_effect(
                     window_manager,
                     Effect::SetVisible {
                         id: *handle,
@@ -320,7 +320,7 @@ impl Executor {
         // Process completed drags
         for handle in completed_drags {
             if let Some(drag_state) = self.window_state.get_mut(handle).drag.take() {
-                log::info!("Drag timeout - processing as completed drag");
+                log::debug!("Drag timeout - processing as completed drag");
                 self.window_state.get_mut(handle).dropped_at =
                     queries(window_manager).rect(handle).ok();
 
@@ -328,7 +328,7 @@ impl Executor {
                 let is_floating = monitor_manager.is_window_floating(handle);
                 let is_unmanaged = monitor_manager.find_window(handle).is_none();
                 if is_floating || is_unmanaged {
-                    log::info!(
+                    log::debug!(
                         "📍 Floating/unmanaged window - keeping at current position (drag timeout)"
                     );
                     // (As when the drag's end is told: on another output
@@ -349,7 +349,7 @@ impl Executor {
                             dropped_on,
                         );
                     }
-                    let _ = effect(
+                    try_effect(
                         window_manager,
                         Effect::Border {
                             id: handle,
@@ -374,7 +374,7 @@ impl Executor {
                             if let Some(zone_hit) =
                                 snap_zone_manager.find_zone_for_rect(&window_rect, monitor_manager)
                             {
-                                log::info!("📍 Tiled window dropped on zone '{}' (via timeout) - snapping!", zone_hit.zone.name);
+                                log::debug!("📍 Tiled window dropped on zone '{}' (via timeout) - snapping!", zone_hit.zone.name);
                                 effect(
                                     window_manager,
                                     Effect::Configure {
@@ -470,7 +470,7 @@ impl Executor {
         let width_delta = new_rect.width - old_rect.width;
         let height_delta = new_rect.height - old_rect.height;
 
-        log::info!(
+        log::trace!(
             "Live resize: width_delta={}, height_delta={}",
             width_delta,
             height_delta
@@ -642,17 +642,14 @@ impl Executor {
 
         // CRITICAL: Skip events for windows that should be ignored (like Gevrek's own windows)
         if queries(window_manager).ignored_by_rules(handle) {
-            log::debug!("Skipping OnWindowCreated event for excluded window");
+            log::trace!("{handle:?} opened, but the rules leave it alone");
             return Ok(());
         }
 
         // CRITICAL: Skip duplicate Created events for windows we've already processed
         // EVENT_OBJECT_SHOW can fire multiple times for the same window
         if self.window_state.get(handle).known {
-            log::debug!(
-                "Skipping duplicate Created event for already known window {:?}",
-                handle
-            );
+            log::trace!("{handle:?} is told of as opened again: it is known already");
             return Ok(());
         }
 
@@ -670,6 +667,7 @@ impl Executor {
             .collect();
         // (In the order of the nodes: the same on every start.)
         event_nodes.sort_unstable();
+        let _run = super::graph::GraphRun::start("OnWindowCreated", event_nodes.len(), false);
 
         // (While the graph runs, and the taking of the window after it,
         // this is the window that is opening: `join_parent_out_of_sight`.)
@@ -767,7 +765,7 @@ impl Executor {
         snap_zone_manager: &mut SnapZoneManager,
         handle: WindowHandle,
     ) -> Result<()> {
-        log::debug!("🗑️  Handling Destroyed event for window {:?}", handle);
+        log::trace!("{handle:?} is gone");
 
         if self.window_state.get(handle).drag.is_some() {
             log::debug!("Cleaned up drag state for destroyed window {:?}", handle);
@@ -777,7 +775,7 @@ impl Executor {
         snap_zone_manager.remove_window(handle);
 
         // Remove border if this window has one
-        let _ = effect(
+        try_effect(
             window_manager,
             Effect::Border {
                 id: handle,
@@ -804,8 +802,8 @@ impl Executor {
                             self.expose_workspaces.remove(&ws_id);
                             // (The borders are back with the overview's
                             // end, as when it is left by its key.)
-                            let _ = effect(window_manager, Effect::DecorationsVisible(true));
-                            log::info!("Expose mode auto-deactivated: no windows remaining");
+                            try_effect(window_manager, Effect::DecorationsVisible(true));
+                            log::debug!("Expose mode auto-deactivated: no windows remaining");
                         }
                         AfterDestroy::Regrid(ops) => {
                             if !ops.is_empty() {
@@ -814,7 +812,7 @@ impl Executor {
                                 self.last_expose_transition = Instant::now();
                             }
                             if work_area.is_some() {
-                                log::info!("Expose grid recalculated after window destruction");
+                                log::debug!("Expose grid recalculated after window destruction");
                             }
                         }
                     }
@@ -841,10 +839,7 @@ impl Executor {
             Removal::Hidden { output, .. } => Some(output),
         };
         if let Some(monitor_handle) = removed_from {
-            log::info!(
-                "✅ Window {:?} removed from workspace, reapplying layout",
-                handle
-            );
+            log::debug!("{handle:?} is gone: it left its workspace, which is laid out again");
             let work_area = monitor_manager.get_adjusted_work_area(monitor_handle, window_manager);
             // The flush only lays out the focused workspace, so a
             // hidden one is laid out here. (An output without a work area,
@@ -878,6 +873,7 @@ impl Executor {
             .collect();
         // (In the order of the nodes: the same on every start.)
         event_nodes.sort_unstable();
+        let _run = super::graph::GraphRun::start("OnWindowDestroyed", event_nodes.len(), false);
 
         for node_id in event_nodes {
             self.set_output_value(node_id, 1, Value::WindowHandle(handle));
@@ -922,10 +918,12 @@ impl Executor {
         );
         match decision {
             FocusDecision::Enforce(target) => {
+                log::debug!("{handle:?} took the keyboard, but {target:?} takes it back: its rules keep the keyboard on it");
                 self.focus_managed_window(window_manager, monitor_manager, target)?;
                 return Ok(());
             }
             FocusDecision::Reject { restore } => {
+                log::debug!("{handle:?} does not keep the keyboard: its rules keep it from it");
                 let restored = self.restore_previous_focus(
                     window_manager,
                     monitor_manager,
@@ -934,12 +932,13 @@ impl Executor {
                     restore,
                 )?;
                 if !restored {
-                    let _ = effect(window_manager, Effect::Focus(None));
+                    try_effect(window_manager, Effect::Focus(None));
                 }
                 focus_manager.remove_window(handle);
                 return Ok(());
             }
             FocusDecision::SuppressInitial { restore } => {
+                log::debug!("{handle:?} does not take the keyboard as it opens: its rules say so");
                 let _ = self.restore_previous_focus(
                     window_manager,
                     monitor_manager,
@@ -989,7 +988,8 @@ impl Executor {
         }
         for scratchpad_handle in self.scratchpads.hide_on_focus_loss(handle) {
             if queries(window_manager).exists(scratchpad_handle) {
-                let _ = effect(
+                log::debug!("the scratchpad window {scratchpad_handle:?} is put away: the keyboard went elsewhere");
+                try_effect(
                     window_manager,
                     Effect::SetVisible {
                         id: scratchpad_handle,
@@ -1011,7 +1011,7 @@ impl Executor {
         if !focus_in_expose {
             if let Some(prev) = self.last_focused_window {
                 if prev != handle {
-                    let _ = effect(
+                    try_effect(
                         window_manager,
                         Effect::Border {
                             id: prev,
@@ -1020,7 +1020,7 @@ impl Executor {
                     );
                 }
             }
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::Border {
                     id: handle,
@@ -1054,15 +1054,15 @@ impl Executor {
                         self.last_expose_transition = Instant::now();
                     }
                     self.expose_workspaces.remove(&workspace_id);
-                    let _ = effect(window_manager, Effect::DecorationsVisible(true));
-                    let _ = effect(
+                    try_effect(window_manager, Effect::DecorationsVisible(true));
+                    try_effect(
                         window_manager,
                         Effect::Stack {
                             id: handle,
                             op: StackOp::Raise,
                         },
                     );
-                    log::info!("The overview of workspace {workspace_id} is over: a window was chosen");
+                    log::debug!("The overview of workspace {workspace_id} is over: a window was chosen");
                 }
             }
         }
@@ -1076,6 +1076,7 @@ impl Executor {
             .collect();
         // (In the order of the nodes: the same on every start.)
         event_nodes.sort_unstable();
+        let _run = super::graph::GraphRun::start("OnWindowFocused", event_nodes.len(), true);
 
         for node_id in event_nodes {
             self.set_output_value(node_id, 1, Value::WindowHandle(handle));
@@ -1133,7 +1134,7 @@ impl Executor {
         // drag/retile handling until the transition settles.
         if window_manager.is_animation_event_suppressed(handle) {
             self.forget_moved_across(handle);
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::Border {
                     id: handle,
@@ -1146,19 +1147,19 @@ impl Executor {
         // Check if this is a suppressed window (we caused this move)
         if self.suppressed_windows.remove(&handle) {
             self.forget_moved_across(handle);
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::Border {
                     id: handle,
                     change: BorderChange::Follow,
                 },
             );
-            log::debug!("Ignoring move event for suppressed window (self-triggered)");
+            log::trace!("Ignoring move event for suppressed window (self-triggered)");
             return Ok(());
         }
 
         // Update border position if this window has one
-        let _ = effect(
+        try_effect(
             window_manager,
             Effect::Border {
                 id: handle,
@@ -1184,6 +1185,7 @@ impl Executor {
             .collect();
         // (In the order of the nodes: the same on every start.)
         event_nodes.sort_unstable();
+        let _run = super::graph::GraphRun::start("OnWindowMoved", event_nodes.len(), true);
 
         for node_id in event_nodes {
             self.set_output_value(node_id, 1, Value::WindowHandle(handle));
@@ -1212,7 +1214,7 @@ impl Executor {
         let (width, height) =
             self.enforce_size_constraints(window_manager, monitor_manager, handle, width, height)?;
         if window_manager.is_animation_event_suppressed(handle) {
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::Border {
                     id: handle,
@@ -1224,14 +1226,14 @@ impl Executor {
 
         // Check if this is a suppressed window (we caused this resize)
         if self.suppressed_windows.remove(&handle) {
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::Border {
                     id: handle,
                     change: BorderChange::Follow,
                 },
             );
-            log::debug!("Ignoring resize event for suppressed window (self-triggered)");
+            log::trace!("Ignoring resize event for suppressed window (self-triggered)");
             return Ok(());
         }
 
@@ -1274,7 +1276,7 @@ impl Executor {
                             };
 
                         if is_first_resize {
-                            log::info!("🔧 User is RESIZING window (size changed during drag)");
+                            log::debug!("🔧 User is RESIZING window (size changed during drag)");
                         }
 
                         // Handle live resize - adjust adjacent windows
@@ -1312,7 +1314,7 @@ impl Executor {
         }
 
         // Update border position/size if this window has one
-        let _ = effect(
+        try_effect(
             window_manager,
             Effect::Border {
                 id: handle,
@@ -1330,6 +1332,7 @@ impl Executor {
             .collect();
         // (In the order of the nodes: the same on every start.)
         event_nodes.sort_unstable();
+        let _run = super::graph::GraphRun::start("OnWindowResized", event_nodes.len(), true);
 
         for node_id in event_nodes {
             self.set_output_value(node_id, 1, Value::WindowHandle(handle));
@@ -1349,7 +1352,7 @@ impl Executor {
         handle: WindowHandle,
     ) -> Result<()> {
         // User started dragging this window
-        log::info!("User started dragging window");
+        log::debug!("User started dragging window");
 
         // Track original monitor for cross-monitor detection
         let original_monitor =
@@ -1577,7 +1580,7 @@ impl Executor {
         monitor_manager.find_and_remove_window(handle);
         if let Some(workspace) = monitor_manager.get_focused_workspace_mut(to) {
             workspace.add_floating_window(handle);
-            log::info!(
+            log::debug!(
                 "Floating window on another output: now on workspace '{}'",
                 workspace.name
             );
@@ -1604,7 +1607,7 @@ impl Executor {
         snap_zone_manager: &mut SnapZoneManager,
         handle: WindowHandle,
     ) -> Result<()> {
-        log::info!("🎯 DRAG ENDED - User released window");
+        log::debug!("🎯 DRAG ENDED - User released window");
 
         // In the overview the windows lie where the overview put them:
         // a drag there ends without the workspace being laid out as tiles.
@@ -1620,7 +1623,7 @@ impl Executor {
             let is_floating = monitor_manager.is_window_floating(handle);
             let is_unmanaged = monitor_manager.find_window(handle).is_none();
             if is_floating || is_unmanaged {
-                log::info!(
+                log::debug!(
                     "📍 Window is {} - keeping at drop position",
                     if is_floating { "floating" } else { "unmanaged" }
                 );
@@ -1639,7 +1642,7 @@ impl Executor {
                     self.floating_window_is_on(window_manager, monitor_manager, handle, dropped_on);
                 }
                 // Just update border position
-                let _ = effect(
+                try_effect(
                     window_manager,
                     Effect::Border {
                         id: handle,
@@ -1679,12 +1682,12 @@ impl Executor {
                         .unwrap_or(false);
 
                     if was_resized && !monitor_changed {
-                        log::info!("📐 Tiled window RESIZED - updating split ratios");
+                        log::debug!("📐 Tiled window RESIZED - updating split ratios");
                         if let Some(workspace) =
                             monitor_manager.get_focused_workspace_mut(current_monitor_handle)
                         {
                             if workspace.layout_locked {
-                                log::info!(
+                                log::debug!(
                                     "Layout of workspace '{}' is locked - keeping ratios",
                                     workspace.name
                                 );
@@ -1717,7 +1720,7 @@ impl Executor {
                             if let Some(zone_hit) =
                                 snap_zone_manager.find_zone_for_rect(window_rect, monitor_manager)
                             {
-                                log::info!(
+                                log::debug!(
                                     "📍 Tiled window dropped on zone '{}' - snapping!",
                                     zone_hit.zone.name
                                 );
@@ -1802,7 +1805,7 @@ impl Executor {
         monitor_manager: &mut MonitorManager,
         handle: WindowHandle,
     ) -> Result<()> {
-        let _ = effect(
+        try_effect(
             window_manager,
             Effect::Border {
                 id: handle,
@@ -1833,8 +1836,8 @@ impl Executor {
             // A minimized tiled window leaves the layout until it is
             // restored.
             Minimize::LeftLayout(_) => {
-                let _ = effect(window_manager, Effect::HideStackbar(handle));
-                log::info!(
+                try_effect(window_manager, Effect::HideStackbar(handle));
+                log::debug!(
                     "🔽 Tiled window {:?} minimized; removed from the layout",
                     handle
                 );
@@ -1852,7 +1855,7 @@ impl Executor {
         monitor_manager: &mut MonitorManager,
         handle: WindowHandle,
     ) -> Result<()> {
-        log::info!("🔼 Window restored (via event)");
+        log::debug!("🔼 Window restored (via event)");
         // A window of a workspace brought back from the taskbar after it
         // was minimized is one the person works with: the desktop is not
         // shown any more (and the window is not put away as it comes).
@@ -1894,18 +1897,18 @@ impl Executor {
             &mut changes,
         );
         if left.is_some() {
-            log::info!(
+            log::debug!(
                 "Window {:?} was hidden by its app; removing it from the layout",
                 handle
             );
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::Border {
                     id: handle,
                     change: BorderChange::Visible(false),
                 },
             );
-            let _ = effect(window_manager, Effect::HideStackbar(handle));
+            try_effect(window_manager, Effect::HideStackbar(handle));
         }
         self.apply_changes(window_manager, changes);
         Ok(())
@@ -1918,7 +1921,7 @@ impl Executor {
         monitor_manager: &mut MonitorManager,
         handle: WindowHandle,
     ) -> Result<()> {
-        log::debug!("Window metadata changed for {:?}", handle);
+        log::trace!("Window metadata changed for {:?}", handle);
         self.reevaluate_dynamic_rules(window_manager, monitor_manager, handle)?;
         // A title change must refresh the stackbar tab text when the
         // window lives in a group.

@@ -15,6 +15,7 @@
     "watch_configuration": true,
     "manage_existing_on_startup": true,
     "restore_session_on_startup": false,
+    "debug_log": "auto",
     "appearance": {
       "border_enabled": true,
       "border_width": 8,

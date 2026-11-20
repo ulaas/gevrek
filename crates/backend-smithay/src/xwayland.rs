@@ -313,6 +313,7 @@ impl State {
             Stdio::null(),
             |_| (),
         )?;
+        log::debug!("Xwayland is started; X11 programs can connect once it is ready");
         self.loop_handle = Some(handle.clone());
         let wm_handle = handle.clone();
         handle
@@ -608,6 +609,11 @@ impl XwmHandler for State {
     /// An X11 window wants to be shown: it is tracked like a Wayland
     /// toplevel, and adopted when its first buffer arrives.
     fn map_window_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        log::debug!(
+            "an X11 window asks to be shown ({:?}, {:?})",
+            window.class(),
+            window.title()
+        );
         // What it wrote on itself before it is shown
         // (`_NET_WM_STATE_FULLSCREEN`: a game that starts fullscreen says
         // it so, and sends no request). Read now: once the window is
@@ -676,7 +682,7 @@ impl XwmHandler for State {
         // window of a workspace: it is shown where it put itself, is
         // given no border, no tile and never the keyboard.
         if places_itself {
-            log::debug!("An X11 window of a kind that places itself is left to its program");
+            log::debug!("an X11 window of a kind that places itself is left to its program");
             self.x11_overrides.retain(|other| *other != window);
             self.x11_overrides.push(window);
             self.desktop.needs_redraw = true;
@@ -685,6 +691,10 @@ impl XwmHandler for State {
         let pid = window.pid();
         let geometry = window.geometry();
         let id = self.desktop.track(WindowSurface::X11(window), pid);
+        log::debug!(
+            "the X11 window is the window {} (shown once it draws)",
+            id.0
+        );
         if let Some(record) = self.desktop.windows.get_mut(&id) {
             record.rect.width = geometry.size.w;
             record.rect.height = geometry.size.h;
@@ -697,19 +707,34 @@ impl XwmHandler for State {
     /// Menus, tooltips and the like: they place themselves and are drawn
     /// above everything, without being managed.
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {
+        // (A tooltip at each hover: not worth a line at debug.)
+        log::trace!("an X11 menu or tooltip is shown ({:?})", window.class());
         self.x11_overrides.retain(|other| *other != window);
         self.x11_overrides.push(window);
         self.desktop.needs_redraw = true;
     }
 
     fn unmapped_window(&mut self, _xwm: XwmId, window: X11Surface) {
+        if window.is_override_redirect() {
+            log::trace!("an X11 menu or tooltip is hidden ({:?})", window.class());
+        } else {
+            log::debug!(
+                "an X11 window is hidden by its program ({:?})",
+                window.class()
+            );
+        }
         self.x11_window_gone(&window);
         if !window.is_override_redirect() {
-            let _ = window.set_mapped(false);
+            if let Err(error) = window.set_mapped(false) {
+                log::debug!("an X11 window was not marked unmapped: {error}");
+            }
         }
     }
 
     fn destroyed_window(&mut self, _xwm: XwmId, window: X11Surface) {
+        if !window.is_override_redirect() {
+            log::debug!("an X11 window is destroyed ({:?})", window.class());
+        }
         self.x11_window_gone(&window);
     }
 
@@ -808,10 +833,12 @@ impl XwmHandler for State {
                 geometry.size.h,
             );
             let asked = asked_rect(now, (x, y), (w, h));
-            let _ = window.configure(Rectangle::new(
+            if let Err(error) = window.configure(Rectangle::new(
                 (asked.x, asked.y).into(),
                 (asked.width, asked.height).into(),
-            ));
+            )) {
+                log::debug!("an X11 window was not given the place it asked for: {error}");
+            }
             self.desktop.needs_redraw = true;
             return;
         };
@@ -823,10 +850,12 @@ impl XwmHandler for State {
         let held = self.drag.as_ref().is_some_and(|drag| drag.id == id);
         let asked = asked_rect(rect, (x, y), (w, h));
         if tiled || filling || held || !self.desktop.decorations_visible || asked == rect {
-            let _ = window.configure(Rectangle::new(
+            if let Err(error) = window.configure(Rectangle::new(
                 (rect.x, rect.y).into(),
                 (rect.width, rect.height).into(),
-            ));
+            )) {
+                log::debug!("an X11 window was not told the place it keeps: {error}");
+            }
             return;
         }
         self.desktop.place_now(id, asked);
@@ -935,6 +964,10 @@ impl XwmHandler for State {
     /// An X11 program put something on the clipboard: Wayland clients are
     /// offered it.
     fn new_selection(&mut self, _xwm: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {
+        log::debug!(
+            "an X11 program put something on the {selection:?} selection ({} kinds of data)",
+            mime_types.len()
+        );
         match selection {
             SelectionTarget::Clipboard => {
                 set_data_device_selection(&self.display, &self.seat, mime_types, ())
@@ -965,6 +998,10 @@ impl XwmHandler for State {
                 WindowSurface::Xdg(_) => None,
             })
             .collect();
+        log::debug!(
+            "the {} windows of X11 programs went with Xwayland",
+            gone.len()
+        );
         for window in gone {
             self.x11_window_gone(&window);
         }

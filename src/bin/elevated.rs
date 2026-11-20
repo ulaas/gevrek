@@ -11,7 +11,7 @@
 #[cfg(windows)]
 fn main() {
     use gevrek_win32::elevated_helper::{pipe_name, server};
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    gevrek_logging::Logging::new("gevrek-elevated", log::LevelFilter::Info).init();
     // `--instance <name>`: which gevrek it is for (the default: main).
     let mut arguments = std::env::args().skip(1);
     // `--for <person>`: who it is for, where it runs as another (an

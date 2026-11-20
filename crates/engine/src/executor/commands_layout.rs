@@ -56,7 +56,7 @@ impl Executor {
                     anyhow::bail!("Resize delta must be between 1 and 1000 pixels");
                 }
                 self.resize_delta = pixels;
-                log::info!("Resize delta set to {} pixels", pixels);
+                log::debug!("Resize delta set to {} pixels", pixels);
                 Ok(())
             }
             DispatchCommand::SaveResize { path } => self

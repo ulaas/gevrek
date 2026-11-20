@@ -31,7 +31,7 @@ jiff = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
-env_logger = { workspace = true }
+gevrek-logging = { path = "../logging" }
 clap = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]

@@ -76,7 +76,9 @@ pub fn encode_items(process: u32, items: &[ItemId]) -> Vec<u8> {
 pub fn decode_items(bytes: &[u8], process: u32) -> Option<Vec<ItemId>> {
     // (Memory of Windows may be longer than what was put into it.)
     let end = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
-    let read: serde_json::Value = serde_json::from_slice(&bytes[..end]).ok()?;
+    let read: serde_json::Value = serde_json::from_slice(&bytes[..end])
+        .inspect_err(|error| log::debug!("zones: gevrek's own description of a drag is not understood: {error}"))
+        .ok()?;
     if read.get("process")?.as_u64()? != u64::from(process) {
         return None;
     }

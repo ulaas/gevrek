@@ -37,11 +37,21 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         file.write_all(bytes)?;
         file.sync_all()?;
         if let Ok(existing) = std::fs::metadata(&target) {
-            let _ = std::fs::set_permissions(&temporary, existing.permissions());
+            if let Err(error) = std::fs::set_permissions(&temporary, existing.permissions()) {
+                log::debug!(
+                    "{} gets the rights of a new file, not its own: {error}",
+                    target.display()
+                );
+            }
         }
         std::fs::rename(&temporary, &target)
     })();
-    if written.is_err() {
+    if let Err(error) = &written {
+        log::debug!(
+            "{} was not written, {} is removed: {error}",
+            target.display(),
+            temporary.display()
+        );
         let _ = std::fs::remove_file(&temporary);
     }
     written
@@ -92,7 +102,12 @@ fn backup_in(folder: &Path, origin: &Path, content: &str) -> std::io::Result<Bac
     let mut all = list_in(folder);
     for old in all.drain(KEEP.min(all.len())..) {
         let _ = std::fs::remove_file(sidecar(&old.path));
-        let _ = std::fs::remove_file(&old.path);
+        match std::fs::remove_file(&old.path) {
+            Ok(()) => log::debug!("the old backup {} was removed", old.path.display()),
+            Err(error) => {
+                log::debug!("the old backup {} was not removed: {error}", old.path.display())
+            }
+        }
     }
     Ok(Backup {
         path,

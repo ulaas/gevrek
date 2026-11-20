@@ -691,6 +691,13 @@ impl Config {
                 cleaned.removed_connections
             );
         }
+        log::debug!(
+            "{} was read: schema {}, {} nodes, {} connections",
+            path.display(),
+            config.desktop.schema_version,
+            config.node_graph.nodes.len(),
+            config.node_graph.connections.len()
+        );
 
         Ok(config)
     }
@@ -714,12 +721,22 @@ impl Config {
         // the same text, and never a reason for the save to fail).
         if let Ok(previous) = std::fs::read_to_string(path) {
             if previous != content {
-                if let Err(error) = crate::files::backup(path, &previous) {
-                    log::warn!("No backup of {} was kept: {error}", path.display());
+                match crate::files::backup(path, &previous) {
+                    Ok(backup) => log::debug!(
+                        "what {} held was kept as {}",
+                        path.display(),
+                        backup.path.display()
+                    ),
+                    Err(error) => log::warn!("no backup of {} was kept: {error}", path.display()),
                 }
+            } else {
+                log::debug!("{} holds this already: no backup is kept", path.display());
             }
         }
-        crate::files::write_atomic(path, content.as_bytes())?;
+        crate::files::write_atomic(path, content.as_bytes()).inspect_err(|error| {
+            log::debug!("{} could not be written: {error}", path.display())
+        })?;
+        log::debug!("{} was written ({} bytes)", path.display(), content.len());
         Ok(())
     }
 }

@@ -48,10 +48,22 @@ impl Progress {
     /// What is kept in this file; nothing where there is none, or where
     /// it cannot be read.
     pub fn load(path: &Path) -> Self {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default()
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            // (Trace: the studio's overview reads it each time it is drawn,
+            // and where nothing is kept yet that is as it should be.)
+            Err(error) => {
+                log::trace!("the tutorial remembers nothing yet: {}: {error}", path.display());
+                return Self::default();
+            }
+        };
+        match serde_json::from_str(&text) {
+            Ok(progress) => progress,
+            Err(error) => {
+                log::debug!("the tutorial's memory {} is not understood: {error}", path.display());
+                Self::default()
+            }
+        }
     }
 
     pub fn save(&self, path: &Path) {
@@ -60,8 +72,9 @@ impl Progress {
         }
         match serde_json::to_string_pretty(self) {
             Ok(text) => {
-                if let Err(error) = std::fs::write(path, text) {
-                    log::warn!("the tutorial's memory is not written: {error}");
+                match std::fs::write(path, text) {
+                    Ok(()) => log::debug!("the tutorial's memory is written to {}", path.display()),
+                    Err(error) => log::warn!("the tutorial's memory is not written: {error}"),
                 }
             }
             Err(error) => log::warn!("the tutorial's memory is not written: {error}"),

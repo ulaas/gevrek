@@ -417,8 +417,12 @@ impl Settings {
     /// Read the preferences from `path`; what is missing or not understood keeps its default.
     pub fn load(path: &Path) -> Self {
         let mut s = Self::default();
-        let Ok(text) = std::fs::read_to_string(path) else {
-            return s;
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(error) => {
+                log::debug!("the appearance is gevrek's own: {}: {error}", path.display());
+                return s;
+            }
         };
         for line in text.lines() {
             let Some((k, v)) = line.split_once('=') else {
@@ -671,7 +675,11 @@ pub fn install_fonts(ctx: &egui::Context, system_font: bool) {
             (FontFamily::Proportional, "sans-serif:style=Regular"),
             (FontFamily::Monospace, "monospace:style=Regular"),
         ] {
-            if let Some(bytes) = fc_match(query) {
+            let found = fc_match(query);
+            if found.is_none() {
+                log::debug!("no font of the system's for {query}: egui's own is used");
+            }
+            if let Some(bytes) = found {
                 let name = format!("system-{family:?}");
                 fonts
                     .font_data
@@ -700,6 +708,7 @@ fn fc_match(pattern: &str) -> Option<Vec<u8>> {
     let out = std::process::Command::new("fc-match")
         .args(["-f", "%{file}", pattern])
         .output()
+        .map_err(|error| log::debug!("fc-match did not start: {error}"))
         .ok()?;
     let path = String::from_utf8(out.stdout).ok()?;
     let lower = path.to_lowercase();

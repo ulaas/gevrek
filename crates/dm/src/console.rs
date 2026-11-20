@@ -49,20 +49,24 @@ impl Held {
 impl Drop for Held {
     fn drop(&mut self) {
         // The console is a text console again for whoever has it next.
-        let _ = ioctl(&self.file, KDSETMODE, KD_TEXT);
+        if let Err(error) = ioctl(&self.file, KDSETMODE, KD_TEXT) {
+            log::debug!("a console was not made a text console again: {error}");
+        }
     }
 }
 
 /// A console is a text console again (after a worker that could not
 /// say so itself any more).
 pub fn release(console: u32) {
-    if let Ok(file) = open(console) {
-        let _ = ioctl(&file, KDSETMODE, KD_TEXT);
+    match open(console).and_then(|file| ioctl(&file, KDSETMODE, KD_TEXT)) {
+        Ok(()) => log::debug!("console {console} is a text console again"),
+        Err(error) => log::debug!("console {console} was not made a text console again: {error}"),
     }
 }
 
 /// Show this console, and wait until it is the one shown.
 pub fn show(console: u32) -> std::io::Result<()> {
+    log::debug!("console {console} is to be shown");
     let file = open(0)?;
     ioctl(&file, VT_ACTIVATE, libc::c_ulong::from(console))?;
     ioctl(&file, VT_WAITACTIVE, libc::c_ulong::from(console))

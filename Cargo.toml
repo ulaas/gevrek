@@ -127,7 +127,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
-env_logger = { workspace = true }
+gevrek-logging = { path = "crates/logging" }
 dirs = { workspace = true }
 thiserror = { workspace = true }
 clap = { workspace = true }

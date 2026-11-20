@@ -523,6 +523,8 @@ pub struct Shell<M: 'static> {
     host: Host,
     messages: std::sync::mpsc::Receiver<M>,
     sender: Sender<M>,
+    /// What the thread is busy with, said where it is for long.
+    watch: crate::stall::Watch,
 }
 
 impl<M: 'static> Shell<M> {
@@ -605,6 +607,7 @@ impl<M: 'static> Shell<M> {
                 channel,
                 thread: unsafe { GetCurrentThreadId() },
             },
+            watch: crate::stall::Watch::start(),
         })
     }
 
@@ -696,14 +699,16 @@ impl<M: 'static> Shell<M> {
             };
             unsafe {
                 MsgWaitForMultipleObjectsEx(None, wait, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+                self.watch.enter(crate::stall::Part::Events);
                 let mut message = MSG::default();
                 while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
                     // Makes the characters of the keys that write some.
                     let _ = TranslateMessage(&message);
                     DispatchMessageW(&message);
                 }
+                self.watch.leave();
             }
-            turn(&mut self.host, &self.messages, &mut on_message);
+            turn(&mut self.host, &self.messages, &mut on_message, &self.watch);
             // A drag out of a surface: Windows runs it in a loop of its
             // own and returns when it is over. The shell's own pass is
             // made from inside that loop meanwhile.
@@ -711,10 +716,10 @@ impl<M: 'static> Shell<M> {
                 let Some(ready) = self.host.begin_drag(from, dragged) else {
                     continue;
                 };
-                let (host, messages) = (&mut self.host, &self.messages);
+                let (host, messages, watch) = (&mut self.host, &self.messages, &self.watch);
                 let outcome =
                     dnd::run(&ready.object, ready.allowed, ready.image.as_ref(), &mut || {
-                        turn(host, messages, &mut on_message)
+                        turn(host, messages, &mut on_message, watch)
                     });
                 self.host.end_drag(from, outcome);
             }
@@ -737,7 +742,9 @@ fn turn<M>(
     host: &mut Host,
     messages: &std::sync::mpsc::Receiver<M>,
     on_message: &mut impl FnMut(M, &mut Control),
+    watch: &crate::stall::Watch,
 ) {
+    use crate::stall::Part;
     // What the windows were told, in the order it came.
     let heard = HEARD.with(|heard| {
         heard
@@ -745,16 +752,20 @@ fn turn<M>(
             .map(|mut heard| std::mem::take(&mut *heard))
             .unwrap_or_default()
     });
-    for news in heard {
-        host.take_in(news);
-    }
-    host.take_in_drags();
-    for message in messages.try_iter() {
-        on_message(message, &mut host.control);
-    }
-    host.carry_out();
-    host.access_news();
-    host.look_at_the_covered();
+    watch.during(Part::Events, || {
+        for news in heard {
+            host.take_in(news);
+        }
+        host.take_in_drags();
+    });
+    watch.during(Part::Messages, || {
+        for message in messages.try_iter() {
+            on_message(message, &mut host.control);
+        }
+    });
+    watch.during(Part::CarryOut, || host.carry_out());
+    watch.during(Part::Access, || host.access_news());
+    watch.during(Part::Other("looking at the covered surfaces"), || host.look_at_the_covered());
     let now = Instant::now();
     for index in 0..host.surfaces.len() {
         let surface = &mut host.surfaces[index];
@@ -763,10 +774,13 @@ fn turn<M>(
             surface.redraw = true;
         }
         if surface.redraw {
-            host.draw(index);
+            let (width, height) = surface.configured;
+            let size = (width.max(0) as u32, height.max(0) as u32);
+            let part = Part::Draw { surface: surface.id.0, size };
+            watch.during(part, || host.draw(index));
         }
     }
-    host.carry_out();
+    watch.during(Part::CarryOut, || host.carry_out());
 }
 
 /// Show one surface at `place` and draw `ui` on it until it says to close
@@ -1504,6 +1518,9 @@ struct Surface {
     scale: f32,
     /// The size the picture was last made for.
     configured: (i32, i32),
+    /// The last frame had nothing to draw into (said once, when it
+    /// begins and when it ends).
+    failing: bool,
     /// What happened since the last frame, for egui.
     events: Vec<egui::Event>,
     /// The surface has the keyboard.
@@ -1552,6 +1569,9 @@ impl Surface {
                 view_formats: Vec::new(),
             },
         );
+        if self.configured != (width, height) {
+            log::debug!("surface {:?} is drawn at {width}x{height}", self.id);
+        }
         self.configured = (width, height);
     }
 
@@ -1850,6 +1870,7 @@ impl Host {
     fn carry_out(&mut self) {
         for id in std::mem::take(&mut self.control.close) {
             if let Some(surface) = self.surfaces.iter().find(|surface| surface.id == id) {
+                log::debug!("surface {id:?} is closed");
                 give_back(surface.window.handle, surface.before);
             }
             // A surface's popups go with it (and before it).
@@ -1883,6 +1904,7 @@ impl Host {
                     if let Some(at) = self.control.put.iter().position(|(put, _)| *put == id) {
                         surface.pinned = Some(self.control.put.remove(at).1);
                     }
+                    log::debug!("the surface {name} is opened as {id:?} on {}", surface.display);
                     self.surfaces.push(surface);
                     self.settle(self.surfaces.len() - 1);
                     self.show(self.surfaces.len() - 1);
@@ -1893,6 +1915,7 @@ impl Host {
         for (id, parent, anchor, size, kind, draw) in std::mem::take(&mut self.control.popups) {
             match self.make_popup(id, parent, anchor, size, kind, draw) {
                 Ok(surface) => {
+                    log::debug!("a popup {id:?} is opened from surface {parent:?}");
                     self.surfaces.push(surface);
                     self.settle(self.surfaces.len() - 1);
                     self.show(self.surfaces.len() - 1);
@@ -2189,7 +2212,11 @@ impl Host {
                     ..Default::default()
                 }))
                     .context("the graphics device")?;
-            log::debug!("drawing with {:?}", adapter.get_info());
+            let info = adapter.get_info();
+            log::debug!("drawing with {} ({:?}, {:?})", info.name, info.backend, info.device_type);
+            device.on_uncaptured_error(std::sync::Arc::new(|error| {
+                log::warn!("the graphics device: {error}");
+            }));
             self.gpu = Some(Gpu {
                 device,
                 queue,
@@ -2237,6 +2264,7 @@ impl Host {
             area: Area::default(),
             scale: 1.0,
             configured: (0, 0),
+            failing: false,
             events: Vec::new(),
             focused: false,
             redraw: true,
@@ -2554,6 +2582,7 @@ impl Host {
         }
         match news.message {
             WM_DISPLAYCHANGE | WM_DPICHANGED => {
+                log::debug!("the displays changed");
                 self.displays_changed = true;
                 return;
             }
@@ -2634,7 +2663,7 @@ impl Host {
                 )));
             }
             WM_MOUSELEAVE => {
-                log::debug!("the pointer left surface {:?}", surface.id);
+                log::trace!("the pointer left surface {:?}", surface.id);
                 if self.pointer_on == Some(surface.id) {
                     self.pointer_on = None;
                 }
@@ -2650,7 +2679,7 @@ impl Host {
                 // hint), has not moved; the wheel would turn over nothing.
                 let at =
                     input::point_on(news.lparam, surface.area.x, surface.area.y, surface.scale);
-                log::debug!("the wheel over surface {:?} at {at:?}", surface.id);
+                log::trace!("the wheel over surface {:?} at {at:?}", surface.id);
                 self.pointer_on = Some(surface.id);
                 surface.events.push(egui::Event::PointerMoved(at));
                 surface.events.push(egui::Event::MouseWheel {
@@ -2700,12 +2729,18 @@ impl Host {
             }
             WM_SETFOCUS | WM_KILLFOCUS => {
                 surface.focused = news.message == WM_SETFOCUS;
+                if surface.focused {
+                    log::debug!("surface {:?} has the keyboard", surface.id);
+                } else {
+                    log::debug!("surface {:?} lost the keyboard", surface.id);
+                }
                 surface
                     .events
                     .push(egui::Event::WindowFocused(surface.focused));
             }
             WM_CLOSE => {
                 let id = surface.id;
+                log::debug!("Windows asked surface {id:?} to close");
                 self.control.close(id);
                 return;
             }
@@ -2877,9 +2912,19 @@ impl Host {
         let waited = asked.elapsed().as_secs_f64() * 1000.0;
         let frame = match acquired {
             wgpu::CurrentSurfaceTexture::Success(frame)
-            | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
+            | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
+                if std::mem::take(&mut surface.failing) {
+                    log::debug!("surface {:?} has frames to draw into again", surface.id);
+                }
+                frame
+            }
             other => {
-                log::debug!("no frame to draw into: {other:?}");
+                if surface.failing {
+                    log::trace!("still no frame to draw into on surface {:?}: {other:?}", surface.id);
+                } else {
+                    log::debug!("no frame to draw into on surface {:?}: {other:?}", surface.id);
+                    surface.failing = true;
+                }
                 surface.configure_target(&gpu.device);
                 // Not at once: a window that cannot be drawn on now (the
                 // session is locked, the device is being reset) would

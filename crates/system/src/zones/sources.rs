@@ -86,7 +86,9 @@ impl Source {
                 let _ = wake.send(());
             }
         };
-        let mut watcher = notify::recommended_watcher(handler).ok();
+        let mut watcher = notify::recommended_watcher(handler)
+            .inspect_err(|error| log::debug!("zones: a list is not watched, and read again only when asked: {error}"))
+            .ok();
         if let Some(watcher) = &mut watcher {
             for folder in watched.iter().filter(|folder| folder.is_dir()) {
                 if let Err(error) = watcher.watch(folder, notify::RecursiveMode::NonRecursive) {

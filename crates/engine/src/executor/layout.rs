@@ -78,7 +78,7 @@ impl Executor {
             if let Some(workspace) = monitor_manager.get_focused_workspace_mut(monitor_handle) {
                 // Skip layout flush while expose mode is active — expose manages positions directly
                 if self.expose_workspaces.contains(&workspace.id) {
-                    log::debug!(
+                    log::trace!(
                         "Skipping pending layout flush for monitor {:?} (expose active)",
                         monitor_handle
                     );
@@ -91,7 +91,7 @@ impl Executor {
                 // hidden; it must be visible before it is positioned.
                 self.sync_group_visibility(workspace, window_manager)?;
                 self.apply_workspace_layout_and_position(workspace, work_area, window_manager)?;
-                log::debug!("Flushed pending layout for monitor {:?}", monitor_handle);
+                log::trace!("Flushed pending layout for monitor {:?}", monitor_handle);
             }
         }
 
@@ -192,7 +192,7 @@ impl Executor {
             return Ok(());
         }
 
-        log::debug!("Batch positioning {} windows atomically", operations.len());
+        log::trace!("Batch positioning {} windows atomically", operations.len());
 
         // Use batch positioning for smooth, flicker-free updates.
         Self::batch_move_resize_and_sync_borders(window_manager, &operations)?;
@@ -244,7 +244,7 @@ impl Executor {
                     );
                 }
             } else {
-                let _ = effect(
+                try_effect(
                     window_manager,
                     Effect::Border {
                         id: window_handle,
@@ -415,7 +415,7 @@ impl Executor {
             // (On a workspace that is not shown the window is hidden, and
             // its border with it.)
             if window_manager.is_hidden_by_backend(window) {
-                let _ = effect(
+                try_effect(
                     window_manager,
                     Effect::Border {
                         id: window,
@@ -439,7 +439,7 @@ impl Executor {
         let look = workspace.border_look(floats);
         workspace.dressed_as_floating.insert(window, look.floating);
         if !look.enabled {
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::Border {
                     id: window,
@@ -514,7 +514,7 @@ impl Executor {
                     states: WindowStates::default(),
                 },
             )?;
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::Border {
                     id: window,
@@ -538,7 +538,7 @@ impl Executor {
                 effect(window_manager, Effect::Focus(Some(tiled)))?;
             }
         }
-        log::info!(
+        log::debug!(
             "Floating windows of workspace '{}' put out of the way",
             workspace.name
         );
@@ -563,7 +563,7 @@ impl Executor {
                     states: WindowStates::default(),
                 },
             )?;
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::Border {
                     id: window,
@@ -610,7 +610,7 @@ impl Executor {
             let own_place = queries(window_manager).parent(window).is_some()
                 || queries(window_manager).placed_itself(window);
             if own_place && reaches(&work_area, &rect) {
-                let _ = effect(
+                try_effect(
                     window_manager,
                     Effect::Border {
                         id: window,
@@ -646,7 +646,7 @@ impl Executor {
                     states: WindowStates::default(),
                 },
             )?;
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::Border {
                     id: window,
@@ -665,7 +665,7 @@ impl Executor {
         handle: WindowHandle,
         monitor_handle: MonitorHandle,
     ) -> Result<()> {
-        log::info!("🔄 Re-tiling window on monitor {:?}", monitor_handle);
+        log::debug!("🔄 Re-tiling window on monitor {:?}", monitor_handle);
 
         // A window that already has its tile on this output's workspace
         // on screen (it was dragged and let go where it was, or resized)
@@ -717,7 +717,7 @@ impl Executor {
         if let Some((old_monitor, old_workspace_idx)) =
             monitor_manager.find_and_remove_window(handle)
         {
-            log::info!("   Removed from old workspace on monitor {:?}", old_monitor);
+            log::debug!("   Removed from old workspace on monitor {:?}", old_monitor);
 
             // CRITICAL: Only retile if we removed a TILED window
             // Floating windows don't affect tiling layout
@@ -741,7 +741,7 @@ impl Executor {
 
                         // Reposition remaining windows atomically using batch positioning
                         Self::batch_position_workspace_windows(old_workspace, window_manager)?;
-                        log::info!("   Retiled old workspace (filled gap)");
+                        log::debug!("   Retiled old workspace (filled gap)");
                     }
                 }
             } else {
@@ -762,7 +762,7 @@ impl Executor {
         // Add to focused workspace on target monitor
         // CRITICAL: Preserve floating status - floating windows don't get tiled
         if let Some(workspace) = monitor_manager.get_focused_workspace_mut(monitor_handle) {
-            log::info!(
+            log::debug!(
                 "   Adding to workspace '{}' with layout {:?}",
                 workspace.name,
                 workspace.layout
@@ -771,25 +771,25 @@ impl Executor {
             if was_floating {
                 // Window was floating - keep it floating (don't add to containers)
                 workspace.add_floating_window(handle);
-                log::info!("   ✅ Window re-added as FLOATING (doesn't affect tiling)");
+                log::debug!("   ✅ Window re-added as FLOATING (doesn't affect tiling)");
             } else {
                 // Window was tiled - add to containers and retile
                 // CRITICAL: Preserve order by inserting at old position if available
                 if let Some(idx) = old_container_idx {
                     workspace.add_window_at(handle, idx);
-                    log::info!(
+                    log::debug!(
                         "   ✅ Window re-added at SAME POSITION {} (order preserved)",
                         idx
                     );
                 } else {
                     workspace.add_window(handle, true); // true = ADD AS TILED
-                    log::info!("   Window added at END (new position)");
+                    log::debug!("   Window added at END (new position)");
                 }
 
                 self.apply_workspace_layout_and_position(workspace, work_area, window_manager)?;
-                log::info!("   Applied {:?} layout to workspace", workspace.layout);
+                log::debug!("   Applied {:?} layout to workspace", workspace.layout);
 
-                log::info!("✅ Window successfully tiled in workspace!");
+                log::debug!("✅ Window successfully tiled in workspace!");
             }
         }
 
@@ -852,7 +852,7 @@ impl Executor {
                     adjusted_rect.x += width_delta;
                     adjusted_rect.width -= width_delta;
                     needs_adjustment = true;
-                    log::debug!(
+                    log::trace!(
                         "Adjusting right neighbor: x+={}, width-={}",
                         width_delta,
                         width_delta
@@ -867,7 +867,7 @@ impl Executor {
                     adjusted_rect.y += height_delta;
                     adjusted_rect.height -= height_delta;
                     needs_adjustment = true;
-                    log::debug!(
+                    log::trace!(
                         "Adjusting bottom neighbor: y+={}, height-={}",
                         height_delta,
                         height_delta
@@ -881,7 +881,7 @@ impl Executor {
                 if container_rect.x + container_rect.width <= old_rect.x {
                     adjusted_rect.width += width_delta;
                     needs_adjustment = true;
-                    log::debug!("Adjusting left neighbor: width+={}", width_delta);
+                    log::trace!("Adjusting left neighbor: width+={}", width_delta);
                 }
             }
 
@@ -891,7 +891,7 @@ impl Executor {
                 if container_rect.y + container_rect.height <= old_rect.y {
                     adjusted_rect.height += height_delta;
                     needs_adjustment = true;
-                    log::debug!("Adjusting top neighbor: height+={}", height_delta);
+                    log::trace!("Adjusting top neighbor: height+={}", height_delta);
                 }
             }
 
@@ -1161,7 +1161,7 @@ impl Executor {
                     anyhow::bail!("The selected window is floating");
                 }
                 let enabled = workspace.toggle_pseudotile(window, preferred);
-                log::info!(
+                log::debug!(
                     "Pseudotile {} for {:?} at preferred size {}x{}",
                     if enabled { "enabled" } else { "disabled" },
                     window,
@@ -1336,7 +1336,7 @@ impl Executor {
                 continue;
             };
             if !workspace.name.eq_ignore_ascii_case(&entry.name) {
-                log::info!(
+                log::debug!(
                     "Restoring resize dimensions saved from '{}' onto workspace '{}' (monitor {}, index {})",
                     entry.name,
                     workspace.name,
@@ -1482,7 +1482,7 @@ impl Executor {
             self.sync_group_visibility(workspace, window_manager)?;
             retiled += 1;
         }
-        log::info!(
+        log::debug!(
             "Retiled the focused workspace on {} of {} monitor(s)",
             retiled,
             monitors.len()
@@ -1537,7 +1537,7 @@ impl Executor {
             .ok_or_else(|| anyhow::anyhow!("The selected workspace no longer exists"))?;
         workspace.tiling_enabled = !workspace.tiling_enabled;
         let enabled = workspace.tiling_enabled;
-        log::info!(
+        log::debug!(
             "Tiling {} for workspace '{}' using selector '{}'",
             if enabled { "enabled" } else { "disabled" },
             workspace.name,
@@ -1592,7 +1592,7 @@ impl Executor {
                 })),
             )?;
         }
-        log::info!(
+        log::debug!(
             "Float override {} for workspace '{}' using selector '{}'",
             if enabled { "enabled" } else { "disabled" },
             workspace.name,

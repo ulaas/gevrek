@@ -42,7 +42,7 @@ impl Executor {
                 // Cycle to the next window in focus history (Alt-Tab style)
                 // This sets a pending operation that will be applied by the Runtime using FocusManager
                 self.pending_focus_op = Some(PendingFocusOp::CycleNext);
-                log::info!("Cycle focus next requested");
+                log::trace!("Cycle focus next requested");
 
                 self.trigger_output_execution(
                     window_manager,
@@ -57,7 +57,7 @@ impl Executor {
                 // Cycle to the previous window in focus history (Alt-Shift-Tab style)
                 // This sets a pending operation that will be applied by the Runtime using FocusManager
                 self.pending_focus_op = Some(PendingFocusOp::CyclePrevious);
-                log::info!("Cycle focus previous requested");
+                log::trace!("Cycle focus previous requested");
 
                 self.trigger_output_execution(
                     window_manager,

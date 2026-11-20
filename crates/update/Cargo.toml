@@ -8,6 +8,7 @@ description = "Asks GitHub for gevrek's newest release, and puts it in place of 
 
 [dependencies]
 anyhow = { workspace = true }
+log = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # The check of a downloaded package against the release's SHA256SUMS.txt.

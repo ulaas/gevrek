@@ -218,6 +218,9 @@ impl ZonesHub {
                 .filter_map(|id| inner.waiting.remove(&id))
                 .collect()
         };
+        if !waiting.is_empty() {
+            log::debug!("{} waiting for the shell that went are told it went", waiting.len());
+        }
         for waiting in waiting {
             let _ = waiting.answer.send(not_answered(
                 "The shell that runs the zones went away before it answered",
@@ -238,10 +241,12 @@ impl ZonesHub {
             Some(zones_report::Report::Snapshot(snapshot)) => {
                 let mut inner = self.lock();
                 if !inner.is_attached(session) {
+                    log::debug!("a snapshot of the zones from session {session}, which is not the attached one, is dropped");
                     return;
                 }
                 inner.sequence += 1;
                 let sequence = inner.sequence;
+                log::trace!("the zones' snapshot {sequence} came from session {session} ({} bytes)", snapshot.json.len());
                 let room = room_of(&snapshot.json);
                 inner.keep_room(room);
                 inner.snapshot = Some(Kept {
@@ -256,6 +261,7 @@ impl ZonesHub {
                 let sequence = {
                     let inner = self.lock();
                     if !inner.is_attached(session) {
+                        log::debug!("an event of the zones from session {session}, which is not the attached one, is dropped");
                         return;
                     }
                     inner.sequence
@@ -289,13 +295,24 @@ impl ZonesHub {
                         _ => None,
                     }
                 };
-                if let Some(waiting) = waiting {
-                    let _ = waiting.answer.send(ZonesCommandReply {
-                        success: answer.success,
-                        error: answer.error,
-                        events: answer.events,
-                        delivered: true,
-                    });
+                let request = answer.request_id;
+                match waiting {
+                    Some(waiting) => {
+                        log::debug!(
+                            "the shell answered zones request {request}: {}",
+                            if answer.success { "done".to_string() } else { format!("not done: {}", answer.error.as_deref().unwrap_or("no reason given")) }
+                        );
+                        let reply = ZonesCommandReply {
+                            success: answer.success,
+                            error: answer.error,
+                            events: answer.events,
+                            delivered: true,
+                        };
+                        if waiting.answer.send(reply).is_err() {
+                            log::debug!("whoever asked zones request {request} no longer waits for the answer");
+                        }
+                    }
+                    None => log::debug!("the shell's answer to zones request {request} came when nobody waited for it"),
                 }
             }
             None => {}
@@ -374,6 +391,7 @@ impl ZonesHub {
             .ok()
             .is_some_and(|value| value.get("command").is_some_and(|word| word.is_string()));
         if !is_command {
+            log::debug!("a zones command is refused: it is no JSON object with a command");
             return Err(Status::invalid_argument(
                 "Not a zones command: it is a JSON object with a \"command\", as {\"command\": \"quick_hide\"}",
             ));
@@ -386,6 +404,7 @@ impl ZonesHub {
         let (id, answered) = {
             let mut inner = self.lock();
             let Some(attached) = &inner.attached else {
+                log::debug!("a zones command is answered without a shell: none runs the zones");
                 return Ok(not_answered(NOT_RUNNING, false));
             };
             let (session, requests) = (attached.session, attached.requests.clone());
@@ -396,7 +415,8 @@ impl ZonesHub {
                 version,
                 json,
             };
-            if requests.try_send(Ok(request)).is_err() {
+            if let Err(error) = requests.try_send(Ok(request)) {
+                log::debug!("zones request {id} is not sent to the shell: {error}");
                 return Ok(not_answered(
                     "The shell that runs the zones is not taking what is asked of them",
                     false,
@@ -404,6 +424,7 @@ impl ZonesHub {
             }
             let (answer, answered) = oneshot::channel();
             inner.waiting.insert(id, Waiting { session, answer });
+            log::debug!("zones request {id} is sent to the shell of session {session}");
             (id, answered)
         };
         match tokio::time::timeout(wait, answered).await {
@@ -414,6 +435,7 @@ impl ZonesHub {
             )),
             Err(_) => {
                 self.lock().waiting.remove(&id);
+                log::debug!("the shell did not answer zones request {id} within {} ms", wait.as_millis());
                 Ok(not_answered(
                     format!(
                         "The shell did not answer within {} ms; what was asked may still be carried out",

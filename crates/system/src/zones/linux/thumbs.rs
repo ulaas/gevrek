@@ -245,7 +245,9 @@ pub fn picture(places: &Places, source: &Source<'_>, pixels: u32) -> Option<Pict
             // tried again each time the folder is shown.
             let empty = image::DynamicImage::new_rgba8(1, 1);
             if let Some(png) = encode(&empty, source) {
-                let _ = put(&failure, &png);
+                if let Err(error) = put(&failure, &png) {
+                    log::debug!("zones: that no thumbnail could be made of {} is not kept: {error}", source.uri);
+                }
             }
             kept(&folders[enough..])
         }

@@ -30,7 +30,17 @@ impl PointerConstraintsHandler for State {
     /// gets that at once when the pointer is on the surface, otherwise
     /// when it comes there (`activate_pointer_constraint`).
     fn new_constraint(&mut self, surface: &WlSurface, pointer: &PointerHandle<Self>) {
-        if pointer.current_focus().as_ref() == Some(surface) {
+        let now = pointer.current_focus().as_ref() == Some(surface);
+        log::debug!(
+            "{} asks to lock or confine the pointer ({})",
+            self.surface_named(surface),
+            if now {
+                "it has it now"
+            } else {
+                "when the pointer comes onto it"
+            },
+        );
+        if now {
             with_pointer_constraint(surface, pointer, |constraint| {
                 if let Some(constraint) = constraint {
                     constraint.activate();
@@ -155,6 +165,10 @@ impl KeyboardShortcutsInhibitHandler for State {
     /// gets them (the user asked for that program), and Super+Escape is the
     /// way out.
     fn new_inhibitor(&mut self, inhibitor: KeyboardShortcutsInhibitor) {
+        log::debug!(
+            "{} asks for every key while it has the keyboard: given",
+            self.surface_named(inhibitor.wl_surface())
+        );
         inhibitor.activate();
     }
 }

@@ -122,17 +122,27 @@ impl Default for Settings {
 
 impl Settings {
     pub fn load(folder: &Path) -> Self {
-        std::fs::read_to_string(folder.join("update.json"))
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default()
+        let file = folder.join("update.json");
+        let text = match std::fs::read_to_string(&file) {
+            Ok(text) => text,
+            Err(error) => {
+                log::debug!("the update settings are the defaults: {} was not read: {error}", file.display());
+                return Self::default();
+            }
+        };
+        serde_json::from_str(&text).unwrap_or_else(|error| {
+            log::debug!("the update settings are the defaults: {} is not read: {error}", file.display());
+            Self::default()
+        })
     }
 
     pub fn save(&self, folder: &Path) -> Result<()> {
         std::fs::create_dir_all(folder)?;
         let file = folder.join("update.json");
         std::fs::write(&file, serde_json::to_string_pretty(self)?)
-            .with_context(|| format!("write {}", file.display()))
+            .with_context(|| format!("write {}", file.display()))?;
+        log::debug!("the update settings were written to {}", file.display());
+        Ok(())
     }
 
     /// Whether a check nobody asked for is due: at most once a day, and
@@ -278,12 +288,14 @@ fn download(source: &Source, url: &str, to: &Path, most: u64, seconds: u32) -> R
         curl.args(["--proto", "=https", "--proto-redir", "=https", "--tlsv1.2"]);
     }
     curl.arg("--output").arg(to).arg(url);
+    log::debug!("{url} is downloaded to {}", to.display());
     let output = quiet(&mut curl)
         .output()
         .context("curl could not be started (it is part of Windows 10 and later)")?;
     if !output.status.success() {
         let _ = std::fs::remove_file(to);
         let said = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        log::debug!("{url} was not downloaded: curl ended with {}", output.status);
         bail!("{url}: {}", if said.is_empty() { "the download failed" } else { &said });
     }
     let size = std::fs::metadata(to)?.len();
@@ -291,6 +303,7 @@ fn download(source: &Source, url: &str, to: &Path, most: u64, seconds: u32) -> R
         let _ = std::fs::remove_file(to);
         bail!("{url}: {size} bytes is more than a file of a release has");
     }
+    log::debug!("{url} was downloaded: {size} bytes");
     Ok(())
 }
 
@@ -299,10 +312,20 @@ fn download(source: &Source, url: &str, to: &Path, most: u64, seconds: u32) -> R
 pub fn latest(source: &Source, folder: &Path) -> Result<Release> {
     std::fs::create_dir_all(folder)?;
     let file = folder.join("latest.json");
+    log::debug!("the latest release is asked for at {}", source.api);
     download(source, &source.api, &file, MAX_TEXT, 60)?;
     let text = std::fs::read_to_string(&file);
     let _ = std::fs::remove_file(&file);
-    parse_release(&text?, source)
+    let release = parse_release(&text?, source)
+        .inspect_err(|error| log::debug!("the answer about the latest release is not read: {error:#}"))?;
+    log::debug!(
+        "the latest release is {} (this is {}): {}, {}",
+        release.version,
+        current(),
+        if release.package.is_some() { "with a Windows package" } else { "without a Windows package" },
+        if release.sums.is_some() { "with checksums" } else { "without checksums" }
+    );
+    Ok(release)
 }
 
 // ---------------------------------------------------------------------
@@ -350,7 +373,12 @@ pub fn staged(folder: &Path) -> Option<(String, PathBuf)> {
 
 /// Take away what is staged (it was applied, or is of no use any more).
 pub fn unstage(folder: &Path) {
-    let _ = std::fs::remove_dir_all(staged_folder(folder));
+    let staged = staged_folder(folder);
+    match std::fs::remove_dir_all(&staged) {
+        Ok(()) => log::debug!("what was staged in {} was taken away", staged.display()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => log::debug!("{} was not taken away: {error}", staged.display()),
+    }
 }
 
 /// Download the release's Windows package, check it, and unpack it in the
@@ -372,6 +400,7 @@ pub fn stage(source: &Source, release: &Release, folder: &Path) -> Result<PathBu
     // failure (no network, a file that is not the release's) leaves it as
     // it was, ready to be put in place.
     let mut replaced = false;
+    log::debug!("release {} is staged in {}", release.version, folder.display());
     let result = (|| {
         let sums_file = work.join(SUMS);
         download(source, &sums.url, &sums_file, MAX_TEXT, 60)?;
@@ -386,6 +415,7 @@ pub fn stage(source: &Source, release: &Release, folder: &Path) -> Result<PathBu
                 package.name
             );
         }
+        log::debug!("{} is the file the release names (SHA-256 {found})", package.name);
         replaced = true;
         unstage(folder);
         let staged = staged_folder(folder);
@@ -410,7 +440,21 @@ pub fn stage(source: &Source, release: &Release, folder: &Path) -> Result<PathBu
         std::fs::write(staged.join("ready"), &release.version)?;
         Ok(programs)
     })();
-    let _ = std::fs::remove_dir_all(&work);
+    if let Err(error) = std::fs::remove_dir_all(&work) {
+        log::debug!("{} was not taken away: {error}", work.display());
+    }
+    match &result {
+        Ok(programs) => log::debug!(
+            "release {} is staged: {}",
+            release.version,
+            programs.display()
+        ),
+        Err(error) => log::debug!(
+            "release {} was not staged{}: {error:#}",
+            release.version,
+            if replaced { " and what was staged before is gone" } else { "; what was staged before is kept" }
+        ),
+    }
     if result.is_err() && replaced {
         unstage(folder);
     }
@@ -479,7 +523,12 @@ pub fn apply(package: &Path, install: &Path) -> Result<()> {
                 // run, when a program was never restarted since: then it
                 // cannot be replaced, and is moved out of the way itself.)
                 if aside.exists() && std::fs::remove_file(&aside).is_err() {
-                    let _ = std::fs::rename(&aside, previous.join(format!("{program}.old")));
+                    log::debug!("{} still runs: it is moved out of the way", aside.display());
+                    if let Err(error) =
+                        std::fs::rename(&aside, previous.join(format!("{program}.old")))
+                    {
+                        log::debug!("{} was not moved out of the way: {error}", aside.display());
+                    }
                 }
                 std::fs::rename(&to, &aside)
                     .with_context(|| format!("move {} aside", to.display()))?;
@@ -492,12 +541,18 @@ pub fn apply(package: &Path, install: &Path) -> Result<()> {
         Ok(())
     })();
     if let Err(error) = result {
+        log::debug!(
+            "the update was not put in place in {}, what was moved is moved back: {error:#}",
+            install.display()
+        );
         for program in programs.iter() {
             let _ = std::fs::remove_file(beside(program));
             let to = install.join(program);
             if moved.contains(program) {
                 let _ = std::fs::remove_file(&to);
-                let _ = std::fs::rename(previous.join(program), &to);
+                if let Err(back) = std::fs::rename(previous.join(program), &to) {
+                    log::error!("{} could not be put back: {back}", to.display());
+                }
             } else if placed.contains(program) {
                 let _ = std::fs::remove_file(&to);
             }
@@ -506,9 +561,17 @@ pub fn apply(package: &Path, install: &Path) -> Result<()> {
     }
     for file in BESIDE {
         if package.join(file).is_file() {
-            let _ = std::fs::copy(package.join(file), install.join(file));
+            if let Err(error) = std::fs::copy(package.join(file), install.join(file)) {
+                log::debug!("{file} was not put in place in {}: {error}", install.display());
+            }
         }
     }
+    log::debug!(
+        "the update was put in place in {}: {}; the programs before it are in {}",
+        install.display(),
+        programs.join(", "),
+        previous.display()
+    );
     Ok(())
 }
 
@@ -527,7 +590,7 @@ pub fn note_installed_version(version: &str) {
             .status()
             .is_ok_and(|status| status.success());
         if there {
-            let _ = quiet(Command::new(system_program("reg")).args([
+            let noted = quiet(Command::new(system_program("reg")).args([
                 "add",
                 &key,
                 "/v",
@@ -539,6 +602,17 @@ pub fn note_installed_version(version: &str) {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
+            match noted {
+                Ok(status) if status.success() => {
+                    log::debug!("Windows' list of apps says {version} for {entry} now")
+                }
+                Ok(status) => log::debug!(
+                    "Windows' list of apps was not told {version} for {entry}: reg ended with {status}"
+                ),
+                Err(error) => {
+                    log::debug!("Windows' list of apps was not told {version} for {entry}: {error}")
+                }
+            }
         }
     }
 }

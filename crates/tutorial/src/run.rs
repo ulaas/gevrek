@@ -152,6 +152,7 @@ impl Run {
             return;
         };
         if met(self.step().goal, before, &self.now, &self.carried_out) {
+            log::debug!("the tutorial's step {} of {} is done", self.at + 1, self.lesson.id);
             self.done = Some(now);
         }
     }
@@ -159,8 +160,10 @@ impl Run {
     /// Go to another step (or past the last: the lesson is finished).
     fn go(&mut self, to: usize, now: Instant) -> Effect {
         if to >= self.lesson.steps.len() {
+            log::debug!("the tutorial's lesson {} is finished", self.lesson.id);
             return Effect::Finished;
         }
+        log::debug!("the tutorial goes to step {} of {}", to + 1, self.lesson.id);
         self.at = to;
         // The next step is measured against the desktop as it is now.
         self.before = self.before.as_ref().map(|_| self.now.clone());
@@ -218,6 +221,9 @@ impl Run {
                 }
             }
             Input::Pause(on) => {
+                if on != self.paused.is_some() {
+                    log::debug!("the tutorial is {}", if on { "paused" } else { "going on" });
+                }
                 match (on, self.paused) {
                     (true, None) => self.paused = Some(now),
                     // (The time it was paused is not time waited.)

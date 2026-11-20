@@ -263,11 +263,15 @@ impl GlobalDispatch<ExtWorkspaceManagerV1, ()> for State {
     fn bind(
         state: &mut Self,
         display: &DisplayHandle,
-        _client: &Client,
+        client: &Client,
         resource: New<ExtWorkspaceManagerV1>,
         _: &(),
         init: &mut DataInit<'_, Self>,
     ) {
+        log::debug!(
+            "{} binds the workspace manager",
+            crate::state::named_client(client)
+        );
         let manager = init.init(resource, ());
         let mut bound = Bound {
             manager,

@@ -116,7 +116,9 @@ impl History {
         }
         match options.open(path) {
             Ok(mut file) => {
-                let _ = file.write_all(text.as_bytes());
+                if let Err(error) = file.write_all(text.as_bytes()) {
+                    log::debug!("the clipboard's texts are not kept: {}: {error}", path.display());
+                }
             }
             Err(error) => log::debug!("the clipboard's texts are not kept: {error}"),
         }
@@ -222,8 +224,12 @@ pub fn start() -> anyhow::Result<Clipboard> {
     std::thread::Builder::new()
         .name("gevrek-clipboard".to_string())
         .spawn(move || {
-            let Ok(mut event_loop) = EventLoop::<Keeper>::try_new() else {
-                return;
+            let mut event_loop = match EventLoop::<Keeper>::try_new() {
+                Ok(event_loop) => event_loop,
+                Err(error) => {
+                    log::warn!("the clipboard is not kept: {error}");
+                    return;
+                }
             };
             let mut keeper = Keeper {
                 manager,
@@ -239,10 +245,8 @@ pub fn start() -> anyhow::Result<Clipboard> {
                 timers: event_loop.handle(),
                 handle: handle.clone(),
             };
-            if WaylandSource::new(connection, queue)
-                .insert(event_loop.handle())
-                .is_err()
-            {
+            if let Err(error) = WaylandSource::new(connection, queue).insert(event_loop.handle()) {
+                log::warn!("the clipboard is not kept: {error}");
                 return;
             }
             let offering = handle.clone();
@@ -545,12 +549,18 @@ impl Dispatch<ZwlrDataControlSourceV1, ()> for Keeper {
                 if let Some(bytes) = copied.or(selected) {
                     // Written on a thread of its own: a program that reads
                     // slowly must not hold the clipboard up.
-                    let _ = std::thread::Builder::new()
+                    // (How it went, never what it was.)
+                    if let Err(error) = std::thread::Builder::new()
                         .name("gevrek-clipboard-write".to_string())
                         .spawn(move || {
                             let mut file = std::fs::File::from(fd);
-                            let _ = file.write_all(&bytes);
-                        });
+                            if let Err(error) = file.write_all(&bytes) {
+                                log::debug!("a program did not take all that was pasted: {error}");
+                            }
+                        })
+                    {
+                        log::debug!("what was pasted was not handed over: {error}");
+                    }
                 }
             }
             // Another program owns the clipboard now.

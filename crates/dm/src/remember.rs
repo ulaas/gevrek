@@ -138,14 +138,30 @@ pub fn keep(reader: &Reader, home: &Path, greeter_home: &Path, owner: (u32, u32)
         &home.join(".config").join("gevrek").join("config.json"),
         CONFIG_MOST,
     ) else {
+        log::debug!(
+            "the login keeps what it had of {}: their configuration was not read",
+            reader.name
+        );
         return;
     };
-    let Ok(config) = serde_json::from_slice::<gevrek_model::Config>(&written) else {
-        return;
+    let config = match serde_json::from_slice::<gevrek_model::Config>(&written) {
+        Ok(config) => config,
+        Err(error) => {
+            log::debug!(
+                "the login keeps what it had of {}: their configuration is not one: {error}",
+                reader.name
+            );
+            return;
+        }
     };
     let taken = taken(&config, home);
     let folder = greeter_home.join(FOLDER);
-    if std::fs::create_dir_all(&folder).is_err() {
+    if let Err(error) = std::fs::create_dir_all(&folder) {
+        log::debug!(
+            "the login keeps nothing of {}: {}: {error}",
+            reader.name,
+            folder.display()
+        );
         return;
     }
     let put = |name: &str, bytes: &[u8]| {
@@ -168,17 +184,28 @@ pub fn keep(reader: &Reader, home: &Path, greeter_home: &Path, owner: (u32, u32)
             .custom_flags(libc::O_NOFOLLOW)
             .mode(0o644)
             .open(&beside);
-        let Ok(mut made) = made else {
-            return;
+        let mut made = match made {
+            Ok(made) => made,
+            Err(error) => {
+                log::debug!("{} was not written: {error}", beside.display());
+                return;
+            }
         };
-        if made.write_all(bytes).is_ok()
-            && std::os::unix::fs::fchown(&made, Some(owner.0), Some(owner.1)).is_ok()
+        match made
+            .write_all(bytes)
+            .and_then(|()| std::os::unix::fs::fchown(&made, Some(owner.0), Some(owner.1)))
         {
-            drop(made);
-            let _ = std::fs::rename(&beside, &file);
-        } else {
-            drop(made);
-            let _ = std::fs::remove_file(&beside);
+            Ok(()) => {
+                drop(made);
+                if let Err(error) = std::fs::rename(&beside, &file) {
+                    log::debug!("{} was not put in place: {error}", file.display());
+                }
+            }
+            Err(error) => {
+                drop(made);
+                log::debug!("{} was not written: {error}", beside.display());
+                let _ = std::fs::remove_file(&beside);
+            }
         }
     };
     let keyboard: String = taken
@@ -199,8 +226,24 @@ pub fn keep(reader: &Reader, home: &Path, greeter_home: &Path, owner: (u32, u32)
     if let Some((ending, bytes)) = picture {
         put(&format!("wallpaper.{ending}"), &bytes);
     }
+    log::debug!(
+        "the login keeps the keyboard, the accent and {} of {}",
+        if picture_kept(&folder) {
+            "the wallpaper"
+        } else {
+            "no wallpaper"
+        },
+        reader.name
+    );
     // (The folder itself, not what a link in its place points at.)
     let _ = std::os::unix::fs::lchown(&folder, Some(owner.0), Some(owner.1));
+}
+
+/// Whether a wallpaper is kept in the folder.
+fn picture_kept(folder: &Path) -> bool {
+    PICTURES
+        .iter()
+        .any(|ending| folder.join(format!("wallpaper.{ending}")).exists())
 }
 
 /// What was kept, as the environment of the greeter: the keyboard (in

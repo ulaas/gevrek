@@ -307,14 +307,32 @@ async fn run(
     mut zones: zones::ZonesSide,
 ) {
     let endpoint = gevrek_protocol::Endpoint::parse(&address).address();
+    // That the window manager is not reached is said once, not at each
+    // try: it is tried every few seconds for as long as it is not there.
+    let mut unreached_said = false;
     loop {
+        log::trace!("the line to the window manager at {endpoint} is tried");
         let (mut client, features) = match connect(&endpoint).await {
             Ok((client, peer)) => {
+                log::debug!(
+                    "the line to the window manager at {endpoint} is up: version {}, backend {:?} on {:?}",
+                    peer.version,
+                    peer.backend,
+                    peer.platform
+                );
+                unreached_said = false;
                 let features = peer.features.clone();
                 tell.tell(Event::Connected(peer));
                 (client, features)
             }
             Err(error) => {
+                if !unreached_said {
+                    log::debug!(
+                        "the window manager at {endpoint} is not reached, tried again every {} s: {error}",
+                        RETRY.as_secs()
+                    );
+                    unreached_said = true;
+                }
                 tell.tell(Event::Disconnected(error));
                 // Requests made while there is no line are not kept for
                 // later: the window knows it is not connected.
@@ -339,12 +357,17 @@ async fn run(
         };
         fetch(&mut client, &tell).await;
         // Whether the graph runs is not in the configuration.
-        if let Ok(Ok(state)) = tokio::time::timeout(CALL, client.query_state()).await {
-            tell.tell(Event::Graph(GraphEvent::Paused(state.execution_paused)));
+        match tokio::time::timeout(CALL, client.query_state()).await {
+            Ok(Ok(state)) => tell.tell(Event::Graph(GraphEvent::Paused(state.execution_paused))),
+            Ok(Err(error)) => {
+                log::debug!("whether the graph runs is not known: the state was not answered: {error:#}")
+            }
+            Err(_) => log::debug!("whether the graph runs is not known: the state was not answered in time"),
         }
         let mut stream = match client.subscribe_to_events().await {
             Ok(stream) => stream,
             Err(error) => {
+                log::debug!("the line is given up: the events were not subscribed to, tried again in {} s: {error:#}", RETRY.as_secs());
                 tell.tell(Event::Disconnected(format!("no event stream: {error}")));
                 tokio::time::sleep(RETRY).await;
                 continue;
@@ -400,6 +423,7 @@ async fn run(
             }
         };
         zones.line_down();
+        log::debug!("the line to the window manager at {endpoint} is down: {lost}");
         tell.tell(Event::Disconnected(lost));
         tokio::time::sleep(Duration::from_millis(600)).await;
     }
@@ -490,6 +514,10 @@ async fn fetch(client: &mut WMClient, tell: &Teller) {
                 Ok(mut config) => {
                     // Reading does not build the graph's lookup tables.
                     config.node_graph.rebuild_connection_indices();
+                    log::debug!(
+                        "the running configuration was fetched: revision {}",
+                        document.revision
+                    );
                     tell.tell(Event::Configuration(Box::new(config), document.revision));
                     return;
                 }
@@ -502,6 +530,9 @@ async fn fetch(client: &mut WMClient, tell: &Teller) {
             },
             Ok(Err(error)) => why = format!("the configuration could not be fetched: {error}"),
             Err(_) => why = "the configuration could not be fetched: no answer".to_string(),
+        }
+        if attempt < 2 {
+            log::debug!("{why}; it is asked for again");
         }
     }
     log::warn!("{why}");
@@ -551,6 +582,16 @@ async fn serve(client: &mut WMClient, request: Request, tell: &Teller) {
                         .to_string(),
                 ),
             };
+            match &event {
+                Event::Applied(revision) => {
+                    log::debug!("the configuration was applied as revision {revision}")
+                }
+                Event::Conflict(_) => log::debug!(
+                    "the configuration was not applied: it changed meanwhile (from revision {base_revision})"
+                ),
+                Event::ApplyFailed(why) => log::debug!("the configuration was not applied: {why}"),
+                _ => {}
+            }
             tell.tell(event);
         }
         Request::Dispatch(command) => {
@@ -562,22 +603,19 @@ async fn serve(client: &mut WMClient, request: Request, tell: &Teller) {
                 Ok(Err(error)) => Some(error.to_string()),
                 Err(_) => Some("no answer".to_string()),
             };
+            let name = command_name(&command);
+            match &error {
+                None => log::debug!("the command {name} was run"),
+                Some(why) => log::debug!("the command {name} was not run: {why}"),
+            }
             tell.tell(Event::Dispatched { command, error });
         }
         Request::StateAfter(wait) => {
             tokio::time::sleep(wait.min(Duration::from_secs(2))).await;
-            if let Ok(Ok(state)) = tokio::time::timeout(CALL, client.get_overlay_data()).await {
-                if let Ok(json) = serde_json::to_value(&state) {
-                    tell.tell(Event::State(json));
-                }
-            }
+            state(client, tell).await;
         }
         Request::State => {
-            if let Ok(Ok(state)) = tokio::time::timeout(CALL, client.get_overlay_data()).await {
-                if let Ok(json) = serde_json::to_value(&state) {
-                    tell.tell(Event::State(json));
-                }
-            }
+            state(client, tell).await;
         }
         Request::Zones(command) => {
             let answer = tokio::time::timeout(
@@ -585,7 +623,18 @@ async fn serve(client: &mut WMClient, request: Request, tell: &Teller) {
                 client.send_zones_command(command.clone(), gevrek_zones::ipc::VERSION, 0),
             )
             .await;
-            tell.tell(zones_answered(command, answer));
+            let event = zones_answered(command, answer);
+            if let Event::ZonesAnswered { command, success, error, .. } = &event {
+                let name = command_name(command);
+                match (success, error) {
+                    (true, _) => log::debug!("the zones did {name}"),
+                    (false, why) => log::debug!(
+                        "the zones did not do {name}: {}",
+                        why.as_deref().unwrap_or("no reason given")
+                    ),
+                }
+            }
+            tell.tell(event);
         }
         Request::ZonesState => {
             tell.tell(zones_state(
@@ -596,6 +645,10 @@ async fn serve(client: &mut WMClient, request: Request, tell: &Teller) {
             let error = said(
                 tokio::time::timeout(CALL, client.trigger_manual_event(node.to_string())).await,
             );
+            match &error {
+                None => log::debug!("node {node} was triggered"),
+                Some(why) => log::debug!("node {node} was not triggered: {why}"),
+            }
             tell.tell(Event::Dispatched {
                 command: "Manual trigger".to_string(),
                 error,
@@ -608,7 +661,10 @@ async fn serve(client: &mut WMClient, request: Request, tell: &Teller) {
                 tokio::time::timeout(CALL, client.resume_execution()).await
             };
             match said(answer) {
-                None => tell.tell(Event::Graph(GraphEvent::Paused(pause))),
+                None => {
+                    log::debug!("the graph is {} now", if pause { "paused" } else { "let run" });
+                    tell.tell(Event::Graph(GraphEvent::Paused(pause)))
+                }
                 Some(error) => tell.tell(Event::Dispatched {
                     command: if pause {
                         "Pause the graph"
@@ -621,6 +677,28 @@ async fn serve(client: &mut WMClient, request: Request, tell: &Teller) {
             }
         }
     }
+}
+
+/// Ask for the state the window manager reports and tell it. Asked after
+/// each event, so what goes wrong is said at trace.
+async fn state(client: &mut WMClient, tell: &Teller) {
+    match tokio::time::timeout(CALL, client.get_overlay_data()).await {
+        Ok(Ok(state)) => match serde_json::to_value(&state) {
+            Ok(json) => tell.tell(Event::State(json)),
+            Err(error) => log::trace!("the state was not read as JSON: {error}"),
+        },
+        Ok(Err(error)) => log::trace!("the state was not answered: {error:#}"),
+        Err(_) => log::trace!("the state was not answered in time"),
+    }
+}
+
+/// The name of a command in its JSON (`{"command": "quit", ..}`), without
+/// its arguments, for the log.
+fn command_name(json: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|value| value.get("command")?.as_str().map(str::to_string))
+        .unwrap_or_else(|| "(not read)".to_string())
 }
 
 /// Why a call that answers with a status did not do what was asked, if

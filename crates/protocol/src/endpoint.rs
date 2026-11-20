@@ -153,7 +153,13 @@ pub fn bind_local(instance: &str) -> std::io::Result<LocalIncoming> {
         std::fs::create_dir_all(folder)?;
         // Only the user enters the folder (inside XDG_RUNTIME_DIR it is so
         // already; elsewhere this makes it so).
-        let _ = std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o700));
+        if let Err(error) = std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o700))
+        {
+            log::debug!(
+                "the rights of {} were left as they are: {error}",
+                folder.display()
+            );
+        }
     }
     if path.exists() {
         if std::os::unix::net::UnixStream::connect(&path).is_ok() {
@@ -163,10 +169,15 @@ pub fn bind_local(instance: &str) -> std::io::Result<LocalIncoming> {
             ));
         }
         // Left by a window manager that did not end cleanly.
+        log::debug!(
+            "{} was left by a window manager that is gone; it is removed",
+            path.display()
+        );
         std::fs::remove_file(&path)?;
     }
     let listener = tokio::net::UnixListener::bind(&path)?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    log::debug!("listening on {}", path.display());
     Ok(tokio_stream::wrappers::UnixListenerStream::new(listener))
 }
 
@@ -174,7 +185,11 @@ pub fn bind_local(instance: &str) -> std::io::Result<LocalIncoming> {
 pub fn release_local(instance: &str) {
     #[cfg(unix)]
     {
-        let _ = std::fs::remove_file(socket_path(instance));
+        let path = socket_path(instance);
+        match std::fs::remove_file(&path) {
+            Ok(()) => log::debug!("{} was removed", path.display()),
+            Err(error) => log::debug!("{} was not removed: {error}", path.display()),
+        }
     }
     #[cfg(windows)]
     {
@@ -195,6 +210,7 @@ pub fn bind_local(instance: &str) -> std::io::Result<LocalIncoming> {
                 format!("another gevrek already answers on {name} ({error})"),
             )
         })?;
+    log::debug!("listening on {name}");
     let (sender, receiver) = tokio::sync::mpsc::channel(8);
     tokio::spawn(async move {
         loop {
@@ -209,6 +225,7 @@ pub fn bind_local(instance: &str) -> std::io::Result<LocalIncoming> {
             let next = match make_pipe(&name, false, rights) {
                 Ok(next) => next,
                 Err(error) => {
+                    log::error!("{name} is no longer listened on: its next instance could not be made: {error}");
                     let _ = sender.send(Err(error)).await;
                     return;
                 }
@@ -289,7 +306,7 @@ fn pipe_rights() -> usize {
             }
         })();
         made.unwrap_or_else(|error| {
-            log::warn!("The pipe has Windows' usual rights: its own could not be made ({error})");
+            log::warn!("the pipe has Windows' usual rights: its own could not be made: {error}");
             0
         })
     })

@@ -67,6 +67,7 @@ impl Executor {
             .collect();
         // (In the order of the nodes: the same on every start.)
         startup_nodes.sort_unstable();
+        let _run = GraphRun::start("OnStartup", startup_nodes.len(), false);
 
         for node_id in startup_nodes {
             let mut visited = HashSet::new();
@@ -105,6 +106,7 @@ impl Executor {
             .collect();
         // (In the order of the nodes: the same on every start.)
         startup_nodes.sort_unstable();
+        let _run = GraphRun::start("OnStartup", startup_nodes.len(), false);
 
         for node_id in startup_nodes {
             let mut visited = HashSet::new();
@@ -123,6 +125,7 @@ impl Executor {
             .collect();
         // (In the order of the nodes: the same on every start.)
         startup_completed_nodes.sort_unstable();
+        let _run = GraphRun::start("OnStartupCompleted", startup_completed_nodes.len(), false);
 
         for node_id in startup_completed_nodes {
             let mut visited = HashSet::new();
@@ -339,7 +342,7 @@ impl Executor {
             }
         };
 
-        log::info!("🔹 Executing: {}", node.node_type.display_name());
+        log::trace!("🔹 Executing: {}", node.node_type.display_name());
 
         let done = match &node.node_type {
             NodeType::Unknown(_) => {
@@ -563,7 +566,7 @@ impl Executor {
         let connection = match connection {
             Some(c) => c,
             None => {
-                log::debug!(
+                log::trace!(
                     "get_input_value: no connection found for node {} input {} (pin_id {})",
                     node_id,
                     input_index,
@@ -616,7 +619,7 @@ impl Executor {
         // For non-data nodes, just return the cached value
         let result = self.pin_values.get(&(from_node_id, from_pin_id)).cloned();
         if result.is_none() {
-            log::debug!("get_input_value: pin_values has no value for (node={}, pin={}). Connection: from_node={}, from_pin={}",
+            log::trace!("get_input_value: pin_values has no value for (node={}, pin={}). Connection: from_node={}, from_pin={}",
                 node_id, input_index, from_node_id, from_pin_id);
         }
         result
@@ -773,7 +776,7 @@ impl Executor {
         if let Some(node) = self.graph.nodes.get(&node_id) {
             if output_index < node.outputs.len() {
                 let output_pin_id = node.outputs[output_index].id;
-                log::debug!(
+                log::trace!(
                     "set_output_value: node={}, output_index={}, pin_id={}, value={:?}",
                     node_id,
                     output_index,
@@ -832,11 +835,12 @@ impl Executor {
             .collect();
         // (In the order of the nodes: the same on every start.)
         matching_nodes.sort_unstable();
+        let _run = GraphRun::start("OnKeyPress", matching_nodes.len(), false);
 
         // Execute matching nodes
         for node_id in matching_nodes {
-            log::debug!(
-                "Executing OnKeyPress node {} for hotkey: {}",
+            log::trace!(
+                "the node {} runs for the shortcut {}",
                 node_id,
                 hotkey.key
             );
@@ -880,7 +884,7 @@ impl Executor {
                         active_window,
                         1,
                     )? {
-                        log::info!(
+                        log::debug!(
                             "Focused next window {:?} on monitor: {}",
                             window_handle,
                             monitor_info.name
@@ -910,7 +914,7 @@ impl Executor {
                         active_window,
                         -1,
                     )? {
-                        log::info!(
+                        log::debug!(
                             "Focused previous window {:?} on monitor: {}",
                             window_handle,
                             monitor_info.name
@@ -941,7 +945,7 @@ impl Executor {
                 // Get mutable workspace and perform swap
                 if let Some(workspace) = monitor_manager.get_focused_workspace_mut(monitor_handle) {
                     workspace.swap_container_with_next();
-                    log::info!("Swapped with next window on monitor: {}", monitor_info.name);
+                    log::debug!("Swapped with next window on monitor: {}", monitor_info.name);
 
                     self.apply_workspace_layout_and_position(workspace, work_area, window_manager)?;
                 }
@@ -969,7 +973,7 @@ impl Executor {
                 // Get mutable workspace and perform swap
                 if let Some(workspace) = monitor_manager.get_focused_workspace_mut(monitor_handle) {
                     workspace.swap_container_with_previous();
-                    log::info!(
+                    log::debug!(
                         "Swapped with previous window on monitor: {}",
                         monitor_info.name
                     );
@@ -1050,7 +1054,7 @@ impl Executor {
                             log::warn!("Failed to remove min/max buttons: {}", e);
                         }
 
-                        log::info!(
+                        log::debug!(
                             "Converted window to tiled mode on monitor: {}",
                             monitor_info.name
                         );
@@ -1077,7 +1081,7 @@ impl Executor {
                             log::warn!("Failed to restore min/max buttons: {}", e);
                         }
 
-                        log::info!(
+                        log::debug!(
                             "Converted window to floating mode on monitor: {}",
                             monitor_info.name
                         );
@@ -1114,7 +1118,7 @@ impl Executor {
                     .map(|workspace| workspace.all_windows())
                     .unwrap_or_default();
                 if let Some(up) = window_manager.toggle_window_overview(&windows, area) {
-                    log::info!(
+                    log::debug!(
                         "The overview of {} window(s) is {}",
                         windows.len(),
                         if up { "shown" } else { "put away" }
@@ -1146,14 +1150,14 @@ impl Executor {
                                 Self::batch_move_resize_and_sync_borders(window_manager, &ops)?;
                                 self.last_expose_transition = Instant::now();
                             }
-                            log::info!("Expose mode deactivated on workspace {}", ws_id);
+                            log::debug!("Expose mode deactivated on workspace {}", ws_id);
                         }
                         self.expose_workspaces.remove(&ws_id);
                         // Restore borders after exiting expose
-                        let _ = effect(window_manager, Effect::DecorationsVisible(true));
+                        try_effect(window_manager, Effect::DecorationsVisible(true));
                     } else {
                         // Hide borders during expose
-                        let _ = effect(window_manager, Effect::DecorationsVisible(false));
+                        try_effect(window_manager, Effect::DecorationsVisible(false));
 
                         // Activate expose: capture positions and arrange in grid
                         let window_count = workspace.all_windows().len();
@@ -1177,7 +1181,7 @@ impl Executor {
                             }
 
                             self.expose_workspaces.insert(ws_id);
-                            log::info!(
+                            log::debug!(
                                 "Expose mode activated on workspace {} with {} windows",
                                 ws_id,
                                 window_count
@@ -1322,5 +1326,48 @@ impl Executor {
     /// Get reference to the node graph
     pub fn get_graph(&self) -> &NodeGraph {
         &self.graph
+    }
+}
+
+/// How long the graph took from one trigger, told as the run ends (an
+/// error that ends it early too). At debug for a trigger that comes now
+/// and then (a shortcut, a window that opens or closes, the start), at
+/// trace for one that comes with each move of a window or change of the
+/// keyboard. Nothing is told where no node was there to run.
+pub(super) struct GraphRun {
+    trigger: &'static str,
+    nodes: usize,
+    started: Instant,
+    often: bool,
+}
+
+impl GraphRun {
+    pub(super) fn start(trigger: &'static str, nodes: usize, often: bool) -> Self {
+        Self {
+            trigger,
+            nodes,
+            started: Instant::now(),
+            often,
+        }
+    }
+}
+
+impl Drop for GraphRun {
+    fn drop(&mut self) {
+        if self.nodes == 0 {
+            return;
+        }
+        let level = if self.often {
+            log::Level::Trace
+        } else {
+            log::Level::Debug
+        };
+        log::log!(
+            level,
+            "the graph ran from {} {} node(s) in {:.1} ms",
+            self.nodes,
+            self.trigger,
+            self.started.elapsed().as_secs_f64() * 1000.0
+        );
     }
 }

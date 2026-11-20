@@ -294,13 +294,17 @@ pub fn sync(zones: &Shared, surfaces: &Rc<RefCell<Surfaces>>, control: &mut Cont
         open_now.soft.remove(&display);
         if let Some((surface, _)) = open_now.displays.remove(&display) {
             if control.is_open(surface) {
+                log::debug!("the zones' surface of {display} is closed: it is not wanted there any more, or is elsewhere");
                 control.close(surface);
+            } else {
+                log::debug!("the zones' surface of {display} was closed by the system (its display went)");
             }
         }
     }
     // Something private is shown, or no longer: every surface that is
     // open is left out of pictures of the screen, or let into them again.
     if open_now.unpictured != unpictured {
+        log::debug!("the zones' surfaces are {} pictures of the screen", if unpictured { "left out of" } else { "let into" });
         open_now.unpictured = unpictured;
         for (surface, _) in open_now.displays.values() {
             control.exclude_from_capture(*surface, unpictured);
@@ -345,6 +349,7 @@ pub fn sync(zones: &Shared, surfaces: &Rc<RefCell<Surfaces>>, control: &mut Cont
     // Looked at, or no longer: every surface that is open goes above the
     // windows and takes the keyboard, or goes back below and lets it go.
     if open_now.above != looked_at {
+        log::debug!("the zones' surfaces go {} the windows", if looked_at { "above" } else { "back below" });
         open_now.above = looked_at;
         let (level, keyboard) = stands(looked_at);
         for (surface, _) in open_now.displays.values() {
@@ -449,6 +454,7 @@ pub fn sync(zones: &Shared, surfaces: &Rc<RefCell<Surfaces>>, control: &mut Cont
         if unpictured {
             control.exclude_from_capture(surface, true);
         }
+        log::debug!("the zones' surface of {display} is opened on {} as surface {surface:?}", spot.output);
         open_now.displays.insert(display, (surface, spot));
     }
 }
@@ -554,6 +560,7 @@ fn drags(zones: &Shared, display: &DisplayId, own: SurfaceId, scale: f32, contro
         // one (it names what is no file too, and we know our items by it
         // when they are let go on a zone); else as files, by their paths.
         if !zones.desk.begin_drag(&items, control, own, image.clone()) {
+            log::debug!("the drag is handed to the system as {}", gevrek_zones::timed::count(paths.len(), "file", "files"));
             let mut payload = DragPayload::files(paths);
             // (A link to a file of the desktop is not ours to offer.)
             payload.allowed.link = false;
@@ -593,6 +600,7 @@ fn drags(zones: &Shared, display: &DisplayId, own: SurfaceId, scale: f32, contro
                     }
                 };
                 let would = zones.drag_over(Some(at + origin.to_vec2()), &payload);
+                log::debug!("a drag of {} came over the zones of {display}; there it would be {would:?}", payload.summary());
                 OVER.with(|over| *over.borrow_mut() = Some(payload));
                 control.answer_drag(own, answer_of(would));
             }
@@ -602,6 +610,7 @@ fn drags(zones: &Shared, display: &DisplayId, own: SurfaceId, scale: f32, contro
                 control.answer_drag(own, answer_of(would));
             }
             DragEvent::Left => {
+                log::debug!("the drag left the zones of {display}");
                 OVER.with(|over| *over.borrow_mut() = None);
                 zones.drag_over(None, &DropPayload::default());
             }
@@ -621,9 +630,10 @@ fn drags(zones: &Shared, display: &DisplayId, own: SurfaceId, scale: f32, contro
                     None => zones.payload_of(&payload.paths, payload.text, allowed),
                 };
                 let came = zones.drop_at(at + origin.to_vec2(), &payload);
-                log::debug!("a drop on the zones: {came:?}");
+                log::debug!("a drop of {} ({action:?}) on the zones of {display}: {came:?}", payload.summary());
             }
             DragEvent::Ended { outcome } => {
+                log::debug!("the drag that began on the zones of {display} ended: {outcome:?}");
                 zones.drag_ended(matches!(outcome, DragOutcome::Taken { remove: true, .. }));
             }
         }
@@ -667,6 +677,7 @@ impl Running {
             };
             let folder = gevrek_model::paths::state_dir().join("zones");
             let first = wake.clone();
+            log::debug!("the zones are switched on: they start, with a surface for each display");
             let mut zones = Zones::start(config, desk, folder, wake, hide_icons);
             // (Looked at once at the start: what there is is told to
             // whoever listens.)
@@ -724,12 +735,21 @@ impl Running {
         if heard.is_empty() {
             return;
         }
-        for event in heard {
-            link.publish_zones_event(event);
-        }
-        let mut snapshot = gevrek_zones::ipc::ZonesSnapshot::of(zones.core(), super::now());
-        snapshot.not_shown = zones.not_shown();
-        link.publish_zones(snapshot);
+        let told = gevrek_zones::timed::count(heard.len(), "event", "events");
+        // (After each wake that heard something, a drag's too: said at
+        // trace, and as a warning where it holds the thread.)
+        gevrek_zones::timed::timed_quietly(
+            || format!("telling the window manager of {told} and how the zones are"),
+            || {
+                for event in heard {
+                    link.publish_zones_event(event);
+                }
+                let mut snapshot = gevrek_zones::ipc::ZonesSnapshot::of(zones.core(), super::now());
+                snapshot.not_shown = zones.not_shown();
+                link.publish_zones(snapshot);
+            },
+            |_| "told".to_string(),
+        );
     }
 }
 
@@ -760,6 +780,10 @@ pub fn shown_workspace(state: &serde_json::Value) -> Option<String> {
 /// the answer says so.
 pub fn asked(running: &Option<Running>, link: &gevrek_link::Link, ask: gevrek_link::ZonesAsk) {
     use gevrek_zones::ipc::{Answer, Request};
+    log::debug!(
+        "the zones are asked over the line to the window manager{}",
+        ask.request.as_ref().map_or_else(|| ", and no answer is waited for".to_string(), |request| format!(" (request {request:?})"))
+    );
     let answer = match (running, ask.ask) {
         (Some(running), Request::Command(command)) => {
             let effects = running.zones.borrow_mut().command(command);
@@ -784,6 +808,7 @@ pub fn asked(running: &Option<Running>, link: &gevrek_link::Link, ask: gevrek_li
         (None, Request::Command(_)) => Answer::refused("zones are switched off (desktop.zones.enabled)"),
     };
     if let Some(request) = ask.request {
+        log::debug!("the zones answer request {request:?}: {}", answer.error.as_deref().map_or_else(|| "done".to_string(), |error| format!("not done: {error}")));
         link.answer_zones(request, answer);
     }
 }

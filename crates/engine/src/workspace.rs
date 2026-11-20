@@ -584,7 +584,7 @@ impl Workspace {
 
         self.rebalance_split_ratios(container_idx, new_ratio);
 
-        log::debug!("Updated split ratios: {:?}", self.split_ratios);
+        log::trace!("Updated split ratios: {:?}", self.split_ratios);
     }
 
     /// Clear split ratios (reset to equal sizing)
@@ -1359,11 +1359,11 @@ impl Workspace {
         let active_indices: Vec<usize> = self.active_container_indices();
 
         if active_indices.is_empty() {
-            log::debug!("No active containers to layout (all empty)");
+            log::trace!("No active containers to layout (all empty)");
             return;
         }
 
-        log::info!("📐 Applying {:?} layout to workspace '{}' with {} active containers (of {} total). Workspace padding: {:?}, Container padding: {:?}",
+        log::trace!("📐 Applying {:?} layout to workspace '{}' with {} active containers (of {} total). Workspace padding: {:?}, Container padding: {:?}",
             self.layout, self.name, active_indices.len(), self.containers.len(), self.padding, self.container_padding);
 
         // Extract active containers for layout calculation

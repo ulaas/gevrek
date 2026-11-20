@@ -72,7 +72,19 @@ pub fn stepped(scalar: f32, by_percent: i32) -> f32 {
 
 #[cfg(not(windows))]
 fn ask(arguments: &[&str]) -> Option<String> {
-    let output = Command::new("wpctl").args(arguments).output().ok()?;
+    let output = Command::new("wpctl")
+        .args(arguments)
+        .output()
+        .map_err(|error| log::trace!("wpctl did not start: {error}"))
+        .ok()?;
+    if !output.status.success() {
+        // (What is only read is read every few seconds: said at trace.)
+        if matches!(arguments.first(), Some(&"get-volume" | &"status")) {
+            log::trace!("wpctl {}: {}", arguments.join(" "), output.status);
+        } else {
+            log::debug!("wpctl {}: {}", arguments.join(" "), output.status);
+        }
+    }
     output
         .status
         .success()
@@ -272,6 +284,13 @@ pub fn outputs() -> Vec<Output> {
 /// Play on this device from now on. Whether the sound server took it.
 #[cfg(not(windows))]
 pub fn choose_output(id: u32) -> bool {
+    let took = choose_output_by(id);
+    log::debug!("sound is to be played on device {id}: {}", if took { "taken" } else { "not taken" });
+    took
+}
+
+#[cfg(not(windows))]
+fn choose_output_by(id: u32) -> bool {
     #[cfg(target_os = "linux")]
     if crate::sound_server::there() {
         return crate::sound_server::choose(Device::Speaker, id).is_some();
@@ -283,6 +302,18 @@ pub fn choose_output(id: u32) -> bool {
 /// now. Nothing in it: there is no sound server to ask.
 #[cfg(not(windows))]
 pub fn mixer() -> Mixer {
+    let mixer = mixer_by();
+    log::debug!(
+        "the sound: {} devices to play on, {} to record from, {} programs that play",
+        mixer.outputs.len(),
+        mixer.inputs.len(),
+        mixer.streams.len()
+    );
+    mixer
+}
+
+#[cfg(not(windows))]
+fn mixer_by() -> Mixer {
     #[cfg(target_os = "linux")]
     if let Some(mixer) = crate::sound_server::mixer() {
         return mixer;
@@ -309,6 +340,13 @@ pub fn mixer() -> Mixer {
 /// Record from this device from now on. Whether the sound server took it.
 #[cfg(not(windows))]
 pub fn choose_input(id: u32) -> bool {
+    let took = choose_input_by(id);
+    log::debug!("sound is to be recorded from device {id}: {}", if took { "taken" } else { "not taken" });
+    took
+}
+
+#[cfg(not(windows))]
+fn choose_input_by(id: u32) -> bool {
     #[cfg(target_os = "linux")]
     if crate::sound_server::there() {
         return crate::sound_server::choose(Device::Microphone, id).is_some();
@@ -331,6 +369,13 @@ pub fn set_stream(id: u32, percent: u32) -> bool {
 /// Mute one program, or let it be heard again.
 #[cfg(not(windows))]
 pub fn toggle_stream_mute(id: u32) -> bool {
+    let took = toggle_stream_mute_by(id);
+    log::debug!("program {id} is muted or heard again: {}", if took { "taken" } else { "not taken" });
+    took
+}
+
+#[cfg(not(windows))]
+fn toggle_stream_mute_by(id: u32) -> bool {
     #[cfg(target_os = "linux")]
     if crate::sound_server::there() {
         return crate::sound_server::toggle_stream_mute(id).is_some();
@@ -343,11 +388,18 @@ pub fn toggle_stream_mute(id: u32) -> bool {
 /// heard, each known by the number of its process.
 #[cfg(windows)]
 pub fn mixer() -> Mixer {
-    Mixer {
+    let mixer = Mixer {
         outputs: outputs(),
         inputs: inputs(),
         streams: streams(),
-    }
+    };
+    log::debug!(
+        "the sound: {} devices to play on, {} to record from, {} programs that play",
+        mixer.outputs.len(),
+        mixer.inputs.len(),
+        mixer.streams.len()
+    );
+    mixer
 }
 
 #[cfg(windows)]
@@ -687,7 +739,10 @@ mod endpoint {
             Ok(true)
         });
         match chosen {
-            Ok(taken) => taken,
+            Ok(taken) => {
+                log::debug!("sound device {id} is the one in use: {}", if taken { "taken" } else { "there is no such device" });
+                taken
+            }
             Err(error) => {
                 log::warn!("the sound device was not changed: {error}");
                 false

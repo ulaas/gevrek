@@ -621,7 +621,7 @@ impl Outputs {
         };
         if let Some(workspace) = self.get_focused_workspace_mut(monitor) {
             workspace.apply_layout(work_area);
-            log::debug!(
+            log::trace!(
                 "Applied layout {:?} to workspace {} on monitor {:?}",
                 workspace.layout,
                 workspace.name,
@@ -969,7 +969,7 @@ impl Outputs {
                 if previous != idx {
                     self.previous_workspace.insert(monitor, previous);
                 }
-                log::info!(
+                log::debug!(
                     "Switched to workspace {} on monitor {:?}",
                     workspaces
                         .focused()
@@ -999,7 +999,7 @@ impl Outputs {
             workspaces.push(workspace);
             let new_index = workspaces.len() - 1; // Index of the newly added workspace
             self.next_workspace_id += 1;
-            log::info!(
+            log::debug!(
                 "Created workspace '{}' with layout {:?} at index {} on monitor {:?}",
                 name,
                 layout,
@@ -1050,7 +1050,7 @@ impl Outputs {
             }
             _ => {}
         }
-        log::info!(
+        log::debug!(
             "Removed inactive empty workspace '{}' from monitor {:?}",
             workspace.name,
             monitor
@@ -1118,7 +1118,7 @@ impl Outputs {
         }
         let removed = workspaces.remove_at(index)?;
         self.previous_workspace.remove(&monitor);
-        log::info!(
+        log::debug!(
             "Closed empty workspace '{}' on monitor {:?}",
             removed.name,
             monitor
@@ -1217,7 +1217,7 @@ impl Outputs {
                             log::warn!("⚠️  Removed BORDER window {:?} from workspace '{}' on monitor {:?} (should never happen!)",
                                     window, workspace.name, monitor);
                         } else if !window_exists {
-                            log::info!("Removed non-existent/destroyed window {:?} from workspace '{}' on monitor {:?}",
+                            log::debug!("Removed non-existent/destroyed window {:?} from workspace '{}' on monitor {:?}",
                                     window, workspace.name, monitor);
                         }
                         total_removed += 1;
@@ -1312,7 +1312,7 @@ impl Outputs {
                         let overlay_height = window.height;
                         work_area.y += overlay_height;
                         work_area.height -= overlay_height;
-                        log::debug!(
+                        log::trace!(
                             "Adjusted work area for top overlay ({}px) on monitor {:?}",
                             overlay_height,
                             monitor
@@ -1321,7 +1321,7 @@ impl Outputs {
                         // Overlay at bottom - reduce work area from bottom
                         let overlay_height = window.height;
                         work_area.height -= overlay_height;
-                        log::debug!(
+                        log::trace!(
                             "Adjusted work area for bottom overlay ({}px) on monitor {:?}",
                             overlay_height,
                             monitor

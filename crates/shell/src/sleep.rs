@@ -38,15 +38,23 @@ pub fn watch(wanted: Arc<AtomicBool>, lock: impl Fn() + Send + 'static) -> anyho
         )
     };
     let mut held = Some(hold(&manager)?);
+    log::debug!("sleep is held off until the screen is locked");
     let signals = manager.receive_signal("PrepareForSleep")?;
     std::thread::Builder::new()
         .name("gevrek-sleep".to_string())
         .spawn(move || {
             for message in signals {
-                let Ok(going) = message.body().deserialize::<bool>() else {
-                    continue;
+                let going = match message.body().deserialize::<bool>() {
+                    Ok(going) => going,
+                    Err(error) => {
+                        log::debug!("logind's PrepareForSleep was not understood: {error}");
+                        continue;
+                    }
                 };
                 if going {
+                    if !wanted.load(Ordering::Relaxed) {
+                        log::debug!("the machine sleeps, unlocked: the configuration wants no lock first");
+                    }
                     if wanted.load(Ordering::Relaxed) {
                         log::info!("The machine is about to sleep: locking first");
                         lock();
@@ -56,7 +64,10 @@ pub fn watch(wanted: Arc<AtomicBool>, lock: impl Fn() + Send + 'static) -> anyho
                     drop(held.take());
                 } else {
                     // Awake again: hold sleep off for the next time.
-                    held = hold(&manager).ok();
+                    log::debug!("the machine is awake again");
+                    held = hold(&manager)
+                        .map_err(|error| log::debug!("logind did not hold sleep off: {error}"))
+                        .ok();
                     if held.is_none() {
                         log::warn!("Sleep can no longer be held off for the lock");
                     }

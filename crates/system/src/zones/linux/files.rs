@@ -115,7 +115,9 @@ fn arrive(from: &Path, folder: &Path, name: &str, tick: Tick<'_>) -> std::io::Re
     let arrived = copy_tree(from, &part, &mut counted).and_then(|()| settle(&part, folder, name));
     if arrived.is_err() {
         // Half a copy is not left lying.
-        let _ = remove_tree(&part);
+        if let Err(error) = remove_tree(&part) {
+            log::debug!("zones: half a copy is left at {}: {error}", part.display());
+        }
     }
     arrived
 }
@@ -171,7 +173,9 @@ fn copy_tree(from: &Path, to: &Path, counted: &mut Counted<'_>) -> std::io::Resu
         }
         target.set_permissions(data.permissions())?;
         if let Ok(modified) = data.modified() {
-            let _ = target.set_modified(modified);
+            if let Err(error) = target.set_modified(modified) {
+                log::trace!("zones: a copy keeps the time it was made, not the original's: {error}");
+            }
         }
         Ok(())
     } else {

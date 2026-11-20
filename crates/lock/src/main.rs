@@ -145,9 +145,18 @@ mod linux {
         let mut client = pam::Client::with_password(service())
             .map_err(|error| format!("the system's check is not there: {error}"))?;
         client.conversation_mut().set_credentials(user, password);
-        client
-            .authenticate()
-            .map_err(|_| "That is not the password.".to_string())
+        log::debug!("PAM checks the password of {user} through {}", service());
+        match client.authenticate() {
+            Ok(()) => {
+                log::debug!("PAM let {user} in");
+                Ok(())
+            }
+            // (The code alone: what was answered is never said.)
+            Err(error) => {
+                log::debug!("PAM did not let {user} in: {error}");
+                Err("That is not the password.".to_string())
+            }
+        }
     }
 
     /// Where the greeter keeps the name that logged in last: with what
@@ -166,7 +175,18 @@ mod linux {
     /// Ask the display manager for something, and hear what it says.
     fn ask(socket: &std::path::Path, ask: &gevrek_dm::wire::Ask) -> Result<(), String> {
         use std::io::{BufRead, Write};
-        let gone = |_| "The login service does not answer.".to_string();
+        let gone = |error: std::io::Error| {
+            log::debug!("the display manager does not answer: {error}");
+            "The login service does not answer.".to_string()
+        };
+        // (What is asked by its kind alone: a login carries the password.)
+        let kind = match ask {
+            gevrek_dm::wire::Ask::Login { user, .. } => format!("a login of {user}"),
+            gevrek_dm::wire::Ask::Power { restart: true } => "a restart".to_string(),
+            gevrek_dm::wire::Ask::Power { restart: false } => "the machine off".to_string(),
+            gevrek_dm::wire::Ask::Shown => "the end of the boot splash".to_string(),
+        };
+        log::debug!("the display manager is asked for {kind}");
         let mut stream = std::os::unix::net::UnixStream::connect(socket).map_err(gone)?;
         let mut line = serde_json::to_string(ask).map_err(|error| error.to_string())?;
         line.push('\n');
@@ -177,11 +197,15 @@ mod linux {
         std::io::BufReader::new(stream)
             .read_line(&mut heard)
             .map_err(gone)?;
-        let answer: gevrek_dm::wire::Answer = serde_json::from_str(&heard)
-            .map_err(|_| "The login service does not answer.".to_string())?;
+        let answer: gevrek_dm::wire::Answer = serde_json::from_str(&heard).map_err(|error| {
+            log::debug!("the display manager's answer was not understood: {error}");
+            "The login service does not answer.".to_string()
+        })?;
         if answer.ok {
+            log::debug!("the display manager said yes to {kind}");
             Ok(())
         } else {
+            log::debug!("the display manager said no to {kind}: {}", answer.why);
             Err(answer.why)
         }
     }
@@ -228,8 +252,10 @@ mod linux {
     }
 
     pub fn run() -> anyhow::Result<()> {
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
         let greeter = std::env::args().nth(1).as_deref() == Some("--greeter");
+        // (As the greeter, it is nobody's yet: no configuration is read.)
+        let logging = gevrek_logging::Logging::new("gevrek-lock", log::LevelFilter::Warn);
+        if greeter { logging.without_setting() } else { logging }.init();
         let socket = std::env::var_os(gevrek_dm::SOCKET_VARIABLE).map(std::path::PathBuf::from);
         anyhow::ensure!(
             !greeter || socket.is_some(),
@@ -252,6 +278,14 @@ mod linux {
             greeter || !user.is_empty(),
             "who is logged in is not known (USER is not set): the screen is not locked"
         );
+        if greeter {
+            log::debug!(
+                "the greeter is started{}",
+                if user.is_empty() { ", with no name known" } else { ", with the last name known" }
+            );
+        } else {
+            log::debug!("the screen of {user} is to be locked");
+        }
         let shown_socket = socket.clone().filter(|_| greeter);
         let mut shell: Shell<Message> = Shell::new()?;
 
@@ -283,7 +317,12 @@ mod linux {
                                         if let Some(folder) = file.parent() {
                                             let _ = std::fs::create_dir_all(folder);
                                         }
-                                        let _ = std::fs::write(file, name);
+                                        if let Err(error) = std::fs::write(&file, name) {
+                                            log::debug!(
+                                                "who logged in last was not written to {}: {error}",
+                                                file.display()
+                                            );
+                                        }
                                     }
                                 }
                                 if let gevrek_dm::wire::Ask::Login { password, .. } = &mut login {
@@ -306,7 +345,9 @@ mod linux {
             .parent()
             .map(|folder| folder.join("studio-appearance"))
             .unwrap_or_default();
-        let config = gevrek_model::Config::load(&gevrek_model::paths::config_file()).ok();
+        let config = gevrek_model::Config::load(&gevrek_model::paths::config_file())
+            .map_err(|error| log::debug!("the lock goes without the configuration: {error:#}"))
+            .ok();
         // The wallpaper is read beside the lock, which does not wait for it.
         if let Some(file) = wallpaper_file(config.as_ref()) {
             let read = shell.sender();
@@ -387,11 +428,16 @@ mod linux {
                 if let Some(socket) = state.tell_shown.take() {
                     // (Beside the drawing: the answer is not waited for,
                     // and a service that knows no such word says no.)
-                    let _ = std::thread::Builder::new()
+                    log::debug!("the login is on the display");
+                    if let Err(error) = std::thread::Builder::new()
                         .name("gevrek-lock-shown".to_string())
                         .spawn(move || {
+                            // (Said by `ask`, yes or no.)
                             let _ = ask(&socket, &gevrek_dm::wire::Ask::Shown);
-                        });
+                        })
+                    {
+                        log::debug!("the display manager is not told the login is shown: {error}");
+                    }
                 }
                 Flow::Continue
             })
@@ -402,12 +448,19 @@ mod linux {
             match message {
                 // The login stays: the display manager shows the
                 // session's console now, and this one again afterwards.
-                Message::Verdict(Ok(())) if state.greeter => state.status = Status::Waiting,
+                Message::Verdict(Ok(())) if state.greeter => {
+                    log::debug!("the session is started: the login waits for it to end");
+                    state.status = Status::Waiting
+                }
                 Message::Verdict(Ok(())) => {
+                    log::debug!("the screen is unlocked");
                     state.unlocked = true;
                     control.unlock();
                 }
-                Message::Verdict(Err(why)) => state.status = Status::Wrong(Instant::now(), why),
+                Message::Verdict(Err(why)) => {
+                    log::debug!("not let in: {why}");
+                    state.status = Status::Wrong(Instant::now(), why)
+                }
                 Message::Wallpaper(picture) => {
                     // The accent is the picture's, where the desktop's is
                     // (said so by whoever started this: the login).
@@ -849,7 +902,10 @@ mod linux {
         }
         if let Some(what) = asked {
             state.status = Status::Checking;
-            let _ = state.check.send(format!("\n{what}"));
+            log::debug!("the person asked for {what}");
+            if state.check.send(format!("\n{what}")).is_err() {
+                log::debug!("{what} was not asked: the checking thread is gone");
+            }
         }
         if submit {
             let mut password = std::mem::take(&mut state.password);
@@ -987,6 +1043,7 @@ mod linux {
     /// the signal as that).
     fn next_keyboard_layout() {
         // SAFETY: a signal to the process that started this one.
+        log::debug!("the compositor is asked for the next keyboard layout");
         unsafe {
             libc::kill(libc::getppid(), libc::SIGUSR2);
         }

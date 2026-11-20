@@ -93,9 +93,11 @@ impl WindowSurface {
                 // the size it has to itself: see `Emulated`.)
                 let (width, height) = Emulated::of(window).unwrap_or((rect.width, rect.height));
                 let geometry = Rectangle::new((rect.x, rect.y).into(), (width, height).into());
-                if let Err(error) = window.configure(geometry) {
-                    log::debug!("X11 configure: {error}");
-                }
+                // (At each move of the pointer while it drags the window:
+                // a failure is said once.)
+                static CONFIGURE: crate::failing::Failing =
+                    crate::failing::Failing::new("telling an X11 window its place");
+                CONFIGURE.note(window.configure(geometry));
             }
         }
     }

@@ -92,7 +92,11 @@ fn tool(arguments: &[&str], seconds: u32) -> Option<String> {
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .output()
+        .map_err(|error| log::debug!("bluetoothctl did not start: {error}"))
         .ok()?;
+    if !output.status.success() {
+        log::debug!("bluetoothctl {}: {}", arguments.join(" "), output.status);
+    }
     Some(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
@@ -233,6 +237,11 @@ fn read_elsewhere() -> Option<Bluetooth> {
         }
         let known = devices_in(&tool(&["devices", "Paired"], 3).unwrap_or_default());
         let connected = devices_in(&tool(&["devices", "Connected"], 3).unwrap_or_default());
+        log::debug!(
+            "bluetooth: {} devices paired, {} connected",
+            known.len(),
+            connected.len()
+        );
         Some(Bluetooth {
             powered: powered_in(&show),
             devices: together(known, &connected),
@@ -248,7 +257,12 @@ fn read_elsewhere() -> Option<Bluetooth> {
 pub fn set_power(on: bool) {
     #[cfg(target_os = "linux")]
     {
-        let _ = tool(&["power", if on { "on" } else { "off" }], 5);
+        let said = tool(&["power", if on { "on" } else { "off" }], 5);
+        log::debug!(
+            "bluetooth's radio asked to be {}: {}",
+            if on { "on" } else { "off" },
+            if said.is_some() { "asked" } else { "not asked" }
+        );
     }
     #[cfg(windows)]
     {
@@ -264,11 +278,17 @@ pub fn set_power(on: bool) {
 /// call it beside what draws.)
 pub fn connect(address: &str, on: bool) {
     if !is_address(address) {
+        log::debug!("bluetooth: {address:?} is no device's address");
         return;
     }
     #[cfg(target_os = "linux")]
     {
-        let _ = tool(&[if on { "connect" } else { "disconnect" }, address], 12);
+        let said = tool(&[if on { "connect" } else { "disconnect" }, address], 12);
+        log::debug!(
+            "bluetooth: {address} {}: {}",
+            if on { "connected" } else { "let go" },
+            if said.is_some() { "asked" } else { "not asked" }
+        );
     }
     #[cfg(not(target_os = "linux"))]
     {

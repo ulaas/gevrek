@@ -377,10 +377,11 @@ nothing broken on the way. Nothing new is built in this pass.
       parts (commands, looking around, events, layout and motion,
       checks, state and effects). Nothing is said unless asked for:
 
-          RUST_LOG=info,gevrek::passes=debug
+          RUST_LOG=info,gevrek::passes=trace
 
       Then a pass longer than a frame (16 ms) is told at once with its
-      parts, and every half minute the passes are summed up. To tick:
+      parts, and every half minute the passes are summed up (the sum
+      alone at `debug`, which is on by default before 1.0). To tick:
       the person runs gevrek so for a while of ordinary use, and the
       lines go into the log here; they say what step 2 begins with.
 - [ ] **any** The large files have their behaviour held by tests before

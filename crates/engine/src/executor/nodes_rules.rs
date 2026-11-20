@@ -50,11 +50,11 @@ impl Executor {
                     self.get_input_value(node_id, 1)
                 {
                     // 1. Use rules from RuleList pin if connected
-                    log::debug!("Using {} rules from RuleList pin", rule_list.len());
+                    log::trace!("Using {} rules from RuleList pin", rule_list.len());
                     rule_list.iter().map(convert_rule).collect()
                 } else if !rules.is_empty() {
                     // 2. Use static rules from node properties
-                    log::debug!("Using {} static rules from node properties", rules.len());
+                    log::trace!("Using {} static rules from node properties", rules.len());
                     rules.iter().map(convert_rule).collect()
                 } else {
                     // 3. Fall back to legacy single-rule mode (Pattern pin + match_kind/match_strategy)
@@ -91,7 +91,7 @@ impl Executor {
                         gevrek_model::graph::RuleMatchStrategy::Regex => DwmMatchStrategy::Regex,
                     };
 
-                    log::debug!(
+                    log::trace!(
                         "Using legacy single-rule mode with pattern '{}'",
                         pattern_str
                     );
@@ -112,7 +112,7 @@ impl Executor {
                                 let float_rule = FloatRule::new(window_rule);
                                 engine.add_float_rule(float_rule);
                             }
-                            log::info!("✓ Created {} float rule(s)", rule_count);
+                            log::debug!("✓ Created {} float rule(s)", rule_count);
                         }
                         Some(NodeType::CreateIgnoreRule { .. }) => {
                             use crate::rules::IgnoreRule;
@@ -120,7 +120,7 @@ impl Executor {
                                 let ignore_rule = IgnoreRule::new(window_rule);
                                 engine.add_ignore_rule(ignore_rule);
                             }
-                            log::info!("✓ Created {} ignore rule(s)", rule_count);
+                            log::debug!("✓ Created {} ignore rule(s)", rule_count);
                         }
                         Some(NodeType::CreateManageRule { .. }) => {
                             use crate::rules::ManageRule;
@@ -128,7 +128,7 @@ impl Executor {
                                 let manage_rule = ManageRule::new(window_rule);
                                 engine.add_manage_rule(manage_rule);
                             }
-                            log::info!("✓ Created {} manage rule(s)", rule_count);
+                            log::debug!("✓ Created {} manage rule(s)", rule_count);
                         }
                         _ => {}
                     }
@@ -218,7 +218,7 @@ impl Executor {
                     match_strategy.clone(),
                 );
 
-                log::debug!(
+                log::trace!(
                     "Created rule: {:?} {:?} '{}'",
                     match_kind,
                     match_strategy,
@@ -249,7 +249,7 @@ impl Executor {
                     }
                 }
 
-                log::debug!("Combined {} rules into RuleList", rules.len());
+                log::trace!("Combined {} rules into RuleList", rules.len());
 
                 // Set output value
                 self.set_output_value(node_id, 1, Value::RuleList(rules));
@@ -266,7 +266,7 @@ impl Executor {
 
             NodeType::ApplySystemFilters { enabled } => {
                 if !enabled {
-                    log::info!("System filters disabled by user");
+                    log::debug!("System filters disabled by user");
                     self.set_output_value(node_id, 1, Value::Number(0.0));
                     self.trigger_output_execution(
                         window_manager,
@@ -284,7 +284,7 @@ impl Executor {
                     engine.add_system_ignore_rules();
                     let after_count = engine.ignore_rules.len();
                     let added = after_count - before_count;
-                    log::info!("✓ Applied {} system ignore rules", added);
+                    log::debug!("✓ Applied {} system ignore rules", added);
                     added as f64
                 } else {
                     log::error!("Failed to lock rule engine");

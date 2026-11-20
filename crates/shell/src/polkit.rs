@@ -83,10 +83,12 @@ impl<F: Fn(FromAgent) + Send + Sync + 'static> Agent<F> {
             .find(|uid| Some(*uid) == own)
             .or_else(|| uids.first().copied());
         let Some(user) = uid.and_then(user_name) else {
+            log::debug!("polkit asks for {action_id}, and no account that could answer is known");
             return Err(zbus::fdo::Error::Failed(
                 "no account that could answer is known".to_string(),
             ));
         };
+        log::debug!("polkit asks for {action_id}, to be answered by {user}");
         let (answer, verdict) = async_channel::bounded(1);
         (self.tell)(FromAgent::Begin(Ask {
             message: message.to_string(),
@@ -95,7 +97,16 @@ impl<F: Fn(FromAgent) + Send + Sync + 'static> Agent<F> {
             cookie: cookie.to_string(),
             answer,
         }));
-        match verdict.recv().await {
+        let said = verdict.recv().await;
+        log::debug!(
+            "polkit is told of {action_id}: {}",
+            if matches!(said, Ok(true)) {
+                "it held"
+            } else {
+                "dismissed"
+            }
+        );
+        match said {
             Ok(true) => Ok(()),
             _ => Err(zbus::fdo::Error::Failed(
                 "the request was dismissed".to_string(),
@@ -104,6 +115,7 @@ impl<F: Fn(FromAgent) + Send + Sync + 'static> Agent<F> {
     }
 
     fn cancel_authentication(&self, cookie: &str) {
+        log::debug!("polkit took a request back");
         (self.tell)(FromAgent::Cancel(cookie.to_string()));
     }
 }
@@ -258,6 +270,7 @@ pub fn check(
     say: impl FnMut(&str),
 ) -> Verdict {
     if let Ok(socket) = std::os::unix::net::UnixStream::connect(HELPER_SOCKET) {
+        log::debug!("polkit's helper is asked through {HELPER_SOCKET}");
         let Ok(mut to_helper) = socket.try_clone() else {
             return Verdict::Broken("polkit's helper could not be spoken to".to_string());
         };
@@ -278,6 +291,7 @@ pub fn check(
     else {
         return Verdict::Broken("polkit's helper program was not found".to_string());
     };
+    log::debug!("polkit's helper {helper} is started");
     let child = Command::new(helper)
         .arg(user)
         .stdin(Stdio::piped())
@@ -304,7 +318,10 @@ pub fn check(
     if said == Verdict::Refused {
         let _ = child.kill();
     }
-    let _ = child.wait();
+    match child.wait() {
+        Ok(status) => log::debug!("polkit's helper ended: {status}"),
+        Err(error) => log::debug!("polkit's helper was not waited for: {error}"),
+    }
     said
 }
 
@@ -326,7 +343,8 @@ pub fn converse(
     }
     .and_then(|()| writeln!(to_helper, "{cookie}"))
     .and_then(|()| to_helper.flush());
-    if begun.is_err() {
+    if let Err(error) = begun {
+        log::debug!("polkit's helper did not listen: {error}");
         return Verdict::Broken("polkit's helper did not listen".to_string());
     }
     let mut told = String::new();
@@ -336,9 +354,11 @@ pub fn converse(
         };
         let line = line.trim_end();
         if line == "SUCCESS" {
+            log::debug!("polkit's helper: the check held");
             return Verdict::Yes;
         }
         if line == "FAILURE" {
+            log::debug!("polkit's helper: the check did not hold");
             return Verdict::No(told);
         }
         let asked = line
@@ -349,7 +369,14 @@ pub fn converse(
                     .map(|question| (question, true))
             });
         if let Some((question, seen)) = asked {
+            // (The question is the system's own; the answer is never said.)
+            log::debug!(
+                "the system's check asks {:?}, to be answered {}",
+                question.trim(),
+                if seen { "openly" } else { "blindly" }
+            );
             let Some(mut answer) = ask(question.trim(), seen) else {
+                log::debug!("the question was taken back by the person");
                 return Verdict::Refused;
             };
             let sent = writeln!(to_helper, "{answer}").and_then(|()| to_helper.flush());
@@ -363,6 +390,7 @@ pub fn converse(
             .or_else(|| line.strip_prefix("PAM_TEXT_INFO"))
         {
             told = text.trim().to_string();
+            log::debug!("the system's check says something to the person");
             say(&told);
             // It waits for an empty line before it goes on.
             let _ = writeln!(to_helper).and_then(|()| to_helper.flush());

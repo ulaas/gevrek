@@ -514,8 +514,14 @@ impl Zones {
             }
             begun.is_ok()
         });
+        log::debug!("the zones start, with their state in {}", folder.display());
         let store = Store::new(folder);
-        let state = match store.load() {
+        let loaded = gevrek_zones::timed::timed(
+            || format!("reading the zones' state from {}", store.file().display()),
+            || store.load(),
+            |loaded| gevrek_zones::timed::result(loaded, |loaded| format!("{:?}", loaded.report)),
+        );
+        let state = match loaded {
             Ok(loaded) => {
                 match &loaded.report {
                     LoadReport::Fresh | LoadReport::Read => {}
@@ -745,7 +751,9 @@ impl Zones {
     /// The desktop's own folder, asked of the backend once.
     fn desktop_folder(&mut self) -> Option<String> {
         if self.desktop.is_none() {
-            self.desktop = Some(self.desk.desktop());
+            let desktop = self.desk.desktop();
+            log::debug!("the desktop's folder for the zones is {}", desktop.as_deref().unwrap_or("not known"));
+            self.desktop = Some(desktop);
         }
         self.desktop.clone().flatten()
     }
@@ -853,8 +861,13 @@ impl Zones {
         if let Some(file) = &self.trace_file {
             use std::io::Write;
             // (A trace that cannot be written is no reason to stop.)
-            if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(file) {
-                let _ = writeln!(file, "{line}");
+            // (Said once, when it first fails.)
+            static FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            let written = std::fs::OpenOptions::new().append(true).open(file).and_then(|mut file| writeln!(file, "{line}"));
+            if let Err(error) = written {
+                if !FAILED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    log::debug!("the zones' trace could not be written to {}: {error}", file.display());
+                }
             }
         }
     }
@@ -1004,7 +1017,7 @@ impl Zones {
                     match &event {
                         ZonesEvent::Refused { reason } => log::info!("the zones did not: {reason}"),
                         ZonesEvent::OperationFailed { operation, error } => {
-                            log::warn!("{operation:?} failed: {error}")
+                            log::warn!("{operation} failed: {error}")
                         }
                         // A file that changed has another picture.
                         ZonesEvent::ItemsChanged { .. } => {
@@ -1151,7 +1164,14 @@ impl Zones {
     /// Write the state now (the shell ends, the zones are switched off).
     pub fn flush(&mut self) {
         if self.unsaved.take().is_some() {
-            if let Err(error) = self.store.save(self.core.state()) {
+            let store = &self.store;
+            let state = self.core.state();
+            let saved = gevrek_zones::timed::timed(
+                || format!("writing the zones' state to {}", store.file().display()),
+                || store.save(state),
+                gevrek_zones::timed::done,
+            );
+            if let Err(error) = saved {
                 log::error!("the zones' state could not be written: {error}");
             }
         }
@@ -1533,6 +1553,7 @@ impl Zones {
 
     /// Carry out a line of a menu the shell drew for some items.
     pub fn act(&mut self, items: &[ItemId], action: &str) {
+        log::debug!("the menu's line {action} is carried out for {}", gevrek_zones::timed::count(items.len(), "item", "items"));
         // The two that are commands of the zones, and can be taken back.
         if action == TRASH {
             self.command(Command::TrashItems { items: items.to_vec() });
@@ -1686,9 +1707,12 @@ impl Zones {
         let text = serde_json::to_string_pretty(&document).map_err(|error| error.to_string())?;
         let path = std::path::Path::new(path);
         let beside = path.with_extension("json.writing");
-        std::fs::write(&beside, text)
-            .and_then(|()| std::fs::rename(&beside, path))
-            .map_err(|error| format!("{} could not be written: {error}", path.display()))
+        let written = gevrek_zones::timed::timed(
+            || format!("writing the zones' arrangement to {}", path.display()),
+            || std::fs::write(&beside, text).and_then(|()| std::fs::rename(&beside, path)),
+            gevrek_zones::timed::done,
+        );
+        written.map_err(|error| format!("{} could not be written: {error}", path.display()))
     }
 
     /// Take an arrangement from a file and put it in force. The core
@@ -1696,7 +1720,12 @@ impl Zones {
     /// a file that cannot be right changes nothing. Says the name it is
     /// kept under.
     pub fn import_from(&mut self, path: &str) -> Result<String, String> {
-        let text = std::fs::read_to_string(path).map_err(|error| format!("{path} could not be read: {error}"))?;
+        let text = gevrek_zones::timed::timed(
+            || format!("reading an arrangement from {path}"),
+            || std::fs::read_to_string(path),
+            |read| gevrek_zones::timed::result(read, |text| format!("{} bytes", text.len())),
+        )
+        .map_err(|error| format!("{path} could not be read: {error}"))?;
         let document: serde_json::Value =
             serde_json::from_str(&text).map_err(|error| format!("{path} is no arrangement: {error}"))?;
         let effects = self.command(Command::ImportLayout { document, apply: true });
@@ -1791,6 +1820,11 @@ impl Zones {
     /// show under the pointer (the first item's, where it has come).
     pub fn take_drag_out(&mut self) -> Option<(Vec<ItemId>, Vec<String>, Option<Picture>)> {
         let (items, paths) = self.drag_out.take()?;
+        log::debug!(
+            "a drag of {} out of the zones begins ({} of them files)",
+            gevrek_zones::timed::count(items.len(), "item", "items"),
+            paths.len()
+        );
         let first = self.outgoing.first().map(|(item, _)| item.clone());
         let picture = first.and_then(|item| {
             let handle = self.pictures.handle_of(&item)?;
@@ -1823,6 +1857,11 @@ impl Zones {
     /// still there go to the bin.
     pub fn drag_ended(&mut self, remove: bool) {
         let outgoing = std::mem::take(&mut self.outgoing);
+        log::debug!(
+            "the drag of {} out of the zones ended{}",
+            gevrek_zones::timed::count(outgoing.len(), "item", "items"),
+            if remove { "; whoever took them leaves the originals to the bin" } else { "" }
+        );
         if remove {
             for (item, _) in outgoing {
                 let Some(path) = self.core.item(&item).and_then(|item| item.path.clone()) else {
@@ -1830,7 +1869,7 @@ impl Zones {
                 };
                 let operation = FileOperation::Trash { path };
                 if let Err(error) = self.desk.perform(&operation) {
-                    log::warn!("{operation:?} failed: {error}");
+                    log::warn!("{operation} failed: {error}");
                 }
             }
         }
@@ -1947,10 +1986,16 @@ impl Zones {
             let acts = gesture::dropped(&self.layout, &items, at);
             // (A zone that takes nothing says so, and nothing is placed.)
             let placed = acts.iter().any(|act| matches!(act, Act::Do(_)));
+            if placed {
+                log::debug!("{} of the zones were let go, and are placed", gevrek_zones::timed::count(items.len(), "item", "items"));
+            } else {
+                log::debug!("{} of the zones were let go where nothing takes them", gevrek_zones::timed::count(items.len(), "item", "items"));
+            }
             self.perform(acts);
             return if placed { Dropped::Placed } else { Dropped::Refused };
         }
         if payload.paths.is_empty() || !(payload.allowed.moving || payload.allowed.copy) {
+            log::debug!("a drop of {} is refused: no files, or neither moved nor copied", payload.summary());
             return Dropped::Refused;
         }
         let moved = payload.allowed.moving;
@@ -1971,7 +2016,10 @@ impl Zones {
                 };
                 return self.bring_in(payload, None, Some(at));
             }
-            _ => return Dropped::Refused,
+            target => {
+                log::debug!("a drop of {} is refused: {target:?} takes no files", payload.summary());
+                return Dropped::Refused;
+            }
         };
         // Into the folder the portal stands in (not its own, where it has
         // gone further in), or into a folder it shows that lies under the
@@ -1979,8 +2027,14 @@ impl Zones {
         let under = into.and_then(|folder| self.core.item(&folder).and_then(|folder| folder.path.clone()));
         let stands_in = self.layout.zone(&zone).and_then(|shown| shown.portal.as_ref()).map(|portal| portal.directory.clone());
         let Some(folder) = under.or(stands_in) else {
+            log::debug!("a drop of {} on the portal {zone} is refused: it stands in no folder", payload.summary());
             return Dropped::Refused;
         };
+        log::debug!(
+            "a drop of {} on the portal {zone}: {} into {folder}",
+            payload.summary(),
+            if moved { "moved" } else { "copied" }
+        );
         self.command(Command::BringIn { paths: payload.paths.clone(), folder, copy: !moved, zone: None, at: None });
         // (What came into the folder is told by the backend, as any change of it.)
         (self.wake_later)(Duration::ZERO);
@@ -1998,9 +2052,16 @@ impl Zones {
         at: Option<gevrek_zones::placement::LoosePosition>,
     ) -> Dropped {
         let Some(folder) = self.desktop_folder() else {
+            log::debug!("a drop of {} is refused: the desktop has no folder to bring files to", payload.summary());
             return Dropped::Refused;
         };
         let moved = payload.allowed.moving;
+        log::debug!(
+            "a drop of {} {}: {} into {folder}",
+            payload.summary(),
+            zone.as_ref().map_or_else(|| "on the desktop".to_string(), |zone| format!("on the zone {zone}")),
+            if moved { "moved" } else { "copied" }
+        );
         self.command(Command::BringIn { paths: payload.paths.clone(), folder, copy: !moved, zone, at });
         (self.wake_later)(Duration::ZERO);
         Dropped::Filed { moved }
@@ -2009,6 +2070,7 @@ impl Zones {
 
 impl Drop for Zones {
     fn drop(&mut self) {
+        log::debug!("the zones stop");
         // The shell ends: the desktop is the person's own again.
         if let Err(why) = explorer::put_back(&mut *self.desk, &self.icons) {
             log::error!("{why}");

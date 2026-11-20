@@ -39,7 +39,7 @@ impl Executor {
                     ..LaunchProfile::default()
                 };
                 let pid = window_manager.launch(&launch)?;
-                log::info!(
+                log::trace!(
                     "Launched process '{}' as PID {} from automation graph",
                     launch.program,
                     pid
@@ -89,7 +89,7 @@ impl Executor {
                             relative: false,
                         },
                     )?;
-                    log::info!("Moved window to ({}, {})", x, y);
+                    log::trace!("Moved window to ({}, {})", x, y);
 
                     // Pass through window for chaining
                     self.set_output_value(node_id, 1, Value::WindowHandle(handle));
@@ -139,7 +139,7 @@ impl Executor {
                             relative: false,
                         },
                     )?;
-                    log::info!("Resized window to {}x{}", width, height);
+                    log::trace!("Resized window to {}x{}", width, height);
 
                     // Pass through window for chaining
                     self.set_output_value(node_id, 1, Value::WindowHandle(handle));
@@ -164,7 +164,7 @@ impl Executor {
                             selector: WindowSelector::Handle(handle.0 as i64),
                         },
                     )?;
-                    log::info!("Closed window");
+                    log::trace!("Closed window");
 
                     // Pass through window for chaining (even though window is closed)
                     self.set_output_value(node_id, 1, Value::WindowHandle(handle));
@@ -198,7 +198,7 @@ impl Executor {
                             title: title.clone(),
                         },
                     )))?;
-                    log::info!("Set window title to: {}", title);
+                    log::trace!("Set window title to: {}", title);
 
                     // Pass through window for chaining
                     self.set_output_value(node_id, 1, Value::WindowHandle(handle));
@@ -239,13 +239,13 @@ impl Executor {
                     };
 
                     if window_manager.start_window_animation(handle, dwm_anim_type, duration)? {
-                        log::info!(
+                        log::trace!(
                             "Scheduled {:?} animation ({}ms)",
                             animation_type,
                             duration.clamp(16, 5000),
                         );
                     } else {
-                        log::debug!(
+                        log::trace!(
                             "Skipped {:?} animation because runtime animations are disabled",
                             animation_type,
                         );
@@ -278,7 +278,7 @@ impl Executor {
                     if self.is_startup_phase
                         && matches!(mode, gevrek_model::graph::WindowMode::Auto)
                     {
-                        log::info!(
+                        log::trace!(
                             "Skipping startup auto-arrangement for existing window {:?}; startup is non-destructive",
                             handle
                         );
@@ -312,7 +312,7 @@ impl Executor {
 
                     // CRITICAL: Never manage Gevrek's own windows
                     if queries(window_manager).ignored_by_rules(handle) {
-                        log::info!("Skipping window management for excluded window");
+                        log::trace!("Skipping window management for excluded window");
                         self.set_output_value(node_id, 1, Value::WindowHandle(handle));
                         self.trigger_output_execution(
                             window_manager,
@@ -348,7 +348,7 @@ impl Executor {
                         .map(|w| w.title.clone())
                         .unwrap_or_else(|| format!("{:?}", handle));
 
-                    log::info!(
+                    log::trace!(
                         "📋 Setting window arrangement: '{}' ({:?}) mode={:?}",
                         window_title,
                         handle,
@@ -366,7 +366,7 @@ impl Executor {
                         if let Some(window_monitor) =
                             monitor_of(window_manager, monitor_manager, handle)
                         {
-                            log::info!(
+                            log::trace!(
                                 "   └─ STARTUP: Monitor='{}' for window '{}'",
                                 window_monitor.name,
                                 window_title
@@ -398,7 +398,7 @@ impl Executor {
                         // last was), one that is to be tiled goes to the
                         // display with the keyboard: where it was asked
                         // for.
-                        log::info!(
+                        log::trace!(
                             "   └─ NEW WINDOW: tiled on the display with the keyboard ({:?})",
                             keyboard_monitor
                         );
@@ -407,7 +407,7 @@ impl Executor {
                         if let Some(window_monitor) =
                             monitor_of(window_manager, monitor_manager, handle)
                         {
-                            log::debug!(
+                            log::trace!(
                                 "NEW WINDOW: Using monitor from window position: {}",
                                 window_monitor.name
                             );
@@ -415,7 +415,7 @@ impl Executor {
                         } else if let Some(cursor_monitor) =
                             monitor_at_cursor(window_manager, monitor_manager)
                         {
-                            log::debug!(
+                            log::trace!(
                                 "NEW WINDOW: Using monitor at cursor position: {}",
                                 cursor_monitor.name
                             );
@@ -452,7 +452,7 @@ impl Executor {
                     if let Some((old_monitor, old_workspace_idx)) = old_location {
                         // Window was moved from another workspace
                         if old_monitor != monitor_handle {
-                            log::info!(
+                            log::trace!(
                                 "Window moved from monitor {:?} to monitor {:?}",
                                 old_monitor,
                                 monitor_handle
@@ -477,7 +477,7 @@ impl Executor {
                                             old_work_area,
                                             window_manager,
                                         )?;
-                                        log::info!(
+                                        log::trace!(
                                             "Retiled old workspace after removing tiled window"
                                         );
                                     }
@@ -486,7 +486,7 @@ impl Executor {
                                 log::warn!("Could not get monitor info for old workspace retiling");
                             }
                         } else {
-                            log::debug!(
+                            log::trace!(
                                 "Skipped retiling - removed window was floating, not tiled"
                             );
                         }
@@ -522,7 +522,7 @@ impl Executor {
                         //          3) Use explicit mode (Tiled/Floating) for new windows
                         let actual_mode = if was_floating {
                             // ALWAYS preserve floating status - floating windows are part of workspace but don't affect tiling
-                            log::info!(
+                            log::trace!(
                                 "Preserving FLOATING status for window that was already floating"
                             );
                             gevrek_model::graph::WindowMode::Floating
@@ -532,7 +532,7 @@ impl Executor {
                             if let Some(window) = all_windows.iter().find(|w| w.handle == handle) {
                                 // Check if window should be ignored
                                 if queries(window_manager).ignored_by_rules(handle) {
-                                    log::info!(
+                                    log::trace!(
                                         "Auto-detected as FLOATING (ignored window): '{}'",
                                         window.title
                                     );
@@ -543,14 +543,14 @@ impl Executor {
                                         || window.title.is_empty();
 
                                     if should_float {
-                                        log::info!(
+                                        log::trace!(
                                             "Auto-detected as FLOATING (matched rule): '{}'",
                                             window.title
                                         );
                                         gevrek_model::graph::WindowMode::Floating
                                     } else {
                                         // On every monitor: a window no rule floats is tiled.
-                                        log::info!("Auto-detected as TILED: '{}'", window.title);
+                                        log::trace!("Auto-detected as TILED: '{}'", window.title);
                                         gevrek_model::graph::WindowMode::Tiled
                                     }
                                 }
@@ -571,14 +571,14 @@ impl Executor {
                             gevrek_model::graph::WindowMode::Auto => {
                                 // Should never reach here, but treat as Floating fallback
                                 workspace.add_floating_window(handle);
-                                log::info!(
+                                log::trace!(
                                     "   └─ Added as FLOATING (Auto fallback) to workspace '{}'",
                                     workspace.name
                                 );
                             }
                             gevrek_model::graph::WindowMode::Tiled => {
                                 workspace.add_window(handle, true);
-                                log::info!(
+                                log::trace!(
                                     "   └─ Added as TILED to workspace '{}' ({} containers now)",
                                     workspace.name,
                                     workspace.containers.len()
@@ -602,7 +602,7 @@ impl Executor {
                                     work_area,
                                     window_manager,
                                 )?;
-                                log::info!(
+                                log::trace!(
                                     "   └─ Applied {:?} layout to {} containers",
                                     workspace.layout,
                                     workspace.containers.len()
@@ -610,7 +610,7 @@ impl Executor {
                             }
                             gevrek_model::graph::WindowMode::Floating => {
                                 workspace.add_floating_window(handle);
-                                log::info!(
+                                log::trace!(
                                     "   └─ Added as FLOATING to workspace '{}'",
                                     workspace.name
                                 );
@@ -646,7 +646,7 @@ impl Executor {
                                     .then_some(())
                                     .ok_or_else(|| anyhow::anyhow!("no border was drawn"))
                                     {
-                                        Ok(_) => log::info!(
+                                        Ok(_) => log::trace!(
                                             "   └─ Border created for floating window {:?}",
                                             handle
                                         ),
@@ -689,7 +689,7 @@ impl Executor {
                             selector: WindowSelector::Handle(handle.0 as i64),
                         },
                     )?;
-                    log::info!("Brought window to front");
+                    log::trace!("Brought window to front");
 
                     // Pass through window for chaining
                     self.set_output_value(node_id, 1, Value::WindowHandle(handle));
@@ -714,7 +714,7 @@ impl Executor {
                             selector: WindowSelector::Handle(handle.0 as i64),
                         },
                     )?;
-                    log::info!("Sent window to back");
+                    log::trace!("Sent window to back");
 
                     // Pass through window for chaining
                     self.set_output_value(node_id, 1, Value::WindowHandle(handle));
@@ -746,7 +746,7 @@ impl Executor {
                         id: handle,
                         op: StackOp::AlwaysOnTop(enabled_val),
                     })?;
-                    log::info!("Set always on top: {} for window", enabled_val);
+                    log::trace!("Set always on top: {} for window", enabled_val);
 
                     // Pass through window for chaining
                     self.set_output_value(node_id, 1, Value::WindowHandle(handle));
@@ -781,7 +781,7 @@ impl Executor {
                             cloaked: cloak_val,
                         },
                     )))?;
-                    log::info!("Cloaked window: {}", cloak_val);
+                    log::trace!("Cloaked window: {}", cloak_val);
 
                     // Pass through window for chaining
                     self.set_output_value(node_id, 1, Value::WindowHandle(handle));
@@ -820,7 +820,7 @@ impl Executor {
                             },
                         },
                     )))?;
-                    log::info!("Set native border color for window");
+                    log::trace!("Set native border color for window");
 
                     // Pass through window for chaining
                     self.set_output_value(node_id, 1, Value::WindowHandle(handle));
@@ -859,7 +859,7 @@ impl Executor {
                             },
                         },
                     )))?;
-                    log::info!("Set caption color for window");
+                    log::trace!("Set caption color for window");
 
                     // Pass through window for chaining
                     self.set_output_value(node_id, 1, Value::WindowHandle(handle));
@@ -894,7 +894,7 @@ impl Executor {
                             backdrop,
                         },
                     )))?;
-                    log::info!("Set system backdrop for window");
+                    log::trace!("Set system backdrop for window");
 
                     // Pass through window for chaining
                     self.set_output_value(node_id, 1, Value::WindowHandle(handle));
@@ -925,7 +925,7 @@ impl Executor {
                     window_manager.apply(&Effect::Platform(PlatformEffect::Windows(
                         WindowsEffect::Corner { id: handle, corner },
                     )))?;
-                    log::info!("Set window corner preference");
+                    log::trace!("Set window corner preference");
 
                     // Pass through window for chaining
                     self.set_output_value(node_id, 1, Value::WindowHandle(handle));

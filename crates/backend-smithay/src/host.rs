@@ -168,7 +168,9 @@ impl State {
             if let Err(error) = &result {
                 log::warn!("Command {:?} failed: {error}", command.command);
             }
-            let _ = command.response.send(result);
+            if command.response.send(result).is_err() {
+                log::debug!("the answer to a command was not given: who asked is gone");
+            }
         }
 
         // Paused: bindings do not run. Configuration changes are still

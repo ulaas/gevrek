@@ -1899,10 +1899,10 @@ dependencies = [
  "ctrlc",
  "dirs",
  "embed-resource",
- "env_logger",
  "gevrek-engine",
  "gevrek-host",
  "gevrek-link",
+ "gevrek-logging",
  "gevrek-model",
  "gevrek-protocol",
  "gevrek-schema",
@@ -1933,7 +1933,7 @@ version = "0.7.1"
 dependencies = [
  "anyhow",
  "bindgen 0.69.5",
- "env_logger",
+ "gevrek-logging",
  "gevrek-model",
  "libc",
  "log",
@@ -1990,8 +1990,8 @@ dependencies = [
  "anyhow",
  "bindgen 0.69.5",
  "egui 0.37.0",
- "env_logger",
  "gevrek-dm",
+ "gevrek-logging",
  "gevrek-model",
  "gevrek-shellkit",
  "gevrek-ui",
@@ -2000,6 +2000,17 @@ dependencies = [
  "libc",
  "log",
  "pam",
+ "serde_json",
+]
+
+[[package]]
+name = "gevrek-logging"
+version = "0.7.1"
+dependencies = [
+ "env_logger",
+ "gevrek-build",
+ "gevrek-model",
+ "log",
  "serde_json",
 ]
 
@@ -2076,10 +2087,10 @@ dependencies = [
  "clap",
  "egui 0.37.0",
  "embed-resource",
- "env_logger",
  "gbm",
  "gevrek-build",
  "gevrek-link",
+ "gevrek-logging",
  "gevrek-model",
  "gevrek-protocol",
  "gevrek-schema",
@@ -2132,10 +2143,10 @@ dependencies = [
  "ab_glyph",
  "anyhow",
  "ctrlc",
- "env_logger",
  "font8x8",
  "gevrek-engine",
  "gevrek-host",
+ "gevrek-logging",
  "gevrek-model",
  "gevrek-protocol",
  "gevrek-server",
@@ -2164,10 +2175,10 @@ dependencies = [
  "eframe",
  "egui 0.37.0",
  "embed-resource",
- "env_logger",
  "gevrek-build",
  "gevrek-engine",
  "gevrek-link",
+ "gevrek-logging",
  "gevrek-model",
  "gevrek-protocol",
  "gevrek-schema",
@@ -2238,6 +2249,7 @@ dependencies = [
  "egui-phosphor",
  "egui-wgpu",
  "image",
+ "log",
  "pollster",
  "resvg",
 ]
@@ -2247,6 +2259,7 @@ name = "gevrek-update"
 version = "0.7.1"
 dependencies = [
  "anyhow",
+ "log",
  "serde",
  "serde_json",
  "sha2",
@@ -2277,6 +2290,7 @@ name = "gevrek-zones"
 version = "0.7.1"
 dependencies = [
  "gevrek-model",
+ "log",
  "schemars",
  "serde",
  "serde_json",

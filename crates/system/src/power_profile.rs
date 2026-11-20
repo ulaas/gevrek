@@ -71,7 +71,11 @@ fn ask(arguments: &[&str]) -> Option<String> {
         .arg("--system")
         .args(arguments)
         .output()
+        .map_err(|error| log::debug!("busctl did not start: {error}"))
         .ok()?;
+    if !output.status.success() {
+        log::debug!("busctl {}: {}", arguments.join(" "), output.status);
+    }
     output
         .status
         .success()
@@ -97,7 +101,7 @@ pub fn read() -> Option<Profiles> {
 #[cfg(target_os = "linux")]
 pub fn choose(profile: &str) -> bool {
     let [name, path, interface] = SERVICE;
-    is_a_name(profile)
+    let took = is_a_name(profile)
         && ask(&[
             "set-property",
             name,
@@ -107,7 +111,12 @@ pub fn choose(profile: &str) -> bool {
             "s",
             profile,
         ])
-        .is_some()
+        .is_some();
+    log::debug!(
+        "the power profile {profile:?}: {}",
+        if took { "chosen" } else { "not taken" }
+    );
+    took
 }
 
 /// Chosen in the system's own settings here.

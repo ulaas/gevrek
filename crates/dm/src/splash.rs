@@ -32,24 +32,39 @@ const GREETER_LATE: Duration = Duration::from_secs(20);
 
 /// Run `plymouth` with these words; whether it said yes within `within`.
 fn plymouth(words: &[&str], within: Duration) -> bool {
-    let Ok(mut child) = Command::new("plymouth")
+    let mut child = match Command::new("plymouth")
         .args(words)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-    else {
-        // (No plymouth on this system.)
-        return false;
+    {
+        Ok(child) => child,
+        Err(error) => {
+            // (No plymouth on this system.)
+            log::debug!("plymouth {} did not start: {error}", words.join(" "));
+            return false;
+        }
     };
     let since = Instant::now();
     loop {
         match child.try_wait() {
-            Ok(Some(status)) => return status.success(),
+            Ok(Some(status)) => {
+                log::debug!(
+                    "plymouth {}: {status} ({} ms)",
+                    words.join(" "),
+                    since.elapsed().as_millis()
+                );
+                return status.success();
+            }
             Ok(None) if since.elapsed() < within => {
                 std::thread::sleep(Duration::from_millis(20));
             }
-            _ => {
+            other => {
+                match other {
+                    Err(error) => log::debug!("plymouth {}: {error}", words.join(" ")),
+                    _ => log::debug!("plymouth {} did not answer in time: ended", words.join(" ")),
+                }
                 let _ = child.kill();
                 let _ = child.wait();
                 return false;
@@ -79,7 +94,11 @@ const PID_FILE: &str = "/run/plymouth/pid";
 /// displays), and a splash taken for none keeps the display from the
 /// greeter.
 fn running() -> bool {
-    std::path::Path::new(PID_FILE).exists() || plymouth(&["--ping"], TO_LET_GO)
+    if std::path::Path::new(PID_FILE).exists() {
+        log::debug!("a boot splash is running: {PID_FILE} is there");
+        return true;
+    }
+    plymouth(&["--ping"], TO_LET_GO)
 }
 
 /// Tell the splash to let go of the display; whether it did.
@@ -121,6 +140,7 @@ pub fn let_go() {
 /// the display is told again to let go of it.
 pub fn let_go_again() {
     if THERE.load(Ordering::SeqCst) {
+        log::debug!("the boot splash is asked again to let go of the display");
         deactivate();
     }
 }

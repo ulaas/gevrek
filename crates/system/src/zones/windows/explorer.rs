@@ -266,8 +266,11 @@ impl Keeper {
         // The one from the time before is kept beside the new one: a
         // layout that was written down is not thrown away by the next.
         if before.is_some() {
-            let _ = std::fs::copy(&self.path, self.path.with_extension("previous.json"));
+            if let Err(error) = std::fs::copy(&self.path, self.path.with_extension("previous.json")) {
+                log::debug!("zones: the journal before is not kept beside {}: {error}", self.path.display());
+            }
         }
+        log::debug!("zones: how Explorer's desktop is, is written down in {}", self.path.display());
         self.save(&Journal {
             version: VERSION,
             written_at: now(),
@@ -287,8 +290,10 @@ impl Keeper {
         if !journal.desktop.view.icons_shown {
             // The person has them switched off already: nothing to do,
             // and nothing to put back later.
+            log::debug!("zones: Explorer's icons are switched off by the person already; nothing is put away");
             return Ok(());
         }
+        log::debug!("zones: Explorer's icons are put away");
         journal.hidden = true;
         self.save(&journal)?;
         explorer.show_icons(false)
@@ -302,7 +307,9 @@ impl Keeper {
             return Ok(());
         };
         let now_shown = explorer.read()?;
-        for step in plan(&journal, &now_shown) {
+        let steps = plan(&journal, &now_shown);
+        log::debug!("zones: Explorer's desktop is put back as written down, in {} steps", steps.len());
+        for step in steps {
             match step {
                 Step::Size { view_mode, icon_size } => explorer.size_icons(view_mode, icon_size)?,
                 Step::Arrange { auto_arrange, snap_to_grid } => explorer.arrange(auto_arrange, snap_to_grid)?,

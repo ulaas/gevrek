@@ -1628,6 +1628,7 @@ impl ZonesCore {
     fn ask(&mut self, pending: Pending) -> Effect {
         self.requests += 1;
         let operation = pending.operation().clone();
+        log::debug!("request {}: {operation} is asked of the backend", self.requests);
         self.pending.insert(self.requests, pending);
         Effect::Ask(BackendRequest::Perform { request: self.requests, operation })
     }
@@ -1638,8 +1639,10 @@ impl ZonesCore {
     /// 1970 (rules that ask about age are tried against it).
     pub fn event(&mut self, event: BackendEvent, now: u64) -> Vec<Effect> {
         let before = self.before();
+        told(&event);
         let mut effects = self.happened(event, now);
         self.settle(&mut effects, before, Some(now));
+        say(&effects);
         effects
     }
 
@@ -1666,6 +1669,7 @@ impl ZonesCore {
                 if !self.watched.contains(&path) {
                     return Vec::new();
                 }
+                log::debug!("{path} could not be listed: {error}");
                 // What was shown of it is not known to be there any more.
                 self.directories.remove(&path);
                 let mut effects = self.listing_is(&path, Listing::Unavailable { reason: error.to_string() });
@@ -1674,7 +1678,10 @@ impl ZonesCore {
             }
             // The desktop that cannot be listed keeps what was last known
             // of it: there is nothing better to show.
-            BackendEvent::ListingFailed { location: Location::Desktop, .. } => Vec::new(),
+            BackendEvent::ListingFailed { location: Location::Desktop, error } => {
+                log::debug!("the desktop could not be listed; what was known of it is kept: {error}");
+                Vec::new()
+            }
             BackendEvent::SourceListed { source, items } => self.source_listed(source, items),
             BackendEvent::SourceFailed { source, error } => self.source_failed(source, error),
             BackendEvent::ScreenShared { shared } => self.screen_shared(shared),
@@ -1754,7 +1761,14 @@ impl ZonesCore {
                 // No display at all: the machine sleeps or the session is
                 // locked. Everything stays as it is until one is back.
                 if displays.is_empty() {
+                    if !self.displays.is_empty() {
+                        log::debug!("no display is left for the zones; they stay as they are until one is back");
+                    }
                     return Vec::new();
+                }
+                let ids = |displays: &[Display]| displays.iter().map(|display| display.id.to_string()).collect::<Vec<_>>();
+                if ids(&self.displays) != ids(&displays) {
+                    log::debug!("the zones are on {} now: {}", crate::timed::count(displays.len(), "display", "displays"), ids(&displays).join(", "));
                 }
                 self.displays = displays;
                 self.reserved = reserved;
@@ -1766,6 +1780,7 @@ impl ZonesCore {
                 if self.workspace == name {
                     return Vec::new();
                 }
+                log::debug!("the zones are on the workspace {} now", name.as_deref().unwrap_or("(none)"));
                 self.workspace = name;
                 if !self.config.profile_per_workspace {
                     // Zones that are of some workspaces only come and go
@@ -1921,8 +1936,14 @@ impl ZonesCore {
         error: Option<BackendError>,
     ) -> Vec<Effect> {
         let Some(pending) = self.pending.remove(&request) else {
+            log::debug!("request {request} ended, and was not waited for any more");
             return Vec::new();
         };
+        match &error {
+            None => log::debug!("request {request} is done: {}", pending.operation()),
+            Some(BackendError::Cancelled) => log::debug!("request {request} was called off: {}", pending.operation()),
+            Some(error) => log::debug!("request {request} failed: {}: {error}", pending.operation()),
+        }
         match (pending, error) {
             (Pending::RuleMove { item, operation }, Some(error)) => {
                 // The file is still where it was: so is its place, and
@@ -2034,17 +2055,28 @@ impl ZonesCore {
     /// Carry out a command. One that cannot be carried out changes
     /// nothing and gives `ZonesEvent::Refused` with the reason.
     pub fn command(&mut self, command: Command, now: u64) -> Vec<Effect> {
+        let level = if busy(&command) { log::Level::Trace } else { log::Level::Debug };
+        let name = if log::log_enabled!(level) { name_of(&command) } else { String::new() };
         let refused = |reason: String| vec![Effect::Notify(ZonesEvent::Refused { reason })];
         if !self.config.enabled {
+            log::log!(level, "{name} was refused: the zones are switched off");
             return refused("zones are switched off (desktop.zones.enabled)".to_string());
         }
         let command = match self.aimed(command) {
             Ok(command) => command,
-            Err(reason) => return refused(reason),
+            Err(reason) => {
+                log::log!(level, "{name} was refused: {reason}");
+                return refused(reason);
+            }
         };
         let before = self.before();
         self.view.refused_by = None;
         let (mut zone, item) = Self::about(&command);
+        if log::log_enabled!(level) {
+            let zone = zone.as_ref().map(|zone| format!(" for the zone {zone}")).unwrap_or_default();
+            let item = item.as_ref().map(|item| format!(" about {item}")).unwrap_or_default();
+            log::log!(level, "the zones were asked to {name}{zone}{item}");
+        }
         let mut effects = self.carry_out(command, now).unwrap_or_else(refused);
         // A refusal says what it was about, for the zone to show it; one
         // that was a lock's says whose lock.
@@ -2054,6 +2086,7 @@ impl ZonesCore {
         });
         let by_lock = self.view.refused_by.take();
         if let Some(reason) = reason {
+            log::log!(level, "{name} was refused: {reason}");
             let locked = by_lock.is_some();
             if let Some((locked_zone, geometry)) = by_lock {
                 zone = Some(locked_zone.clone());
@@ -2065,6 +2098,7 @@ impl ZonesCore {
             }
         }
         self.settle(&mut effects, before, Some(now));
+        say(&effects);
         effects
     }
 
@@ -2596,6 +2630,7 @@ impl ZonesCore {
 
     fn roll_up(&mut self, zone: &ZoneId, rolled_up: Option<bool>) -> Outcome {
         let rolled_up = rolled_up.unwrap_or(!self.known(zone)?.rolled_up);
+        log::debug!("the zone {zone} is {}", if rolled_up { "rolled up" } else { "unrolled" });
         let mut effects = Vec::new();
         // Tabs roll up together: they are one thing on the desktop.
         for companion in self.companions(zone) {
@@ -2860,5 +2895,148 @@ impl ZonesCore {
         effects.push(Effect::Notify(ZonesEvent::LayoutChanged));
         effects.push(Effect::SaveState);
         Ok(effects)
+    }
+}
+
+// ---- what is said in the log ----------------------------------------
+
+/// What a command is called, for the log ("create_zone"). Only its name:
+/// what was typed (a search, a filter) is never said.
+fn name_of(command: &Command) -> String {
+    // (A whole layout is large, and its name is known.)
+    if matches!(command, Command::ImportLayout { .. }) {
+        return "import_layout".to_string();
+    }
+    serde_json::to_value(command)
+        .ok()
+        .and_then(|written| written.get("command").and_then(|name| name.as_str()).map(str::to_string))
+        .unwrap_or_else(|| "do something".to_string())
+}
+
+/// A command that comes at each move of the pointer, each key or each
+/// tick: said at trace only.
+fn busy(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::MoveZone { .. }
+            | Command::ResizeZone { .. }
+            | Command::PointerOver { .. }
+            | Command::Tick { .. }
+            | Command::Search { .. }
+            | Command::Filter { .. }
+            | Command::Peek { .. }
+            | Command::Select { .. }
+            | Command::FocusZone { .. }
+            | Command::FocusItem { .. }
+            | Command::FocusNeighbour { .. }
+            | Command::MoveItemFocus { .. }
+            | Command::CheckTimedRules
+    )
+}
+
+/// What the backend told, at trace: the listings and changes of folders
+/// come often. (The failures are said where they are taken in.)
+fn told(event: &BackendEvent) {
+    if !log::log_enabled!(log::Level::Trace) {
+        return;
+    }
+    match event {
+        BackendEvent::Listed { location, items } => log::trace!("{location} was listed: {} items", items.len()),
+        BackendEvent::ItemAdded { location, item } => log::trace!("{} came to {location}", item.id),
+        BackendEvent::ItemRemoved { location, item } => log::trace!("{item} went from {location}"),
+        BackendEvent::ItemRenamed { location, from, item } => log::trace!("{from} in {location} is {} now", item.id),
+        BackendEvent::ItemChanged { location, item } => log::trace!("{} in {location} changed", item.id),
+        BackendEvent::OperationProgress { request, done, total } => log::trace!("request {request} has come to {done} of {total}"),
+        BackendEvent::IconReady { request, icon } => log::trace!("the picture of request {} is {icon:?}", request.0),
+        _ => {}
+    }
+}
+
+/// What came of a command or an event, as far as it is a state of the
+/// zones that changed (a zone made, a folder gone to, an operation
+/// ended), at debug; what changes at each move, at trace.
+fn say(effects: &[Effect]) {
+    if !log::log_enabled!(log::Level::Debug) {
+        return;
+    }
+    for effect in effects {
+        let event = match effect {
+            Effect::Notify(event) => event,
+            Effect::SaveConfig => {
+                log::trace!("the zones' configuration is to be written");
+                continue;
+            }
+            Effect::SaveState => {
+                log::trace!("the zones' state is to be written");
+                continue;
+            }
+            Effect::Ask(_) => continue,
+        };
+        match event {
+            ZonesEvent::ZoneCreated { zone } => log::debug!("the zone {zone} was made"),
+            ZonesEvent::ZoneDeleted { zone } => log::debug!("the zone {zone} was taken away"),
+            ZonesEvent::ZoneExpanded { zone, expanded: true } => log::debug!("the zone {zone} is open"),
+            ZonesEvent::ZoneExpanded { zone, expanded: false } => log::debug!("the zone {zone} is rolled up again"),
+            ZonesEvent::ProfileChanged { made, moved } => log::debug!(
+                "another arrangement of the zones is in use{}{}",
+                if *made { ", made new for these displays" } else { "" },
+                if moved.is_empty() { String::new() } else { format!(", {} moved to another display", moved.len()) }
+            ),
+            ZonesEvent::SettingsChanged => log::debug!("the zones' settings changed"),
+            ZonesEvent::Navigated { zone, directory } => log::debug!("the portal {zone} shows {directory} now"),
+            ZonesEvent::ListingChanged { zone, listing } => log::debug!("the listing of the zone {zone} is {listing:?}"),
+            ZonesEvent::OperationBegun { request, operation } => log::debug!("request {request} ({operation}) goes on by itself"),
+            ZonesEvent::OperationEnded { request } => log::debug!("request {request} has ended"),
+            ZonesEvent::OpenRequested { items, with } => log::debug!(
+                "{} to be opened{}",
+                crate::timed::count(items.len(), "item is", "items are"),
+                with.as_ref().map(|with| format!(" with {with}")).unwrap_or_default()
+            ),
+            ZonesEvent::SnapshotSaved { name } => log::debug!("the snapshot {name} was saved"),
+            ZonesEvent::SnapshotRestored { name } => log::debug!("the snapshot {name} was put in force"),
+            ZonesEvent::SnapshotDeleted { name } => log::debug!("the snapshot {name} was taken away"),
+            ZonesEvent::SnapshotRenamed { name, to } => log::debug!("the snapshot {name} is called {to} now"),
+            ZonesEvent::LayoutImported { name, applied, .. } => {
+                log::debug!("a layout was taken in as {name}{}", if *applied { " and put in force" } else { "" })
+            }
+            ZonesEvent::LayoutExported { .. } => log::debug!("the zones' layout was written out"),
+            ZonesEvent::RulesApplied { plan, .. } => log::debug!("the rules were applied: {} steps, {} held back", plan.steps.len(), plan.held.len()),
+            ZonesEvent::RulesUndone => log::debug!("what the rules did was taken back"),
+            ZonesEvent::AutoCreated { zones, items, rules } => {
+                log::debug!("{} were made by type, holding {items} items, with {rules} rules", crate::timed::count(zones.len(), "zone", "zones"))
+            }
+            ZonesEvent::AutoUndone { zones, items, rules } => {
+                log::debug!("the zones made by type were taken back: {zones} zones, {items} items, {rules} rules")
+            }
+            ZonesEvent::VisibilityChanged { quick_hidden, peeking } => {
+                log::debug!("the zones are {}{}", if *quick_hidden { "hidden" } else { "shown" }, if *peeking { ", looked at above the windows" } else { "" })
+            }
+            ZonesEvent::PrivacyChanged { masked, screen_shared } => {
+                log::debug!("what the zones show is {} (the screen is {}shared)", if *masked { "covered" } else { "uncovered" }, if *screen_shared { "" } else { "not " })
+            }
+            ZonesEvent::GreyIconsChanged { on } => log::debug!("the icons are drawn {}", if *on { "grey" } else { "in their colours" }),
+            ZonesEvent::RefusedByLock { zone, .. } => log::debug!("the lock of {zone} refused it"),
+            _ => log::trace!("the zones tell: {}", told_name(event)),
+        }
+    }
+}
+
+/// What a told event is called, for the log at trace.
+fn told_name(event: &ZonesEvent) -> &'static str {
+    match event {
+        ZonesEvent::ZoneChanged { .. } => "a zone changed",
+        ZonesEvent::ZonePlaced { .. } => "a zone was placed",
+        ZonesEvent::ItemsChanged { .. } => "the items of a zone changed",
+        ZonesEvent::LayoutChanged => "the layout changed",
+        ZonesEvent::FocusChanged { .. } => "the keyboard is elsewhere",
+        ZonesEvent::SelectionChanged { .. } => "other items are chosen",
+        ZonesEvent::ReservedChanged { .. } => "other room is kept",
+        ZonesEvent::Found { .. } => "what was found",
+        ZonesEvent::FilterChanged { .. } => "a filter changed",
+        ZonesEvent::OperationProgress { .. } => "how far an operation has come",
+        ZonesEvent::Refused { .. } | ZonesEvent::RefusedAbout { .. } => "a refusal",
+        ZonesEvent::RulesPreviewed { .. } => "what the rules would do",
+        ZonesEvent::AutoPlanned { .. } => "what making zones by type would do",
+        _ => "something else",
     }
 }

@@ -240,6 +240,9 @@ impl WallpaperPreview {
                             (image, size)
                         })
                         .map_err(|error| error.to_string());
+                    if let Err(error) = &read {
+                        log::debug!("the wallpaper {} is not shown: {error}", path.display());
+                    }
                     let _ = tell.send(read);
                     wake.request_repaint();
                 });

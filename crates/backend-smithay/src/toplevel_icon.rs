@@ -112,7 +112,12 @@ impl State {
         };
         // The file of the icon it had goes.
         if window.icon.starts_with('/') {
-            let _ = std::fs::remove_file(&window.icon);
+            if let Err(error) = std::fs::remove_file(&window.icon) {
+                log::debug!(
+                    "a window's old icon {} was not removed: {error}",
+                    window.icon
+                );
+            }
         }
         window.icon = match icon {
             // Pixels: a file of them, which is sure to be there for the
@@ -147,14 +152,29 @@ impl State {
     pub(crate) fn forget_window_icon(&mut self, id: WindowHandle) {
         if let Some(window) = self.desktop.windows.get(&id) {
             if window.icon.starts_with('/') {
-                let _ = std::fs::remove_file(&window.icon);
+                if let Err(error) = std::fs::remove_file(&window.icon) {
+                    log::debug!(
+                        "the icon {} of a closed window was not removed: {error}",
+                        window.icon
+                    );
+                }
             }
         }
     }
 
     /// The compositor ends: the folder of the icons goes.
     pub fn forget_window_icons(&self) {
-        let _ = std::fs::remove_dir_all(folder());
+        let folder = folder();
+        match std::fs::remove_dir_all(&folder) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                log::debug!(
+                    "the folder of window icons {} was not removed: {error}",
+                    folder.display()
+                )
+            }
+        }
     }
 }
 

@@ -304,7 +304,7 @@ struct State {
 }
 
 pub fn run() -> anyhow::Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    gevrek_logging::Logging::new("gevrek-shell", log::LevelFilter::Warn).init();
     let args = Args::parse();
     // `gevrek stop` of another instance must not take this one for its own.
     gevrek_model::paths::claim_process("shell");
@@ -847,10 +847,12 @@ const CENTRE_WIDTH: u32 = 400;
 fn toggle_centre(state: &Rc<RefCell<State>>, control: &mut Control) {
     if let Some(id) = state.borrow_mut().centre.take() {
         if control.is_open(id) {
+            log::debug!("the notification centre is closed: asked again");
             control.close(id);
             return;
         }
     }
+    log::debug!("the notification centre is opened");
     // The cards are in the corner the centre opens in, and all of them
     // are in its list: they are put away.
     state.borrow_mut().notes.put_away();
@@ -1144,10 +1146,12 @@ fn zones_woken(state: &Rc<RefCell<State>>, control: &mut Control) {
 fn toggle_power(state: &Rc<RefCell<State>>, control: &mut Control) {
     if let Some((id, ..)) = state.borrow_mut().power.take() {
         if control.is_open(id) {
+            log::debug!("the power menu is closed: asked again");
             control.close(id);
             return;
         }
     }
+    log::debug!("the power menu is opened");
     let place = Place {
         name: surface_name("gevrek-power"),
         edge: Edge::Centre,
@@ -1360,10 +1364,12 @@ fn sound_action(state: &Rc<RefCell<State>>, action: &str, control: &mut Control)
 fn toggle_shortcuts(state: &Rc<RefCell<State>>, control: &mut Control) {
     if let Some(id) = state.borrow_mut().shortcuts.take() {
         if control.is_open(id) {
+            log::debug!("the shortcut list is closed: asked again");
             control.close(id);
             return;
         }
     }
+    log::debug!("the shortcut list is opened");
     let place = Place {
         name: surface_name("gevrek-shortcuts"),
         edge: Edge::Centre,
@@ -1573,10 +1579,12 @@ fn shell_action(
 fn toggle_control(state: &Rc<RefCell<State>>, control: &mut Control) {
     if let Some((id, _, _)) = state.borrow_mut().control_centre.take() {
         if control.is_open(id) {
+            log::debug!("the control centre is closed: asked again");
             control.close(id);
             return;
         }
     }
+    log::debug!("the control centre is opened");
     let place = Place {
         name: surface_name("gevrek-control-centre"),
         edge: Edge::Right,
@@ -2119,6 +2127,7 @@ fn toggle_switcher(state: &Rc<RefCell<State>>, control: &mut Control) {
         control.redraw(id);
         return;
     }
+    log::debug!("the switcher is opened");
     let entries = {
         let state = state.borrow();
         state.used.order(state.switch_to.clone())
@@ -2255,10 +2264,12 @@ fn take_pictures(state: &mut State, windows: Vec<u64>, after: Duration) {
 fn toggle_overview(state: &Rc<RefCell<State>>, control: &mut Control) {
     if let Some((id, _)) = state.borrow_mut().overview.take() {
         if control.is_open(id) {
+            log::debug!("the overview is closed: asked again");
             control.close(id);
             return;
         }
     }
+    log::debug!("the overview is opened");
     let (size, in_sight) = {
         let state = state.borrow();
         // (As large as what it shows, within the display with the keyboard.)
@@ -2354,10 +2365,12 @@ fn toggle_launcher(state: &Rc<RefCell<State>>, control: &mut Control) {
         // One the host closed itself (its display went) is not open:
         // asked for, the launcher then opens.
         if control.is_open(id) {
+            log::debug!("the launcher is closed: asked again");
             control.close(id);
             return;
         }
     }
+    log::debug!("the launcher is opened");
     let place = Place {
         name: surface_name("gevrek-launcher"),
         edge: Edge::Centre,
@@ -2535,6 +2548,13 @@ fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
         match &event {
             Event::Runtime { kind, window, .. } => log::trace!("heard {kind} {window:?}"),
             Event::Log { .. } => log::trace!("heard a line of the log"),
+            Event::Connected(peer) => log::debug!(
+                "connected to the window manager {} at {} ({}, {})",
+                peer.version,
+                peer.address,
+                peer.backend,
+                peer.platform
+            ),
             _ => {}
         }
         // The tutorial hears which commands were carried out: some of
@@ -2565,11 +2585,13 @@ fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
                     .iter()
                     .find(|(name, _)| name == "action")
                     .map(|(_, value)| value.as_str());
+                log::debug!("the window manager asks the shell for {}", action.unwrap_or("nothing"));
                 if let Some(action) = action {
                     shell_action(state, action, &fields, control);
                 }
             }
             Event::Configuration(config, revision) => {
+                log::debug!("the configuration of revision {revision} is taken in");
                 let (red, green, blue) = config.desktop.appearance.active_border_color;
                 {
                     let mut state = state.borrow_mut();
@@ -2744,7 +2766,8 @@ fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
             }
             // No window manager: nobody keeps the panel's room, and there
             // is nothing to show. The panels are back when it is.
-            Event::Disconnected(_) => {
+            Event::Disconnected(why) => {
+                log::debug!("the line to the window manager is down: {why}");
                 {
                     let mut state = state.borrow_mut();
                     state.places.clear();
@@ -2800,6 +2823,7 @@ fn sync_panels(state: &Rc<RefCell<State>>, control: &mut Control) {
             );
         }
     } else if !with_tray && shared.tray.is_some() {
+        log::debug!("the tray's icons are no longer heard of: no panel shows them");
         shared.tray = None;
         shared.tray_items.clear();
         shared.tray_all.clear();
@@ -2814,6 +2838,7 @@ fn sync_panels(state: &Rc<RefCell<State>>, control: &mut Control) {
     let plan = panel::plan(&open, &wanted);
     for name in plan.close {
         if let Some(one) = shared.panels.remove(&name) {
+            log::debug!("the panel of {name} is closed: the display is to have none, or is gone");
             control.close(one.surface);
         }
     }
@@ -2825,6 +2850,7 @@ fn sync_panels(state: &Rc<RefCell<State>>, control: &mut Control) {
         }
     }
     for (name, at) in plan.open {
+        log::debug!("a panel is opened on {name} at {at:?}");
         // The rectangle is the window manager's; of the place only the
         // name, the level and the keyboard count (`Control::open_at`).
         let place = Place {

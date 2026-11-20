@@ -17,7 +17,7 @@ impl Executor {
             if !queries(window_manager).exists(handle) {
                 continue;
             }
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::SetVisible {
                     id: handle,
@@ -62,7 +62,7 @@ impl Executor {
             let _ = monitor_manager.find_and_remove_window(handle);
             self.position_scratchpad(window_manager, monitor_manager, handle, &profile);
             if visible {
-                let _ = effect(
+                try_effect(
                     window_manager,
                     Effect::SetVisible {
                         id: handle,
@@ -70,7 +70,7 @@ impl Executor {
                     },
                 );
             } else {
-                let _ = effect(
+                try_effect(
                     window_manager,
                     Effect::SetVisible {
                         id: handle,
@@ -156,7 +156,7 @@ impl Executor {
             )?;
         }
         self.scratchpads.bind(normalized_id, handle, show);
-        log::info!("Adopted window {:?} as scratchpad '{}'", handle, profile.id);
+        log::debug!("Adopted window {:?} as scratchpad '{}'", handle, profile.id);
         Ok(())
     }
 
@@ -204,6 +204,7 @@ impl Executor {
                 return Ok(());
             }
             Toggle::Hide(handle) => {
+                log::debug!("the scratchpad '{id}' is put away ({handle:?})");
                 effect(
                     window_manager,
                     Effect::SetVisible {
@@ -218,6 +219,7 @@ impl Executor {
                 window: handle,
                 profile,
             } => {
+                log::debug!("the scratchpad '{id}' is shown ({handle:?})");
                 self.position_scratchpad(window_manager, monitor_manager, handle, &profile);
                 effect(
                     window_manager,
@@ -256,7 +258,7 @@ impl Executor {
 
         Self::launch_scratchpad(window_manager, &profile)?;
         self.scratchpads.mark_pending(id);
-        log::info!(
+        log::debug!(
             "Launched scratchpad '{}'; waiting for its window",
             profile.id
         );
@@ -287,6 +289,7 @@ impl Executor {
     ) -> Result<()> {
         if let Some((handle, visible)) = self.scratchpads.window(id) {
             if visible && queries(window_manager).exists(handle) {
+                log::debug!("the scratchpad '{id}' is put away ({handle:?})");
                 effect(
                     window_manager,
                     Effect::SetVisible {
@@ -303,13 +306,16 @@ impl Executor {
     pub(super) fn hide_all_scratchpads(&mut self, window_manager: &mut dyn Desktop) {
         for handle in self.scratchpads.hide_all() {
             if queries(window_manager).exists(handle) {
-                let _ = effect(
+                log::debug!("the scratchpad window {handle:?} is put away with the others");
+                if let Err(error) = effect(
                     window_manager,
                     Effect::SetVisible {
                         id: handle,
                         visible: false,
                     },
-                );
+                ) {
+                    log::debug!("the scratchpad window {handle:?} was not put away: {error:#}");
+                }
             }
         }
     }
@@ -329,7 +335,7 @@ impl Executor {
         let Some(area) = work_area else { return };
 
         let rect = scratchpads::placement(profile, area);
-        let _ = effect(
+        try_effect(
             window_manager,
             Effect::Configure {
                 id: handle,

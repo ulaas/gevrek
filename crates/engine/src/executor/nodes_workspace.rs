@@ -233,7 +233,7 @@ impl Executor {
                                     index,
                                     &settings,
                                 );
-                                log::info!(
+                                log::debug!(
                                     "Hot reload updated workspace '{}' on monitor {:?}",
                                     name,
                                     monitor_handle
@@ -248,7 +248,7 @@ impl Executor {
                         ),
                     };
                     if let Some(workspace_index) = workspace_index {
-                        log::info!("Workspace '{}' at index {} on monitor {:?} with container padding (x:{}, y:{}) and workspace padding (x:{}, y:{})",
+                        log::debug!("Workspace '{}' at index {} on monitor {:?} with container padding (x:{}, y:{}) and workspace padding (x:{}, y:{})",
                             name, workspace_index, monitor_handle, padding_x_val, padding_y_val, workspace_padding_x_val, workspace_padding_y_val);
 
                         // Set output values
@@ -334,7 +334,7 @@ impl Executor {
                     if let Some(workspaces) = monitor_manager.get_workspaces(monitor_handle) {
                         let current_idx = workspaces.focused_idx();
                         self.set_output_value(node_id, 1, Value::Number(current_idx as f64));
-                        log::debug!("Current workspace: {}", current_idx);
+                        log::trace!("Current workspace: {}", current_idx);
                     }
                 }
 
@@ -389,7 +389,7 @@ impl Executor {
             NodeType::GetWorkspace { workspace_index } => {
                 // Return the configured workspace index
                 self.set_output_value(node_id, 1, Value::Number(*workspace_index as f64));
-                log::debug!("GetWorkspace returning index: {}", workspace_index);
+                log::trace!("GetWorkspace returning index: {}", workspace_index);
 
                 self.trigger_output_execution(
                     window_manager,

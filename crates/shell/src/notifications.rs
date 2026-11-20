@@ -614,10 +614,21 @@ impl<F: Fn(FromBus) + Send + Sync + 'static> Service<F> {
         });
         // The shell answers within its next turn; a sender is not kept
         // waiting when it does not.
-        number.recv_timeout(Duration::from_secs(2)).unwrap_or(0)
+        // (Who sent it, never what it says.)
+        match number.recv_timeout(Duration::from_secs(2)) {
+            Ok(id) => {
+                log::debug!("a notification of {app_name} is shown as {id} ({urgency:?})");
+                id
+            }
+            Err(error) => {
+                log::debug!("a notification of {app_name} was not numbered in time: {error}");
+                0
+            }
+        }
     }
 
     fn close_notification(&self, id: u32) {
+        log::debug!("notification {id} is taken back by its sender");
         (self.tell)(FromBus::Close(id));
     }
 
@@ -651,6 +662,10 @@ pub fn serve(
         .name("gevrek-notifications".to_string())
         .spawn(move || {
             for message in receiver {
+                match &message {
+                    ToBus::Closed(id, why) => log::debug!("notification {id} is closed ({why:?})"),
+                    ToBus::Action(id, key) => log::debug!("on notification {id}, {key} was chosen"),
+                }
                 let sent = match message {
                     ToBus::Closed(id, why) => connection.emit_signal(
                         Option::<&str>::None,

@@ -87,7 +87,7 @@ impl Executor {
                         states: WindowStates::default(),
                     },
                 )?;
-                let _ = effect(
+                try_effect(
                     window_manager,
                     Effect::Border {
                         id: target,
@@ -124,7 +124,7 @@ impl Executor {
                         states: WindowStates::default(),
                     },
                 )?;
-                let _ = effect(
+                try_effect(
                     window_manager,
                     Effect::Border {
                         id: target,
@@ -306,7 +306,7 @@ impl Executor {
         focus_manager: &mut FocusManager,
         command: DispatchCommand,
     ) -> Result<()> {
-        log::info!("Dispatching {}", command.display_name());
+        log::debug!("Dispatching {}", command.display_name());
         self.release_placed_scratchpads(monitor_manager);
         let focus_before = queries(window_manager).active_window();
         // Pick the family by the command's kind, then hand the command over.
@@ -575,7 +575,7 @@ impl Executor {
             if focus_after != focus_before {
                 if let Some(window) = focus_after {
                     if let Ok(rect) = queries(window_manager).rect(window) {
-                        let _ = effect(
+                        try_effect(
                             window_manager,
                             Effect::WarpPointer(gevrek_model::geometry::Point {
                                 x: rect.x + rect.width.div_euclid(2),

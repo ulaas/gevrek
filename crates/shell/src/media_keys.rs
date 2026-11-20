@@ -84,8 +84,10 @@ pub fn tell(ask: Ask) {
             Ask::Stop => gevrek_system::playing::Ask::Stop,
         };
         if gevrek_system::playing::tell(asked) {
+            log::debug!("the player the system knows is told {ask:?}");
             return;
         }
+        log::debug!("no player took {ask:?}: the keyboard's own key for it is pressed");
         gevrek_system::every_key::press(match ask {
             Ask::PlayPause => 0xB3,
             Ask::Next => 0xB0,

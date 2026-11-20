@@ -13,7 +13,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { workspace = true }
 log = { workspace = true }
-env_logger = { workspace = true }
+gevrek-logging = { path = "../logging" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 egui = "0.37"

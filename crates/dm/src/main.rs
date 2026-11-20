@@ -34,7 +34,9 @@ mod worker;
 
 #[cfg(target_os = "linux")]
 fn main() -> anyhow::Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    // (A service of the system: no person's configuration is its own, so
+    // the build and the version say.)
+    gevrek_logging::Logging::new("gevrek-dm", log::LevelFilter::Info).without_setting().init();
     match std::env::args().nth(1).as_deref() {
         Some("--worker") => worker::run(),
         None => service::run(),

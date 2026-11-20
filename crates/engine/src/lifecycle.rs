@@ -253,7 +253,7 @@ pub fn restored(world: &mut World, id: WindowId, fallback: Option<OutputId>) -> 
     match target.and_then(|output| world.outputs.get_focused_workspace_mut(output)) {
         Some(workspace) => {
             workspace.add_window(id, true);
-            log::info!(
+            log::debug!(
                 "Restored window {:?} rejoined workspace '{}'",
                 id,
                 workspace.name

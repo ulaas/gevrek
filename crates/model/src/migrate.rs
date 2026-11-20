@@ -16,6 +16,11 @@ pub fn migrate(config: &mut Value) {
         .get("schema_version")
         .and_then(Value::as_u64)
         .unwrap_or(0);
+    if let Some((last, _)) = STEPS.last() {
+        if version < u64::from(*last) {
+            log::debug!("a configuration of schema {version} is brought to schema {last}");
+        }
+    }
     for (to, step) in STEPS {
         if version < u64::from(*to) {
             step(config);

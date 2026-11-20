@@ -12,6 +12,7 @@ use super::{Desk, Spot};
 use gevrek_system::icons::Picture;
 use gevrek_system::zones::{displays_of_state, SystemBackend};
 use gevrek_zones::backend::{BackendError, IconHandle, ZonesBackend};
+use gevrek_zones::timed::{done, result, timed, timed_quietly};
 use gevrek_zones::{DisplayId, ItemId};
 
 /// How a program is started for the zones: by the window manager, as
@@ -89,6 +90,19 @@ pub fn desk(wake: impl Fn() + Send + Sync + 'static, starter: Starter) -> Option
     Some(Box::new(System { backend, outputs: Vec::new() }))
 }
 
+#[cfg(not(windows))]
+impl System {
+    /// What the zones' own menu offers for these items: it reads each
+    /// file and the programs that open it.
+    fn menu_for(&mut self, items: &[ItemId]) -> gevrek_system::zones::ContextMenu {
+        timed(
+            || format!("making the menu for {}", gevrek_zones::timed::count(items.len(), "item", "items")),
+            || self.backend.menu_for(items, gevrek_model::geometry::Point::default()),
+            |menu| gevrek_zones::timed::count(menu.actions.len(), "entry", "entries"),
+        )
+    }
+}
+
 /// The backend, and what the window manager said of the displays that
 /// only the surfaces need.
 pub struct System {
@@ -115,7 +129,10 @@ fn outputs_of(state: &serde_json::Value) -> Vec<(DisplayId, String)> {
 
 impl Desk for System {
     fn picture(&mut self, icon: IconHandle) -> Option<Picture> {
-        self.backend.picture(icon).cloned()
+        // (Asked for each icon drawn.)
+        timed_quietly(|| format!("taking picture {}", icon.0), || self.backend.picture(icon).cloned(), |picture| {
+            if picture.is_some() { "there".to_string() } else { "none".to_string() }
+        })
     }
 
     fn told(&mut self, state: &serde_json::Value) {
@@ -124,17 +141,31 @@ impl Desk for System {
         // the room kept for the zones themselves: the core is told what
         // the panels leave, and no more.
         let (displays, reserved) = displays_of_state(&panels_state(state));
-        self.backend.set_displays(displays, reserved);
+        // (Told at each change of the window manager's state.)
+        let told = gevrek_zones::timed::count(displays.len(), "display", "displays");
+        timed_quietly(
+            || format!("telling the backend of {told}"),
+            || self.backend.set_displays(displays, reserved),
+            |_| "told".to_string(),
+        );
         // The programs that have a window, for the zones that show them.
-        self.backend.set_wm_state(state);
+        timed_quietly(|| "telling the backend the window manager's state".to_string(), || self.backend.set_wm_state(state), |_| {
+            "told".to_string()
+        });
     }
 
     fn pinned(&self) -> Vec<String> {
-        self.backend.pinned_launchers()
+        timed(|| "asking for the pinned launchers".to_string(), || self.backend.pinned_launchers(), |pinned| {
+            gevrek_zones::timed::count(pinned.len(), "launcher", "launchers")
+        })
     }
 
     fn pin(&mut self, program: &str, pin: bool) -> Result<(), BackendError> {
-        self.backend.pin_launcher(program, pin)
+        timed(
+            || format!("{} {program}", if pin { "pinning" } else { "letting go of" }),
+            || self.backend.pin_launcher(program, pin),
+            done,
+        )
     }
 
     fn spot_of(&mut self, display: &DisplayId) -> Option<Spot> {
@@ -143,9 +174,14 @@ impl Desk for System {
         // the path the window manager's state has for it: asked for by
         // the path, no surface was opened at all.)
         #[cfg(windows)]
-        let output = self.backend.name_of(display).unwrap_or(output);
+        let output = timed_quietly(|| format!("asking the system's name of {display}"), || self.backend.name_of(display), |name| {
+            format!("{name:?}")
+        })
+        .unwrap_or(output);
         #[cfg(windows)]
-        let pixels = self.backend.pixels_of(display)?;
+        let pixels = timed_quietly(|| format!("asking where {display} is in pixels"), || self.backend.pixels_of(display), |pixels| {
+            format!("{pixels:?}")
+        })?;
         // (A Wayland compositor places a surface by its output's name.)
         #[cfg(not(windows))]
         let pixels = (0, 0, 0, 0);
@@ -153,7 +189,7 @@ impl Desk for System {
     }
 
     fn desktop(&mut self) -> Option<String> {
-        if let Some(folder) = self.backend.desktop_folder() {
+        if let Some(folder) = ZonesBackend::desktop_folder(self) {
             return Some(folder);
         }
         // (Until the backend says it itself.)
@@ -169,7 +205,7 @@ impl Desk for System {
 
     #[cfg(windows)]
     fn hide_system_icons(&mut self) -> Result<(), BackendError> {
-        self.backend.hide_system_icons()
+        timed(|| "putting the system's icons away".to_string(), || self.backend.hide_system_icons(), done)
     }
 
     #[cfg(windows)]
@@ -179,7 +215,11 @@ impl Desk for System {
 
     #[cfg(windows)]
     fn online_only(&mut self, item: &ItemId) -> bool {
-        matches!(self.backend.cloud_state(item), Some(gevrek_system::zones::cloud::CloudState::OnlineOnly))
+        // (Asked for each icon drawn.)
+        let state = timed_quietly(|| format!("asking whether {item} is online only"), || self.backend.cloud_state(item), |state| {
+            format!("{state:?}")
+        });
+        matches!(state, Some(gevrek_system::zones::cloud::CloudState::OnlineOnly))
     }
 
     #[cfg(windows)]
@@ -203,11 +243,12 @@ impl Desk for System {
         use gevrek_zones::backend::DragActions;
         // (A link to something of the desktop is not ours to offer.)
         let allowed = DragActions { copy: true, moving: true, link: false };
-        if let Err(error) = self.backend.start_drag(items, allowed) {
+        if let Err(error) = ZonesBackend::start_drag(self, items, allowed) {
             log::warn!("the system's description of what is dragged could not be made: {error}");
             return false;
         }
         let Some(out) = self.backend.take_drag() else {
+            log::debug!("the system made nothing of the drag of {}", gevrek_zones::timed::count(items.len(), "item", "items"));
             return false;
         };
         let allowed = gevrek_shellkit::dnd::DragActions {
@@ -226,23 +267,37 @@ impl Desk for System {
         on: gevrek_shellkit::host::SurfaceId,
         allowed: gevrek_zones::backend::DragActions,
     ) -> Option<gevrek_zones::backend::DropPayload> {
-        let object = control.dropped_object(on)?;
-        let mut payload = gevrek_system::zones::dnd::payload_of(&object, allowed);
-        // (What has no path is named in the list of shell ids only.)
-        if let Some(list) = gevrek_system::zones::dnd::id_list_of(&object) {
-            for item in gevrek_system::zones::dnd::items_of_id_list(&list) {
-                if !payload.items.contains(&item) {
-                    payload.items.push(item);
+        let Some(object) = control.dropped_object(on) else {
+            log::debug!("a drop on surface {on:?} carried nothing the system could give");
+            return None;
+        };
+        let payload = timed(
+            || "reading what was dropped".to_string(),
+            || {
+                let mut payload = gevrek_system::zones::dnd::payload_of(&object, allowed);
+                // (What has no path is named in the list of shell ids only.)
+                if let Some(list) = gevrek_system::zones::dnd::id_list_of(&object) {
+                    for item in gevrek_system::zones::dnd::items_of_id_list(&list) {
+                        if !payload.items.contains(&item) {
+                            payload.items.push(item);
+                        }
+                    }
                 }
-            }
-        }
+                payload
+            },
+            |payload| payload.summary(),
+        );
         Some(payload)
     }
 
     #[cfg(windows)]
     fn items_named(&mut self, kind: &str, bytes: &[u8]) -> Vec<ItemId> {
         if kind.contains("IDList") {
-            gevrek_system::zones::dnd::items_of_id_list(bytes)
+            timed(
+                || format!("reading the items of a list of shell ids ({} bytes)", bytes.len()),
+                || gevrek_system::zones::dnd::items_of_id_list(bytes),
+                |items| gevrek_zones::timed::count(items.len(), "item", "items"),
+            )
         } else {
             Vec::new()
         }
@@ -251,7 +306,7 @@ impl Desk for System {
     #[cfg(not(windows))]
     fn own_menu(&mut self, items: &[ItemId]) -> Option<Vec<DeskAction>> {
         use gevrek_system::zones::MenuAction;
-        let menu = self.backend.menu_for(items, gevrek_model::geometry::Point::default());
+        let menu = self.menu_for(items);
         let line = |id: &str, label: &str| DeskAction { id: id.to_string(), label: label.to_string() };
         let mut lines = Vec::new();
         for action in menu.actions {
@@ -282,7 +337,7 @@ impl Desk for System {
     #[cfg(not(windows))]
     fn programs(&mut self, items: &[ItemId]) -> Vec<DeskAction> {
         use gevrek_system::zones::MenuAction;
-        let menu = self.backend.menu_for(items, gevrek_model::geometry::Point::default());
+        let menu = self.menu_for(items);
         menu.actions
             .into_iter()
             .find_map(|action| match action {
@@ -297,7 +352,7 @@ impl Desk for System {
 
     #[cfg(not(windows))]
     fn properties(&mut self, items: &[ItemId]) -> Vec<(String, String)> {
-        let menu = self.backend.menu_for(items, gevrek_model::geometry::Point::default());
+        let menu = self.menu_for(items);
         menu.properties.iter().flat_map(properties_of).collect()
     }
 
@@ -305,11 +360,14 @@ impl Desk for System {
     fn act(&mut self, items: &[ItemId], action: &str) -> Result<(), BackendError> {
         for item in items {
             match action {
-                "open" => self.backend.open(item)?,
-                "allow" => self.backend.allow_launching(item)?,
+                "open" => ZonesBackend::open(self, item)?,
+                "allow" => timed(|| format!("allowing {item} to be started"), || self.backend.allow_launching(item), done)?,
                 with => match with.strip_prefix("with:") {
-                    Some(program) => self.backend.open_with(item, Some(program))?,
-                    None => return Err(BackendError::Unsupported),
+                    Some(program) => ZonesBackend::open_with(self, item, Some(program))?,
+                    None => {
+                        log::debug!("{action} is no action of the zones' own menu");
+                        return Err(BackendError::Unsupported);
+                    }
                 },
             }
         }
@@ -450,83 +508,137 @@ pub fn rights_in_words(mode: u32) -> String {
     format!("{letters} ({:03o})", mode & 0o777)
 }
 
-// Everything the core asks goes to the backend as it is.
+// Everything the core asks goes to the backend as it is, and what may
+// wait on the file system or another process is said in the log with how
+// long the shell's thread waited for it (`timed`).
 impl ZonesBackend for System {
     fn begin_listing(&mut self, location: &gevrek_zones::backend::Location) -> bool {
-        self.backend.begin_listing(location)
+        timed(
+            || format!("beginning to list {location}"),
+            || self.backend.begin_listing(location),
+            |begun| if *begun { "begun, told later".to_string() } else { "to be listed at once".to_string() },
+        )
     }
     fn list_source(&mut self, source: &gevrek_zones::config::SmartSource) -> Result<Vec<gevrek_zones::Item>, BackendError> {
-        self.backend.list_source(source)
+        timed(|| format!("listing the source {source:?}"), || self.backend.list_source(source), items)
     }
     fn watch_source(&mut self, source: &gevrek_zones::config::SmartSource) -> Result<gevrek_zones::backend::WatchId, BackendError> {
-        self.backend.watch_source(source)
+        timed(|| format!("watching the source {source:?}"), || self.backend.watch_source(source), watch)
     }
     fn begin_operation(&mut self, request: u64, operation: &gevrek_zones::backend::FileOperation) -> bool {
-        self.backend.begin_operation(request, operation)
+        timed(
+            || format!("beginning {operation} (request {request})"),
+            || self.backend.begin_operation(request, operation),
+            |begun| if *begun { "begun, ends later".to_string() } else { "to be done at once".to_string() },
+        )
     }
     fn cancel_operation(&mut self, request: u64) {
-        self.backend.cancel_operation(request)
+        timed(|| format!("calling off request {request}"), || self.backend.cancel_operation(request), |_| "asked".to_string())
     }
     fn screen_shared(&mut self) -> Option<bool> {
-        self.backend.screen_shared()
+        timed(|| "asking whether the screen is shared".to_string(), || self.backend.screen_shared(), |shared| format!("{shared:?}"))
     }
     fn list(&mut self, location: &gevrek_zones::backend::Location) -> Result<Vec<gevrek_zones::Item>, BackendError> {
-        self.backend.list(location)
+        timed(|| format!("listing {location}"), || self.backend.list(location), items)
     }
     fn watch(&mut self, location: &gevrek_zones::backend::Location) -> Result<gevrek_zones::backend::WatchId, BackendError> {
-        self.backend.watch(location)
+        timed(|| format!("watching {location}"), || self.backend.watch(location), watch)
     }
     fn unwatch(&mut self, watch: gevrek_zones::backend::WatchId) {
-        self.backend.unwatch(watch)
+        timed(|| format!("ending watch {}", watch.0), || self.backend.unwatch(watch), |_| "ended".to_string())
     }
     fn drain_events(&mut self) -> Vec<gevrek_zones::BackendEvent> {
-        self.backend.drain_events()
+        // (Asked at each pass: said only when there was news, or it was slow.)
+        timed_quietly(|| "taking the backend's news".to_string(), || self.backend.drain_events(), |events| {
+            gevrek_zones::timed::count(events.len(), "event", "events")
+        })
     }
     fn facts(&mut self, item: &ItemId) -> Option<gevrek_zones::item::ItemFacts> {
-        self.backend.facts(item)
+        timed(|| format!("reading the facts of {item}"), || self.backend.facts(item), |facts| {
+            if facts.is_some() { "read".to_string() } else { "none".to_string() }
+        })
     }
     fn request_icon(&mut self, item: &ItemId, size: gevrek_zones::backend::IconSize) -> gevrek_zones::backend::IconRequest {
-        self.backend.request_icon(item, size)
+        timed_quietly(|| format!("asking for the icon of {item}"), || self.backend.request_icon(item, size), |request| {
+            format!("request {}", request.0)
+        })
     }
     fn request_thumbnail(&mut self, item: &ItemId, size: gevrek_zones::backend::IconSize) -> gevrek_zones::backend::IconRequest {
-        self.backend.request_thumbnail(item, size)
+        timed_quietly(|| format!("asking for the thumbnail of {item}"), || self.backend.request_thumbnail(item, size), |request| {
+            format!("request {}", request.0)
+        })
     }
     fn open(&mut self, item: &ItemId) -> Result<(), BackendError> {
-        self.backend.open(item)
+        timed(|| format!("opening {item}"), || self.backend.open(item), done)
     }
     fn open_with(&mut self, item: &ItemId, program: Option<&str>) -> Result<(), BackendError> {
-        self.backend.open_with(item, program)
+        timed(
+            || format!("opening {item} with {}", program.unwrap_or("a program chosen then")),
+            || self.backend.open_with(item, program),
+            done,
+        )
     }
     fn context_menu(&mut self, items: &[ItemId], at: gevrek_model::geometry::Point) -> Result<(), BackendError> {
-        self.backend.context_menu(items, at)
+        timed(
+            || format!("showing the system's menu for {}", gevrek_zones::timed::count(items.len(), "item", "items")),
+            || self.backend.context_menu(items, at),
+            done,
+        )
     }
     fn perform(&mut self, operation: &gevrek_zones::backend::FileOperation) -> Result<gevrek_zones::backend::FileOperation, BackendError> {
-        self.backend.perform(operation)
+        timed(|| operation.to_string(), || self.backend.perform(operation), |done| {
+            result(done, |undo| format!("done (taken back by {undo})"))
+        })
     }
     fn drop_payload(&mut self) -> Option<gevrek_zones::backend::DropPayload> {
-        self.backend.drop_payload()
+        timed(|| "reading what was dropped".to_string(), || self.backend.drop_payload(), |payload| match payload {
+            Some(payload) => payload.summary(),
+            None => "nothing".to_string(),
+        })
     }
     fn start_drag(&mut self, items: &[ItemId], allowed: gevrek_zones::backend::DragActions) -> Result<(), BackendError> {
-        self.backend.start_drag(items, allowed)
+        timed(
+            || format!("handing a drag of {} to the system", gevrek_zones::timed::count(items.len(), "item", "items")),
+            || self.backend.start_drag(items, allowed),
+            done,
+        )
     }
     fn displays(&mut self) -> Vec<gevrek_zones::geometry::Display> {
-        self.backend.displays()
+        timed(|| "asking for the displays".to_string(), || self.backend.displays(), |displays| {
+            gevrek_zones::timed::count(displays.len(), "display", "displays")
+        })
     }
     fn reserved_areas(&mut self) -> Vec<gevrek_zones::geometry::ReservedArea> {
-        self.backend.reserved_areas()
+        timed(|| "asking for the room kept on the displays".to_string(), || self.backend.reserved_areas(), |areas| {
+            gevrek_zones::timed::count(areas.len(), "area", "areas")
+        })
     }
     fn desktop_folder(&mut self) -> Option<String> {
-        self.backend.desktop_folder()
+        timed(|| "asking for the desktop's folder".to_string(), || self.backend.desktop_folder(), |folder| {
+            folder.clone().unwrap_or_else(|| "none".to_string())
+        })
     }
     fn journal_system_icons(&mut self) -> Result<(), BackendError> {
-        self.backend.journal_system_icons()
+        timed(|| "writing down where the system's icons are".to_string(), || self.backend.journal_system_icons(), done)
     }
     fn system_icons_to_restore(&mut self) -> bool {
-        self.backend.system_icons_to_restore()
+        timed(|| "asking whether the system's icons are to be put back".to_string(), || self.backend.system_icons_to_restore(), |to| {
+            to.to_string()
+        })
     }
     fn restore_system_icons(&mut self) -> Result<(), BackendError> {
-        self.backend.restore_system_icons()
+        timed(|| "putting the system's icons back".to_string(), || self.backend.restore_system_icons(), done)
     }
+}
+
+/// How a listing came out, for the log.
+fn items(listed: &Result<Vec<gevrek_zones::Item>, BackendError>) -> String {
+    result(listed, |items| gevrek_zones::timed::count(items.len(), "item", "items"))
+}
+
+/// How a watch came out, for the log.
+fn watch(watched: &Result<gevrek_zones::backend::WatchId, BackendError>) -> String {
+    result(watched, |watch| format!("watch {}", watch.0))
 }
 
 #[cfg(test)]

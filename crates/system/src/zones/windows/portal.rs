@@ -193,6 +193,7 @@ impl Inner {
         if state.reach == reach || self.ended() {
             return;
         }
+        log::debug!("zones: {} is away: {why}", self.path);
         state.reach = reach.clone();
         self.news.tell(crate::zones::reach::told(&location, &reach));
     }
@@ -233,6 +234,7 @@ impl Inner {
             return Err(gone());
         }
         seen.listed(&items);
+        log::debug!("zones: {} is there, with {} items", self.path, items.len());
         // (It is there from the moment it is told so, for whoever asks
         // when woken by the telling.)
         self.state().reach = Reach::There;
@@ -296,9 +298,13 @@ impl Inner {
                 again(&weak);
             }
         };
-        let mut watcher = notify::recommended_watcher(handler).ok()?;
-        watcher.watch(&anchor, RecursiveMode::NonRecursive).ok()?;
-        Some(watcher)
+        let watching = notify::recommended_watcher(handler).and_then(|mut watcher| {
+            watcher.watch(&anchor, RecursiveMode::NonRecursive)?;
+            Ok(watcher)
+        });
+        watching
+            .inspect_err(|error| log::debug!("zones: {} is not listened to for a folder in it to come back: {error}", anchor.display()))
+            .ok()
     }
 }
 

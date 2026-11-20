@@ -741,6 +741,10 @@ impl Window {
                 }
             };
             if let Some((config, base_revision)) = wanted {
+                log::debug!(
+                    "the welcome sends {} on revision {base_revision}",
+                    if self.first { "a first configuration" } else { "what was chosen" }
+                );
                 self.link.send(Request::Apply {
                     config: Box::new(config),
                     base_revision,
@@ -787,6 +791,14 @@ impl eframe::App for Window {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let context = ui.ctx().clone();
         for event in self.link.poll() {
+            match &event {
+                Event::Applied(revision) => log::debug!("the window manager applied revision {revision}"),
+                Event::ApplyFailed(why) | Event::Conflict(why) => {
+                    log::warn!("what the welcome sent was not applied: {why}")
+                }
+                Event::Disconnected(why) => log::debug!("the line to the window manager is down: {why}"),
+                _ => {}
+            }
             if let Event::Configuration(config, revision) = event {
                 if self.running.is_none() {
                     self.first = gevrek_tutorial::welcome_due(&config);

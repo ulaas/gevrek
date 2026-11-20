@@ -268,7 +268,8 @@ pub fn change(by_percent: i32) -> Option<Brightness> {
         // The file itself where it may be written (a rule of the system
         // that gives it to the user, or a folder of the checks'), else
         // through logind, which sets it for the user at the machine.
-        if std::fs::write(&file, wanted.to_string()).is_err() {
+        if let Err(error) = std::fs::write(&file, wanted.to_string()) {
+            log::debug!("{} was not written ({error}): logind is asked", file.display());
             let asked = std::process::Command::new("busctl")
                 .args([
                     "call",
@@ -283,7 +284,9 @@ pub fn change(by_percent: i32) -> Option<Brightness> {
                 ])
                 .output();
             match asked {
-                Ok(output) if output.status.success() => {}
+                Ok(output) if output.status.success() => {
+                    log::debug!("logind set the brightness of {name} to {wanted}");
+                }
                 Ok(output) => {
                     log::warn!(
                         "the brightness was not set: {}",

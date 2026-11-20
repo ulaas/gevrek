@@ -428,6 +428,8 @@ pub struct Shell<M: 'static> {
     handle: QueueHandle<Host>,
     messages: std::rc::Rc<std::cell::RefCell<Vec<M>>>,
     sender: Sender<M>,
+    /// What the thread is busy with, said where it is for long.
+    watch: crate::stall::Watch,
 }
 
 impl<M: 'static> Shell<M> {
@@ -442,8 +444,13 @@ impl<M: 'static> Shell<M> {
         // what is missing is said when it is asked for.
         let layer_shell = LayerShell::bind(&globals, &handle).ok();
         let event_loop: EventLoop<Host> = EventLoop::try_new().context("an event loop")?;
-        WaylandSource::new(connection.clone(), queue)
-            .insert(event_loop.handle())
+        let watch = crate::stall::Watch::start();
+        let watched = watch.clone();
+        event_loop
+            .handle()
+            .insert_source(WaylandSource::new(connection.clone(), queue), move |_, queue, host| {
+                watched.during(crate::stall::Part::Events, || queue.dispatch_pending(host))
+            })
             .map_err(|error| anyhow::anyhow!("the Wayland source: {error}"))?;
         // Messages from other threads wake the loop and wait in a list.
         let (channel, receiver) =
@@ -524,12 +531,14 @@ impl<M: 'static> Shell<M> {
             control: Control::default(),
             connection,
         };
+        host.tell_what_is_missing();
         Ok(Self {
             event_loop,
             host,
             handle,
             messages,
             sender: Sender { channel },
+            watch,
         })
     }
 
@@ -604,12 +613,17 @@ impl<M: 'static> Shell<M> {
             self.event_loop
                 .dispatch(wait, &mut self.host)
                 .context("the event loop")?;
+            use crate::stall::Part;
             let waiting: Vec<M> = std::mem::take(&mut *self.messages.borrow_mut());
-            for message in waiting {
-                on_message(message, &mut self.host.control);
+            if !waiting.is_empty() {
+                self.watch.during(Part::Messages, || {
+                    for message in waiting {
+                        on_message(message, &mut self.host.control);
+                    }
+                });
             }
-            self.host.carry_out(&self.handle);
-            self.host.access_news();
+            self.watch.during(Part::CarryOut, || self.host.carry_out(&self.handle));
+            self.watch.during(Part::Access, || self.host.access_news());
             let now = Instant::now();
             for index in 0..self.host.surfaces.len() {
                 let surface = &mut self.host.surfaces[index];
@@ -618,10 +632,11 @@ impl<M: 'static> Shell<M> {
                     surface.redraw = true;
                 }
                 if surface.redraw && surface.configured && !surface.waiting_for_frame {
-                    self.host.draw(index, &self.handle);
+                    let part = Part::Draw { surface: surface.id.0, size: surface.size };
+                    self.watch.during(part, || self.host.draw(index, &self.handle));
                 }
             }
-            self.host.carry_out(&self.handle);
+            self.watch.during(Part::CarryOut, || self.host.carry_out(&self.handle));
             if self.host.control.quit || (until_empty && self.host.surfaces.is_empty()) {
                 break;
             }
@@ -695,6 +710,9 @@ struct Surface {
     /// with them the surface is drawn at exactly the display's pixels.
     fraction: Option<(WpFractionalScaleV1, WpViewport)>,
     configured: bool,
+    /// The last frame had nothing to draw into (said once, when it
+    /// begins and when it ends).
+    failing: bool,
     /// What happened since the last frame, for egui.
     events: Vec<egui::Event>,
     /// The pointer egui last wanted over it.
@@ -848,6 +866,9 @@ impl Host {
     /// Do what handlers asked for: open, close, draw again.
     fn carry_out(&mut self, handle: &QueueHandle<Self>) {
         for id in std::mem::take(&mut self.control.close) {
+            if self.surfaces.iter().any(|surface| surface.id == id) {
+                log::debug!("surface {id:?} is closed");
+            }
             // A surface's popups go with it (and before it).
             self.surfaces.retain(
                 |surface| !matches!(&surface.role, Role::Popup(_, parent) if *parent == id),
@@ -865,7 +886,15 @@ impl Host {
         }
         for (id, place, draw) in std::mem::take(&mut self.control.open) {
             match self.make(id, &place, draw, handle) {
-                Ok(surface) => self.surfaces.push(surface),
+                Ok(surface) => {
+                    log::debug!(
+                        "the surface {} is opened as {id:?} ({:?}, on {})",
+                        place.name,
+                        place.level,
+                        place.output.as_deref().unwrap_or("the compositor's choice of display")
+                    );
+                    self.surfaces.push(surface)
+                }
                 Err(error) => {
                     log::error!("the surface {} could not be opened: {error:#}", place.name)
                 }
@@ -873,14 +902,20 @@ impl Host {
         }
         for (id, parent, anchor, size, kind, draw) in std::mem::take(&mut self.control.popups) {
             match self.make_popup(id, parent, anchor, size, kind, draw, handle) {
-                Ok(surface) => self.surfaces.push(surface),
+                Ok(surface) => {
+                    log::debug!("a popup {id:?} is opened from surface {parent:?}");
+                    self.surfaces.push(surface)
+                }
                 Err(error) => log::error!("a popup could not be opened: {error:#}"),
             }
         }
         for (id, parts) in std::mem::take(&mut self.control.reach) {
-            let Ok(region) = smithay_client_toolkit::compositor::Region::new(&self.compositor)
-            else {
-                continue;
+            let region = match smithay_client_toolkit::compositor::Region::new(&self.compositor) {
+                Ok(region) => region,
+                Err(error) => {
+                    log::debug!("the reach of surface {id:?} was not changed: {error}");
+                    continue;
+                }
             };
             for part in parts {
                 region.add(
@@ -969,6 +1004,7 @@ impl Host {
         if let Some(each) = self.control.lock.take() {
             match self.lock_state.lock(handle) {
                 Ok(lock) => {
+                    log::debug!("the compositor is asked to lock the session");
                     self.lock = Some(lock);
                     self.lock_draw = Some(each);
                 }
@@ -985,7 +1021,10 @@ impl Host {
                 self.surfaces
                     .retain(|surface| !matches!(surface.role, Role::Lock(_)));
                 lock.unlock();
-                let _ = self.connection.roundtrip();
+                log::debug!("the session is unlocked");
+                if let Err(error) = self.connection.roundtrip() {
+                    log::debug!("the compositor may not have heard of the unlock: {error}");
+                }
             }
             self.control.quit = true;
         }
@@ -1269,6 +1308,11 @@ impl Host {
             let (device, queue) =
                 pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
                     .context("the graphics device")?;
+            let info = adapter.get_info();
+            log::debug!("drawing with {} ({:?}, {:?})", info.name, info.backend, info.device_type);
+            device.on_uncaptured_error(std::sync::Arc::new(|error| {
+                log::warn!("the graphics device: {error}");
+            }));
             self.gpu = Some(Gpu {
                 device,
                 queue,
@@ -1326,6 +1370,7 @@ impl Host {
             scale: 1.0,
             fraction,
             configured: false,
+            failing: false,
             events: Vec::new(),
             pointer: egui::CursorIcon::Default,
             focused: false,
@@ -1437,9 +1482,19 @@ impl Host {
         };
         let frame = match surface.target.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)
-            | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
+            | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
+                if std::mem::take(&mut surface.failing) {
+                    log::debug!("surface {:?} has frames to draw into again", surface.id);
+                }
+                frame
+            }
             other => {
-                log::debug!("no frame to draw into: {other:?}");
+                if surface.failing {
+                    log::trace!("still no frame to draw into on surface {:?}: {other:?}", surface.id);
+                } else {
+                    log::debug!("no frame to draw into on surface {:?}: {other:?}", surface.id);
+                    surface.failing = true;
+                }
                 surface.configure_target(&gpu.device);
                 surface.redraw = true;
                 return;
@@ -1495,11 +1550,59 @@ impl Host {
     }
 }
 
+/// A configure as it came, said when it changes the surface's size or
+/// is its first.
+fn log_configure(surface: &Surface, width: u32, height: u32) {
+    if !surface.configured {
+        log::debug!("surface {:?} is configured at {width}x{height}", surface.id);
+    } else if width > 0 && height > 0 && surface.size != (width, height) {
+        log::debug!(
+            "surface {:?} is made {width}x{height} (was {}x{})",
+            surface.id,
+            surface.size.0,
+            surface.size.1
+        );
+    }
+}
+
+impl Host {
+    /// What the compositor lacks of what the shell can use; what is
+    /// asked of it later fails with its own words.
+    fn tell_what_is_missing(&self) {
+        let missing: Vec<&str> = [
+            (self.layer_shell.is_none(), "the layer shell"),
+            (self.xdg_shell.is_none(), "popups (xdg shell)"),
+            (self.fractional.is_none(), "fractional scales"),
+            (self.viewporter.is_none(), "the viewporter"),
+            (self.shapes.is_none(), "pointer shapes"),
+            (self.background_effect.is_none(), "blur behind surfaces"),
+            (self.text_manager.is_none(), "text input"),
+        ]
+        .into_iter()
+        .filter_map(|(missing, what)| missing.then_some(what))
+        .collect();
+        if missing.is_empty() {
+            log::debug!("the compositor has all the shell can use");
+        } else {
+            log::debug!("the compositor has no {}", missing.join(", no "));
+        }
+    }
+
+    /// A display's name as the compositor gives it, for the log.
+    fn output_name(&self, output: &wl_output::WlOutput) -> String {
+        self.outputs
+            .info(output)
+            .and_then(|info| info.name)
+            .unwrap_or_else(|| "one without a name".to_owned())
+    }
+}
+
 impl LayerShellHandler for Host {
     fn closed(&mut self, _: &Connection, _: &QueueHandle<Self>, layer: &LayerSurface) {
         // The compositor took it away (its output is gone).
         if let Some(index) = self.index_of(layer.wl_surface()) {
             let id = self.surfaces[index].id;
+            log::debug!("the compositor closed surface {id:?}");
             self.control.close(id);
         }
     }
@@ -1520,6 +1623,7 @@ impl LayerShellHandler for Host {
         };
         let surface = &mut self.surfaces[index];
         let (width, height) = configure.new_size;
+        log_configure(surface, width, height);
         if width > 0 && height > 0 {
             surface.size = (width, height);
         }
@@ -1541,7 +1645,10 @@ impl Host {
         self.control.next_id += 1;
         let id = SurfaceId(self.control.next_id);
         match self.finish(id, Role::Lock(lock_surface), draw) {
-            Ok(surface) => self.surfaces.push(surface),
+            Ok(surface) => {
+                log::debug!("lock surface {id:?} covers a display");
+                self.surfaces.push(surface)
+            }
             Err(error) => log::error!("a display's lock surface could not be made: {error:#}"),
         }
     }
@@ -1550,6 +1657,7 @@ impl Host {
 impl SessionLockHandler for Host {
     fn locked(&mut self, _: &Connection, handle: &QueueHandle<Self>, _: SessionLock) {
         let outputs: Vec<wl_output::WlOutput> = self.outputs.outputs().collect();
+        log::debug!("the session is locked: {} displays to cover", outputs.len());
         for output in &outputs {
             self.cover(output, handle);
         }
@@ -1579,6 +1687,7 @@ impl SessionLockHandler for Host {
         };
         let surface = &mut self.surfaces[index];
         let (width, height) = configure.new_size;
+        log_configure(surface, width, height);
         if width > 0 && height > 0 {
             surface.size = (width, height);
         }
@@ -1624,6 +1733,7 @@ impl PopupHandler for Host {
             return;
         };
         let surface = &mut self.surfaces[index];
+        log_configure(surface, configure.width.max(0) as u32, configure.height.max(0) as u32);
         if configure.width > 0 && configure.height > 0 {
             surface.size = (configure.width as u32, configure.height as u32);
         }
@@ -1636,6 +1746,7 @@ impl PopupHandler for Host {
         // Dismissed by the compositor (a click elsewhere).
         if let Some(index) = self.index_of(popup.wl_surface()) {
             let id = self.surfaces[index].id;
+            log::debug!("the compositor dismissed popup {id:?}");
             self.control.close(id);
         }
     }
@@ -1720,6 +1831,7 @@ impl OutputHandler for Host {
         handle: &QueueHandle<Self>,
         output: wl_output::WlOutput,
     ) {
+        log::debug!("a display came: {}", self.output_name(&output));
         // A display plugged in while the session is locked is covered too.
         if self.lock.is_some() && !self.surfaces.is_empty() {
             self.cover(&output, handle);
@@ -1728,7 +1840,14 @@ impl OutputHandler for Host {
 
     fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
 
-    fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+    fn output_destroyed(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        output: wl_output::WlOutput,
+    ) {
+        log::debug!("a display went: {}", self.output_name(&output));
+    }
 }
 
 impl SeatHandler for Host {
@@ -1745,20 +1864,33 @@ impl SeatHandler for Host {
         seat: wl_seat::WlSeat,
         capability: Capability,
     ) {
+        log::debug!("the seat has a {capability}");
         if capability == Capability::Keyboard && self.keyboard.is_none() {
-            self.keyboard = self.seats.get_keyboard(handle, &seat, None).ok();
+            self.keyboard = self
+                .seats
+                .get_keyboard(handle, &seat, None)
+                .map_err(|error| log::debug!("the seat's keyboard was not taken: {error}"))
+                .ok();
         }
         if let (Some(manager), None) = (&self.text_manager, &self.text_input) {
             self.text_input = Some(manager.get_text_input(&seat, handle, ()));
         }
         if capability == Capability::Pointer && self.pointer.is_none() {
-            self.pointer = self.seats.get_pointer(handle, &seat).ok();
+            self.pointer = self
+                .seats
+                .get_pointer(handle, &seat)
+                .map_err(|error| log::debug!("the seat's pointer was not taken: {error}"))
+                .ok();
             if let (Some(shapes), Some(pointer)) = (&self.shapes, &self.pointer) {
                 self.shape_device = Some(shapes.get_pointer(pointer, handle, ()));
             }
         }
         if capability == Capability::Touch && self.touch.is_none() {
-            self.touch = self.seats.get_touch(handle, &seat).ok();
+            self.touch = self
+                .seats
+                .get_touch(handle, &seat)
+                .map_err(|error| log::debug!("the seat's touch was not taken: {error}"))
+                .ok();
         }
         self.seat.get_or_insert(seat);
         self.drag_seat_known();
@@ -1769,8 +1901,9 @@ impl SeatHandler for Host {
         _: &Connection,
         _: &QueueHandle<Self>,
         _: wl_seat::WlSeat,
-        _: Capability,
+        capability: Capability,
     ) {
+        log::debug!("the seat has no {capability} any more");
     }
 
     fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
@@ -1901,6 +2034,7 @@ impl KeyboardHandler for Host {
     ) {
         if let Some(index) = self.index_of(wl_surface) {
             let surface = &mut self.surfaces[index];
+            log::debug!("surface {:?} has the keyboard", surface.id);
             self.keyboard_on = Some(surface.id);
             surface.focused = true;
             surface.access.adapter.update_window_focus_state(true);
@@ -1919,6 +2053,7 @@ impl KeyboardHandler for Host {
     ) {
         if let Some(index) = self.index_of(wl_surface) {
             let surface = &mut self.surfaces[index];
+            log::debug!("surface {:?} lost the keyboard", surface.id);
             if self.keyboard_on == Some(surface.id) {
                 self.keyboard_on = None;
             }

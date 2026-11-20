@@ -16,6 +16,10 @@ use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions}
 use smithay::backend::renderer::Renderer;
 use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Transform};
 
+// (Each frame a program's buffer is drawn into: a failure is said once.)
+static BIND_CARD: crate::failing::Failing =
+    crate::failing::Failing::new("drawing into a program's buffer of the graphics card");
+
 /// The texture program of the renderer, with the cut added. Where a pixel
 /// is on the target comes from `gl_FragCoord`, so the cut is the same
 /// whatever the buffer of the surface is like (scaled, cropped, turned).
@@ -178,9 +182,7 @@ impl ClipRenderer for GlesRenderer {
         dmabuf: &'a mut smithay::backend::allocator::dmabuf::Dmabuf,
     ) -> Option<<Self as smithay::backend::renderer::RendererSuper>::Framebuffer<'a>> {
         use smithay::backend::renderer::Bind;
-        self.bind(dmabuf)
-            .map_err(|error| log::debug!("a program's buffer could not be drawn into: {error:?}"))
-            .ok()
+        BIND_CARD.note(self.bind(dmabuf))
     }
 }
 

@@ -35,6 +35,9 @@ pub struct Document {
     last: Option<(String, Instant)>,
     /// Counts every change: who watches the document compares it.
     generation: u64,
+    /// Whether the model read it at the last check (`None`: not checked
+    /// yet), for the log to say when that changes.
+    was_typed: Option<bool>,
 }
 
 impl Document {
@@ -44,6 +47,7 @@ impl Document {
             typed: Err(String::new()),
             issues: Vec::new(),
             defaults: serde_json::to_value(Config::default()).unwrap_or(Value::Null),
+            was_typed: None,
             undo: Vec::new(),
             redo: Vec::new(),
             last: None,
@@ -221,10 +225,22 @@ impl Document {
                 self.value = written;
             }
         }
+        let (was_typed, issues_before) = (self.was_typed, self.issues.len());
         self.issues = match &self.typed {
             Ok(config) => config.validate(),
             Err(_) => Vec::new(),
         };
+        // Said when it is another than before, not at each edit (a slider
+        // that is dragged edits at every frame).
+        self.was_typed = Some(self.typed.is_ok());
+        if was_typed != self.was_typed {
+            match &self.typed {
+                Ok(_) => log::debug!("the document is a configuration ({} issues)", self.issues.len()),
+                Err(error) => log::debug!("the document is no configuration: {error}"),
+            }
+        } else if self.typed.is_ok() && issues_before != self.issues.len() {
+            log::debug!("the configuration's check finds {} issues", self.issues.len());
+        }
     }
 
     /// How many issues lie at or under `pointer` (`/desktop/shell/panel`); errors

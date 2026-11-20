@@ -124,7 +124,7 @@ impl Executor {
             if !visible || !queries(window_manager).exists(window) {
                 continue;
             }
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::SetVisible {
                     id: window,
@@ -142,7 +142,7 @@ impl Executor {
         // (On Windows the desktop keeps it for a moment against a window
         // the system would give it to by itself as the others go.)
         effect(window_manager, Effect::Focus(None))?;
-        log::info!("The desktop is shown: {count} window(s) out of sight");
+        log::debug!("The desktop is shown: {count} window(s) out of sight");
         self.emit_desktop_event(
             RuntimeEventKind::DesktopShown,
             [("windows".to_string(), count.to_string())],
@@ -196,7 +196,7 @@ impl Executor {
         // shown.)
         self.apply_changes(window_manager, changes);
         for window in windows {
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::Border {
                     id: *window,
@@ -292,7 +292,7 @@ impl Executor {
         workspaces::show_windows(&mut self.window_state, &back, &mut changes);
         self.apply_changes(window_manager, changes);
         for window in &back {
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::Border {
                     id: *window,
@@ -311,7 +311,7 @@ impl Executor {
             if !queries(window_manager).exists(*window) {
                 continue;
             }
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::SetVisible {
                     id: *window,
@@ -353,7 +353,7 @@ impl Executor {
                 log::debug!("The keyboard was not given back after the desktop: {error:#}");
             }
         }
-        log::info!(
+        log::debug!(
             "The desktop is shown no longer ({}): {count} window(s) back",
             why.word()
         );

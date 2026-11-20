@@ -14,7 +14,7 @@
 //! no session of the pointer's own picture: such a session is told at once
 //! that it has stopped.
 
-use crate::capture::CaptureTarget;
+use crate::capture::{CaptureTarget, CARD_PICTURE, PICTURE};
 use crate::state::State;
 use gevrek_engine::outputs::MonitorHandle;
 use gevrek_engine::WindowHandle;
@@ -369,6 +369,7 @@ impl State {
                 let mut card = card.clone();
                 match self.draw_into_card(renderer, &mut card, output, capture.with_pointer) {
                     Ok(()) => {
+                        CARD_PICTURE.worked();
                         capture.frame.transform(
                             smithay::reexports::wayland_server::protocol::wl_output::Transform::Normal,
                         );
@@ -383,7 +384,7 @@ impl State {
                         self.picture_taken(output);
                     }
                     Err(error) => {
-                        log::debug!("no picture into a program's buffer: {error}");
+                        CARD_PICTURE.failed(error);
                         capture.frame.failed(FailureReason::BufferConstraints);
                     }
                 }
@@ -402,8 +403,9 @@ impl State {
                         self.draw_pointer_for_capture::<R, T>(renderer, format, output)
                     }
                 };
-                if let Err(error) = &picture {
-                    log::warn!("no picture for a program: {error}");
+                match &picture {
+                    Ok(_) => PICTURE.worked(),
+                    Err(error) => PICTURE.failed(error),
                 }
                 drawn.push((key, picture.ok()));
             }
@@ -560,11 +562,15 @@ impl GlobalDispatch<ExtImageCopyCaptureManagerV1, ()> for State {
     fn bind(
         _: &mut Self,
         _: &DisplayHandle,
-        _: &Client,
+        client: &Client,
         resource: New<ExtImageCopyCaptureManagerV1>,
         _: &(),
         init: &mut DataInit<'_, Self>,
     ) {
+        log::debug!(
+            "{} binds the image copy capture manager (it may take pictures of displays and windows)",
+            crate::state::named_client(client)
+        );
         init.init(resource, ());
     }
 }
@@ -572,7 +578,7 @@ impl GlobalDispatch<ExtImageCopyCaptureManagerV1, ()> for State {
 impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for State {
     fn request(
         state: &mut Self,
-        _: &Client,
+        client: &Client,
         manager: &ExtImageCopyCaptureManagerV1,
         request: ext_image_copy_capture_manager_v1::Request,
         _: &(),
@@ -597,6 +603,21 @@ impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for State {
                 };
                 let source = source.data::<Option<Source>>().copied().flatten();
                 let size = source.and_then(|source| state.image_size(source));
+                match (source, size) {
+                    (Some(source), Some((width, height))) => log::debug!(
+                        "{} begins to take pictures of {source:?} ({width}x{height}{})",
+                        crate::state::named_client(client),
+                        if with_pointer {
+                            ", with the pointer"
+                        } else {
+                            ""
+                        },
+                    ),
+                    _ => log::debug!(
+                        "{} asked for pictures of something that is gone: stopped at once",
+                        crate::state::named_client(client)
+                    ),
+                }
                 let session = init.init(
                     session,
                     Arc::new(Session {
@@ -642,6 +663,10 @@ impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for State {
                 ..
             } => {
                 let source = source.data::<Option<Source>>().copied().flatten();
+                log::debug!(
+                    "{} watches the pointer over {source:?}",
+                    crate::state::named_client(client)
+                );
                 let session = init.init(session, source);
                 if let Some(source) = source {
                     state.pointer_watches.push(PointerWatch {

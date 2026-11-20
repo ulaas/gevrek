@@ -283,7 +283,9 @@ impl Studio {
                 Document::new(&Config::default()),
             ),
             Source::File(path) => {
-                let config = Config::load(&path).unwrap_or_else(|error| {
+                let config = Config::load(&path)
+                    .inspect(|_| log::debug!("the configuration is read from {}", path.display()))
+                    .unwrap_or_else(|error| {
                     log::warn!(
                         "{}: {error}; starting from gevrek's defaults",
                         path.display()
@@ -467,6 +469,13 @@ impl Studio {
         for event in self.link.poll() {
             match event {
                 Event::Connected(peer) => {
+                    log::debug!(
+                        "connected to the window manager {} at {} ({}, {})",
+                        peer.version,
+                        peer.address,
+                        peer.backend,
+                        peer.platform
+                    );
                     // A window manager that started again counts its
                     // revisions from the start.
                     if let Some(session) = &mut self.session {
@@ -476,6 +485,7 @@ impl Studio {
                     self.line_down.clear();
                 }
                 Event::Disconnected(reason) => {
+                    log::debug!("the line to the window manager is down: {reason}");
                     self.picking = false;
                     if self.peer.take().is_some() {
                         self.toast(Tone::Warn, "The window manager went away. Trying again.");
@@ -487,10 +497,12 @@ impl Studio {
                     self.state = None;
                 }
                 Event::Configuration(config, revision) => {
+                    log::debug!("the configuration of revision {revision} came");
                     self.fetch_problem = None;
                     self.remote_configuration(*config, revision)
                 }
                 Event::Applied(revision) => {
+                    log::debug!("the window manager applied revision {revision}");
                     self.applying = false;
                     if let Some(session) = &mut self.session {
                         session.applied(revision);
@@ -502,6 +514,7 @@ impl Studio {
                     }
                 }
                 Event::Conflict(message) => {
+                    log::debug!("the change was not applied: {message}");
                     self.applying = false;
                     self.try_out = None;
                     self.toast(Tone::Warn, message);
@@ -512,9 +525,11 @@ impl Studio {
                 Event::Log { level: gevrek_link::Level::Error, ref message, .. }
                     if message.starts_with(gevrek_link::FETCH_FAILED) && self.session.is_none() =>
                 {
+                    log::debug!("the configuration was not fetched: {message}");
                     self.fetch_problem = Some(message.clone());
                 }
                 Event::ApplyFailed(message) => {
+                    log::debug!("the window manager did not apply the change: {message}");
                     self.applying = false;
                     self.try_out = None;
                     crate::tryout::forget_revert();
@@ -522,6 +537,10 @@ impl Studio {
                     self.toast(Tone::Bad, format!("Not applied: {message}"));
                 }
                 Event::Changed { revision, origin } => {
+                    log::debug!(
+                        "the configuration changed to revision {revision}, by {}",
+                        if origin.is_empty() { "a file edit or a toggle" } else { origin.as_str() }
+                    );
                     let notice = self
                         .session
                         .as_ref()
@@ -593,8 +612,14 @@ impl Studio {
                     }
                 }
                 Event::Dispatched { command, error } => match error {
-                    None => self.toast(Tone::Note, format!("Done: {command}")),
-                    Some(error) => self.toast(Tone::Bad, format!("{command}: {error}")),
+                    None => {
+                        log::debug!("the window manager carried out {command}");
+                        self.toast(Tone::Note, format!("Done: {command}"))
+                    }
+                    Some(error) => {
+                        log::debug!("the window manager did not carry out {command}: {error}");
+                        self.toast(Tone::Bad, format!("{command}: {error}"))
+                    }
                 },
                 Event::State(state) => self.state = Some(state),
                 // What the zones' page asked, it shows itself, where it
@@ -726,6 +751,7 @@ impl Studio {
             // A second Save is the answer that it is to be.
             let now = file_mark(&path);
             if now != self.file_mark {
+                log::debug!("{} is not saved: it was changed elsewhere since it was read", path.display());
                 self.file_mark = now;
                 self.toast(
                     Tone::Warn,
@@ -738,6 +764,7 @@ impl Studio {
             }
             match config.save(&path) {
                 Ok(()) => {
+                    log::debug!("the configuration is saved to {}", path.display());
                     self.file_mark = file_mark(&path);
                     self.document.replace(&config);
                     self.forget_changes();
@@ -745,7 +772,10 @@ impl Studio {
                     self.base = None;
                     self.toast(Tone::Good, format!("Saved {}", path.display()));
                 }
-                Err(error) => self.toast(Tone::Bad, format!("Not saved: {error}")),
+                Err(error) => {
+                    log::debug!("the configuration was not saved to {}: {error}", path.display());
+                    self.toast(Tone::Bad, format!("Not saved: {error}"))
+                }
             }
             return;
         }
@@ -755,6 +785,7 @@ impl Studio {
         };
         self.sent_generation = self.document.generation();
         self.applying = true;
+        log::debug!("the draft is sent to the window manager, on revision {}", request.base_revision);
         self.link.send(Request::Apply {
             config: Box::new(request.config),
             base_revision: request.base_revision,
@@ -1157,13 +1188,19 @@ impl Studio {
                             self.toast(Tone::Note, "The sandbox follows what you change here. Close its window, or press the button again, to end it.");
                             self.sandbox = Some(sandbox);
                         }
-                        Err(error) => self.toast(Tone::Bad, error),
+                        Err(error) => {
+                            log::debug!("the sandbox did not start: {error}");
+                            self.toast(Tone::Bad, error)
+                        }
                     }
                 }
-                None => self.toast(
-                    Tone::Warn,
-                    "The configuration is not valid as it is; the sandbox needs one that is.",
-                ),
+                None => {
+                    log::debug!("no sandbox: the draft is not a valid configuration");
+                    self.toast(
+                        Tone::Warn,
+                        "The configuration is not valid as it is; the sandbox needs one that is.",
+                    )
+                }
             },
         }
     }

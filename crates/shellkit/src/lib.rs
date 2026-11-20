@@ -28,6 +28,7 @@
 
 pub mod dnd;
 pub mod look;
+pub mod stall;
 #[cfg(target_os = "linux")]
 pub mod layer;
 #[cfg(windows)]

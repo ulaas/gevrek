@@ -477,15 +477,12 @@ mod linux {
     }
 
     pub fn run() -> anyhow::Result<()> {
-        let mut logger =
-            env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"));
         // The message-bus library tells of every message it reads at the
         // level other things tell of what they do at: a session's log had
         // a screenful a second of it. Unless it is asked for by name.
-        if !std::env::var("RUST_LOG").is_ok_and(|asked| asked.contains("zbus")) {
-            logger.filter_module("zbus", log::LevelFilter::Warn);
-        }
-        logger.init();
+        gevrek_logging::Logging::new("gevrek-shell", log::LevelFilter::Warn)
+            .quiet("zbus", log::LevelFilter::Warn)
+            .init();
         let args = Args::parse();
         let address = args
             .address
@@ -587,12 +584,18 @@ mod linux {
         match crate::notifications::serve(move |message| {
             bus_sender.send(Message::Bus(message));
         }) {
-            Ok(to_bus) => state.borrow_mut().to_bus = Some(to_bus),
+            Ok(to_bus) => {
+                log::debug!("the shell is the notification service");
+                state.borrow_mut().to_bus = Some(to_bus)
+            }
             Err(error) => log::warn!("no notifications: {error}"),
         }
         // What is copied is kept when its program closes, and remembered.
         match crate::clipboard::start() {
-            Ok(clipboard) => state.borrow_mut().clipboard = Some(clipboard),
+            Ok(clipboard) => {
+                log::debug!("the clipboard is kept");
+                state.borrow_mut().clipboard = Some(clipboard)
+            }
             Err(error) => log::warn!("the clipboard is not kept: {error}"),
         }
         // The portal backend: what applications are told of the look.
@@ -603,7 +606,10 @@ mod linux {
             match crate::portal::Portal::serve(look, move |asked| {
                 portal_sender.send(Message::Portal(asked));
             }) {
-                Ok(portal) => shared.portal = Some(portal),
+                Ok(portal) => {
+                    log::debug!("the shell is the portal backend");
+                    shared.portal = Some(portal)
+                }
                 Err(error) => log::warn!("no portal backend: {error}"),
             }
         }
@@ -613,7 +619,10 @@ mod linux {
         match crate::polkit::serve(move |message| {
             agent_sender.send(Message::Agent(message));
         }) {
-            Ok(connection) => state.borrow_mut()._agent = Some(connection),
+            Ok(connection) => {
+                log::debug!("the shell is the authentication agent");
+                state.borrow_mut()._agent = Some(connection)
+            }
             Err(error) => log::warn!("not the authentication agent: {error}"),
         }
         // The tray; without the session's bus, or when another tray is
@@ -623,7 +632,10 @@ mod linux {
             match crate::tray::serve(move |message| {
                 tray_sender.send(Message::Tray(message));
             }) {
-                Ok(tray) => state.borrow_mut().tray = Some(tray),
+                Ok(tray) => {
+                    log::debug!("the shell is the tray");
+                    state.borrow_mut().tray = Some(tray)
+                }
                 Err(error) => log::warn!("no tray: {error}"),
             }
         }
@@ -649,10 +661,11 @@ mod linux {
         {
             let sleep_sender = shell.sender();
             let wanted = std::sync::Arc::clone(&state.borrow().lock_before_sleep);
-            if let Err(error) = crate::sleep::watch(wanted, move || {
+            match crate::sleep::watch(wanted, move || {
                 sleep_sender.send(Message::LockForSleep);
             }) {
-                log::info!("not locking before sleep: {error}");
+                Ok(()) => log::debug!("the shell hears when the machine is about to sleep"),
+                Err(error) => log::info!("not locking before sleep: {error}"),
             }
         }
         state.borrow_mut().verdicts = Some(shell.sender());
@@ -687,13 +700,19 @@ mod linux {
                     Message::ShareEnded(session) => {
                         let mut state = listening.borrow_mut();
                         if state.casts.remove(&session).is_some() {
+                            log::debug!("a sharing of the screen ended");
                             if let Some(portal) = &state.portal {
                                 portal.share_closed(&session);
                             }
                         }
                     }
                     Message::Recorded(result) => match result {
-                        Ok((file, pictures)) => tell(
+                        Ok((file, pictures)) => {
+                            log::debug!(
+                                "the recording is written to {} ({pictures} pictures)",
+                                file.display()
+                            );
+                            tell(
                             &listening,
                             "Recording saved",
                             &format!(
@@ -702,8 +721,12 @@ mod linux {
                                 pictures / u64::from(crate::record::RATE)
                             ),
                             control,
-                        ),
-                        Err(why) => tell(&listening, "The recording was not saved", &why, control),
+                        )
+                        }
+                        Err(why) => {
+                            log::warn!("the recording was not saved: {why}");
+                            tell(&listening, "The recording was not saved", &why, control)
+                        }
                     },
                     Message::Playing(playing) => {
                         let mut state = listening.borrow_mut();
@@ -798,6 +821,7 @@ mod linux {
                             // (A request that is not on the screen any
                             // more: taken back.)
                             None => {
+                                log::debug!("polkit asked about a request that is not shown any more");
                                 let _ = answer.send(None);
                             }
                         }
@@ -814,6 +838,7 @@ mod linux {
                     Message::NextRequest => next_auth(&listening, control),
                     Message::Tray(message) => from_tray(&listening, message, control),
                     Message::LockForSleep => {
+                        log::debug!("the machine is about to sleep: the screen is locked first");
                         let command = serde_json::json!({"command": "shell", "action": "lock"});
                         listening
                             .borrow()
@@ -833,6 +858,7 @@ mod linux {
                 }
             },
             move |names, control| {
+                log::debug!("the displays are {names:?}");
                 displays.borrow_mut().outputs = names.to_vec();
                 sync_panels(&displays, control);
             },
@@ -919,6 +945,7 @@ mod linux {
                         .iter()
                         .find(|(name, _)| name == "action")
                         .map(|(_, value)| value.as_str());
+                    log::debug!("the window manager asks the shell for {}", action.unwrap_or("nothing"));
                     match action {
                         Some("launcher") => toggle_launcher(state, control),
                         Some("welcome") => {
@@ -1018,6 +1045,7 @@ mod linux {
                     }
                 }
                 Event::Configuration(config, revision) => {
+                    log::debug!("the configuration of revision {revision} is taken in");
                     state.borrow_mut().running = Some(((*config).clone(), revision));
                     {
                         let mut state = state.borrow_mut();
@@ -1056,8 +1084,10 @@ mod linux {
                         );
                         let runs = state.older_icons.as_mut().is_some_and(|older| older.runs());
                         if wanted && !runs {
+                            log::debug!("the icons of older programs are carried over to the tray");
                             state.older_icons = crate::tray::Older::start();
-                        } else if !wanted {
+                        } else if !wanted && state.older_icons.is_some() {
+                            log::debug!("the icons of older programs are no longer carried over");
                             state.older_icons = None;
                         }
                         // Kept still when the desktop is: the shell's own
@@ -1218,6 +1248,18 @@ mod linux {
                     log::warn!("the window manager did not carry out {command}: {error}");
                     tell(state, "That did not work", &error, control);
                 }
+                Event::Connected(peer) => {
+                    log::debug!(
+                        "connected to the window manager {} at {} ({}, {})",
+                        peer.version,
+                        peer.address,
+                        peer.backend,
+                        peer.platform
+                    );
+                }
+                Event::Disconnected(why) => {
+                    log::debug!("the line to the window manager is down: {why}");
+                }
                 _ => {}
             }
         }
@@ -1235,6 +1277,12 @@ mod linux {
             .map(crate::panel::geometry);
         // Another place, or switched off: the surfaces that are there go.
         if shared.panel_made != wanted {
+            if !shared.panels.is_empty() {
+                log::debug!(
+                    "the panels are closed: {}",
+                    if wanted.is_some() { "they go to another place" } else { "the panel is switched off" }
+                );
+            }
             for (_, id) in shared.panels.drain() {
                 control.close(id);
             }
@@ -1250,6 +1298,7 @@ mod linux {
             .collect();
         for name in gone {
             if let Some(id) = shared.panels.remove(&name) {
+                log::debug!("the panel of {name} is closed: the display is gone");
                 control.close(id);
             }
         }
@@ -1265,6 +1314,7 @@ mod linux {
                 .is_some_and(|bar| bar.on(&name).is_some());
             if !here {
                 if let Some(id) = shared.panels.remove(&name) {
+                    log::debug!("the panel of {name} is closed: the display is to have none");
                     control.close(id);
                 }
                 continue;
@@ -1291,6 +1341,7 @@ mod linux {
                 margin: margin as i32,
                 output: Some(name.clone()),
             };
+            log::debug!("a panel is opened on {name}");
             let drawn = Rc::clone(state);
             let output = name.clone();
             let mut fonts = false;
@@ -2090,6 +2141,7 @@ mod linux {
         // One request at a time; a second one while the user chooses is
         // refused.
         if state.borrow().share.is_some() {
+            log::debug!("a request to share the screen is refused: another is being chosen");
             let _ = ask.answer.send_blocking(None);
             return;
         }
@@ -2111,6 +2163,7 @@ mod linux {
             }
         };
         if sources.is_empty() {
+            log::debug!("a request to share the screen is refused: there is nothing to share");
             let _ = ask.answer.send_blocking(None);
             tell(
                 state,
@@ -2145,6 +2198,7 @@ mod linux {
                 in_card,
                 sender,
             ) {
+                log::debug!("{} is given {} streams of the screen", ask.app, streams.len());
                 let _ = ask.answer.send_blocking(Some(crate::portal::Answer {
                     streams,
                     remember: Some(ask.remembered.clone()),
@@ -2430,6 +2484,7 @@ mod linux {
             });
         if refuse {
             if let Some(share) = state.share.take() {
+                log::debug!("the screen is not shared with {}: refused", share.ask.app);
                 let _ = share.ask.answer.send_blocking(None);
             }
             return Flow::Close;
@@ -2497,9 +2552,11 @@ mod linux {
         control: &mut Control,
     ) {
         if state.borrow().control_ask.is_some() {
+            log::debug!("a request to control the desktop is refused: another is asked");
             let _ = ask.answer.send_blocking(false);
             return;
         }
+        log::debug!("the question whether the desktop may be controlled is opened");
         let place = Place {
             name: "gevrek-control".to_string(),
             edge: Edge::Centre,
@@ -2580,6 +2637,11 @@ mod linux {
             return Flow::Continue;
         };
         if let Some((_, ask)) = state.control_ask.take() {
+            log::debug!(
+                "{} may {}control the desktop",
+                ask.app,
+                if said { "" } else { "not " }
+            );
             let _ = ask.answer.send_blocking(said);
         }
         Flow::Close
@@ -2600,6 +2662,7 @@ mod linux {
         });
         // (No configuration known, or a question is up already: refused.)
         let Some(planned) = planned.filter(|_| state.borrow().shortcut_ask.is_none()) else {
+            log::debug!("shortcuts for {} are refused: no configuration, or another question is up", ask.app);
             let _ = ask.answer.send_blocking(None);
             return;
         };
@@ -2611,9 +2674,11 @@ mod linux {
                 state.borrow().running.as_ref().map(|(config, _)| {
                     crate::app_shortcuts::bound(&config.desktop.bindings, &ask.app)
                 });
+            log::debug!("{} asks for no new shortcut: told what it has", ask.app);
             let _ = ask.answer.send_blocking(Some(bound.unwrap_or_default()));
             return;
         }
+        log::debug!("the question of {}'s shortcuts is opened", ask.app);
         let place = Place {
             name: "gevrek-shortcuts".to_string(),
             edge: Edge::Centre,
@@ -2733,6 +2798,7 @@ mod linux {
             return Flow::Close;
         };
         let Some((config, revision)) = state.running.clone().filter(|_| said) else {
+            log::debug!("the shortcuts of {} are refused", ask.app);
             let _ = ask.answer.send_blocking(None);
             return Flow::Close;
         };
@@ -2751,6 +2817,7 @@ mod linux {
             base_revision: revision,
             client_id: "gevrek-shell".to_string(),
         });
+        log::debug!("{} is given {} shortcuts", ask.app, bound.len());
         let _ = ask.answer.send_blocking(Some(bound));
         Flow::Close
     }
@@ -2791,6 +2858,7 @@ mod linux {
             return;
         }
         let ask = shared.auth_waiting.remove(0);
+        log::debug!("the authentication dialog is opened for {}", ask.user);
         let place = Place {
             name: "gevrek-authentication".to_string(),
             edge: Edge::Centre,
@@ -2891,6 +2959,7 @@ mod linux {
             auth.asked = None;
             match verdict {
                 crate::polkit::Verdict::Yes => {
+                    log::debug!("the authentication of {} held", auth.ask.user);
                     let _ = auth.ask.answer.send_blocking(true);
                     let surface = auth.surface;
                     shared.auth = None;
@@ -3034,12 +3103,15 @@ mod linux {
                 auth.checking = true;
                 auth.problem.clear();
                 auth.said.clear();
+                // (What was typed goes to the check alone, never to the log.)
+                log::debug!("the authentication dialog's answer goes to the system's check");
                 let _ = answer.send(Some(std::mem::take(&mut auth.password)));
             }
         }
         if dismiss {
             // (Taken back, whatever the system's check is at: it is told
             // at its next question, and its verdict is nobody's.)
+            log::debug!("the authentication dialog is dismissed");
             if let Some((_, _, answer)) = auth.asked.take() {
                 let _ = answer.send(None);
             }
@@ -3176,16 +3248,20 @@ mod linux {
     fn toggle_recording(state: &Rc<RefCell<State>>, window: bool, control: &mut Control) {
         let going = state.borrow_mut().recording.take();
         if let Some(recording) = going {
+            log::debug!("the recording ends: asked again");
             for id in state.borrow().panels.values() {
                 control.redraw(*id);
             }
             // The file is finished beside the shell: it waits for nothing.
             if let Some(sender) = state.borrow().verdicts.clone() {
-                let _ = std::thread::Builder::new()
+                if let Err(error) = std::thread::Builder::new()
                     .name("gevrek-record-end".to_string())
                     .spawn(move || {
                         sender.send(Message::Recorded(recording.finish()));
-                    });
+                    })
+                {
+                    log::warn!("the recording is not finished: no thread for it: {error}");
+                }
             }
             return show_osd(state, Osd::words(icons::STOP, "Recording ended"), control);
         }
@@ -3273,9 +3349,11 @@ mod linux {
     /// chosen by dragging.
     fn screenshot(state: &Rc<RefCell<State>>, which: &str, control: &mut Control) {
         let (output, window, logical) = focused_place(&state.borrow());
+        log::debug!("a screenshot ({which}) of {}", output.as_deref().unwrap_or("the display"));
         let picture = match crate::screenshot::take(output.as_deref()) {
             Ok(picture) => picture,
             Err(error) => {
+                log::debug!("no picture of the screen: {error:#}");
                 return tell(
                     state,
                     "No picture of the screen",
@@ -3366,6 +3444,10 @@ mod linux {
                     None
                 }
             };
+            log::debug!(
+                "an application asked for a picture of the screen: {}",
+                if file.is_some() { "given" } else { "none" }
+            );
             let _ = ask.answer.send_blocking(file);
             return;
         }
@@ -3378,9 +3460,11 @@ mod linux {
     fn choose_for(state: &Rc<RefCell<State>>, purpose: RegionFor, control: &mut Control) {
         let refuse = |purpose: RegionFor| match purpose {
             RegionFor::Picture(answer) => {
+                log::debug!("an application's picture of the screen is refused: one is chosen already, or none can be had");
                 let _ = answer.send_blocking(None);
             }
             RegionFor::Colour(answer) => {
+                log::debug!("an application's colour is refused: a part is chosen already, or no picture can be had");
                 let _ = answer.send_blocking(None);
             }
             _ => {}
@@ -3560,7 +3644,12 @@ mod linux {
                             pixels: picture.pixels.clone(),
                         })
                     });
-                    let _ = answer.send_blocking(wanted.and_then(|picture| hand_over(&picture)));
+                    let file = wanted.and_then(|picture| hand_over(&picture));
+                    log::debug!(
+                        "an application's picture of the screen: {}",
+                        if file.is_some() { "given" } else { "left by the person" }
+                    );
+                    let _ = answer.send_blocking(file);
                 }
                 (RegionFor::Colour(answer), _, _) => {
                     let colour = pressed_at.and_then(pixel_at).map(|[red, green, blue]| {
@@ -3570,6 +3659,10 @@ mod linux {
                             f64::from(blue) / 255.0,
                         )
                     });
+                    log::debug!(
+                        "an application's colour: {}",
+                        if colour.is_some() { "picked" } else { "left by the person" }
+                    );
                     let _ = answer.send_blocking(colour);
                 }
                 _ => {}
@@ -3611,10 +3704,12 @@ mod linux {
     fn toggle_centre(state: &Rc<RefCell<State>>, control: &mut Control) {
         // Open: it goes (the way it came), and is closed when it is gone.
         if let Some((id, coming)) = state.borrow_mut().centre.as_mut() {
+            log::debug!("the notification centre goes: asked again");
             coming.leave(Instant::now());
             control.redraw(*id);
             return;
         }
+        log::debug!("the notification centre is opened");
         glass_scene(state);
         let place = Place {
             name: "gevrek-notification-centre".to_string(),
@@ -3696,10 +3791,12 @@ mod linux {
     fn toggle_control(state: &Rc<RefCell<State>>, control: &mut Control) {
         // Open: it goes (the way it came), and is closed when it is gone.
         if let Some((id, _, _, coming)) = state.borrow_mut().control_centre.as_mut() {
+            log::debug!("the control centre goes: asked again");
             coming.leave(Instant::now());
             control.redraw(*id);
             return;
         }
+        log::debug!("the control centre is opened");
         glass_scene(state);
         let place = Place {
             name: "gevrek-control-centre".to_string(),
@@ -4077,9 +4174,11 @@ mod linux {
     /// Open the power menu, or close it when it is open.
     fn toggle_power(state: &Rc<RefCell<State>>, control: &mut Control) {
         if let Some((id, ..)) = state.borrow_mut().power.take() {
+            log::debug!("the power menu is closed: asked again");
             control.close(id);
             return;
         }
+        log::debug!("the power menu is opened");
         let place = Place {
             name: "gevrek-power".to_string(),
             edge: Edge::Centre,
@@ -4309,6 +4408,7 @@ mod linux {
                 control.redraw(id);
             }
             None => {
+                log::debug!("the on-screen display is opened");
                 let place = Place {
                     name: "gevrek-osd".to_string(),
                     edge: Edge::Bottom,
@@ -4562,6 +4662,7 @@ mod linux {
             }
             _ if empty => {}
             _ => {
+                log::debug!("the notifications' surface is opened");
                 let place = Place {
                     name: "gevrek-notifications".to_string(),
                     edge: {
@@ -4672,6 +4773,7 @@ mod linux {
             control.redraw(id);
             return;
         }
+        log::debug!("the switcher is opened");
         let entries = {
             let state = state.borrow();
             let entries = state
@@ -4899,9 +5001,11 @@ mod linux {
     fn toggle_launcher(state: &Rc<RefCell<State>>, control: &mut Control) {
         let open = state.borrow_mut().launcher.take();
         if let Some((id, _)) = open {
+            log::debug!("the launcher is closed: asked again");
             control.close(id);
             return;
         }
+        log::debug!("the launcher is opened");
         // On the display that has the keyboard: what is chosen in it
         // opens on that display too, wherever the pointer and the focus
         // are by the time its window comes.

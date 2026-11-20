@@ -64,21 +64,21 @@ impl Executor {
             if let Some((source_monitor, _)) = monitor_manager.find_and_remove_window(handle) {
                 self.mark_layout_dirty(source_monitor);
             }
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::Border {
                     id: handle,
                     change: BorderChange::Remove,
                 },
             );
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::Platform(PlatformEffect::Windows(WindowsEffect::CaptionButtons {
                     id: handle,
                     shown: true,
                 })),
             );
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::SetVisible {
                     id: handle,
@@ -337,7 +337,7 @@ impl Executor {
             )?;
             if never {
                 if !restored {
-                    let _ = effect(window_manager, Effect::Focus(None));
+                    try_effect(window_manager, Effect::Focus(None));
                 }
                 focus_manager.remove_window(handle);
             }
@@ -382,7 +382,7 @@ impl Executor {
                     states: WindowStates::default(),
                 },
             )?;
-            log::info!(
+            log::debug!(
                 "Restored persistent floating size {}x{} for {:?}",
                 width,
                 height,
@@ -409,7 +409,7 @@ impl Executor {
             height,
             || Self::persistent_size_key(window_manager, handle),
         ) {
-            log::debug!(
+            log::trace!(
                 "Remembered persistent floating size {}x{} for {:?}",
                 width,
                 height,
@@ -466,7 +466,7 @@ impl Executor {
                     states: WindowStates::default(),
                 },
             )?;
-            log::info!(
+            log::trace!(
                 "Clamped floating window {:?} from {}x{} to {}x{}",
                 handle,
                 width,

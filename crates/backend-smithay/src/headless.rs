@@ -27,6 +27,10 @@ use smithay::reexports::pixman;
 use smithay::reexports::wayland_server::{Display, DisplayHandle};
 use std::collections::HashMap;
 
+// (Drawing that fails fails again at the next frame: said once.)
+static DRAW: crate::failing::Failing =
+    crate::failing::Failing::at("drawing a frame in memory", log::Level::Warn);
+
 /// How often the outputs are looked at: frame callbacks go out at this
 /// rate, and what changed is drawn.
 const FRAME: std::time::Duration = std::time::Duration::from_millis(16);
@@ -91,8 +95,9 @@ pub fn run(
             let picture = state.screenshot.take();
             if state.desktop.needs_redraw || picture.is_some() {
                 state.desktop.needs_redraw = false;
-                if let Err(error) = draw(&mut renderer, &mut targets, state) {
-                    log::warn!("draw: {error}");
+                match draw(&mut renderer, &mut targets, state) {
+                    Ok(_) => DRAW.worked(),
+                    Err(error) => DRAW.failed(error),
                 }
                 state.serve_captures::<_, pixman::Image<'static, 'static>>(
                     &mut renderer,

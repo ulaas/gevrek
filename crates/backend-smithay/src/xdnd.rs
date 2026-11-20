@@ -263,11 +263,16 @@ fn source(
         while let Some(event) = x.poll_for_event()? {
             match event {
                 Event::ClientMessage(said) if said.type_ == status => {
-                    takes = said.data.as_data32()[1] & 1 != 0;
-                    log::debug!(
-                        "xdnd: the window says it {} the drop",
-                        if takes { "takes" } else { "does not take" }
-                    );
+                    // (Said again at each move over the window: written
+                    // when it changes.)
+                    let now = said.data.as_data32()[1] & 1 != 0;
+                    if now != takes {
+                        log::debug!(
+                            "xdnd: the window says it {} the drop",
+                            if now { "takes" } else { "does not take" }
+                        );
+                    }
+                    takes = now;
                 }
                 Event::ClientMessage(said) if said.type_ == finished => {
                     log::debug!("xdnd: the window is done with the drop");

@@ -20,7 +20,7 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
-env_logger = { workspace = true }
+gevrek-logging = { path = "../logging" }
 ctrlc = { workspace = true, features = ["termination"] }
 
 [[bin]]

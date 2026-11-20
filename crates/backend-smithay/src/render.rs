@@ -46,6 +46,22 @@ render_elements! {
     ClippedTexture=Clipped<TextureRenderElement<<R as RendererSuper>::TextureId>>,
 }
 
+use crate::failing::Failing;
+
+// Drawing that fails fails again at the next frame: each is said once
+// when it begins to fail and once when it works again.
+static SOFT_PICTURE: Failing = Failing::new("drawing a soft picture");
+static VIGNETTE: Failing = Failing::new("drawing the vignette");
+static CURSOR: Failing = Failing::new("drawing the cursor");
+static EFFECTS: Failing = Failing::new("drawing the effects around a window");
+static BORDER_CORNER: Failing = Failing::new("drawing a border's corner");
+static STACKBAR: Failing = Failing::new("drawing a stackbar");
+static OVERVIEW_WALLPAPER: Failing = Failing::new("drawing the overview's wallpaper");
+static WALLPAPER: Failing = Failing::new("drawing the wallpaper");
+static OVERVIEW_TITLE: Failing = Failing::new("drawing a window's title in the overview");
+static OVERVIEW_NAME: Failing = Failing::new("drawing a workspace's name in the overview");
+static SHADOW: Failing = Failing::new("drawing the shadow under a surface");
+
 /// The colour behind the windows.
 pub const BACKGROUND: Color32F = Color32F::new(0.07, 0.07, 0.09, 1.0);
 
@@ -110,14 +126,17 @@ where
                 Some(size.into()),
                 Kind::Unspecified,
             ) {
-                Ok(element) => Some(match cut {
-                    Some((rect, radius, program)) => {
-                        OutputElement::ClippedMemory(Clipped::new(element, rect, radius, program))
-                    }
-                    None => OutputElement::Memory(element),
-                }),
+                Ok(element) => {
+                    SOFT_PICTURE.worked();
+                    Some(match cut {
+                        Some((rect, radius, program)) => OutputElement::ClippedMemory(
+                            Clipped::new(element, rect, radius, program),
+                        ),
+                        None => OutputElement::Memory(element),
+                    })
+                }
                 Err(error) => {
-                    log::debug!("a soft picture: {error:?}");
+                    SOFT_PICTURE.failed(error);
                     None
                 }
             }
@@ -205,8 +224,11 @@ impl State {
                 Some(points.into()),
                 Kind::Unspecified,
             ) {
-                Ok(element) => elements.push(OutputElement::Memory(element)),
-                Err(error) => log::debug!("the vignette: {error:?}"),
+                Ok(element) => {
+                    VIGNETTE.worked();
+                    elements.push(OutputElement::Memory(element))
+                }
+                Err(error) => VIGNETTE.failed(error),
             }
         }
         if look.veil <= 0.0 {
@@ -320,8 +342,11 @@ impl State {
                     None,
                     Kind::Cursor,
                 ) {
-                    Ok(element) => elements.push(OutputElement::Memory(element)),
-                    Err(error) => log::debug!("cursor: {error:?}"),
+                    Ok(element) => {
+                        CURSOR.worked();
+                        elements.push(OutputElement::Memory(element))
+                    }
+                    Err(error) => CURSOR.failed(error),
                 }
             }
             _ => {}
@@ -795,11 +820,12 @@ impl State {
                                 Kind::Unspecified,
                             ) {
                                 Ok(element) => {
+                                    EFFECTS.worked();
                                     aura_elements.push(OutputElement::Memory(element));
                                     aura_drawn = true;
                                     content_radius = spec.corner_radius;
                                 }
-                                Err(error) => log::debug!("effects: {error:?}"),
+                                Err(error) => EFFECTS.failed(error),
                             }
                         }
                     }
@@ -881,8 +907,11 @@ impl State {
                                     None,
                                     Kind::Unspecified,
                                 ) {
-                                    Ok(element) => elements.push(OutputElement::Memory(element)),
-                                    Err(error) => log::debug!("border corner: {error:?}"),
+                                    Ok(element) => {
+                                        BORDER_CORNER.worked();
+                                        elements.push(OutputElement::Memory(element))
+                                    }
+                                    Err(error) => BORDER_CORNER.failed(error),
                                 }
                             }
                         }
@@ -1005,13 +1034,21 @@ impl State {
                     None,
                     Kind::Unspecified,
                 ) {
-                    Ok(element) => strip.push(match &cut {
-                        Some((rect, program)) if framed != shown => OutputElement::ClippedMemory(
-                            Clipped::new(element, *rect, content_radius, program.clone()),
-                        ),
-                        _ => OutputElement::Memory(element),
-                    }),
-                    Err(error) => log::debug!("stackbar: {error:?}"),
+                    Ok(element) => {
+                        STACKBAR.worked();
+                        strip.push(match &cut {
+                            Some((rect, program)) if framed != shown => {
+                                OutputElement::ClippedMemory(Clipped::new(
+                                    element,
+                                    *rect,
+                                    content_radius,
+                                    program.clone(),
+                                ))
+                            }
+                            _ => OutputElement::Memory(element),
+                        })
+                    }
+                    Err(error) => STACKBAR.failed(error),
                 }
             }
             if resizing {
@@ -1170,8 +1207,11 @@ impl State {
                         Some(points.into()),
                         Kind::Unspecified,
                     ) {
-                        Ok(element) => elements.push(OutputElement::Memory(element)),
-                        Err(error) => log::debug!("the overview's wallpaper: {error:?}"),
+                        Ok(element) => {
+                            OVERVIEW_WALLPAPER.worked();
+                            elements.push(OutputElement::Memory(element))
+                        }
+                        Err(error) => OVERVIEW_WALLPAPER.failed(error),
                     }
                 }
             }
@@ -1189,8 +1229,11 @@ impl State {
                         Some(points.into()),
                         Kind::Unspecified,
                     ) {
-                        Ok(element) => elements.push(OutputElement::Memory(element)),
-                        Err(error) => log::debug!("wallpaper: {error:?}"),
+                        Ok(element) => {
+                            WALLPAPER.worked();
+                            elements.push(OutputElement::Memory(element))
+                        }
+                        Err(error) => WALLPAPER.failed(error),
                     }
                 };
             if has_picture {
@@ -1272,8 +1315,11 @@ impl State {
                 None,
                 Kind::Unspecified,
             ) {
-                Ok(element) => elements.push(OutputElement::Memory(element)),
-                Err(error) => log::debug!("a window's title in the overview: {error:?}"),
+                Ok(element) => {
+                    OVERVIEW_TITLE.worked();
+                    elements.push(OutputElement::Memory(element))
+                }
+                Err(error) => OVERVIEW_TITLE.failed(error),
             }
             if self.window_overview.marked == Some(shown.window) {
                 for (id, rect) in [
@@ -1331,8 +1377,11 @@ impl State {
                 None,
                 Kind::Unspecified,
             ) {
-                Ok(element) => elements.push(OutputElement::Memory(element)),
-                Err(error) => log::debug!("a workspace's name in the overview: {error:?}"),
+                Ok(element) => {
+                    OVERVIEW_NAME.worked();
+                    elements.push(OutputElement::Memory(element))
+                }
+                Err(error) => OVERVIEW_NAME.failed(error),
             }
             let mut solid = |id: usize, rect: (i32, i32, i32, i32), colour: Color32F| {
                 elements.push(OutputElement::Solid(SolidColorRenderElement::new(
@@ -1430,8 +1479,11 @@ impl State {
             None,
             Kind::Unspecified,
         ) {
-            Ok(element) => elements.push(OutputElement::Memory(element)),
-            Err(error) => log::debug!("shadow under a surface: {error:?}"),
+            Ok(element) => {
+                SHADOW.worked();
+                elements.push(OutputElement::Memory(element))
+            }
+            Err(error) => SHADOW.failed(error),
         }
     }
 

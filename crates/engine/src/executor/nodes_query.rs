@@ -130,7 +130,7 @@ impl Executor {
                         };
 
                         if matches {
-                            log::info!(
+                            log::trace!(
                                 "Window matches rule: {:?} {:?} '{}'",
                                 match_kind,
                                 match_strategy,
@@ -173,7 +173,7 @@ impl Executor {
                         if let Some(window) = all_windows.iter().find(|w| w.handle == handle) {
                             // First check if window should be ignored entirely (Gevrek's own windows)
                             if queries(window_manager).ignored_by_rules(handle) {
-                                log::debug!(
+                                log::trace!(
                                     "Window '{}' should be ignored, setting as FLOATING",
                                     window.title
                                 );
@@ -183,7 +183,7 @@ impl Executor {
                                     || window.title.is_empty();
 
                                 if should_float {
-                                    log::debug!("Window '{}' matched float rule", window.title);
+                                    log::trace!("Window '{}' matched float rule", window.title);
                                     false // Float
                                 } else {
                                     // Use default mode for unmatched windows
@@ -196,7 +196,7 @@ impl Executor {
                         };
 
                     if should_tile {
-                        log::info!(
+                        log::trace!(
                             "Window mode: TILED - '{}'",
                             all_windows
                                 .iter()
@@ -212,7 +212,7 @@ impl Executor {
                             visited,
                         )?; // Tile output
                     } else {
-                        log::info!(
+                        log::trace!(
                             "Window mode: FLOATING - '{}'",
                             all_windows
                                 .iter()
@@ -309,7 +309,7 @@ impl Executor {
                     .map(|w| w.handle)
                     .collect::<Vec<_>>();
 
-                log::debug!(
+                log::trace!(
                     "GetAllWindows returned {} manageable windows",
                     windows.len()
                 );
@@ -354,7 +354,7 @@ impl Executor {
                     .map(|m| m.handle)
                     .collect::<Vec<_>>();
 
-                log::debug!(
+                log::trace!(
                     "GetMonitors: Found {} monitors with handles: {:?}",
                     monitors.len(),
                     monitors
@@ -384,7 +384,7 @@ impl Executor {
                         self.set_output_value(node_id, 9, Value::Number(info.work_height as f64));
                         self.set_output_value(node_id, 10, Value::Bool(info.is_primary));
 
-                        log::info!("Got monitor info: {}", info.name);
+                        log::trace!("Got monitor info: {}", info.name);
                     }
                 }
 
@@ -408,7 +408,7 @@ impl Executor {
                         self.set_output_value(node_id, 3, Value::Number(window.y as f64));
                         self.set_output_value(node_id, 4, Value::Number(window.width as f64));
                         self.set_output_value(node_id, 5, Value::Number(window.height as f64));
-                        log::debug!("Got window info for '{}'", window.title);
+                        log::trace!("Got window info for '{}'", window.title);
                     }
                 }
 

@@ -152,6 +152,9 @@ fn read(folder: &Path, system: &System, how: &How, wake: &Wake) -> Outcome {
             };
             if (how.reach)(above) {
                 let watching = watcher(wake).and_then(|mut watcher| watcher.add(above).map(|()| watcher));
+                if let Err(error) = &watching {
+                    log::debug!("zones: {} is not listened to for {} to come back: {error}", above.display(), folder.display());
+                }
                 break watching.ok().map(|watcher| (watcher, next.to_path_buf()));
             }
             next = above;
@@ -191,6 +194,7 @@ pub fn go(
             Ok(_) => match finding.recv_timeout(how.patience) {
                 Ok(outcome) => outcome,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
+                    log::debug!("zones: {} does not answer within {} ms; waited for on", folder.display(), how.patience.as_millis());
                     let _ = answers.send(Answer { watch: Some(watch), outcome: Outcome::Slow });
                     wake();
                     finding.recv().unwrap_or_else(|_| lost())

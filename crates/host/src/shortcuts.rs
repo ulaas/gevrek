@@ -36,8 +36,16 @@ pub fn toggle() -> anyhow::Result<()> {
     if let Some(mut child) = window.take() {
         // Still open: close it. (`try_wait` is `Ok(None)` while it runs.)
         if matches!(child.try_wait(), Ok(None)) {
-            let _ = child.kill();
-            let _ = child.wait();
+            let pid = child.id();
+            if let Err(error) = child.kill() {
+                log::debug!("the list of shortcuts (process {pid}) could not be ended: {error}");
+            }
+            match child.wait() {
+                Ok(exit) => log::debug!("the list of shortcuts (process {pid}) was closed: {exit}"),
+                Err(error) => {
+                    log::debug!("the list of shortcuts (process {pid}) was closed, its end not seen: {error}")
+                }
+            }
             return Ok(());
         }
     }
@@ -60,6 +68,11 @@ pub fn toggle() -> anyhow::Result<()> {
         .stderr(std::process::Stdio::null())
         .spawn()
         .map_err(|error| anyhow::anyhow!("Could not start {}: {error}", program.display()))?;
+    log::debug!(
+        "the list of shortcuts was opened: {} as process {}",
+        program.display(),
+        child.id()
+    );
     *window = Some(child);
     Ok(())
 }

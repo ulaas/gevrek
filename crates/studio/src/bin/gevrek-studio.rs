@@ -55,7 +55,7 @@ fn main() -> anyhow::Result<()> {
     // file), it goes there as before.
     #[cfg(windows)]
     gevrek_system::every_key::say_to_the_terminal_it_was_started_from();
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    gevrek_logging::Logging::new("gevrek-studio", log::LevelFilter::Warn).init();
     let args = Args::parse();
     if let Some(name) = &args.sample {
         return gevrek_studio::sample::run(name);

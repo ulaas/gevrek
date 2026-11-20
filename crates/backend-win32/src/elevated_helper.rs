@@ -993,12 +993,17 @@ pub mod client {
             }
         });
         let Some(file) = opened else {
+            log::debug!("the helper's pipe of what it hears did not open: {name}");
             return false;
         };
         std::thread::spawn(move || {
             for line in BufReader::new(file).lines() {
-                let Ok(line) = line else {
-                    break;
+                let line = match line {
+                    Ok(line) => line,
+                    Err(error) => {
+                        log::debug!("what the helper hears is heard no more: {error}");
+                        break;
+                    }
                 };
                 match serde_json::from_str::<Heard>(&line) {
                     Ok(Heard::Input(raw)) => crate::hotkey::heard_by_helper(raw),
@@ -1011,6 +1016,7 @@ pub mod client {
                     Err(error) => log::debug!("what the helper told was not understood: {error}"),
                 }
             }
+            log::debug!("the helper's pipe of what it hears is closed");
             crate::hotkey::set_helper_answers(false);
         });
         true
@@ -1065,6 +1071,7 @@ pub mod client {
 
     /// Let the helper go (it shows what it had hidden, and ends).
     pub fn disconnect() {
+        log::debug!("the helper for elevated windows is let go");
         *line() = None;
         crate::hotkey::set_helper_answers(false);
     }

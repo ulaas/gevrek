@@ -166,10 +166,10 @@ if [ -z "$bare" ]; then
     # take the notifications of the session this window is in.
     shell=("$bin/gevrek-shell")
     if command -v dbus-run-session >/dev/null 2>&1; then shell=(dbus-run-session -- "$bin/gevrek-shell"); fi
-    WAYLAND_DISPLAY="$socket" RUST_LOG="${RUST_LOG:-warn}" \
+    WAYLAND_DISPLAY="$socket" \
         "${shell[@]}" > "$work/shell.log" 2>&1 &
     pids+=("$!")
-    WAYLAND_DISPLAY="$socket" RUST_LOG="${RUST_LOG:-warn}" \
+    WAYLAND_DISPLAY="$socket" \
         "$bin/gevrek-studio" > "$work/studio.log" 2>&1 &
     pids+=("$!")
     # The list of shortcuts on top, once the studio's window is there.

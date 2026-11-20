@@ -47,7 +47,13 @@ impl Awake {
     /// Someone asks for the screen to be kept awake, or stops asking.
     pub fn set(&mut self, asker: &str, asks: bool) {
         if let Some(awake) = self.askers.set(asker, asks) {
-            let _ = self.tell.send(awake);
+            log::debug!(
+                "the screen is {} awake ({asker} asked)",
+                if awake { "kept" } else { "no longer kept" }
+            );
+            if let Err(error) = self.tell.send(awake) {
+                log::debug!("the keeper of the screen's wakefulness is gone: {error}");
+            }
         }
     }
 }
@@ -76,8 +82,12 @@ pub fn start() -> anyhow::Result<Awake> {
     std::thread::Builder::new()
         .name("gevrek-awake".to_string())
         .spawn(move || {
-            let Ok(mut event_loop) = EventLoop::<Holder>::try_new() else {
-                return;
+            let mut event_loop = match EventLoop::<Holder>::try_new() {
+                Ok(event_loop) => event_loop,
+                Err(error) => {
+                    log::warn!("the screen cannot be kept awake for the portal: {error}");
+                    return;
+                }
             };
             let mut holder = Holder {
                 manager,
@@ -85,10 +95,8 @@ pub fn start() -> anyhow::Result<Awake> {
                 held: None,
                 handle,
             };
-            if WaylandSource::new(connection.clone(), queue)
-                .insert(event_loop.handle())
-                .is_err()
-            {
+            if let Err(error) = WaylandSource::new(connection.clone(), queue).insert(event_loop.handle()) {
+                log::warn!("the screen cannot be kept awake for the portal: {error}");
                 return;
             }
             let _ = event_loop

@@ -52,6 +52,56 @@ unsafe fn take_foreground(hwnd: HWND) {
 /// it carries the HWND value). The name stays for the existing code.
 pub use gevrek_model::ids::WindowId as WindowHandle;
 
+/// Why gevrek leaves a window alone (`WindowManager::ignore_reason`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IgnoreReason {
+    /// One of gevrek's own windows, by its class.
+    Own(String),
+    /// It is on a display the configuration switches off.
+    UnmanagedDisplay,
+    /// What it is: a menu, a tooltip, a dialog of another window.
+    Kind(crate::window_kind::Kind),
+    /// Its program runs as an administrator, and no helper does.
+    Elevated,
+    /// Out of sight (another virtual desktop, a program not yet shown),
+    /// and a rule leaves it alone so.
+    Cloaked(String),
+    /// A rule leaves it alone.
+    Rule(String),
+    /// It is gone.
+    Gone,
+    /// No rules are there yet, and its title says so.
+    Fallback(&'static str),
+}
+
+impl IgnoreReason {
+    /// Whether this comes for what passes by as the pointer does (a menu,
+    /// a tooltip): said at trace only.
+    pub fn passes_by(&self) -> bool {
+        matches!(self, IgnoreReason::Kind(_) | IgnoreReason::Gone)
+    }
+}
+
+impl std::fmt::Display for IgnoreReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IgnoreReason::Own(class) => write!(f, "it is one of gevrek's own (class {class})"),
+            IgnoreReason::UnmanagedDisplay => {
+                write!(f, "it is on a display the configuration leaves alone")
+            }
+            IgnoreReason::Kind(kind) => write!(f, "it is no window of its own ({kind:?})"),
+            IgnoreReason::Elevated => write!(
+                f,
+                "its program runs as an administrator, and no helper for such windows answers"
+            ),
+            IgnoreReason::Cloaked(rule) => write!(f, "it is cloaked, and {rule} leaves it alone"),
+            IgnoreReason::Rule(rule) => write!(f, "{rule} leaves it alone"),
+            IgnoreReason::Gone => write!(f, "it is gone"),
+            IgnoreReason::Fallback(why) => write!(f, "{why}"),
+        }
+    }
+}
+
 /// HWND conversions. Windows-only, so they live here and never in the model
 /// or the engine.
 /// From where a workspace slides in so that it is seen on no display but
@@ -1189,6 +1239,13 @@ impl WindowManager {
     /// Check if a window should be excluded from window management
     /// Returns true if the window should NOT be managed (should be ignored)
     pub fn should_ignore_window(&self, handle: WindowHandle) -> bool {
+        self.ignore_reason(handle).is_some()
+    }
+
+    /// Why a window is not managed, or `None` where it is. Asked again and
+    /// again (for each event of a window): nothing is said here; the
+    /// runtime says it once, when the window opens.
+    pub fn ignore_reason(&self, handle: WindowHandle) -> Option<IgnoreReason> {
         use windows::Win32::UI::WindowsAndMessaging::GetClassNameW;
 
         // CRITICAL: Always check for Gevrek internal windows FIRST, before any other logic
@@ -1207,15 +1264,14 @@ impl WindowManager {
                     || class_str.starts_with("Gevrek_Shell")
                     || class_str == "GevrekHotkeyWindow"
                 {
-                    log::debug!("Ignoring Gevrek internal window with class: {}", class_str);
-                    return true;
+                    return Some(IgnoreReason::Own(class_str));
                 }
             }
         }
 
         // A window on a display the configuration switches off is not ours.
         if crate::dwm::monitor::is_on_unmanaged_display(handle.to_hwnd()) {
-            return true;
+            return Some(IgnoreReason::UnmanagedDisplay);
         }
 
         // (The window as Windows has it: gevrek's own number for a window
@@ -1225,8 +1281,9 @@ impl WindowManager {
         // Nor is what only passes by (a notification a program draws
         // itself, a display of the volume), nor what belongs to another
         // window (a dialog, a menu): `window_kind.rs`.
-        if !crate::window_kind::of_window(native).is_managed() {
-            return true;
+        let kind = crate::window_kind::of_window(native);
+        if !kind.is_managed() {
+            return Some(IgnoreReason::Kind(kind));
         }
 
         // Nor is one of a program with an administrator's rights, where
@@ -1237,7 +1294,7 @@ impl WindowManager {
         if crate::elevated::window_is_beyond_reach(native)
             && !crate::elevated_helper::client::connected()
         {
-            return true;
+            return Some(IgnoreReason::Elevated);
         }
 
         // If we have a RuleEngine, use it for filtering
@@ -1246,8 +1303,17 @@ impl WindowManager {
                 // Build WindowInfo for rule checking
                 // (A window that is gone meanwhile is nobody's to manage.)
                 return match self.rule_window_info(handle) {
-                    Some(rule_window_info) => engine.should_ignore(&rule_window_info),
-                    None => true,
+                    Some(rule_window_info) => {
+                        let cloaked = rule_window_info.is_cloaked;
+                        engine.ignored_by(&rule_window_info).map(|rule| {
+                            if cloaked {
+                                IgnoreReason::Cloaked(rule)
+                            } else {
+                                IgnoreReason::Rule(rule)
+                            }
+                        })
+                    }
+                    None => Some(IgnoreReason::Gone),
                 };
             }
         }
@@ -1258,18 +1324,16 @@ impl WindowManager {
 
             // Always ignore Gevrek's own windows (config editor, etc.)
             if title.contains("gevrek") {
-                log::debug!("Ignoring Gevrek's own window: {}", window_info.title);
-                return true;
+                return Some(IgnoreReason::Fallback("its title says it is gevrek's"));
             }
 
             // Ignore common dialog/popup windows
             if title.contains("dialog") || title.contains("popup") {
-                log::debug!("Ignoring dialog/popup window: {}", window_info.title);
-                return true;
+                return Some(IgnoreReason::Fallback("its title says it is a dialog"));
             }
         }
 
-        false
+        None
     }
 
     /// Resolve the rules for a live window. The window's tags are engine
@@ -1679,7 +1743,7 @@ impl WindowManager {
                 let adjusted_width = width + left_offset + right_offset;
                 let adjusted_height = height + top_offset + bottom_offset;
 
-                log::info!("🪟 SetWindowPos: hwnd={:?}, requested=({},{} {}x{}), offsets=({},{},{},{}), adjusted=({},{} {}x{})",
+                log::trace!("🪟 SetWindowPos: hwnd={:?}, requested=({},{} {}x{}), offsets=({},{},{},{}), adjusted=({},{} {}x{})",
                     hwnd, x, y, width, height,
                     left_offset, top_offset, right_offset, bottom_offset,
                     adjusted_x, adjusted_y, adjusted_width, adjusted_height);
@@ -1712,7 +1776,7 @@ impl WindowManager {
                     handle,
                     crate::dwm::container::Rect::new(x, y, width, height),
                 );
-                log::debug!("✓ SetWindowPos succeeded for hwnd={:?}", hwnd);
+                log::trace!("✓ SetWindowPos succeeded for hwnd={:?}", hwnd);
             } else {
                 log::warn!("⚠️ IsWindow returned false for handle {:?}", handle);
             }
@@ -2114,8 +2178,10 @@ impl WindowManager {
             return;
         }
         if self.get_window_rect(handle).is_ok_and(|now| now != place) {
-            log::info!("Window {} is shown again where it belongs: {place:?}", handle.0);
-            let _ = self.batch_move_resize(&[(handle, place)]);
+            log::debug!("Window {} is shown again where it belongs: {place:?}", handle.0);
+            if let Err(error) = self.batch_move_resize(&[(handle, place)]) {
+                log::debug!("window {} was not put back where it belongs: {error:#}", handle.0);
+            }
             let _ = self.update_border_position_explicit(
                 handle,
                 place.x,
@@ -2194,7 +2260,7 @@ impl WindowManager {
                 // tab) must disappear with it, e.g. on a workspace switch.
                 self.hide_stackbar(handle);
 
-                log::debug!("Hid window: {:?}", handle);
+                log::trace!("Hid window: {:?}", handle);
             }
         }
         Ok(())
@@ -2229,7 +2295,7 @@ impl WindowManager {
                 self.show_border(handle)?;
                 self.show_stackbar(handle);
 
-                log::debug!("Showed window: {:?}", handle);
+                log::trace!("Showed window: {:?}", handle);
             }
         }
         // (After the window itself: what belongs to it lies above it.)
@@ -2273,7 +2339,7 @@ impl WindowManager {
                 list.push(handle);
             }
         }
-        log::debug!("Hid {} window(s) that belong to {:?}", list.len(), owner);
+        log::trace!("Hid {} window(s) that belong to {:?}", list.len(), owner);
     }
 
     /// A window that is no window of gevrek's was shown just now: where
@@ -2354,7 +2420,7 @@ impl WindowManager {
         if !list.contains(&handle) {
             list.push(handle);
         }
-        log::info!("{handle:?} was shown while {key:?} is hidden: it is hidden with it");
+        log::debug!("{handle:?} was shown while {key:?} is hidden: it is hidden with it");
         Some(key)
     }
 
@@ -2484,7 +2550,7 @@ impl WindowManager {
                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
                     ),
                 )?;
-                log::debug!("Removed min/max buttons from window: {:?}", handle);
+                log::trace!("Removed min/max buttons from window: {:?}", handle);
             }
         }
         Ok(())
@@ -2524,7 +2590,7 @@ impl WindowManager {
                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
                     ),
                 )?;
-                log::debug!("Restored min/max buttons to window: {:?}", handle);
+                log::trace!("Restored min/max buttons to window: {:?}", handle);
             }
         }
         Ok(())
@@ -2846,7 +2912,7 @@ impl WindowManager {
                     0,
                     nonblocking_swp(hwnd, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE),
                 )?;
-                log::debug!("Brought window to front");
+                log::trace!("Brought window to front");
             }
         }
         Ok(())
@@ -2874,7 +2940,7 @@ impl WindowManager {
                 )?;
                 // Give the window keyboard focus
                 take_foreground(hwnd);
-                log::debug!("Focused window");
+                log::trace!("Focused window");
             }
         }
         Ok(())
@@ -2910,7 +2976,7 @@ impl WindowManager {
                     0,
                     nonblocking_swp(hwnd, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE),
                 )?;
-                log::debug!("Sent window to back");
+                log::trace!("Sent window to back");
             }
         }
         Ok(())
@@ -2935,7 +3001,7 @@ impl WindowManager {
                     0,
                     nonblocking_swp(hwnd, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE),
                 )?;
-                log::info!("Set always on top: {} for window", enabled);
+                log::debug!("Set always on top: {} for window", enabled);
             }
         }
         Ok(())
@@ -2965,7 +3031,7 @@ impl WindowManager {
             );
 
             if result.is_ok() {
-                log::debug!("Window {} cloaked: {}", handle.0, cloak);
+                log::trace!("Window {} cloaked: {}", handle.0, cloak);
             } else {
                 // Fallback to ShowWindow if cloaking not supported
                 if cloak {
@@ -3032,7 +3098,7 @@ impl WindowManager {
                 std::mem::size_of::<u32>() as u32,
             );
 
-            log::debug!("Set native border color for window {}", handle.0);
+            log::trace!("Set native border color for window {}", handle.0);
         }
         self.window_border_colors.insert(handle, color);
         Ok(())
@@ -3082,7 +3148,7 @@ impl WindowManager {
                 std::mem::size_of::<u32>() as u32,
             );
 
-            log::debug!("Set caption color for window {}", handle.0);
+            log::trace!("Set caption color for window {}", handle.0);
         }
         self.window_caption_colors.insert(handle, color);
         Ok(())
@@ -3124,7 +3190,7 @@ impl WindowManager {
             );
 
             if result.is_ok() {
-                log::debug!(
+                log::trace!(
                     "Set system backdrop {:?} for window {}",
                     backdrop_type,
                     handle.0
@@ -3169,7 +3235,7 @@ impl WindowManager {
                 std::mem::size_of::<i32>() as u32,
             );
 
-            log::debug!("Set corner preference {:?} for window {}", corner, handle.0);
+            log::trace!("Set corner preference {:?} for window {}", corner, handle.0);
         }
         self.window_corners.insert(handle, corner);
         Ok(())
@@ -3611,7 +3677,10 @@ impl WindowManager {
         if let Some(window) = to.filter(|window| self.window_exists(*window)) {
             // (Over the others on its way back, as it will be there.)
             self.stand_ins.raise(window);
-            let _ = self.focus_window(window);
+            log::debug!("the overview is over: the keyboard goes to {window:?}");
+            if let Err(error) = self.focus_window(window) {
+                log::debug!("{window:?} did not take the keyboard after the overview: {error:#}");
+            }
         }
         if self.overview_leaving.is_empty() {
             self.window_overview_is_over();
@@ -4273,7 +4342,7 @@ impl WindowManager {
             if !self.window_exists(handle) {
                 continue;
             }
-            log::info!(
+            log::debug!(
                 "Window {} is still open after its exit animation; restoring it",
                 handle.0
             );
@@ -4332,7 +4401,7 @@ impl WindowManager {
             move_must_be_posted(target.1) || super::reach::by_helper(target.1)
         });
         for (handle, hwnd, x, y, width, height) in &hung {
-            log::debug!(
+            log::trace!(
                 "Window {} is not responding; positioning it asynchronously",
                 handle.0
             );
@@ -4357,7 +4426,7 @@ impl WindowManager {
 
         let skip = match Self::defer_window_positions(&targets) {
             Ok(()) => {
-                log::debug!("Batch positioned {} windows", targets.len());
+                log::trace!("Batch positioned {} windows", targets.len());
                 return Ok(());
             }
             Err(failed) => failed,
@@ -4783,7 +4852,7 @@ impl WindowManager {
                 let old_border_hwnd = old_border_info.border_hwnd.to_hwnd();
                 if IsWindow(old_border_hwnd).as_bool() {
                     let _ = DestroyWindow(old_border_hwnd);
-                    log::debug!("Removed old border before creating new one");
+                    log::trace!("Removed old border before creating new one");
                 }
             }
 
@@ -4893,7 +4962,7 @@ impl WindowManager {
 
             // Verify window was created
             if IsWindow(border_hwnd).as_bool() {
-                log::debug!(
+                log::trace!(
                     "Border created for window: {}x{} with {}px border",
                     border_width_total - (width * 2) - (offset * 2),
                     border_height_total - (width * 2) - (offset * 2),
@@ -5053,7 +5122,7 @@ impl WindowManager {
             let (border_y, border_height_total) =
                 border_rect_with_strip(border_y, border_height_total, self.strip_above(handle));
 
-            log::info!("🎨 Creating border at EXPLICIT position: window ({},{}) {}x{}, border ({},{}) {}x{}",
+            log::trace!("🎨 Creating border at EXPLICIT position: window ({},{}) {}x{}, border ({},{}) {}x{}",
                 x, y, target_width, target_height,
                 border_x, border_y, border_width_total, border_height_total);
 
@@ -5296,7 +5365,7 @@ impl WindowManager {
                 let (border_y, border_height_total) =
                     border_rect_with_strip(border_y, border_height_total, self.strip_above(target_handle));
 
-                log::debug!(
+                log::trace!(
                     "🎨 Border position explicit: window at ({},{}) {}x{}, border at ({},{}) {}x{}",
                     x,
                     y,
@@ -5554,7 +5623,7 @@ impl WindowManager {
                 let border_hwnd = border_info.border_hwnd.to_hwnd();
                 if IsWindow(border_hwnd).as_bool() {
                     let _ = ShowWindow(border_hwnd, SW_HIDE);
-                    log::debug!("Hid border for window");
+                    log::trace!("Hid border for window");
                 }
             }
         }
@@ -5621,7 +5690,7 @@ impl WindowManager {
                         None,
                         RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW,
                     );
-                    log::debug!("Showed border for window");
+                    log::trace!("Showed border for window");
                 }
             }
         }
@@ -6474,7 +6543,7 @@ impl WindowManager {
             );
 
             if result.is_ok() {
-                log::debug!(
+                log::trace!(
                     "Set native border color ({},{},{}) on window {:?}",
                     r,
                     g,
@@ -6483,7 +6552,7 @@ impl WindowManager {
                 );
                 Ok(true)
             } else {
-                log::debug!("DWMWA_BORDER_COLOR not supported (requires Windows 11 22000+)");
+                log::trace!("DWMWA_BORDER_COLOR not supported (requires Windows 11 22000+)");
                 Ok(false)
             }
         }
@@ -6641,7 +6710,7 @@ fn is_hung(hwnd: HWND) -> bool {
         cache.insert(key, (now, unresponsive));
     });
     if unresponsive {
-        log::debug!(
+        log::trace!(
             "Window {:?} is not responding; using non-blocking calls",
             hwnd
         );
@@ -7318,7 +7387,7 @@ unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL 
     let context = &mut *(lparam.0 as *mut EnumContext);
     if let Some(info) = eligible_window_info(hwnd) {
         if info.is_minimized {
-            log::info!(
+            log::debug!(
                 "📦 Found minimized window: '{}' ({:?})",
                 info.title,
                 info.handle

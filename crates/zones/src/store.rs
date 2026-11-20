@@ -173,7 +173,9 @@ impl Store {
         let path = self.backup_folder().join(format!("zones-{number:08}.json"));
         write_atomic(&path, text.as_bytes())?;
         for old in existing.iter().skip(self.keep.saturating_sub(1)) {
-            let _ = std::fs::remove_file(old);
+            if let Err(error) = std::fs::remove_file(old) {
+                log::debug!("the old backup {} of the zones' state could not be removed: {error}", old.display());
+            }
         }
         Ok(path)
     }
@@ -194,6 +196,7 @@ impl Store {
             number += 1;
         };
         std::fs::rename(self.file(), &aside)?;
+        log::debug!("the zones' state file {} is put aside as {} ({why:?})", self.file().display(), aside.display());
         Ok(aside)
     }
 
@@ -203,7 +206,10 @@ impl Store {
     pub fn save(&self, state: &ZonesState) -> std::io::Result<()> {
         let text = encode(state);
         match std::fs::read_to_string(self.file()) {
-            Ok(before) if before == text => return Ok(()),
+            Ok(before) if before == text => {
+                log::trace!("the zones' state is as it was in {}; nothing is written", self.file().display());
+                return Ok(());
+            }
             Ok(before) => match decode(&before) {
                 Ok(_) => {
                     self.back_up(&before)?;
@@ -219,13 +225,37 @@ impl Store {
             }
             Err(error) => return Err(error),
         }
-        write_atomic(&self.file(), text.as_bytes())
+        write_atomic(&self.file(), text.as_bytes())?;
+        log::debug!("the zones' state was written to {} ({} bytes)", self.file().display(), text.len());
+        Ok(())
     }
 
     /// Read the state. An error is only what the disk refuses (the file
     /// is there and may not be read or moved); everything else gives a
     /// state and says how it was come by.
     pub fn load(&self) -> std::io::Result<Loaded> {
+        let loaded = self.read();
+        match &loaded {
+            Ok(Loaded { report: LoadReport::Fresh, .. }) => {
+                log::debug!("the zones' state starts fresh: there is none in {}", self.folder.display())
+            }
+            Ok(Loaded { report: LoadReport::Read, state }) => {
+                log::debug!("the zones' state was read from {} ({} arrangements)", self.file().display(), state.profiles.len())
+            }
+            Ok(Loaded { report: LoadReport::Migrated { from }, .. }) => {
+                log::debug!("the zones' state was read from {}, of layout {from}, and brought up", self.file().display())
+            }
+            Ok(Loaded { report: LoadReport::Recovered { why, backup, unreadable_backups, .. }, .. }) => log::debug!(
+                "the zones' state in {} could not be used ({why:?}); taken from {}, past {unreadable_backups} unreadable backups",
+                self.file().display(),
+                backup.as_ref().map_or_else(|| "nothing (empty)".to_string(), |backup| backup.display().to_string())
+            ),
+            Err(error) => log::debug!("the zones' state in {} could not be read: {error}", self.file().display()),
+        }
+        loaded
+    }
+
+    fn read(&self) -> std::io::Result<Loaded> {
         let why = match std::fs::read_to_string(self.file()) {
             Ok(text) => match decode(&text) {
                 Ok((state, None)) => return Ok(Loaded { state, report: LoadReport::Read }),
@@ -252,9 +282,11 @@ impl Store {
         let mut unreadable_backups = 0;
         let mut found = None;
         for backup in self.backups() {
-            let state = std::fs::read_to_string(&backup)
-                .ok()
-                .and_then(|text| decode(&text).ok());
+            let state = match std::fs::read_to_string(&backup) {
+                Ok(text) => decode(&text).map_err(|why| format!("{why:?}")),
+                Err(error) => Err(error.to_string()),
+            };
+            let state = state.inspect_err(|why| log::debug!("the backup {} cannot be used: {why}", backup.display())).ok();
             match state {
                 Some((state, _)) => {
                     found = Some((state, backup));

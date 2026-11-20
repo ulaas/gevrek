@@ -99,6 +99,7 @@ impl Choice {
 #[cfg(target_os = "linux")]
 pub fn ask_machine(choice: Choice) -> Result<(), String> {
     let call = choice.call().ok_or("that is not the machine's to do")?;
+    log::debug!("logind is asked to {call}");
     let connection = zbus::blocking::Connection::system()
         .map_err(|error| format!("the system's bus does not answer: {error}"))?;
     connection
@@ -111,8 +112,11 @@ pub fn ask_machine(choice: Choice) -> Result<(), String> {
             // rules want one.
             &(true,),
         )
-        .map(|_| ())
-        .map_err(|error| format!("{}: {error}", choice.words()))
+        .map(|_| log::debug!("logind took {call}"))
+        .map_err(|error| {
+            log::debug!("logind did not take {call}: {error}");
+            format!("{}: {error}", choice.words())
+        })
 }
 
 /// The size of the power menu's surface, in logical pixels.

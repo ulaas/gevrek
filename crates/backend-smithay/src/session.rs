@@ -135,10 +135,8 @@ pub(crate) fn open(
     let socket_name = socket.socket_name().to_string_lossy().into_owned();
     handle
         .insert_source(socket, |stream, _, state| {
-            if let Err(error) = state
-                .display
-                .insert_client(stream, Arc::new(ClientState::default()))
-            {
+            let client = ClientState::of(&stream);
+            if let Err(error) = state.display.insert_client(stream, Arc::new(client)) {
                 log::warn!("client refused: {error}");
             }
         })

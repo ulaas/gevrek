@@ -116,7 +116,9 @@ pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         })
         .and_then(|()| std::fs::rename(&beside, path));
     if written.is_err() {
-        let _ = std::fs::remove_file(&beside);
+        if let Err(error) = std::fs::remove_file(&beside) {
+            log::debug!("zones: {} was left behind: {error}", beside.display());
+        }
     }
     written
 }
@@ -422,9 +424,15 @@ pub fn start_directly(launch: &Launch) -> std::io::Result<()> {
     let mut child = command.spawn()?;
     // Waited for on a thread of its own, so that it does not stay behind
     // as a dead entry of the process table when it ends.
-    let _ = std::thread::Builder::new().name("gevrek-zones-child".to_string()).spawn(move || {
-        let _ = child.wait();
+    let waited = std::thread::Builder::new().name("gevrek-zones-child".to_string()).spawn(move || {
+        if let Err(error) = child.wait() {
+            log::debug!("zones: the end of a program that was started is not known: {error}");
+        }
     });
+    if let Err(error) = waited {
+        log::debug!("zones: {} is not waited for, and stays behind when it ends: {error}", launch.program);
+    }
+    log::debug!("zones: {} was started directly", launch.program);
     Ok(())
 }
 
@@ -641,6 +649,21 @@ fn carry_out(
     operation: &FileOperation,
     tick: files::Tick<'_>,
 ) -> Result<FileOperation, BackendError> {
+    log::debug!("zones: {operation}");
+    let done = carry_out_now(trash, operation, tick);
+    match &done {
+        Ok(undo) => log::debug!("zones: {operation}: done (taken back by {undo})"),
+        Err(BackendError::Cancelled) => log::debug!("zones: {operation}: called off"),
+        Err(error) => log::debug!("zones: {operation}: failed: {error}"),
+    }
+    done
+}
+
+fn carry_out_now(
+    trash: Option<&trash::Trash>,
+    operation: &FileOperation,
+    tick: files::Tick<'_>,
+) -> Result<FileOperation, BackendError> {
     // (Without knowing who the person is, no trash can is theirs.)
     let can = || trash.ok_or(BackendError::Unsupported);
     match operation {
@@ -775,6 +798,7 @@ impl SystemBackend {
         if self.displays == displays && self.reserved == reserved {
             return;
         }
+        log::debug!("zones: the displays or the room kept on them changed: {} displays, {} areas kept", displays.len(), reserved.len());
         self.displays = displays.clone();
         self.reserved = reserved.clone();
         self.events.push(BackendEvent::Displays { displays, reserved });
@@ -885,7 +909,9 @@ impl SystemBackend {
             self.answer.clone(),
             Arc::clone(&self.wake),
         );
+        log::debug!("zones: going to {} (watch {}) on a thread of its own", portal.folder.display(), watch.0);
         if let Err(error) = gone {
+            log::debug!("zones: {} cannot be gone to: no thread: {error}", portal.folder.display());
             portal.opening = false;
             let reach = Reach::Away { why: format!("{}: no thread to read it on: {error}", text(&portal.folder)) };
             self.events.extend(crate::zones::reach::told(&portal.location, &reach));
@@ -929,6 +955,11 @@ impl SystemBackend {
             portal::Outcome::Once { .. } => return,
         };
         if portal.reach != reach {
+            match &reach {
+                Reach::There => log::debug!("zones: {} is there (watch {})", portal.folder.display(), watch.0),
+                Reach::Away { why } => log::debug!("zones: {} is away (watch {}): {why}", portal.folder.display(), watch.0),
+                Reach::Opening => {}
+            }
             events.extend(crate::zones::reach::told(&portal.location, &reach));
         }
         portal.reach = reach;
@@ -1044,6 +1075,7 @@ impl SystemBackend {
                 addresses: opened.iter().map(|opened| opened.address.clone()).collect(),
             };
             (self.launcher)(&launch).map_err(|error| refusal(error, &app.name))?;
+            log::debug!("zones: {} is started ({})", app.name, if launch.program.is_empty() { "over the bus" } else { &launch.program });
         }
         Ok(())
     }
@@ -1053,6 +1085,7 @@ impl SystemBackend {
         let program = Associations::load(&self.system.places, &self.system.locales)
             .default_for(&self.system.mimes, mime)
             .ok_or_else(|| BackendError::NotFound { what: format!("a program that opens {mime}") })?;
+        log::debug!("zones: {} is opened with {}, the program for {mime}", opened.file, program.app.name);
         self.start(&program.app, &program.exec, &[opened])
     }
 
@@ -1140,11 +1173,13 @@ impl ZonesBackend for SystemBackend {
             // own, and told when it was read (or as away).
             self.numbers += 1;
             let watch = WatchId(self.numbers);
+            log::debug!("zones: {} is watched (watch {})", folder.display(), watch.0);
             self.portals.insert(watch, portal::Portal::new(location.clone(), folder));
             self.go_to(watch);
             return Ok(watch);
         }
         if !folder.is_dir() {
+            log::debug!("zones: {} is not watched: it is no folder", folder.display());
             return Err(BackendError::NotFound { what: text(&folder) });
         }
         self.numbers += 1;
@@ -1165,6 +1200,7 @@ impl ZonesBackend for SystemBackend {
             added
         });
         begun.map(|()| watch).map_err(|error| {
+            log::debug!("zones: {} cannot be watched: {error}", folder.display());
             self.folders.remove(watch);
             BackendError::Refused { what: format!("{}: {error}", text(&folder)) }
         })
@@ -1172,7 +1208,8 @@ impl ZonesBackend for SystemBackend {
 
     fn unwatch(&mut self, watch: WatchId) {
         // (A portal's own watcher and its threads' answers go with it.)
-        if self.portals.remove(&watch).is_some() {
+        if let Some(portal) = self.portals.remove(&watch) {
+            log::debug!("zones: {} is no longer watched (watch {})", portal.folder.display(), watch.0);
             self.folders.remove(watch);
             return;
         }
@@ -1189,6 +1226,7 @@ impl ZonesBackend for SystemBackend {
             None => {}
         }
         if let (Some(folder), Some(watcher)) = (self.folders.remove(watch), &mut self.watcher) {
+            log::debug!("zones: {} is no longer watched (watch {})", folder.display(), watch.0);
             watcher.remove(&folder);
         }
         if self.folders.is_empty() {
@@ -1332,6 +1370,7 @@ impl ZonesBackend for SystemBackend {
         // (A program is no file: what can be done with one is the
         // renderer's to offer.)
         if items.iter().any(Smart::is_program) {
+            log::debug!("zones: a program has no menu of the system's");
             return Err(BackendError::Unsupported);
         }
         self.menu = Some(self.menu_for(items, at));
@@ -1369,6 +1408,9 @@ impl ZonesBackend for SystemBackend {
 
     fn start_drag(&mut self, items: &[ItemId], allowed: DragActions) -> Result<(), BackendError> {
         let there: Vec<ItemId> = items.iter().filter(|item| self.path_of(item).is_ok()).cloned().collect();
+        if there.len() < items.len() {
+            log::debug!("zones: {} of the {} items dragged are no files that are there", items.len() - there.len(), items.len());
+        }
         if there.is_empty() {
             return Err(BackendError::NotFound { what: "anything to drag".to_string() });
         }

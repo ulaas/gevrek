@@ -8,6 +8,8 @@
 #![allow(clippy::result_large_err)]
 
 use anyhow::Result;
+/// What the server is asked and how it answers, written to the log.
+mod answered;
 pub mod node_registry;
 /// What the window manager keeps and passes on of the shell's zones.
 pub mod zones;
@@ -639,12 +641,24 @@ impl WMServer {
         file: &Config,
         request: ConfigRequest,
     ) -> Result<u64, Status> {
-        self.ensure_config_writable()?;
-        file.save(&self.config_path)
-            .map_err(|error| Status::internal(format!("Failed to save configuration: {error}")))?;
-        self.runtime_config_sender
-            .send(request)
-            .map_err(|_| Status::unavailable("Window manager runtime is not running"))?;
+        self.ensure_config_writable().inspect_err(|error| {
+            log::debug!("the configuration was not written: {}", error.message())
+        })?;
+        file.save(&self.config_path).map_err(|error| {
+            log::warn!(
+                "the configuration could not be saved to {}: {error}",
+                self.config_path.display()
+            );
+            Status::internal(format!("Failed to save configuration: {error}"))
+        })?;
+        log::debug!(
+            "the configuration was saved to {}; it is handed to the window manager",
+            self.config_path.display()
+        );
+        self.runtime_config_sender.send(request).map_err(|_| {
+            log::debug!("the configuration was not handed over: the window manager's loop is gone");
+            Status::unavailable("Window manager runtime is not running")
+        })?;
         // A loop that waits for work is told there is some.
         gevrek_host::wake::now();
         // Wait for this request, not for any publish: a runtime toggle or a
@@ -652,7 +666,14 @@ impl WMServer {
         let request_number = self.config_requests_sent.fetch_add(1, Ordering::SeqCst) + 1;
         wait_for_request(&self.config, request_number, CONFIG_APPLY_TIMEOUT)
             .await
+            .inspect(|revision| {
+                log::debug!("the window manager applied the configuration as revision {revision}")
+            })
             .ok_or_else(|| {
+                log::warn!(
+                    "the window manager has not applied the configuration within {} s",
+                    CONFIG_APPLY_TIMEOUT.as_secs()
+                );
                 Status::deadline_exceeded(
                     "The configuration was saved, but the window manager has not applied it yet",
                 )
@@ -669,7 +690,7 @@ impl WMServer {
         if error.is_some()
             && (!self.config_path.exists() || Config::load(&self.config_path).is_ok())
         {
-            log::info!("Config file is readable again; leaving read-only mode");
+            log::info!("the config file is readable again: it is written to from now on");
             *error = None;
         }
         error.clone()
@@ -699,6 +720,15 @@ fn announce_configuration(
     if announced.fetch_max(revision, Ordering::SeqCst) >= revision {
         return;
     }
+    log::debug!(
+        "the configuration is at revision {revision} now, told to {} subscribers ({})",
+        events.receiver_count(),
+        if origin_client_id.is_empty() {
+            "not changed by a client".to_string()
+        } else {
+            format!("changed by client {origin_client_id:?}")
+        }
+    );
     let _ = events.send(ExecutionEvent {
         event: Some(execution_event::Event::ConfigurationChanged(
             ConfigurationChanged {
@@ -724,17 +754,21 @@ async fn forward_events(
         let event = match receiver.recv().await {
             Ok(event) => event,
             Err(broadcast::error::RecvError::Lagged(count)) => {
-                log::warn!("Event subscriber lagged; {count} events dropped");
+                log::warn!("an event subscriber fell behind: {count} events were dropped for it");
                 ExecutionEvent {
                     event: Some(execution_event::Event::EventsDropped(
                         gevrek_protocol::proto::EventsDropped { count },
                     )),
                 }
             }
-            Err(broadcast::error::RecvError::Closed) => break,
+            Err(broadcast::error::RecvError::Closed) => {
+                log::debug!("an event subscriber's stream ended: the server stops");
+                return;
+            }
         };
         if sender.send(Ok(event)).await.is_err() {
-            break;
+            log::debug!("an event subscriber left");
+            return;
         }
     }
 }
@@ -1479,20 +1513,19 @@ impl WMService for WMServer {
         if gevrek_host::lock::is_locked() {
             return Err(locked_status());
         }
-        log::info!("Received PushGraph request - applying working graph to running config");
         let proto_graph = request.into_inner();
 
         // If a graph is provided, update the working graph first
         // Otherwise, use the current working graph
         let core_graph = if proto_graph.json.is_empty() {
-            log::info!("No graph provided - using current working graph");
+            log::debug!("no graph was pushed: the working graph is applied");
             self.working_graph
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
                 .clone()
         } else {
-            log::info!(
-                "Graph provided: {} nodes, {} connections - updating working graph first",
+            log::debug!(
+                "a graph was pushed: {} nodes, {} connections; it is the working graph now",
                 proto_graph.node_count,
                 proto_graph.connection_count
             );
@@ -1511,8 +1544,8 @@ impl WMService for WMServer {
         let node_count = core_graph.nodes.len() as u32;
         let connection_count = core_graph.connections.len() as u32;
 
-        log::info!(
-            "Applying graph to running config: {} nodes, {} connections",
+        log::debug!(
+            "the graph is applied to the running configuration: {} nodes, {} connections",
             node_count,
             connection_count
         );
@@ -1526,6 +1559,10 @@ impl WMService for WMServer {
             // revision would replace someone else's change unseen.
             let running = self.config.borrow().revision;
             if proto_graph.base_revision != 0 && proto_graph.base_revision != running {
+                log::debug!(
+                    "the pushed graph was refused: made from revision {}, the WM is at {running}",
+                    proto_graph.base_revision
+                );
                 return Ok(Response::new(PushGraphResponse {
                     success: false,
                     error: Some(format!(
@@ -1558,7 +1595,7 @@ impl WMService for WMServer {
             );
             revision
         };
-        log::info!("Pushed graph saved and applied by the runtime");
+        log::info!("the pushed graph was saved and applied as revision {revision}");
 
         // Broadcast graph update event
         let event = ExecutionEvent {
@@ -1960,7 +1997,7 @@ impl WMService for WMServer {
     }
 
     async fn query_state(&self, _request: Request<Empty>) -> Result<Response<WmState>, Status> {
-        log::info!("Querying WM state");
+        log::trace!("the state is asked for");
 
         let paused = match self.execution_paused.try_lock() {
             Ok(paused) => *paused,
@@ -2121,8 +2158,8 @@ impl WMService for WMServer {
         _request: Request<Empty>,
     ) -> Result<Response<Self::SubscribeToEventsStream>, Status> {
         let subscriber_count = self.event_broadcaster.receiver_count();
-        log::info!(
-            "🔔 New event subscription (total subscribers: {})",
+        log::debug!(
+            "a client subscribed to the events ({} subscribers now)",
             subscriber_count + 1
         );
         let receiver = self.event_broadcaster.subscribe();
@@ -2245,7 +2282,7 @@ impl WMService for WMServer {
         &self,
         _request: Request<Empty>,
     ) -> Result<Response<GetNodeDefinitionsResponse>, Status> {
-        log::info!("Sending node definitions to editor");
+        log::debug!("the node definitions are sent to an editor");
 
         let definitions = self.node_registry.get_definitions().to_vec();
 
@@ -2259,13 +2296,12 @@ impl WMService for WMServer {
         &self,
         _request: Request<Empty>,
     ) -> Result<Response<NodeGraph>, Status> {
-        log::info!("Sending current node graph to editor");
 
         let config = self.running_config();
         let proto_graph = gevrek_protocol::conversions::node_graph_to_proto(&config.node_graph);
 
-        log::info!(
-            "Sending graph with {} nodes, {} connections",
+        log::debug!(
+            "the running graph is sent: {} nodes, {} connections",
             proto_graph.node_count,
             proto_graph.connection_count
         );
@@ -2286,8 +2322,8 @@ impl WMService for WMServer {
         let connection_count = proto_graph.connection_count;
         let editor_id = proto_graph.editor_id.clone();
 
-        log::info!(
-            "Received UpdateWorkingGraph from editor {}: {} nodes, {} connections",
+        log::debug!(
+            "editor {} shares its working graph: {} nodes, {} connections",
             editor_id,
             node_count,
             connection_count
@@ -2302,8 +2338,8 @@ impl WMService for WMServer {
         // PushGraph, 0 is the unconditional form.
         let running = self.config.borrow().revision;
         if proto_graph.base_revision != 0 && proto_graph.base_revision != running {
-            log::info!(
-                "Refused the working graph of editor {}: made from revision {}, the WM is at {}",
+            log::debug!(
+                "the working graph of editor {} was refused: made from revision {}, the WM is at {}",
                 editor_id,
                 proto_graph.base_revision,
                 running
@@ -2340,15 +2376,15 @@ impl WMService for WMServer {
         let subscriber_count = self.event_broadcaster.receiver_count();
         match self.event_broadcaster.send(event) {
             Ok(_) => {
-                log::info!(
-                    "📡 Working graph update from editor {} broadcast to {} subscribers",
+                log::debug!(
+                    "the working graph of editor {} was told to {} subscribers",
                     editor_id,
                     subscriber_count
                 );
             }
             Err(e) => {
-                log::warn!(
-                    "Failed to broadcast event: {} (subscribers: {})",
+                log::debug!(
+                    "the working graph was told to nobody: {} (subscribers: {})",
                     e,
                     subscriber_count
                 );
@@ -2365,13 +2401,12 @@ impl WMService for WMServer {
         &self,
         _request: Request<Empty>,
     ) -> Result<Response<NodeGraph>, Status> {
-        log::info!("Sending working node graph to editor");
 
         let working = self.working_graph.lock().unwrap_or_else(|p| p.into_inner());
         let proto_graph = gevrek_protocol::conversions::node_graph_to_proto(&working);
 
-        log::info!(
-            "Sending working graph with {} nodes, {} connections",
+        log::debug!(
+            "the working graph is sent: {} nodes, {} connections",
             proto_graph.node_count,
             proto_graph.connection_count
         );
@@ -2383,7 +2418,7 @@ impl WMService for WMServer {
         &self,
         _request: Request<Empty>,
     ) -> Result<Response<OverlayDataResponse>, Status> {
-        log::info!("GetOverlayData RPC called");
+        log::trace!("the overlay's data is asked for");
 
         // Snapshot each shared state independently. The editor polls this RPC,
         // so never retain the high-frequency overlay guard while waiting for
@@ -2739,10 +2774,22 @@ pub async fn serve_on(
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     };
     tokio::pin!(waited_enough);
-    let router = Server::builder().add_service(WindowManagerServer::new(wm_server));
+    let router =
+        Server::builder().add_service(WindowManagerServer::new(answered::Logged::new(wm_server)));
     match endpoint {
         gevrek_protocol::Endpoint::Local(instance) => {
             let incoming = gevrek_protocol::endpoint::bind_local(&instance)?;
+            // Each program that connects (the shell, the settings, each
+            // `gevrek` command) is one connection.
+            let incoming = tokio_stream::StreamExt::map(incoming, |connection| {
+                match &connection {
+                    Ok(_) => log::debug!("a client connected to the local endpoint"),
+                    Err(error) => {
+                        log::debug!("a client could not connect to the local endpoint: {error}")
+                    }
+                }
+                connection
+            });
             log::info!(
                 "Listening on {}",
                 gevrek_protocol::Endpoint::Local(instance.clone()).describe()
@@ -2755,6 +2802,13 @@ pub async fn serve_on(
                 }
             };
             gevrek_protocol::endpoint::release_local(&instance);
+            log::debug!(
+                "the local endpoint is no longer listened on{}",
+                match &served {
+                    Ok(()) => String::new(),
+                    Err(error) => format!(": {error}"),
+                }
+            );
             served?;
         }
         gevrek_protocol::Endpoint::Tcp(url) => {

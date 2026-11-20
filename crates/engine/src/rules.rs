@@ -495,8 +495,15 @@ impl RuleEngine {
     /// Check if a window should be ignored
     /// Returns false if there's an explicit manage rule
     pub fn should_ignore(&self, window: &WindowInfo) -> bool {
+        self.ignored_by(window).is_some()
+    }
+
+    /// The rule that leaves a window alone, in words (`the rule 'Steam'
+    /// (Class)`), or `None` where the window is managed. Asked often (for
+    /// every event of a window): what it finds is said at trace only.
+    pub fn ignored_by(&self, window: &WindowInfo) -> Option<String> {
         if let Some(managed) = self.resolve_static(window).managed {
-            return !managed;
+            return (!managed).then(|| "a rule of the configuration".to_string());
         }
         // Check manage rules first (they override ignore)
         if self
@@ -504,26 +511,25 @@ impl RuleEngine {
             .iter()
             .any(|mr| self.rule_matches(&mr.rule, window))
         {
-            return false;
+            return None;
         }
 
         // Check ignore rules
-        if let Some(matched) = self
+        let matched = self
             .ignore_rules
             .iter()
-            .find(|ir| self.rule_matches(&ir.rule, window))
-        {
-            log::debug!(
-                "Window ignored by rule {:?} ({:?}): title={:?} class={:?} exe={:?}",
-                matched.rule.id,
-                matched.rule.kind,
-                window.title,
-                window.class,
-                window.exe,
-            );
-            return true;
-        }
-        false
+            .find(|ir| self.rule_matches(&ir.rule, window))?;
+        log::trace!(
+            "a window is left alone by the rule {:?} ({:?}): class {:?}, program {:?}",
+            matched.rule.id,
+            matched.rule.kind,
+            window.class,
+            window.exe,
+        );
+        Some(format!(
+            "the rule '{}' ({:?})",
+            matched.rule.id, matched.rule.kind
+        ))
     }
 
     /// Get workspace assignment for a window

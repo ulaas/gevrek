@@ -40,6 +40,10 @@ use smithay::reexports::pixman;
 use smithay::utils::{Rectangle, Transform};
 use std::collections::{HashMap, HashSet};
 
+// (Asked for again at the next frame where it fails: said once.)
+static SOFT_DISPLAY: crate::failing::Failing =
+    crate::failing::Failing::new("drawing the soft picture of a display");
+
 /// How wide the small picture is at the most, in pixels.
 const WIDTH: f64 = 480.0;
 /// How far a pixel of the display is spread, in the display's own pixels
@@ -345,6 +349,7 @@ impl State {
             }
             match self.draw_small::<R, T>(renderer, format, output) {
                 Ok(Some((soft, size))) => {
+                    SOFT_DISPLAY.worked();
                     self.soft
                         .borrow_mut()
                         .scenes
@@ -353,7 +358,7 @@ impl State {
                     self.desktop.needs_redraw = true;
                 }
                 Ok(None) => {}
-                Err(error) => log::debug!("the soft picture of a display: {error}"),
+                Err(error) => SOFT_DISPLAY.failed(error),
             }
         }
     }

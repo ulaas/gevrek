@@ -240,11 +240,15 @@ impl GlobalDispatch<ZwlrForeignToplevelManagerV1, ()> for State {
     fn bind(
         state: &mut Self,
         display: &DisplayHandle,
-        _client: &Client,
+        client: &Client,
         resource: New<ZwlrForeignToplevelManagerV1>,
         _: &(),
         init: &mut DataInit<'_, Self>,
     ) {
+        log::debug!(
+            "{} binds the foreign toplevel manager (it may focus, move and close windows)",
+            crate::state::named_client(client)
+        );
         let manager = init.init(resource, ());
         let mut bound = Bound {
             manager,

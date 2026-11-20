@@ -96,15 +96,26 @@ pub fn init(display: &DisplayHandle) {
     display.create_global::<State, ZwlrScreencopyManagerV1, ()>(VERSION, ());
 }
 
+// A program that records the screen asks for a picture each frame: what
+// fails for it fails again, and is said once.
+pub(crate) static CARD_PICTURE: crate::failing::Failing =
+    crate::failing::Failing::new("drawing a picture into a program's buffer of the graphics card");
+pub(crate) static PICTURE: crate::failing::Failing =
+    crate::failing::Failing::at("drawing a picture for a program", log::Level::Warn);
+
 impl GlobalDispatch<ZwlrScreencopyManagerV1, ()> for State {
     fn bind(
         _state: &mut Self,
         _display: &DisplayHandle,
-        _client: &Client,
+        client: &Client,
         resource: New<ZwlrScreencopyManagerV1>,
         _data: &(),
         init: &mut DataInit<'_, Self>,
     ) {
+        log::debug!(
+            "{} binds the screencopy manager (it may take pictures of the displays)",
+            crate::state::named_client(client)
+        );
         init.init(resource, ());
     }
 }
@@ -155,9 +166,13 @@ impl Dispatch<ZwlrScreencopyManagerV1, ()> for State {
         );
         let Some((_, _, width, height)) = region else {
             // An output that is gone, or a part outside of it.
+            log::debug!(
+                "a picture of a display is refused: the display is gone, or the part is outside it"
+            );
             frame.failed();
             return;
         };
+        log::trace!("a picture of {known:?} is asked for ({width}x{height})");
         frame.buffer(
             wl_shm::Format::Xrgb8888,
             width as u32,
@@ -342,10 +357,14 @@ impl State {
             // drawn straight into it.
             if let Ok(card) = smithay::wayland::dmabuf::get_dmabuf(&capture.buffer) {
                 let mut card = card.clone();
-                let done = self
-                    .draw_into_card(renderer, &mut card, capture.output, capture.with_pointer)
-                    .map_err(|error| log::debug!("no picture into a program's buffer: {error}"))
-                    .is_ok();
+                let done = CARD_PICTURE
+                    .note(self.draw_into_card(
+                        renderer,
+                        &mut card,
+                        capture.output,
+                        capture.with_pointer,
+                    ))
+                    .is_some();
                 if !done {
                     capture.frame.failed();
                     continue;
@@ -369,13 +388,8 @@ impl State {
             }
             let key = (capture.output, capture.with_pointer);
             if !drawn.iter().any(|(known, _)| *known == key) {
-                let picture = match self.draw_for_capture(renderer, target, format, key.0, key.1) {
-                    Ok(picture) => Some(picture),
-                    Err(error) => {
-                        log::warn!("no picture of the output for a program: {error}");
-                        None
-                    }
-                };
+                let picture =
+                    PICTURE.note(self.draw_for_capture(renderer, target, format, key.0, key.1));
                 drawn.push((key, picture));
             }
             let picture = drawn

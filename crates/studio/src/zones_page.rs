@@ -709,7 +709,12 @@ pub fn written(document: &Value, file: &str) -> Result<(), String> {
     }
     let text = serde_json::to_string_pretty(document).map_err(|error| error.to_string())?;
     let path = widgets::whole_path(file, dirs::home_dir().as_deref());
-    std::fs::write(path, text + "\n").map_err(|error| error.to_string())
+    let written = std::fs::write(&path, text + "\n");
+    match &written {
+        Ok(()) => log::debug!("the zones' arrangement was written to {}", path.display()),
+        Err(error) => log::debug!("the zones' arrangement could not be written to {}: {error}", path.display()),
+    }
+    written.map_err(|error| error.to_string())
 }
 
 /// What is said of an arrangement that was read in (`layout_imported`).
@@ -925,6 +930,8 @@ pub struct ZonesPage {
 
 impl ZonesPage {
     fn ask(&mut self, what: Ask, command: Value, wishes: &mut Vec<Wish>) {
+        // (Only what is asked: an arrangement read in is a whole document.)
+        log::debug!("the zones are asked from the studio: {what:?} ({})", command["command"].as_str().unwrap_or("?"));
         let command = command.to_string();
         self.below = matches!(what, Ask::Snapshot | Ask::Export(_) | Ask::Import);
         self.of_types = matches!(what, Ask::TypesPreview | Ask::TypesMake | Ask::TypesUndo);
@@ -962,12 +969,23 @@ impl ZonesPage {
         // (Whatever was done, the zones are other than they were told.)
         self.state_asked = None;
         if !success {
+            log::debug!(
+                "the zones did not do {:?}{}: {}",
+                asked.what,
+                if delivered { "" } else { " (it did not reach them)" },
+                error.unwrap_or("refused")
+            );
             self.outcome = Some(refusal(error.unwrap_or("refused"), delivered));
             return true;
         }
+        log::debug!("the zones did {:?}, after {} ms, with {} events", asked.what, asked.at.elapsed().as_millis(), events.len());
         let events: Vec<Value> = events
             .iter()
-            .filter_map(|event| serde_json::from_str(event).ok())
+            .filter_map(|event| {
+                serde_json::from_str(event)
+                    .inspect_err(|error| log::debug!("an event of the zones' answer is not understood: {error}"))
+                    .ok()
+            })
             .collect();
         let event = |name: &str| events.iter().find(|event| event["event"] == name);
         let list = |pointer: &str| list_at(document, pointer);
@@ -1066,6 +1084,7 @@ impl ZonesPage {
         }
         if let Some(asked) = &self.asked {
             if asked.at.elapsed() > ANSWER_ARRIVES {
+                log::debug!("the zones did not answer {:?} within {} ms", asked.what, ANSWER_ARRIVES.as_millis());
                 self.outcome = Some(Outcome::Said {
                     bad: true,
                     text: "No answer from the window manager.".to_string(),
@@ -1682,6 +1701,7 @@ impl ZonesPage {
                         ));
                     }
                     Err(error) => {
+                        log::debug!("an arrangement could not be read from {}: {error}", whole.display());
                         self.below = true;
                         self.outcome = Some(Outcome::Said {
                             bad: true,

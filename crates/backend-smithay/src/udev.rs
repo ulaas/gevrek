@@ -107,6 +107,17 @@ struct Hardware {
 /// that has no frame on its way to the screen. A display that is being
 /// drawn to is paced by its own vertical blank (`DrmEvent::VBlank`), at its
 /// own refresh rate; this only starts the first frame after a pause.
+// What fails as a frame is drawn or shown fails again at the next one:
+// each is said once when it begins and once when it ends.
+static RENDER: crate::failing::Failing =
+    crate::failing::Failing::at("drawing a frame for a display", log::Level::Warn);
+static QUEUE_FRAME: crate::failing::Failing =
+    crate::failing::Failing::at("handing a frame to a display", log::Level::Warn);
+static FRAME_SUBMITTED: crate::failing::Failing =
+    crate::failing::Failing::at("a frame reaching a display", log::Level::Warn);
+static COLOUR_RAMP: crate::failing::Failing =
+    crate::failing::Failing::new("giving a display its colour ramp (the night light)");
+
 const FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(4);
 
 /// How long the picture takes to turn warm when the night light comes on,
@@ -283,6 +294,16 @@ pub fn run(
         Ok(udev) => {
             handle
                 .insert_source(udev, move |event, _, state| {
+                    match &event {
+                        UdevEvent::Added { device_id, path } => log::debug!(
+                            "a display device was added: {} ({device_id}); only the first is used",
+                            path.display()
+                        ),
+                        UdevEvent::Removed { device_id } => {
+                            log::debug!("a display device was removed ({device_id})")
+                        }
+                        UdevEvent::Changed { .. } => {}
+                    }
                     if let UdevEvent::Changed { .. } = event {
                         log::info!(
                             "The display device reports a change: looking at its connectors"
@@ -411,8 +432,8 @@ pub fn run(
                             };
                             feedback.presented::<_, Monotonic>(time, refresh, sequence, flags);
                         }
-                        Ok(_) => {}
-                        Err(error) => log::warn!("frame: {error:?}"),
+                        Ok(_) => FRAME_SUBMITTED.worked(),
+                        Err(error) => FRAME_SUBMITTED.failed(error),
                     }
                     surface.pending = false;
                 }
@@ -540,12 +561,19 @@ fn scan_outputs(hardware: &mut Hardware, state: &mut State) {
     };
     let mut connected = Vec::new();
     for handle in resources.connectors() {
-        if let Ok(info) = hardware.drm.get_connector(*handle, false) {
-            if info.state() == connector::State::Connected {
-                connected.push((*handle, info));
+        match hardware.drm.get_connector(*handle, false) {
+            Ok(info) if info.state() == connector::State::Connected => {
+                connected.push((*handle, info))
             }
+            Ok(_) => {}
+            Err(error) => log::debug!("the connector {handle:?} could not be read: {error}"),
         }
     }
+    log::debug!(
+        "the display device has {} connectors, {} with a display",
+        resources.connectors().len(),
+        connected.len()
+    );
 
     // Displays that went away.
     let gone: Vec<usize> = hardware
@@ -583,6 +611,7 @@ fn scan_outputs(hardware: &mut Hardware, state: &mut State) {
             continue;
         }
         let Some(mode) = pick_mode(&info, profile.as_ref(), &connector_name) else {
+            log::debug!("{connector_name} has no mode to use: left dark");
             continue;
         };
         log::info!(
@@ -607,6 +636,7 @@ fn scan_outputs(hardware: &mut Hardware, state: &mut State) {
             log::warn!("No CRTC left for {:?}", info.interface());
             continue;
         };
+        log::debug!("{connector_name} ({handle:?}) is driven by the CRTC {crtc:?}");
         let (width, height) = mode.size();
         let name = format!("{}-{}", info.interface().as_str(), info.interface_id());
         // To the right of the outputs that are there.
@@ -773,8 +803,11 @@ fn night_light(hardware: &mut Hardware, state: &mut State) {
             .drm
             .set_gamma(surface.crtc, &ramp(red), &ramp(green), &ramp(blue))
         {
-            Ok(()) => given += 1,
-            Err(error) => log::debug!("a display did not take a colour ramp: {error}"),
+            Ok(()) => {
+                COLOUR_RAMP.worked();
+                given += 1
+            }
+            Err(error) => COLOUR_RAMP.failed(error),
         }
     }
     hardware.night_now = kelvin;
@@ -816,7 +849,11 @@ fn follow_refresh(surface: &mut Surface, state: &mut State, name: &str) {
     );
     let on = wanted && can && surface.compositor.use_vrr(true).is_ok();
     if !on && surface.compositor.vrr_enabled() {
-        let _ = surface.compositor.use_vrr(false);
+        if let Err(error) = surface.compositor.use_vrr(false) {
+            log::debug!(
+                "{name}: the refresh rate that follows the program was not switched off: {error}"
+            );
+        }
     }
     let was = state.vrr_on.contains(name);
     if on != was {
@@ -1114,6 +1151,7 @@ fn draw_once(hardware: &mut Hardware, state: &mut State, from_timer: bool) -> (b
             .render_frame(renderer, &elements, BACKGROUND, flags)
         {
             Ok(result) => {
+                RENDER.worked();
                 // Nothing changed on this output: nothing to show.
                 if result.is_empty {
                     continue;
@@ -1136,14 +1174,15 @@ fn draw_once(hardware: &mut Hardware, state: &mut State, from_timer: bool) -> (b
                     .queue_frame(state.presentation_feedback(surface.output))
                 {
                     Ok(()) => {
+                        QUEUE_FRAME.worked();
                         surface.pending = true;
                         drew = true;
                         changed.push(surface.output);
                     }
-                    Err(error) => log::warn!("queue frame: {error:?}"),
+                    Err(error) => QUEUE_FRAME.failed(error),
                 }
             }
-            Err(error) => log::warn!("render: {error:?}"),
+            Err(error) => RENDER.failed(error),
         }
     }
     // Pictures for other programs (screenshots, recorders).

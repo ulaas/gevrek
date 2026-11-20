@@ -70,7 +70,10 @@ pub fn put_away(desk: &mut dyn Desk) -> SystemIcons {
         ));
     }
     match desk.hide_system_icons() {
-        Ok(()) => SystemIcons::Away,
+        Ok(()) => {
+            log::debug!("the system's own desktop icons are put away while the zones show");
+            SystemIcons::Away
+        }
         Err(error) => {
             // Whatever of it was begun is taken back, by what was written.
             let back = desk.restore_system_icons();
@@ -97,6 +100,7 @@ pub fn put_back(desk: &mut dyn Desk, now: &SystemIcons) -> Result<SystemIcons, S
         return Ok(SystemIcons::Theirs);
     }
     desk.restore_system_icons()
+        .inspect(|()| log::debug!("the system's own desktop icons are back"))
         .map(|()| SystemIcons::Theirs)
         .map_err(|error| format!("the desktop's own icons could not be put back: {error}"))
 }

@@ -108,6 +108,7 @@ impl ConfigPublisher {
             snapshot.config = Arc::new(config.clone());
             revision = snapshot.revision;
         });
+        log::debug!("the running configuration was published as revision {revision}");
         revision
     }
 
@@ -119,6 +120,7 @@ impl ConfigPublisher {
             snapshot.requests_applied += 1;
             snapshot.last_request_revision = REFUSED;
         });
+        log::debug!("a configuration request was refused: it was made from an older revision");
     }
 
     /// Publish the configuration that results from applying one
@@ -132,6 +134,7 @@ impl ConfigPublisher {
             snapshot.last_request_revision = snapshot.revision;
             revision = snapshot.revision;
         });
+        log::debug!("a configuration request was applied and published as revision {revision}");
         revision
     }
 

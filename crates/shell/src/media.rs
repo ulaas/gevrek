@@ -165,11 +165,20 @@ fn file_of(address: &str) -> Option<std::path::PathBuf> {
 /// Pass a key on to a player. Returns the name of the player that was
 /// told, or `None` when there is none (or no bus).
 pub fn tell(ask: Ask) -> Option<String> {
-    let connection = Connection::session().ok()?;
-    let (player, _) = player_on(&connection)?;
-    connection
-        .call_method(Some(player.as_str()), PATH, Some(PLAYER), ask.call(), &())
+    let connection = Connection::session()
+        .map_err(|error| log::debug!("no player is told {}: no session bus: {error}", ask.call()))
         .ok()?;
+    let Some((player, _)) = player_on(&connection) else {
+        log::debug!("no player is told {}: there is none", ask.call());
+        return None;
+    };
+    match connection.call_method(Some(player.as_str()), PATH, Some(PLAYER), ask.call(), &()) {
+        Ok(_) => log::debug!("{player} is told {}", ask.call()),
+        Err(error) => {
+            log::debug!("{player} did not take {}: {error}", ask.call());
+            return None;
+        }
+    }
     Some(player.trim_start_matches(PREFIX).to_string())
 }
 

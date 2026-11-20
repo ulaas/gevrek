@@ -114,6 +114,33 @@ pub enum Asked {
     ShortcutsConfigure,
 }
 
+impl Asked {
+    /// What is asked, and by whom, as the log says it: never what a
+    /// notification says.
+    pub fn told(&self) -> String {
+        match self {
+            Asked::Notify { app, .. } => format!("to show a notification of {app}"),
+            Asked::Withdraw(_) => "to take a notification back".to_string(),
+            Asked::Wallpaper(file) => format!("for the wallpaper {}", file.display()),
+            Asked::Awake(asker, true) => format!("to keep the screen awake for {asker}"),
+            Asked::Awake(asker, false) => format!("no longer to keep the screen awake for {asker}"),
+            Asked::Share(ask) => format!("to share the screen with {}", ask.app),
+            Asked::ShareEnd(_) => "to end a sharing of the screen".to_string(),
+            Asked::Picture(ask) => format!(
+                "for a picture of the screen{}",
+                if ask.interactive { ", chosen by the person" } else { "" }
+            ),
+            Asked::Colour(_) => "for a colour from the screen".to_string(),
+            Asked::Control(ask) => format!("to let {} control the desktop", ask.app),
+            Asked::Shortcuts(ask) => {
+                format!("for {} shortcuts of {}", ask.wanted.len(), ask.app)
+            }
+            Asked::ShortcutsList(ask) => format!("which shortcuts {} has", ask.app),
+            Asked::ShortcutsConfigure => "to change an application's shortcuts".to_string(),
+        }
+    }
+}
+
 /// A request about an application's shortcuts.
 #[derive(Debug, Clone)]
 pub struct ShortcutsAsk {
@@ -295,7 +322,9 @@ impl ShortcutSession {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(&self.name);
-        let _ = server.remove::<Self, _>(self.name.as_str()).await;
+        if let Err(error) = server.remove::<Self, _>(self.name.as_str()).await {
+            log::debug!("a portal session {} was not taken off the bus: {error}", self.name);
+        }
     }
 
     #[zbus(property, name = "version")]
@@ -823,7 +852,11 @@ impl Background {
         };
         let file = folder.join(format!("{app_id}.desktop"));
         if !enable {
-            let _ = std::fs::remove_file(&file);
+            match std::fs::remove_file(&file) {
+                Ok(()) => log::debug!("{app_id} no longer starts with the session"),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => log::debug!("{} was not removed: {error}", file.display()),
+            }
             return false;
         }
         if commandline.is_empty() {
@@ -1294,7 +1327,9 @@ impl CastSession {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(&self.name);
         (self.tell)(Asked::ShareEnd(self.name.clone()));
-        let _ = server.remove::<Self, _>(self.name.as_str()).await;
+        if let Err(error) = server.remove::<Self, _>(self.name.as_str()).await {
+            log::debug!("a portal session {} was not taken off the bus: {error}", self.name);
+        }
     }
 
     #[zbus(property, name = "version")]
@@ -1413,7 +1448,9 @@ impl Held {
         if self.holds {
             (self.tell)(Asked::Awake(self.name.clone(), false));
         }
-        let _ = server.remove::<Self, _>(self.name.as_str()).await;
+        if let Err(error) = server.remove::<Self, _>(self.name.as_str()).await {
+            log::debug!("a portal session {} was not taken off the bus: {error}", self.name);
+        }
     }
 }
 
@@ -1568,7 +1605,10 @@ impl Portal {
     /// `tell` is called (on the bus's thread) with what applications ask.
     pub fn serve(look: Look, tell: impl Fn(Asked) + Send + Sync + 'static) -> anyhow::Result<Self> {
         let look = Arc::new(Mutex::new(look));
-        let tell: Tell = Arc::new(tell);
+        let tell: Tell = Arc::new(move |asked: Asked| {
+            log::debug!("the portal is asked {}", asked.told());
+            tell(asked)
+        });
         let sessions = Arc::new(Mutex::new(HashMap::new()));
         let kept = Arc::clone(&sessions);
         let apps = Arc::new(Mutex::new(HashMap::new()));
@@ -1717,10 +1757,13 @@ impl Portal {
         if let Err(error) = sent {
             log::warn!("the portal was not told that the sharing ended: {error}");
         }
-        let _ = self
+        if let Err(error) = self
             .connection
             .object_server()
-            .remove::<CastSession, _>(session);
+            .remove::<CastSession, _>(session)
+        {
+            log::debug!("the sharing {session} was not taken off the bus: {error}");
+        }
     }
 
     /// The user chose something a notification of the portal offers: its

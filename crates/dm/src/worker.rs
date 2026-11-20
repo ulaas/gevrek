@@ -51,8 +51,11 @@ pub fn session_environment(order: &Order, uid: u32) -> Vec<(String, String)> {
 
 fn say(answer: &Answer) {
     let mut out = std::io::stdout().lock();
-    let _ = writeln!(out, "{}", serde_json::to_string(answer).unwrap_or_default());
-    let _ = out.flush();
+    if let Err(error) = writeln!(out, "{}", serde_json::to_string(answer).unwrap_or_default())
+        .and_then(|()| out.flush())
+    {
+        log::debug!("the service was not told whether the login held: {error}");
+    }
 }
 
 /// The session's number in what `/proc/self/cgroup` says
@@ -95,17 +98,30 @@ pub fn run() -> anyhow::Result<()> {
     std::io::stdin().lock().read_line(&mut line)?;
     let order: Order = serde_json::from_str(&line)
         .map_err(|error| anyhow::anyhow!("the order was not understood: {error}"))?;
+    // (The order carries the password: only its parts that are not are
+    // said.)
+    log::debug!(
+        "a worker for a {:?} session of {} on console {}",
+        order.kind,
+        order.user,
+        order.console
+    );
     if !gevrek_dm::wire::is_a_user_name(&order.user) {
         say(&Answer::no("There is no such user."));
         std::process::exit(1);
     }
     let Some(account) = users::get_user_by_name(&order.user) else {
+        log::debug!("there is no account {}", order.user);
         // (Said as a wrong password is: who has an account is not told.)
         say(&Answer::no("The name or the password is not right."));
         std::process::exit(1);
     };
     // Root does not log into a desktop.
     if order.kind == Kind::User && account.uid() == 0 {
+        log::debug!(
+            "{} is not let in: root does not log into a desktop",
+            order.user
+        );
         say(&Answer::no("The name or the password is not right."));
         std::process::exit(1);
     }
@@ -118,23 +134,38 @@ pub fn run() -> anyhow::Result<()> {
     let mut client =
         crate::pam_session::Session::start(service_of(order.kind), &order.user, &order.password)
             .map_err(|error| anyhow::anyhow!("{error}"))?;
+    log::debug!(
+        "PAM checks {} through {}",
+        order.user,
+        service_of(order.kind)
+    );
     if let Err(error) = client.authenticate() {
         log::info!("{} was not let in: {error:?}", order.user);
         say(&Answer::no("The name or the password is not right."));
         std::process::exit(1);
     }
+    log::debug!("PAM let {} in: the session is opened", order.user);
     if let Err(error) = client.open() {
         log::error!("no session for {}: {error:?}", order.user);
         say(&Answer::no("The session could not be opened."));
         std::process::exit(1);
     }
+    log::debug!("PAM opened the session of {}", order.user);
     // What PAM's modules want the session to have: logind's own word on
     // the session, `pam_env`'s variables, a keyring's socket.
-    let environment = crate::pam_session::merged(&environment, &client.environment());
+    let from_pam = client.environment();
+    log::debug!(
+        "PAM's modules gave the session {} variables",
+        from_pam.len()
+    );
+    let environment = crate::pam_session::merged(&environment, &from_pam);
     // The session's console is taken before anybody is told that the
     // session is there (the service shows the console when it hears yes).
     let held = match crate::console::Held::take(order.console) {
-        Ok(held) => Some(held),
+        Ok(held) => {
+            log::debug!("console {} is taken for the session", order.console);
+            Some(held)
+        }
         Err(error) => {
             log::warn!("console {} was not taken: {error}", order.console);
             None
@@ -146,7 +177,9 @@ pub fn run() -> anyhow::Result<()> {
     // service that is gone says nothing, and nothing is started.
     if order.kind == Kind::User {
         let mut go = String::new();
+        log::debug!("the session waits for its console to be shown");
         if std::io::stdin().lock().read_line(&mut go).unwrap_or(0) == 0 {
+            log::debug!("the service went before it said to begin: the session is not started");
             drop(held);
             drop(client);
             std::process::exit(1);
@@ -198,8 +231,11 @@ pub fn run() -> anyhow::Result<()> {
     };
     // What the session writes goes where the service's own words go (the
     // journal), not into the pipe the verdict went through.
-    if let Ok(journal) = std::io::stderr().as_fd().try_clone_to_owned() {
-        command.stdout(std::process::Stdio::from(journal));
+    match std::io::stderr().as_fd().try_clone_to_owned() {
+        Ok(journal) => {
+            command.stdout(std::process::Stdio::from(journal));
+        }
+        Err(error) => log::debug!("what the session writes goes nowhere: {error}"),
     }
     command
         .env_clear()
@@ -217,9 +253,12 @@ pub fn run() -> anyhow::Result<()> {
         .stdin(std::process::Stdio::null());
     // The session's number, as logind gave it (this process was put into
     // the session's group when the session was opened).
-    if let Some(id) = session_of(&std::fs::read_to_string("/proc/self/cgroup").unwrap_or_default())
-    {
-        command.env("XDG_SESSION_ID", id);
+    match session_of(&std::fs::read_to_string("/proc/self/cgroup").unwrap_or_default()) {
+        Some(id) => {
+            log::debug!("logind's session {id}");
+            command.env("XDG_SESSION_ID", id);
+        }
+        None => log::debug!("the worker is in no session of logind's"),
     }
     // SAFETY: only calls that are safe between fork and exec: the groups
     // of the user, then the user's own identity, in that order (after the
@@ -249,6 +288,11 @@ pub fn run() -> anyhow::Result<()> {
     };
     // When the service ends, or asks this worker to end, the session's
     // programs are asked to end; the worker stays to close the session.
+    log::debug!(
+        "the session of {} is started (process {})",
+        order.user,
+        child.id()
+    );
     SESSION.store(child.id() as i32, std::sync::atomic::Ordering::SeqCst);
     // SAFETY: the handler only sends a signal on, which may be done there.
     unsafe {
@@ -262,6 +306,7 @@ pub fn run() -> anyhow::Result<()> {
         libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
     }
     let status = child.wait()?;
+    log::debug!("the session of {} ended: {status}", order.user);
     remember();
     drop(held);
     // The session is closed with the client (PAM tells logind).

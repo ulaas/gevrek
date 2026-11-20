@@ -367,11 +367,15 @@ impl GlobalDispatch<ZwlrOutputManagerV1, ()> for State {
     fn bind(
         state: &mut Self,
         display: &DisplayHandle,
-        _client: &Client,
+        client: &Client,
         resource: New<ZwlrOutputManagerV1>,
         _: &(),
         init: &mut DataInit<'_, Self>,
     ) {
+        log::debug!(
+            "{} binds the output manager (it may set the displays up)",
+            crate::state::named_client(client)
+        );
         let manager = init.init(resource, ());
         let mut bound = Bound {
             manager,

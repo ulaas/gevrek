@@ -289,6 +289,7 @@ impl ZonesSide {
         let made = tokio::time::timeout(Duration::from_secs(5), client.attach_zones(outgoing)).await;
         match made {
             Ok(Ok(requests)) => {
+                log::debug!("zones: the zones' call is made; this program runs the zones");
                 self.call = Some(Call { reports, requests });
                 self.said = None;
                 self.teller.tell(ZonesHeard::Attached);

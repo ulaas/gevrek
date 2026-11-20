@@ -39,8 +39,6 @@ fn main() -> anyhow::Result<()> {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
 
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-
     let mut arguments = std::env::args().skip(1);
     let mut config_path: Option<std::path::PathBuf> = None;
     let mut address = gevrek_protocol::DEFAULT_WM_SOCKET.to_string();
@@ -111,6 +109,17 @@ fn main() -> anyhow::Result<()> {
             "--" => program = arguments.by_ref().collect(),
             other => anyhow::bail!("unknown argument {other}"),
         }
+    }
+    // (After the arguments: the setting is read from the file they name.)
+    // (smithay sends the keymap again with every key a program is given,
+    // in a span its log tells of at the level of information: a line a
+    // key.)
+    let logging = gevrek_logging::Logging::new("gevrek-wl", log::LevelFilter::Info)
+        .quiet("smithay::input::keyboard", log::LevelFilter::Warn);
+    if safe {
+        logging.without_setting().init();
+    } else {
+        logging.config(Some(gevrek_model::paths::resolve_config(config_path.clone()).0)).init();
     }
     if test_input {
         log::warn!("--test-input: this window manager takes made-up keys and mouse input from its control endpoint");

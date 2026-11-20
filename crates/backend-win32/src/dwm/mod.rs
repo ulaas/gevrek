@@ -36,7 +36,7 @@ pub use rules::{
     RuleResolution, WindowRule,
 };
 pub use window_manager::{
-    invisible_border_content_rect, stackbar_content_rect, HwndExt, RuleResolutionScope,
+    invisible_border_content_rect, stackbar_content_rect, HwndExt, IgnoreReason, RuleResolutionScope,
     StackbarContainerState, SystemBackdrop, WindowCorner, WindowHandle, WindowInfo, WindowManager,
 };
 pub use window_monitor::{WindowEvent, WindowMonitor};

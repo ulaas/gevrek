@@ -10,6 +10,15 @@ use smithay::backend::winit::{self, WinitEvent};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::{Display, DisplayHandle};
 
+// What fails as a frame is drawn fails again at the next one: said once
+// when it begins and once when it ends.
+static RENDER: crate::failing::Failing =
+    crate::failing::Failing::at("drawing a frame into the window", log::Level::Warn);
+static EMPTY_FRAME: crate::failing::Failing =
+    crate::failing::Failing::at("drawing an empty frame into the window", log::Level::Warn);
+static SUBMIT: crate::failing::Failing =
+    crate::failing::Failing::at("showing a frame in the window", log::Level::Warn);
+
 /// Draw the frame once more into a texture of its own and write that to a
 /// PPM file (the simplest picture format: a short text header, then RGB
 /// bytes). The window's own framebuffer is not read: doing that broke the
@@ -249,15 +258,18 @@ pub fn run(
                             &elements,
                             BACKGROUND,
                         ) {
-                            Ok(result) => result.damage.cloned(),
+                            Ok(result) => {
+                                RENDER.worked();
+                                result.damage.cloned()
+                            }
                             Err(error) => {
-                                log::warn!("render: {error:?}");
+                                RENDER.failed(error);
                                 None
                             }
                         }
                     }
                     Err(error) => {
-                        log::warn!("bind: {error:?}");
+                        RENDER.failed(error);
                         None
                     }
                 };
@@ -278,12 +290,15 @@ pub fn run(
                             )
                             .and_then(|frame| frame.finish());
                         if let Err(error) = made_current {
-                            log::warn!("empty frame: {error:?}");
+                            EMPTY_FRAME.failed(error);
+                        } else {
+                            EMPTY_FRAME.worked();
                         }
                     }
                 }
-                if let Err(error) = backend.submit(damage.as_deref()) {
-                    log::warn!("submit: {error:?}");
+                match backend.submit(damage.as_deref()) {
+                    Ok(()) => SUBMIT.worked(),
+                    Err(error) => SUBMIT.failed(error),
                 }
                 // While a client's own pointer picture is shown, or gevrek's
                 // arrow, the host's pointer is hidden over the window.

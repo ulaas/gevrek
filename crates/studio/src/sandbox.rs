@@ -108,6 +108,11 @@ impl Sandbox {
         let child = command
             .spawn()
             .map_err(|error| format!("gevrek-wl did not start: {error}"))?;
+        log::debug!(
+            "the sandbox {instance} is started (process {}) with {}",
+            child.id(),
+            path.display()
+        );
         Ok(Self {
             child,
             config: path,
@@ -122,7 +127,20 @@ impl Sandbox {
 
     /// Whether the nested gevrek still runs (its window may be closed).
     pub fn alive(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(None))
+        match self.child.try_wait() {
+            Ok(None) => true,
+            Ok(Some(status)) => {
+                log::debug!("the sandbox {} ended: {status}", self.instance);
+                false
+            }
+            Err(error) => {
+                log::debug!(
+                    "the sandbox {} is not known any more: {error}",
+                    self.instance
+                );
+                false
+            }
+        }
     }
 
     /// Give the nested gevrek the configuration as it is now, if it
@@ -132,15 +150,24 @@ impl Sandbox {
             return;
         }
         self.written = generation;
-        if let Err(error) = write(config, &self.config) {
-            log::warn!("the sandbox was not given the change: {error}");
+        match write(config, &self.config) {
+            Ok(()) => log::debug!("the sandbox is given the draft of generation {generation}"),
+            Err(error) => log::warn!("the sandbox was not given the change: {error}"),
         }
     }
 
     pub fn stop(mut self) {
         let _ = self.child.kill();
-        let _ = self.child.wait();
-        let _ = std::fs::remove_file(&self.config);
+        match self.child.wait() {
+            Ok(status) => log::debug!("the sandbox {} is stopped: {status}", self.instance),
+            Err(error) => log::debug!("the sandbox {} was not waited for: {error}", self.instance),
+        }
+        if let Err(error) = std::fs::remove_file(&self.config) {
+            log::debug!(
+                "the sandbox's {} was not removed: {error}",
+                self.config.display()
+            );
+        }
     }
 }
 

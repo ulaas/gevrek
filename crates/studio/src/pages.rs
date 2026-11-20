@@ -435,8 +435,8 @@ impl Page {
             card("Touchpad", "/desktop/input/touchpad", Show::AllBut(&[])),
         ];
         const STARTUP: &[Card] = &[card("Programs", "/desktop/startup", Show::Place)];
-        // (Three switches anybody may want before a list of variables
-        // few write.)
+        // (The switches anybody may want before a list of variables few
+        // write.)
         const SESSION: &[Card] = &[
             card(
                 "When gevrek starts",
@@ -445,6 +445,7 @@ impl Page {
                     "manage_existing_on_startup",
                     "restore_session_on_startup",
                     "watch_configuration",
+                    "debug_log",
                 ]),
             ),
             card("Environment", "/desktop/session", Show::AllBut(&[])),

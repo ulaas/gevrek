@@ -163,11 +163,15 @@ impl GlobalDispatch<ZwlrVirtualPointerManagerV1, ()> for State {
     fn bind(
         _: &mut Self,
         _display: &DisplayHandle,
-        _client: &Client,
+        client: &Client,
         resource: New<ZwlrVirtualPointerManagerV1>,
         _: &(),
         init: &mut DataInit<'_, Self>,
     ) {
+        log::debug!(
+            "{} binds the virtual pointer manager (it may move the pointer and press its buttons)",
+            crate::state::named_client(client)
+        );
         init.init(resource, ());
     }
 }

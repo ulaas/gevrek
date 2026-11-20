@@ -487,11 +487,81 @@ pub type NodeEventCallback = Arc<dyn Fn(gevrek_engine::executor::NodeExecutionEv
 #[derive(Default)]
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
+    /// Who it is, for the log: `pid 1234 (gevrek-shell)`; empty where it
+    /// is not known.
+    pub who: String,
+}
+
+impl ClientState {
+    /// For a client that connected through `stream`.
+    pub fn of(stream: &std::os::unix::net::UnixStream) -> Self {
+        Self { who: who_is(stream), ..Default::default() }
+    }
+
+    fn named(&self) -> &str {
+        if self.who.is_empty() {
+            "a client"
+        } else {
+            &self.who
+        }
+    }
+}
+
+/// The process at the other end of `stream`: its id and its name.
+fn who_is(stream: &std::os::unix::net::UnixStream) -> String {
+    use std::os::fd::AsRawFd;
+    let mut credentials = libc::ucred { pid: 0, uid: 0, gid: 0 };
+    let mut size = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: the buffer is a `ucred` and `size` says so.
+    let asked = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&mut credentials as *mut libc::ucred).cast(),
+            &mut size,
+        )
+    };
+    if asked != 0 || credentials.pid <= 0 {
+        return String::new();
+    }
+    let name = std::fs::read_to_string(format!("/proc/{}/comm", credentials.pid)).unwrap_or_default();
+    format!("pid {} ({})", credentials.pid, name.trim())
 }
 
 impl ClientData for ClientState {
-    fn initialized(&self, _client_id: ClientId) {}
-    fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
+    fn initialized(&self, _client_id: ClientId) {
+        log::debug!("{} connected", self.named());
+    }
+
+    fn disconnected(&self, _client_id: ClientId, reason: DisconnectReason) {
+        match reason {
+            DisconnectReason::ProtocolError(error) => {
+                log::warn!("{} was disconnected for a protocol error: {error}", self.named())
+            }
+            // (Also what the library says where the client read nothing
+            // for so long that what it was sent no longer fit in its
+            // socket: the client is cut off then too.)
+            DisconnectReason::ConnectionClosed => log::debug!(
+                "{} is disconnected: it closed its connection, or stopped reading it",
+                self.named()
+            ),
+        }
+    }
+}
+
+/// A client as the log names it: `pid 1234 (gevrek-shell)`, or
+/// Xwayland.
+pub(crate) fn named_client(client: &Client) -> String {
+    if client
+        .get_data::<smithay::xwayland::XWaylandClientData>()
+        .is_some()
+    {
+        return "Xwayland".to_string();
+    }
+    client
+        .get_data::<ClientState>()
+        .map_or_else(|| "a client".to_string(), |state| state.named().to_string())
 }
 
 /// How long a display is held for the next new window: an application
@@ -969,6 +1039,14 @@ impl State {
     ) -> MonitorHandle {
         self.next_output += 1;
         let id = MonitorHandle(self.next_output);
+        log::debug!(
+            "the output {name} is added as {} at {}x{}+{}+{}, scale {scale}",
+            id.0,
+            rect.width,
+            rect.height,
+            rect.x,
+            rect.y
+        );
         let output = Output::new(
             name.to_string(),
             PhysicalProperties {
@@ -1036,6 +1114,14 @@ impl State {
     /// An output is gone: clients are told, and the engine moves its
     /// workspaces and windows to an output that is left.
     pub fn remove_output(&mut self, id: MonitorHandle) {
+        match self.outputs.iter().find(|(other, _)| *other == id) {
+            Some((_, output)) => log::debug!(
+                "the output {} ({}) is removed; its layer surfaces are told to close",
+                output.name(),
+                id.0
+            ),
+            None => log::debug!("the output {} is removed, and was not known", id.0),
+        }
         self.wallpapers.borrow_mut().forget(id);
         self.core.monitor_manager.forget_detail(id);
         if let Some(index) = self.outputs.iter().position(|(other, _)| *other == id) {
@@ -1126,6 +1212,11 @@ impl State {
             }
             // The device's pixels stay; what a logical pixel is, and which
             // way up the picture is, changes.
+            log::debug!(
+                "the output {} is set to scale {scale} (was {}), turned {transform:?}",
+                record.name,
+                record.scale
+            );
             let device = record.mode;
             record.scale = scale;
             record.transform = transform;
@@ -1219,6 +1310,14 @@ impl State {
             .iter_mut()
             .find(|output| output.id == id)
         {
+            if output.mode != (width, height) {
+                log::debug!(
+                    "the output {} is now {width}x{height} device pixels ({}x{} logical)",
+                    output.name,
+                    logical.0,
+                    logical.1
+                );
+            }
             output.mode = (width, height);
             output.rect.width = logical.0;
             output.rect.height = logical.1;
@@ -1565,7 +1664,10 @@ impl State {
                 .map(|window| window.surface.clone()),
             self.xwm.as_mut(),
         ) {
-            let _ = xwm.raise_window(&window);
+            // (Each time the focus is settled: a failure is said once.)
+            static RAISE: crate::failing::Failing =
+                crate::failing::Failing::new("raising the focused X11 window for the X server");
+            RAISE.note(xwm.raise_window(&window));
         }
         let window_surface = focused
             .and_then(|id| self.desktop.windows.get(&id))
@@ -1679,6 +1781,7 @@ impl State {
                         window.initial_title = window.title.clone();
                         window.initial_app_id = window.app_id.clone();
                     }
+                    log::debug!("{} is shown (mapped)", self.window_named(id));
                     self.mapped(id);
                 } else if (old_width, old_height) != (size.w, size.h) && caught_up {
                     self.window_event(WindowEvent::Resized(id, size.w, size.h));
@@ -1690,6 +1793,10 @@ impl State {
             None if was_mapped => {
                 window.mapped = false;
                 self.desktop.needs_redraw = true;
+                log::debug!(
+                    "{} is hidden by its program (unmapped)",
+                    self.window_named(id)
+                );
                 self.window_event(WindowEvent::Unmapped(id));
             }
             None => {}
@@ -1837,8 +1944,52 @@ impl State {
 }
 
 impl State {
+    /// A window as the log names it: its number, its kind, its
+    /// application id and its title.
+    pub(crate) fn window_named(&self, id: WindowHandle) -> String {
+        match self.desktop.windows.get(&id) {
+            Some(window) => format!(
+                "{} window {} ({:?}, {:?})",
+                match window.surface {
+                    WindowSurface::Xdg(_) => "the",
+                    WindowSurface::X11(_) => "the X11",
+                },
+                id.0,
+                window.app_id,
+                window.title,
+            ),
+            None => format!("the window {} (no longer known)", id.0),
+        }
+    }
+
+    /// The client a surface belongs to, as the log names it.
+    pub(crate) fn client_named(&self, surface: &WlSurface) -> String {
+        match self.display.get_client(surface.id()) {
+            Ok(client) => named_client(&client),
+            Err(_) => "a client that has gone".to_string(),
+        }
+    }
+
+    /// A surface as the log names it: the window it is, the layer
+    /// surface it is (by its namespace), or else its client.
+    pub(crate) fn surface_named(&self, surface: &WlSurface) -> String {
+        if let Some(id) = self.desktop.id_of_surface(surface) {
+            return self.window_named(id);
+        }
+        let layer = self.outputs.iter().find_map(|(_, output)| {
+            smithay::desktop::layer_map_for_output(output)
+                .layer_for_surface(surface, smithay::desktop::WindowSurfaceType::TOPLEVEL)
+                .map(|layer| (layer.namespace().to_string(), output.name()))
+        });
+        match layer {
+            Some((namespace, output)) => format!("the layer surface {namespace:?} on {output}"),
+            None => format!("a surface of {}", self.client_named(surface)),
+        }
+    }
+
     /// A window is gone: the core hears of it, and its record is dropped.
     pub(crate) fn window_gone(&mut self, id: WindowHandle) {
+        log::debug!("{} is closed", self.window_named(id));
         self.forget_window_icon(id);
         let was_mapped = match self.desktop.windows.get_mut(&id) {
             Some(window) => {
@@ -2101,7 +2252,9 @@ impl XdgShellHandler for State {
             .client()
             .and_then(|client| client.get_credentials(&self.display).ok())
             .and_then(|credentials| u32::try_from(credentials.pid).ok());
-        self.desktop.track(WindowSurface::Xdg(surface), pid);
+        let who = self.client_named(surface.wl_surface());
+        let id = self.desktop.track(WindowSurface::Xdg(surface), pid);
+        log::debug!("{who} made the window {} (not shown until it draws)", id.0);
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
@@ -2119,6 +2272,13 @@ impl XdgShellHandler for State {
     }
 
     fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
+        match surface.get_parent_surface() {
+            Some(parent) => log::debug!("a popup of {} is opened", self.surface_named(&parent)),
+            None => log::debug!(
+                "a popup of {} is opened, waiting for its layer surface",
+                self.client_named(surface.wl_surface())
+            ),
+        }
         let geometry = self.popup_geometry(&surface, &positioner);
         surface.with_pending_state(|state| {
             state.geometry = geometry;
@@ -2136,6 +2296,13 @@ impl XdgShellHandler for State {
         }
     }
 
+    fn popup_destroyed(&mut self, surface: PopupSurface) {
+        log::debug!(
+            "a popup of {} is closed",
+            self.client_named(surface.wl_surface())
+        );
+    }
+
     /// A menu asks for the keyboard and for the pointer to stay with its
     /// program: keys go to the menu, a press on anything of another program
     /// (or on nothing) dismisses it.
@@ -2150,13 +2317,16 @@ impl XdgShellHandler for State {
         // While the session is locked no program takes the keyboard by
         // a menu of its own: what is typed then is a password.
         if self.locked {
+            log::debug!("a popup's grab is refused: the session is locked");
             surface.send_popup_done();
             return;
         }
         let popup = PopupKind::Xdg(surface);
         let Ok(root) = find_popup_root_surface(&popup) else {
+            log::debug!("a popup's grab is refused: it belongs to no surface any more");
             return;
         };
+        let root_named = self.surface_named(&root);
         let mut grab = match self
             .popups
             .grab_popup(KeyTarget::Wl(root), popup, &seat, serial)
@@ -2172,6 +2342,7 @@ impl XdgShellHandler for State {
                 && !(keyboard.has_grab(serial)
                     || keyboard.has_grab(grab.previous_serial().unwrap_or(serial)))
             {
+                log::debug!("a popup's grab is refused: the keyboard is held by another grab");
                 grab.ungrab(PopupUngrabStrategy::All);
                 return;
             }
@@ -2183,11 +2354,13 @@ impl XdgShellHandler for State {
                 && !(pointer.has_grab(serial)
                     || pointer.has_grab(grab.previous_serial().unwrap_or_else(|| grab.serial())))
             {
+                log::debug!("a popup's grab is refused: the pointer is held by another grab");
                 grab.ungrab(PopupUngrabStrategy::All);
                 return;
             }
             pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
         }
+        log::debug!("a popup of {root_named} has the keyboard and the pointer");
         self.popup_grab = Some(grab);
     }
 
@@ -2293,6 +2466,19 @@ impl SeatHandler for State {
     /// the clipboard.
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&KeyTarget>) {
         use smithay::wayland::seat::WaylandFocus;
+        match focused {
+            Some(KeyTarget::Wl(surface)) => {
+                log::debug!("the keyboard goes to {}", self.surface_named(surface))
+            }
+            Some(KeyTarget::X11(window)) => match self
+                .desktop
+                .id_of(&WindowSurface::X11(window.clone()))
+            {
+                Some(id) => log::debug!("the keyboard goes to {}", self.window_named(id)),
+                None => log::debug!("the keyboard goes to an X11 window ({:?})", window.class()),
+            },
+            None => log::debug!("the keyboard goes to no surface"),
+        }
         let client = focused
             .and_then(|target| target.wl_surface())
             .and_then(|surface| self.display.get_client(surface.id()).ok());
@@ -2336,6 +2522,13 @@ impl SelectionHandler for State {
         source: Option<smithay::wayland::selection::SelectionSource>,
         _seat: Seat<Self>,
     ) {
+        match &source {
+            Some(source) => log::debug!(
+                "a Wayland client put something on the {target:?} selection ({} kinds of data)",
+                source.mime_types().len()
+            ),
+            None => log::debug!("the {target:?} selection is emptied"),
+        }
         if let Some(xwm) = self.xwm.as_mut() {
             if let Err(error) = xwm.new_selection(target, source.map(|source| source.mime_types()))
             {
@@ -2438,6 +2631,20 @@ impl ClientDndGrabHandler for State {
         icon: Option<WlSurface>,
         _seat: Seat<Self>,
     ) {
+        log::debug!(
+            "a drag begins ({} kinds of data, {})",
+            source.as_ref().map_or(0, |source| {
+                smithay::wayland::selection::data_device::with_source_metadata(source, |data| {
+                    data.mime_types.len()
+                })
+                .unwrap_or(0)
+            }),
+            if icon.is_some() {
+                "with a picture"
+            } else {
+                "with no picture"
+            },
+        );
         // (What its program said of its place before the drag began.)
         self.drag_icon_offset = icon.as_ref().map_or((0, 0), buffer_moved);
         self.drag_icon = icon;
@@ -2449,7 +2656,19 @@ impl ClientDndGrabHandler for State {
         self.desktop.needs_redraw = true;
     }
 
-    fn dropped(&mut self, _target: Option<WlSurface>, _validated: bool, _seat: Seat<Self>) {
+    fn dropped(&mut self, target: Option<WlSurface>, validated: bool, _seat: Seat<Self>) {
+        match &target {
+            Some(target) => log::debug!(
+                "a drag is let go over {} ({})",
+                self.surface_named(target),
+                if validated {
+                    "it takes the drop"
+                } else {
+                    "it does not take the drop"
+                },
+            ),
+            None => log::debug!("a drag is let go over nothing that takes it"),
+        }
         self.drag_icon = None;
         self.drag_icon_offset = (0, 0);
         self.dragged = None;
@@ -2484,14 +2703,17 @@ impl ServerDndGrabHandler for State {
     }
 
     fn dropped(&mut self, _seat: Seat<Self>) {
+        log::debug!("an X11 program's drag is let go over a Wayland window");
         self.x_drag_let_go(None);
     }
 
     fn cancelled(&mut self, _seat: Seat<Self>) {
+        log::debug!("an X11 program's drag over a Wayland window is cancelled");
         self.x_drag_let_go(Some(false));
     }
 
     fn finished(&mut self, _seat: Seat<Self>) {
+        log::debug!("an X11 program's drag is finished: the Wayland window has the data");
         self.x_drag_done(true);
     }
 }

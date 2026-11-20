@@ -424,6 +424,7 @@ mod bus {
                 .map(|name| name.to_string())
                 .unwrap_or_default();
             let Some((service, path)) = registered(service, &sender) else {
+                log::debug!("tray: {sender} registered {service:?}, which is no icon's name");
                 return;
             };
             if let Ok(work) = self.work.lock() {
@@ -488,13 +489,15 @@ mod bus {
                 anyhow::anyhow!("the tray could not take its name on the bus: {error}")
             })?;
         // Programs that looked for a host before now find one.
-        let _ = connection.emit_signal(
+        if let Err(error) = connection.emit_signal(
             Option::<&str>::None,
             WATCHER_PATH,
             WATCHER,
             "StatusNotifierHostRegistered",
             &(),
-        );
+        ) {
+            log::debug!("tray: programs were not told that there is a host: {error}");
+        }
 
         // What icons say of themselves, and who leaves the bus.
         let changes = zbus::blocking::MessageIterator::for_match_rule(
@@ -582,6 +585,7 @@ mod bus {
                             match known.iter_mut().find(|icon| icon.item.key == key) {
                                 Some(place) => *place = icon,
                                 None => {
+                                    log::debug!("tray: {key} is added");
                                     known.push(icon);
                                     let _ = connection.emit_signal(
                                         Option::<&str>::None,
@@ -624,6 +628,7 @@ mod bus {
                                 .partition(|icon| icon.owner == name || icon.service == name);
                             known = kept;
                             for icon in gone {
+                                log::debug!("tray: {} is removed: its program left the bus", icon.item.key);
                                 let _ = connection.emit_signal(
                                     Option::<&str>::None,
                                     WATCHER_PATH,

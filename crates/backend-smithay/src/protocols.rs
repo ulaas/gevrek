@@ -354,9 +354,10 @@ impl WlrLayerShellHandler for State {
         &mut self,
         surface: WlrLayerSurface,
         output: Option<WlOutput>,
-        _layer: Layer,
+        layer: Layer,
         namespace: String,
     ) {
+        let named = output.is_some();
         // On the output the client named, else the one the pointer is on.
         let output = output.as_ref().and_then(Output::from_resource).or_else(|| {
             let at_pointer = gevrek_engine::Desktop::output_at_cursor(&self.desktop);
@@ -367,8 +368,21 @@ impl WlrLayerShellHandler for State {
                 .map(|(_, output)| output.clone())
         });
         let Some(output) = output else {
+            log::debug!(
+                "the layer surface {namespace:?} ({layer:?}) is not shown: there is no display"
+            );
             return;
         };
+        log::debug!(
+            "{} made the layer surface {namespace:?} ({layer:?}) on {}{}",
+            self.client_named(surface.wl_surface()),
+            output.name(),
+            if named {
+                ""
+            } else {
+                ", the display it did not name"
+            },
+        );
         let mut map = layer_map_for_output(&output);
         if let Err(error) = map.map_layer(&LayerSurface::new(surface, namespace)) {
             log::warn!("layer surface: {error:?}");
@@ -404,6 +418,10 @@ impl WlrLayerShellHandler for State {
             None => positioner.get_geometry(),
         };
         popup.with_pending_state(|state| state.geometry = geometry);
+        log::debug!(
+            "the popup is given {}",
+            self.surface_named(parent.wl_surface())
+        );
         if let Err(error) = popup.send_configure() {
             log::debug!("popup configure: {error:?}");
         }
@@ -418,6 +436,11 @@ impl WlrLayerShellHandler for State {
                 .find(|layer| layer.layer_surface() == &surface)
                 .cloned()?;
             map.unmap_layer(&layer);
+            log::debug!(
+                "the layer surface {:?} on {} is closed",
+                layer.namespace(),
+                output.name()
+            );
             Some((*id, output.clone()))
         });
         if self.layer_focus.as_ref() == Some(&wl_surface) {
@@ -450,8 +473,22 @@ impl XdgActivationHandler for State {
         let from_user_action = token_data.serial.is_some();
         self.activation_state.remove_token(&token);
         let Some(id) = self.desktop.id_of_surface(&surface) else {
+            log::debug!(
+                "{} asked for the focus for a surface that is no window: left as it is",
+                self.surface_named(&surface)
+            );
             return;
         };
+        log::debug!(
+            "{} asks for the focus (token {}, {})",
+            self.window_named(id),
+            if fresh { "fresh" } else { "too old" },
+            if from_user_action {
+                "made from a user action"
+            } else {
+                "made from no user action"
+            },
+        );
         self.activation_requested(id, fresh, from_user_action);
     }
 }
@@ -492,6 +529,10 @@ impl State {
             return false;
         }
         if !self.desktop.shown(id) {
+            log::debug!(
+                "{} is not given the focus: it is not shown",
+                self.window_named(id)
+            );
             return false;
         }
         self.focus_window(id);
@@ -530,11 +571,19 @@ impl FractionalScaleHandler for State {
 
 impl IdleInhibitHandler for State {
     fn inhibit(&mut self, surface: WlSurface) {
+        log::debug!(
+            "{} keeps the session from going idle",
+            self.surface_named(&surface)
+        );
         self.idle_inhibitors.insert(surface);
         self.sync_idle_inhibit();
     }
 
     fn uninhibit(&mut self, surface: WlSurface) {
+        log::debug!(
+            "{} no longer keeps the session from going idle",
+            self.surface_named(&surface)
+        );
         self.idle_inhibitors.remove(&surface);
         self.sync_idle_inhibit();
     }

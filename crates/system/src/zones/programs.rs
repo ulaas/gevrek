@@ -113,7 +113,7 @@ impl Kept {
     /// The pinned programs, in the person's order. Nothing where the
     /// file is not there or cannot be read.
     pub fn pins(&self) -> Vec<String> {
-        text(&self.pins).and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default()
+        text(&self.pins).and_then(|text| understood(&self.pins, serde_json::from_str(&text))).unwrap_or_default()
     }
 
     /// Write the pinned programs down, whole or not at all.
@@ -129,17 +129,32 @@ impl Kept {
 
     /// How often each program was started.
     pub fn counts(&self) -> HashMap<String, u32> {
-        text(&self.counts).and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default()
+        text(&self.counts).and_then(|text| understood(&self.counts, serde_json::from_str(&text))).unwrap_or_default()
     }
 
     /// The programs started last, the newest first.
     pub fn recent(&self) -> Vec<String> {
-        text(&self.recent).and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default()
+        text(&self.recent).and_then(|text| understood(&self.recent, serde_json::from_str(&text))).unwrap_or_default()
     }
 }
 
+/// What a file of ours holds; nothing where it is not there, and (said
+/// in the log) where it cannot be read.
 fn text(file: &Path) -> Option<String> {
-    std::fs::read_to_string(file).ok()
+    match std::fs::read_to_string(file) {
+        Ok(text) => Some(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            log::debug!("zones: {} cannot be read: {error}", file.display());
+            None
+        }
+    }
+}
+
+/// What was read of a file as JSON; nothing (said in the log) where it
+/// is not understood.
+fn understood<T>(file: &Path, parsed: serde_json::Result<T>) -> Option<T> {
+    parsed.inspect_err(|error| log::debug!("zones: {} is not understood, and is taken as empty: {error}", file.display())).ok()
 }
 
 /// The name of a program's file without its folders and its ending, as

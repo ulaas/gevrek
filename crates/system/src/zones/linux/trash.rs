@@ -194,7 +194,9 @@ impl Trash {
                 Ok(()) => Ok(Trashed { info, file: kept }),
                 Err(error) => {
                     // The file stays where it was; no note without one.
-                    let _ = std::fs::remove_file(&info);
+                    if let Err(again) = std::fs::remove_file(&info) {
+                        log::debug!("zones: the trash's note {} is left without its file: {again}", info.display());
+                    }
                     Err(error)
                 }
             };
@@ -277,7 +279,9 @@ impl Trash {
             std::fs::create_dir_all(folder)?;
         }
         std::fs::rename(&trashed.file, original)?;
-        let _ = std::fs::remove_file(&trashed.info);
+        if let Err(error) = std::fs::remove_file(&trashed.info) {
+            log::debug!("zones: the trash's note {} stays after its file came back: {error}", trashed.info.display());
+        }
         Ok(())
     }
 

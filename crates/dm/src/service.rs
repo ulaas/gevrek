@@ -131,14 +131,26 @@ fn start_worker(order: &Order) -> anyhow::Result<(Child, Answer, std::process::C
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()?;
+    log::debug!(
+        "a worker (process {}) for the {:?} session of {}",
+        child.id(),
+        order.kind,
+        order.user
+    );
     let mut to = child.stdin.take().expect("a pipe to the worker");
     writeln!(to, "{}", serde_json::to_string(order)?)?;
     let mut line = String::new();
     BufReader::new(child.stdout.take().expect("a pipe from the worker")).read_line(&mut line)?;
-    let answer = serde_json::from_str(&line)
-        .unwrap_or_else(|_| Answer::no("The session could not be opened."));
+    let answer: Answer = serde_json::from_str(&line).unwrap_or_else(|error| {
+        log::debug!("the worker's answer was not understood: {error}");
+        Answer::no("The session could not be opened.")
+    });
+    log::debug!("the worker answered: {}", if answer.ok { "yes" } else { "no" });
     if !answer.ok {
-        let _ = child.wait();
+        match child.wait() {
+            Ok(status) => log::debug!("the worker that said no ended: {status}"),
+            Err(error) => log::debug!("the worker that said no was not waited for: {error}"),
+        }
     }
     Ok((child, answer, to))
 }
@@ -200,7 +212,10 @@ fn keep_greeter(socket: PathBuf) {
             Ok((mut worker, answer, _to)) if answer.ok => {
                 log::info!("the greeter is started");
                 GREETER.store(worker.id() as i32, Ordering::SeqCst);
-                let _ = worker.wait();
+                match worker.wait() {
+                    Ok(status) => log::info!("the greeter ended: {status}"),
+                    Err(error) => log::warn!("the greeter was not waited for: {error}"),
+                }
                 GREETER.store(0, Ordering::SeqCst);
             }
             Ok((_, answer, _)) => log::error!("the greeter was not started: {}", answer.why),
@@ -208,6 +223,7 @@ fn keep_greeter(socket: PathBuf) {
         }
         if started.elapsed() < TOO_SOON {
             failures += 1;
+            log::debug!("the greeter did not stay: {failures} of {TRIES} tries");
             // (A boot splash that still has the display keeps the
             // greeter from it.)
             if failures < TRIES {
@@ -289,11 +305,14 @@ impl Machine for TheMachine {
     fn veil(&self) {
         let greeter = GREETER.load(Ordering::SeqCst);
         if greeter > 0 {
+            log::debug!("the login is asked to go under its veil");
             // SAFETY: a signal to the service's own child.
             unsafe {
                 libc::kill(greeter, libc::SIGUSR1);
             }
             std::thread::sleep(FOR_THE_VEIL);
+        } else {
+            log::debug!("no greeter to go under its veil");
         }
     }
 
@@ -309,7 +328,10 @@ impl Machine for TheMachine {
 
     fn go(&self, session: &mut Self::Session) {
         if let Some(mut go) = session.1.take() {
-            let _ = writeln!(go, "go");
+            match writeln!(go, "go") {
+                Ok(()) => log::debug!("the session's worker is told to begin"),
+                Err(error) => log::warn!("the session's worker was not told to begin: {error}"),
+            }
         }
     }
 
@@ -319,10 +341,17 @@ impl Machine for TheMachine {
     }
 
     fn power(&self, restart: bool) -> bool {
-        Command::new("systemctl")
-            .arg(if restart { "reboot" } else { "poweroff" })
-            .status()
-            .is_ok_and(|status| status.success())
+        let asked = if restart { "reboot" } else { "poweroff" };
+        match Command::new("systemctl").arg(asked).status() {
+            Ok(status) => {
+                log::info!("systemctl {asked}: {status}");
+                status.success()
+            }
+            Err(error) => {
+                log::warn!("systemctl {asked} did not start: {error}");
+                false
+            }
+        }
     }
 
     fn shown(&self) {
@@ -340,8 +369,10 @@ fn login<M: Machine>(
     running: &Arc<AtomicBool>,
 ) -> Answer {
     if running.swap(true, Ordering::SeqCst) {
+        log::debug!("no login for {user}: a session is running already");
         return Answer::no("A session is running already.");
     }
+    log::debug!("the greeter asks for a session of {user}");
     let order = Order {
         kind: Kind::User,
         user: user.clone(),
@@ -359,6 +390,7 @@ fn login<M: Machine>(
         }
     };
     if !answer.ok {
+        log::debug!("{user} has no session: {}", answer.why);
         running.store(false, Ordering::SeqCst);
         return answer;
     }
@@ -375,6 +407,7 @@ fn login<M: Machine>(
     let machine = Arc::clone(machine);
     std::thread::spawn(move || {
         machine.wait(session, &user);
+        log::debug!("back to the greeter on console {GREETER_CONSOLE}");
         machine.show(GREETER_CONSOLE);
         machine.release(SESSION_CONSOLE);
         running.store(false, Ordering::SeqCst);
@@ -384,8 +417,10 @@ fn login<M: Machine>(
 
 fn power(machine: &impl Machine, restart: bool, running: &AtomicBool) -> Answer {
     if running.load(Ordering::SeqCst) {
+        log::debug!("the machine is not switched off: a session is running");
         return Answer::no("A session is running.");
     }
+    log::debug!("the greeter asks to {}", if restart { "restart" } else { "switch off" });
     if machine.power(restart) {
         Answer::yes()
     } else {
@@ -409,10 +444,21 @@ fn answer_to<M: Machine>(machine: &Arc<M>, line: &str, running: &Arc<AtomicBool>
         Ok(Ask::Login { user, password }) => login(machine, user, password, running),
         Ok(Ask::Power { restart }) => power(&**machine, restart, running),
         Ok(Ask::Shown) => {
+            log::debug!("the greeter has drawn its first picture");
             machine.shown();
             Answer::yes()
         }
-        Err(_) => Answer::no("That was not understood."),
+        Err(error) => {
+            // (Not what it said, nor the parser's words, which quote it:
+            // it could hold a password.)
+            log::debug!(
+                "the greeter's line was not understood ({} bytes, {:?} at column {})",
+                line.len(),
+                error.classify(),
+                error.column()
+            );
+            Answer::no("That was not understood.")
+        }
     }
 }
 
@@ -423,20 +469,29 @@ fn serve(stream: UnixStream, greeter_uid: u32, running: &Arc<AtomicBool>) {
         log::warn!("a connection that is not the greeter's is refused");
         return;
     }
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-    let Ok(reader) = stream.try_clone() else {
-        return;
+    if let Err(error) = stream.set_read_timeout(Some(Duration::from_secs(10))) {
+        log::debug!("the greeter's connection has no time limit: {error}");
+    }
+    let reader = match stream.try_clone() {
+        Ok(reader) => reader,
+        Err(error) => {
+            log::debug!("the greeter's connection was not read: {error}");
+            return;
+        }
     };
     let Some(line) = line_of(reader) else {
+        log::debug!("the greeter's connection ended with nothing read");
         return;
     };
     let answer = answer_to(&Arc::new(TheMachine), &line, running);
     let mut stream = stream;
-    let _ = writeln!(
+    if let Err(error) = writeln!(
         stream,
         "{}",
         serde_json::to_string(&answer).unwrap_or_default()
-    );
+    ) {
+        log::debug!("the greeter was not answered: {error}");
+    }
 }
 
 pub fn run() -> anyhow::Result<()> {
@@ -470,7 +525,13 @@ pub fn run() -> anyhow::Result<()> {
         .name("gevrek-dm-greeter".to_string())
         .spawn(move || keep_greeter(greeter_socket))?;
     for stream in listener.incoming() {
-        let Ok(stream) = stream else { continue };
+        let stream = match stream {
+            Ok(stream) => stream,
+            Err(error) => {
+                log::debug!("a connection to the service was not taken: {error}");
+                continue;
+            }
+        };
         let running = Arc::clone(&running);
         let uid = greeter.uid();
         std::thread::spawn(move || serve(stream, uid, &running));

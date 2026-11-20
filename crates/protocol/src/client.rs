@@ -88,7 +88,12 @@ impl WMClient {
 
     /// Connect to the WM server (single attempt)
     pub async fn connect(addr: String) -> Result<Self> {
-        let client = WindowManagerClient::new(Self::connect_channel(&addr).await?);
+        log::debug!("connecting to the window manager at {addr}");
+        let channel = Self::connect_channel(&addr).await.inspect_err(|error| {
+            log::debug!("the window manager at {addr} could not be reached: {error:#}")
+        })?;
+        log::debug!("connected to the window manager at {addr}");
+        let client = WindowManagerClient::new(channel);
         Ok(Self {
             client,
             address: addr,
@@ -110,12 +115,14 @@ impl WMClient {
 
         loop {
             attempts += 1;
-            log::debug!("Connection attempt {} to {}", attempts, addr);
+            log::debug!("connecting to the window manager at {addr} (attempt {attempts})");
 
             match Self::connect_channel(&addr).await {
                 Ok(channel) => {
                     if attempts > 1 {
-                        log::info!("Successfully connected after {} attempts", attempts);
+                        log::info!("connected to the window manager at {addr} after {attempts} attempts");
+                    } else {
+                        log::debug!("connected to the window manager at {addr}");
                     }
                     return Ok(Self {
                         client: WindowManagerClient::new(channel),
@@ -125,7 +132,9 @@ impl WMClient {
                 Err(e) => {
                     // Check if we've exhausted retry attempts
                     if config.max_attempts > 0 && attempts >= config.max_attempts {
-                        log::error!("Failed to connect after {} attempts: {}", attempts, e);
+                        log::error!(
+                            "the window manager at {addr} could not be reached in {attempts} attempts: {e:#}"
+                        );
                         return Err(anyhow::anyhow!(
                             "Connection failed after {} attempts: {}",
                             attempts,
@@ -134,10 +143,7 @@ impl WMClient {
                     }
 
                     log::warn!(
-                        "Connection attempt {} failed: {}. Retrying in {:?}...",
-                        attempts,
-                        e,
-                        current_delay
+                        "attempt {attempts} to reach the window manager at {addr} failed, tried again in {current_delay:?}: {e:#}"
                     );
 
                     // Sleep before next retry
@@ -158,9 +164,15 @@ impl WMClient {
 
     /// Reconnect to the WM server (useful after connection drops)
     pub async fn reconnect(&mut self) -> Result<()> {
-        log::info!("Attempting to reconnect to {}", self.address);
-        self.client = WindowManagerClient::new(Self::connect_channel(&self.address).await?);
-        log::info!("Reconnected successfully");
+        log::info!("reconnecting to the window manager at {}", self.address);
+        let channel = Self::connect_channel(&self.address).await.inspect_err(|error| {
+            log::debug!(
+                "the window manager at {} could not be reached again: {error:#}",
+                self.address
+            )
+        })?;
+        self.client = WindowManagerClient::new(channel);
+        log::info!("reconnected to the window manager at {}", self.address);
         Ok(())
     }
 

@@ -63,7 +63,9 @@ mod windows_main {
         enable_per_monitor_dpi_awareness();
         let args = Args::parse();
 
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
+        gevrek_logging::Logging::new("gevrek-wm", log::LevelFilter::Info)
+            .config(Some(gevrek_model::paths::resolve_config(args.config.clone()).0))
+            .init();
 
         log::info!("=== Gevrek Window Manager Runtime Starting ===");
         // `gevrek stop` of another instance must not take this one for its own.

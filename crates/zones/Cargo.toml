@@ -16,3 +16,4 @@ gevrek-model = { path = "../model" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true }
+log = { workspace = true }

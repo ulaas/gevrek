@@ -353,7 +353,7 @@ impl Executor {
                 )
                 .is_ok()
             {
-                let _ = effect(
+                try_effect(
                     window_manager,
                     Effect::Border {
                         id: handle,
@@ -416,7 +416,7 @@ impl Executor {
             },
         )?;
         effect(window_manager, Effect::Focus(Some(next_window)))?;
-        let _ = effect(
+        try_effect(
             window_manager,
             Effect::Border {
                 id: next_window,
@@ -562,7 +562,7 @@ impl Executor {
         .map_err(|_| anyhow::anyhow!("The monitor has no active workspace"))?;
         self.apply_changes(window_manager, changes);
         for window in &reveal.hidden {
-            let _ = effect(
+            try_effect(
                 window_manager,
                 Effect::Border {
                     id: *window,
@@ -587,7 +587,7 @@ impl Executor {
                 .rect(*window)
                 .map_err(anyhow::Error::msg)
             {
-                let _ = effect(
+                try_effect(
                     window_manager,
                     Effect::Configure {
                         id: *window,
@@ -649,7 +649,7 @@ impl Executor {
             self.resolve_monitor_target(window_manager, monitor_manager, &target)?;
         self.focused_monitor = Some(target_monitor);
         self.focus_on_output(window_manager, monitor_manager, target_monitor)?;
-        log::info!("Focused monitor using selector '{}'", target.expression());
+        log::debug!("Focused monitor using selector '{}'", target.expression());
         Ok(())
     }
 
@@ -665,7 +665,7 @@ impl Executor {
             .handle;
         self.focused_monitor = Some(monitor);
         self.focus_on_output(window_manager, monitor_manager, monitor)?;
-        log::info!("Focused the monitor under the cursor");
+        log::debug!("Focused the monitor under the cursor");
         Ok(())
     }
 
@@ -687,7 +687,7 @@ impl Executor {
         // Even when the workspace was already active, land keyboard focus on
         // its window so the command always focuses the target monitor.
         self.focus_on_output(window_manager, monitor_manager, monitor)?;
-        log::info!(
+        log::debug!(
             "Focused workspace '{}' on monitor '{}'",
             workspace.expression(),
             target.expression()
@@ -757,7 +757,7 @@ impl Executor {
         if let Some(window) = focus {
             effect(window_manager, Effect::Focus(Some(window)))?;
         }
-        log::info!(
+        log::debug!(
             "Moved active workspace to monitor using selector '{}'",
             target.expression()
         );
@@ -845,7 +845,7 @@ impl Executor {
         if let Some(window) = source_focus {
             effect(window_manager, Effect::Focus(Some(window)))?;
         }
-        log::info!(
+        log::debug!(
             "Swapped active workspaces using monitor selector '{}'",
             target.expression()
         );
@@ -1282,7 +1282,7 @@ impl Executor {
                 })
                 .collect();
             for window in &asleep {
-                let _ = effect(
+                try_effect(
                     window_manager,
                     Effect::State {
                         id: *window,
@@ -1324,7 +1324,7 @@ impl Executor {
                         height,
                     };
                     log::info!("Window {window:?} was on no display ({rect:?}): it is put at {found:?}");
-                    let _ = effect(
+                    try_effect(
                         window_manager,
                         Effect::Configure {
                             id: window,
@@ -1379,8 +1379,8 @@ impl Executor {
             // all the same: nothing of the workspace that went keeps it.
             None => self.focus_on_output(window_manager, monitor_manager, monitor)?,
         }
-        log::info!(
-            "Switched workspace using selector '{}'",
+        log::debug!(
+            "the display {monitor:?} shows workspace {target} instead of {current} (asked as '{}')",
             selector.expression()
         );
         self.prune_non_persistent_workspace(monitor_manager, monitor, current);
@@ -1480,7 +1480,7 @@ impl Executor {
             return;
         };
         if monitor_manager.remove_inactive_empty_workspace(monitor, index) {
-            log::info!("Removed empty non-persistent workspace '{}'", name);
+            log::debug!("Removed empty non-persistent workspace '{}'", name);
             self.emit_workspace_event(RuntimeEventKind::WorkspaceDestroyed, monitor, &name, false);
         }
     }
@@ -1515,7 +1515,7 @@ impl Executor {
             crate::layouts::LayoutType::BSP,
             true,
         )?;
-        log::info!("Created workspace '{}' at index {}", name, index);
+        log::debug!("Created workspace '{}' at index {}", name, index);
         Ok(())
     }
 
@@ -1531,6 +1531,7 @@ impl Executor {
             .active_monitor(window_manager, monitor_manager)
             .ok_or_else(|| anyhow::anyhow!("Could not determine the active monitor"))?;
         let closed = workspaces::close_focused_workspace(monitor_manager, monitor)?;
+        log::debug!("the workspace '{closed}' on {monitor:?} was closed");
         let persistent = self
             .profile_on(monitor_manager, monitor, &closed)
             .is_some_and(|profile| profile.persistent);
@@ -1619,7 +1620,7 @@ impl Executor {
             .get_workspaces(monitor)
             .is_some_and(|workspaces| workspaces.iter().any(|workspace| workspace.is_called(name)));
         if exists {
-            log::info!(
+            log::debug!(
                 "Workspace '{}' already exists on monitor {:?}",
                 name,
                 monitor
@@ -1649,7 +1650,7 @@ impl Executor {
             layout.unwrap_or(crate::layouts::LayoutType::BSP),
             true,
         )?;
-        log::info!(
+        log::debug!(
             "Ensured workspace '{}' exists on monitor {:?}",
             name,
             monitor
@@ -1673,7 +1674,7 @@ impl Executor {
             .get_focused_workspace_mut(monitor)
             .ok_or_else(|| anyhow::anyhow!("The active monitor has no focused workspace"))?;
         let behaviour = workspace.toggle_window_container_behaviour();
-        log::info!(
+        log::debug!(
             "Window container behaviour for workspace '{}' is now {}",
             workspace.name,
             behaviour.display_name()
@@ -1699,7 +1700,7 @@ impl Executor {
             .and_then(|workspaces| workspaces.get_mut(index))
             .ok_or_else(|| anyhow::anyhow!("The selected workspace no longer exists"))?;
         let behaviour = workspace.toggle_window_container_behaviour();
-        log::info!(
+        log::debug!(
             "Window container behaviour for workspace '{}' is now {} (selector '{}')",
             workspace.name,
             behaviour.display_name(),
@@ -1750,7 +1751,7 @@ impl Executor {
         }
         // Shown on the visible workspace, hidden otherwise.
         self.apply_changes(window_manager, changes);
-        log::info!(
+        log::debug!(
             "Moved selected window {:?} using workspace selector '{}' ({})",
             window,
             selector.expression(),
@@ -1861,7 +1862,7 @@ impl Executor {
             self.focused_monitor = Some(target_monitor);
             effect(window_manager, Effect::Focus(Some(window)))?;
         }
-        log::info!(
+        log::debug!(
             "Moved window {:?} to monitor using selector '{}' ({})",
             window,
             target.expression(),

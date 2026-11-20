@@ -289,6 +289,24 @@ impl Server {
 
 /// The connection, once made; made again when it broke.
 static SERVER: Mutex<Option<Server>> = Mutex::new(None);
+/// Whether the last try to connect came through (said when it changes,
+/// not at each asking: the panel asks every few seconds).
+static CONNECTED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Say how the connection stands, when that is another than before.
+fn say_connected(now: bool) {
+    let was = CONNECTED.swap(
+        if now { 1 } else { 2 },
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    if was != if now { 1 } else { 2 } {
+        if now {
+            log::debug!("connected to the sound server");
+        } else {
+            log::debug!("there is no sound server to connect to (or it does not let gevrek in)");
+        }
+    }
+}
 
 /// Do something on the connection. `None`: there is no server (the
 /// caller asks another way), or it did not answer: the connection is
@@ -301,11 +319,14 @@ fn with<T>(deed: impl Fn(&mut Server) -> Option<T>) -> Option<T> {
     // again once.)
     for _ in 0..2 {
         if kept.is_none() {
-            *kept = Some(Server::connect()?);
+            let made = Server::connect();
+            say_connected(made.is_some());
+            *kept = Some(made?);
         }
         if let Some(answer) = kept.as_mut().and_then(&deed) {
             return Some(answer);
         }
+        log::trace!("the sound server did not answer: the connection is made anew");
         *kept = None;
     }
     None

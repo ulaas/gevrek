@@ -459,6 +459,26 @@ fn effect(window_manager: &mut dyn Desktop, effect: Effect) -> Result<()> {
     window_manager.apply(&effect)
 }
 
+/// An effect whose failure stops nothing that follows: what went wrong is
+/// said (at trace for a border that follows its window, which is asked
+/// for with each move), and the rest goes on.
+fn try_effect(window_manager: &mut dyn Desktop, effect: Effect) {
+    if let Err(error) = window_manager.apply(&effect) {
+        let level = if matches!(
+            effect,
+            Effect::Border {
+                change: BorderChange::Follow,
+                ..
+            }
+        ) {
+            log::Level::Trace
+        } else {
+            log::Level::Debug
+        };
+        log::log!(level, "{effect:?} was not carried out: {error:#}");
+    }
+}
+
 /// The monitor most of a window is on.
 fn monitor_of(
     desktop: &dyn Desktop,

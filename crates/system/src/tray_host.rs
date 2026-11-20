@@ -128,6 +128,7 @@ fn take(list: &mut Vec<Kept>, told: &Told, stamp: u64) -> bool {
         // Taken away.
         (2, Some(at)) => {
             list.remove(at);
+            log::debug!("tray: icon {} of window {} is removed", told.id, told.window);
             true
         }
         // The way presses are told.
@@ -168,6 +169,7 @@ fn take(list: &mut Vec<Kept>, told: &Told, stamp: u64) -> bool {
                     true
                 }
                 None => {
+                    log::debug!("tray: icon {} of window {} is added", told.id, told.window);
                     list.push(kept);
                     true
                 }
@@ -585,6 +587,10 @@ mod windows {
                             .kept
                             .retain(|kept| IsWindow(HWND(kept.window as usize as *mut _)).as_bool());
                         if listening.kept.len() != before {
+                            log::debug!(
+                                "tray: {} icons are removed: their windows are gone",
+                                before - listening.kept.len()
+                            );
                             tell(listening);
                         }
                     }

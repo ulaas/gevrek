@@ -73,7 +73,7 @@ pub fn apply_layout_command(
                 layouts.len() - 1
             };
             workspace.layout = layouts[(current + step) % layouts.len()];
-            log::info!(
+            log::debug!(
                 "Cycled to layout {:?} on workspace {}",
                 workspace.layout,
                 workspace.name
@@ -91,7 +91,7 @@ pub fn apply_layout_command(
         RotateLayout => workspace.layout_rotation = (workspace.layout_rotation + 1) % 4,
         FlipLayout { axis } => {
             workspace.toggle_layout_flip(*axis);
-            log::info!(
+            log::debug!(
                 "Layout flip: horizontal {}, vertical {}",
                 on_off(workspace.layout_flip_horizontal),
                 on_off(workspace.layout_flip_vertical),
@@ -99,7 +99,7 @@ pub fn apply_layout_command(
         }
         ToggleMonocle => {
             let active = workspace.toggle_monocle()?;
-            log::info!(
+            log::debug!(
                 "Monocle {} for workspace '{}'",
                 enabled(active),
                 workspace.name
@@ -107,7 +107,7 @@ pub fn apply_layout_command(
         }
         ToggleLayoutLock => {
             workspace.layout_locked = !workspace.layout_locked;
-            log::info!(
+            log::debug!(
                 "Layout resize lock {} for workspace '{}'",
                 enabled(workspace.layout_locked),
                 workspace.name,
@@ -146,7 +146,7 @@ pub fn apply_layout_command(
                 right: (*right).clamp(0, 10_000),
                 bottom: (*bottom).clamp(0, 10_000),
             };
-            log::info!(
+            log::debug!(
                 "Work-area offset for workspace '{}' set to {},{},{},{}",
                 workspace.name,
                 workspace.work_area_offset.left,
@@ -162,12 +162,12 @@ pub fn apply_layout_command(
         CycleDwindleDirection => {
             let direction = workspace.cycle_dwindle_direction();
             forget_splits_unless_preserved(workspace);
-            log::info!("Dwindle split policy is now {}", direction.display_name());
+            log::debug!("Dwindle split policy is now {}", direction.display_name());
         }
         ToggleDwindlePreserveSplit => {
             workspace.dwindle_preserve_split = !workspace.dwindle_preserve_split;
             forget_splits_unless_preserved(workspace);
-            log::info!(
+            log::debug!(
                 "Dwindle preserve split {}",
                 enabled(workspace.dwindle_preserve_split)
             );
