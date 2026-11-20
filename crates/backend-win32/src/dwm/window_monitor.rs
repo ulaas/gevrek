@@ -434,10 +434,16 @@ unsafe extern "system" fn win_event_proc(
     let window_events =
         match event {
             EVENT_OBJECT_SHOW => {
+                let mut seen_before = false;
                 if let Some(geometry) = read_window_geometry(hwnd) {
-                    LAST_WINDOW_GEOMETRY.with(|rects| {
-                        rects.borrow_mut().insert(handle, geometry);
-                    });
+                    seen_before = LAST_WINDOW_GEOMETRY
+                        .with(|rects| rects.borrow_mut().insert(handle, geometry).is_some());
+                }
+                // A window that opens on another display than the one
+                // with the keyboard is not seen there (`veil`). Not one
+                // gevrek itself shows again.
+                if !seen_before && !super::hidden_journal::is_hidden(handle) {
+                    super::veil::window_opens(hwnd);
                 }
                 vec![WindowEvent::Created(handle)]
             }

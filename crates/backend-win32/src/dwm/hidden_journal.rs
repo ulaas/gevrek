@@ -299,6 +299,8 @@ pub fn hidden_handles() -> Vec<WindowHandle> {
 /// thread, including a panic hook or a console control handler. Returns the
 /// number of windows that were still alive and got unhidden.
 pub fn emergency_restore() -> usize {
+    // (And what was kept from sight as it opened: `veil`.)
+    super::veil::lift_all();
     let Some(mut journal) = lock_for_emergency() else {
         log::error!("Hidden-window journal is busy; could not restore hidden windows");
         return 0;

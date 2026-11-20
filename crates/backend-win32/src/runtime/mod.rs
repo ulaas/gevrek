@@ -970,6 +970,9 @@ impl Runtime {
             pass_times.mark(std::time::Instant::now());
             // Poll window events
             let before_poll = std::time::Instant::now();
+            // (The windows kept from sight as they opened are seen when
+            // this pass, which is told of them now, is over: `veil`.)
+            crate::dwm::veil::events_taken();
             let mut events = self.window_monitor.poll_events();
             let poll_duration = before_poll.elapsed();
             // A window that opens while the mouse button is held (a tab
@@ -1424,6 +1427,16 @@ impl Runtime {
             if let Err(e) = self.window_manager.tick_runtime_animations() {
                 log::error!("Error advancing runtime animations: {}", e);
             }
+            // A window that opened on another display stands where it
+            // belongs now, and is seen; the next one that opens is
+            // measured against the display that has the keyboard now.
+            crate::dwm::veil::pass_ended();
+            crate::dwm::veil::set_keyboard_display(
+                self.core
+                    .executor
+                    .focused_monitor()
+                    .map_or(0, |display| display.0 as isize),
+            );
             // (What this pass hid and showed is in the journal's file.)
             crate::dwm::hidden_journal::flush();
             // (After the windows were put where they are for this pass.)

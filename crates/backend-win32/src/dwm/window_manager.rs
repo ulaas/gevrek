@@ -230,6 +230,11 @@ pub fn workspace_ways(
     }
 }
 
+/// How long the windows of a workspace that gives way stay shown where
+/// nothing moves (`begin_workspace_transition`): until those of the one
+/// that comes are drawn.
+const HELD_FOR_THE_NEXT: Duration = Duration::from_millis(120);
+
 /// The windows of a workspace that gives way to another, between being
 /// asked to hide and being hidden.
 #[derive(Clone, Default)]
@@ -3863,8 +3868,17 @@ impl WindowManager {
         };
         // (With motion reduced the windows are put in their places at once:
         // nothing may be moved aside first that is then not brought in.)
+        //
+        // The old one's windows stay where they are a moment longer, and
+        // are hidden when the new one's are there (`finish_going_out`).
+        // Hidden at once, they were gone before the others were drawn
+        // (every window is hidden and shown by its own program, when it
+        // gets to it), and the bare desktop was seen between the two.
         if !self.animation_scheduler.moves(TransitionScope::Workspace) {
-            hide_at_once(self, &waiting);
+            let until = Instant::now() + HELD_FOR_THE_NEXT;
+            for (handle, home) in waiting {
+                self.going_out.leaving.insert(handle, (home, None, until));
+            }
             return Ok(false);
         }
         let displays: Vec<(i32, i32, i32, i32)> = crate::dwm::monitor::all_displays()
@@ -7274,7 +7288,9 @@ impl WindowManager {
                 std::mem::size_of::<u32>() as u32,
             )
             .is_ok()
-                && cloaked != 0;
+                && cloaked != 0
+                // (Not one gevrek keeps from sight until it is placed.)
+                && !super::veil::holds(hwnd);
 
             Some(RuleWindowInfo {
                 handle,
@@ -7355,7 +7371,9 @@ unsafe fn eligible_window_info(hwnd: HWND) -> Option<WindowInfo> {
         std::mem::size_of::<u32>() as u32,
     )
     .is_ok()
-        && cloaked != 0;
+        && cloaked != 0
+        // (Not one gevrek keeps from sight until it is placed: `veil`.)
+        && !super::veil::holds(hwnd);
     if is_cloaked {
         return None;
     }
@@ -8458,6 +8476,58 @@ mod exit_animation_tests {
         window_manager.show_window(window).unwrap();
         messages_are_heard();
         assert_eq!(window_manager.get_window_rect(window).unwrap(), home);
+        unsafe {
+            let _ = DestroyWindow(HWND(window.0 as _));
+        }
+    }
+
+    /// Where nothing moves, the windows of a workspace that gives way
+    /// stay shown until those of the one that comes are there: hidden at
+    /// once, the bare desktop was seen between the two.
+    #[test]
+    fn where_nothing_moves_a_workspace_stays_until_the_next_is_there() {
+        let _alone = crate::runtime::test_support::alone_with_the_journal();
+        use windows::Win32::UI::WindowsAndMessaging::DestroyWindow;
+        let mut window_manager = WindowManager::new();
+        use super::HELD_FOR_THE_NEXT;
+        // (As with the workspace's animation switched off.)
+        window_manager.set_animation_profile(crate::settings::AnimationProfile {
+            workspace: crate::settings::AnimationChannelProfile::new(
+                false,
+                400,
+                crate::settings::AnimationCurve::Linear,
+            ),
+            ..workspace_slide_profile(false, false)
+        });
+        assert!(!window_manager.animation_scheduler.moves(super::TransitionScope::Workspace));
+        let window = shown_window_out_of_sight();
+        let home = Rect::new(-30000, -30000, 600, 400);
+        window_manager.batch_move_resize(&[(window, home)]).unwrap();
+
+        window_manager.workspace_gives_way();
+        window_manager.hide_window(window).unwrap();
+        let _ = window_manager.begin_workspace_transition(&[], 800, 0);
+        window_manager.tick_runtime_animations().unwrap();
+        messages_are_heard();
+        assert!(is_shown(window), "still there while the next one comes");
+
+        std::thread::sleep(HELD_FOR_THE_NEXT + Duration::from_millis(20));
+        window_manager.tick_runtime_animations().unwrap();
+        messages_are_heard();
+        assert!(!is_shown(window), "and hidden when it is");
+        assert!(window_manager.going_out.leaving.is_empty());
+        assert_eq!(window_manager.hidden_place(window), Some(home));
+
+        // Shown again before its time was over, it stays.
+        window_manager.show_window(window).unwrap();
+        window_manager.workspace_gives_way();
+        window_manager.hide_window(window).unwrap();
+        let _ = window_manager.begin_workspace_transition(&[], 800, 0);
+        window_manager.show_window(window).unwrap();
+        std::thread::sleep(HELD_FOR_THE_NEXT + Duration::from_millis(20));
+        window_manager.tick_runtime_animations().unwrap();
+        messages_are_heard();
+        assert!(is_shown(window));
         unsafe {
             let _ = DestroyWindow(HWND(window.0 as _));
         }
