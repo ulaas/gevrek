@@ -2372,13 +2372,41 @@ impl WindowManager {
         }
     }
 
-    /// Restore a minimized window to its normal state
-    /// Uses SW_RESTORE which properly restores from minimized state
+    /// Bring a minimized window back, without giving it the keyboard:
+    /// whoever asks for it gives the keyboard to the window that is to
+    /// have it.
+    ///
+    /// `SW_RESTORE` gives the keyboard to the window it brings back. A
+    /// workspace whose windows had minimized themselves while it was away
+    /// (Windows Terminal's do, when they are hidden) had them brought
+    /// back one after the other as it was shown: each took the keyboard
+    /// in its turn, and the border of the focused window went from one to
+    /// the next before it came to the window that was to have it.
     pub fn restore_window(&self, handle: WindowHandle) -> Result<()> {
         unsafe {
             let hwnd = handle.to_hwnd();
             if IsWindow(hwnd).as_bool() && IsIconic(hwnd).as_bool() {
-                show_window_nonblocking(hwnd, SW_RESTORE);
+                let mut placement = WINDOWPLACEMENT {
+                    length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+                    ..Default::default()
+                };
+                let to_maximized = GetWindowPlacement(hwnd, &mut placement).is_ok()
+                    && placement.flags.contains(WPF_RESTORETOMAXIMIZED);
+                show_window_nonblocking(hwnd, restore_command(to_maximized));
+                if !to_maximized {
+                    // (Minimized, it went below every window, and brought
+                    // back without the keyboard it stays there: it is
+                    // put above, as it was when it took the keyboard.)
+                    let _ = super::reach::set_window_pos(
+                        hwnd,
+                        Some(HWND_TOP),
+                        0,
+                        0,
+                        0,
+                        0,
+                        nonblocking_swp(hwnd, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE),
+                    );
+                }
                 log::debug!("Restored minimized window: {:?}", handle);
             }
         }
@@ -6692,6 +6720,19 @@ fn move_must_be_posted(hwnd: HWND) -> bool {
     false
 }
 
+/// How a minimized window is brought back. Without the keyboard
+/// (`SW_SHOWNOACTIVATE`), except one that was maximized before it was
+/// minimized: that way of showing would bring it back at its plain size,
+/// and Windows has no way to bring a window back maximized that leaves
+/// the keyboard where it is.
+fn restore_command(to_maximized: bool) -> SHOW_WINDOW_CMD {
+    if to_maximized {
+        SW_RESTORE
+    } else {
+        SW_SHOWNOACTIVATE
+    }
+}
+
 /// `ShowWindow` that never blocks on a hung window. Kept synchronous for
 /// responsive windows: a posted restore/maximize would be processed after the
 /// layout's (sent) positioning and undo it.
@@ -6730,6 +6771,21 @@ fn window_to_activate(hwnd: HWND) -> HWND {
 /// owners should Windows ever hand one out.
 const OWNER_DEPTH: usize = 8;
 
+/// Whether a window of this class that belongs to another is hidden and
+/// shown with it. None of gevrek's own is, and not the window a console
+/// keeps for the programs that run in a terminal.
+///
+/// Every tab of Windows Terminal has such a window (nothing of it is
+/// seen), and the console tells the terminal when it is hidden or shown:
+/// the terminal then minimizes itself, or comes back. Hidden with its
+/// terminal as a workspace went, each terminal of that workspace
+/// minimized itself a moment later, and Windows gave the keyboard to
+/// another window each time: the focus went to and fro on the workspace
+/// that had come.
+fn goes_with_its_owner(class: &str) -> bool {
+    !class.starts_with("Gevrek_") && class != "PseudoConsoleWindow"
+}
+
 /// The top-level windows on the screen that belong to `owner`, directly or
 /// through one another, lowest first. None of gevrek's own.
 fn owned_windows_on_screen(owner: HWND) -> Vec<HWND> {
@@ -6751,7 +6807,7 @@ fn owned_windows_on_screen(owner: HWND) -> Vec<HWND> {
         }
         for _ in 0..OWNER_DEPTH {
             if above == search.owner {
-                if !read_window_class(hwnd).starts_with("Gevrek_") {
+                if goes_with_its_owner(&read_window_class(hwnd)) {
                     search.found.push(hwnd);
                 }
                 break;
@@ -7602,6 +7658,29 @@ mod alpha_compatibility_tests {
             window_alpha_action(180, false, false),
             WindowAlphaAction::ApplyLayered
         );
+    }
+}
+
+#[cfg(test)]
+mod restore_tests {
+    use super::{goes_with_its_owner, restore_command};
+    use windows::Win32::UI::WindowsAndMessaging::{SW_RESTORE, SW_SHOWNOACTIVATE};
+
+    #[test]
+    fn a_minimized_window_is_brought_back_without_the_keyboard() {
+        assert_eq!(restore_command(false), SW_SHOWNOACTIVATE);
+    }
+
+    #[test]
+    fn the_window_a_console_keeps_is_not_hidden_with_its_terminal() {
+        assert!(!goes_with_its_owner("PseudoConsoleWindow"));
+        assert!(!goes_with_its_owner("Gevrek_Border"));
+        assert!(goes_with_its_owner("#32770"), "a dialog goes with its window");
+    }
+
+    #[test]
+    fn one_that_was_maximized_comes_back_maximized() {
+        assert_eq!(restore_command(true), SW_RESTORE);
     }
 }
 
