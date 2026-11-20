@@ -317,8 +317,14 @@ mod tests {
         let mut reader = Reader::default();
         let mut types = Types::default();
         let read = reader.read(&recent, &opened, &mut types, MOST);
-        let seen: Vec<(&str, ItemKind, Option<u64>)> =
-            read.items.iter().map(|item| (item.name.as_str(), item.kind, item.facts.accessed)).collect();
+        // (Told by the files they are, not by the names they are shown
+        // with: the shell leaves the ending away where Explorer is set to
+        // hide the endings of known types, as it is on a new Windows.)
+        let seen: Vec<(&str, ItemKind, Option<u64>)> = read
+            .items
+            .iter()
+            .map(|item| (gevrek_zones::paths::file_name(item.id.as_str()), item.kind, item.facts.accessed))
+            .collect();
         // The newest first; what is gone is not shown; each file once.
         assert_eq!(
             seen,
@@ -348,7 +354,7 @@ mod tests {
         // that alone is news. No more than asked for are given.
         written(&recent.join("old.lnk"), 1_700_001_000);
         let then = reader.read(&recent, &opened, &mut types, 2);
-        assert_eq!(then.items.iter().map(|item| item.name.as_str()).collect::<Vec<_>>(), ["old.txt", "new.png"]);
+        assert_eq!(then.items.iter().map(|item| gevrek_zones::paths::file_name(item.id.as_str())).collect::<Vec<_>>(), ["old.txt", "new.png"]);
         assert_eq!(then.opened_anew, [file("old.txt")]);
         assert_eq!(opened.at(&file("old.txt")), Some(1_700_001_000));
         let _ = std::fs::remove_dir_all(&root);

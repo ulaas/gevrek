@@ -401,11 +401,18 @@ mod tests {
         }
     }
 
-    /// The names in the listing that was told last; nothing in it where
+    /// The name of the file an item is. (Not the name it is shown with:
+    /// the shell leaves the ending away where Explorer is set to hide the
+    /// endings of known types, as it is on a new Windows.)
+    fn file_of(item: &gevrek_zones::item::Item) -> &str {
+        gevrek_zones::paths::file_name(item.id.as_str())
+    }
+
+    /// The files in the listing that was told last; nothing in it where
     /// the last word was that the folder is away.
     fn last_listing(all: &[BackendEvent]) -> Option<Vec<String>> {
         all.iter().rev().find_map(|event| match event {
-            BackendEvent::Listed { items, .. } => Some(items.iter().map(|item| item.name.clone()).collect()),
+            BackendEvent::Listed { items, .. } => Some(items.iter().map(|item| file_of(item).to_string()).collect()),
             BackendEvent::ListingFailed { .. } => Some(Vec::new()),
             _ => None,
         })
@@ -464,7 +471,7 @@ mod tests {
         until(&news, &wakes, &mut all, |_| portal.reach() == Reach::There);
         std::fs::write(format!("{shown}\\a.txt"), b"a").expect("written");
         until(&news, &wakes, &mut all, |all| {
-            all.iter().any(|event| matches!(event, BackendEvent::ItemAdded { item, .. } if item.name == "a.txt"))
+            all.iter().any(|event| matches!(event, BackendEvent::ItemAdded { item, .. } if file_of(item) == "a.txt"))
                 || last_listing(all) == Some(vec!["a.txt".to_string()])
         });
 
@@ -480,7 +487,7 @@ mod tests {
         until(&news, &wakes, &mut all, |all| {
             portal.reach() == Reach::There
                 && (last_listing(all) == Some(vec!["b.txt".to_string()])
-                    || all.iter().any(|event| matches!(event, BackendEvent::ItemAdded { item, .. } if item.name == "b.txt")))
+                    || all.iter().any(|event| matches!(event, BackendEvent::ItemAdded { item, .. } if file_of(item) == "b.txt")))
         });
         let known: Vec<ItemId> = portal.seen.lock().expect("seen").items().into_iter().map(|item| item.id).collect();
         assert_eq!(known, [ItemId::new(format!("{shown}\\b.txt"))]);

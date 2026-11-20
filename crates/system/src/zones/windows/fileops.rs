@@ -457,20 +457,35 @@ fn recycle_bin() -> Vec<Recycled> {
             else {
                 continue;
             };
-            // (The bin shows a thing by the whole path it had.)
-            let shown = lying
-                .GetDisplayName(SIGDN_NORMALDISPLAY)
-                .map(|shown| taken(shown))
-                .unwrap_or_default();
             // The shell's own time of the deleting is whole seconds. The
             // note the bin keeps beside each thing (`$I...` beside
             // `$R...`) was written at that moment and says it finer.
-            let noted = note_of(&lies_at)
+            let note = note_of(&lies_at);
+            let noted = note
+                .as_deref()
                 .and_then(|note| std::fs::metadata(note).ok())
                 .and_then(|note| note.modified().ok());
+            // The name it had is read from that note, which holds the
+            // whole path. What the bin shows it by is that path too, but
+            // without the name's ending where Explorer is set to hide
+            // the endings of known types (as it is on a new Windows):
+            // `kept.txt` was then looked for as `kept` and not found, and
+            // nothing that was deleted by an earlier run could be put
+            // back. Only where the note cannot be read is what the bin
+            // shows taken.
+            let had = note
+                .as_deref()
+                .and_then(|note| std::fs::read(note).ok())
+                .and_then(|note| path_in_note(&note))
+                .unwrap_or_else(|| {
+                    lying
+                        .GetDisplayName(SIGDN_NORMALDISPLAY)
+                        .map(|shown| taken(shown))
+                        .unwrap_or_default()
+                });
             found.push(Recycled {
                 from,
-                name: paths::file_name(&shown).to_string(),
+                name: paths::file_name(&had).to_string(),
                 at: (noted, lying.GetFileTime(&DELETED_AT).map(ticks).unwrap_or(0)),
                 lies_at,
             });
@@ -484,6 +499,31 @@ fn note_of(lies_at: &str) -> Option<std::path::PathBuf> {
     let lying = std::path::Path::new(lies_at);
     let rest = lying.file_name()?.to_str()?.strip_prefix("$R")?;
     Some(lying.with_file_name(format!("$I{rest}")))
+}
+
+/// The path a thing had before it was deleted, as the bin's note of it
+/// says (the `$I...` file). The note begins with three numbers of eight
+/// bytes (its kind, the thing's size, when it was deleted); then, in the
+/// kind Windows 10 and later write (2), the length of the path and the
+/// path, and in the older kind (1) the path alone, in room for 260
+/// letters. Nothing for a note that is not so.
+fn path_in_note(note: &[u8]) -> Option<String> {
+    let kind = u64::from_le_bytes(note.get(..8)?.try_into().ok()?);
+    let letters = match kind {
+        1 => note.get(24..)?,
+        2 => {
+            let length = u32::from_le_bytes(note.get(24..28)?.try_into().ok()?) as usize;
+            note.get(28..)?.get(..length.checked_mul(2)?)?
+        }
+        _ => return None,
+    };
+    let units: Vec<u16> = letters
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .take_while(|unit| *unit != 0)
+        .collect();
+    let path = String::from_utf16(&units).ok()?;
+    (!path.is_empty()).then_some(path)
 }
 
 /// Where in the Recycle Bin the file lies that was last deleted from
@@ -672,6 +712,37 @@ mod tests {
         ));
     }
 
+    /// The bin's note of a deleted thing holds the whole path it had,
+    /// the name's ending with it, in both kinds Windows writes.
+    #[test]
+    fn the_bins_note_says_the_path_a_thing_had() {
+        let path = "C:\\Users\\ada\\Desktop\\kept for later.txt";
+        let letters = |with_end: bool| -> Vec<u8> {
+            path.encode_utf16()
+                .chain(with_end.then_some(0))
+                .flat_map(u16::to_le_bytes)
+                .collect()
+        };
+        let head = |kind: u64| -> Vec<u8> {
+            [kind, 5, 133_000_000_000_000_000].iter().flat_map(|number| number.to_le_bytes()).collect()
+        };
+        // The kind of Windows 10 and later: the length, then the path.
+        let mut new = head(2);
+        new.extend((path.encode_utf16().count() as u32 + 1).to_le_bytes());
+        new.extend(letters(true));
+        assert_eq!(path_in_note(&new).as_deref(), Some(path));
+        // The older kind: the path in room for 260 letters.
+        let mut old = head(1);
+        old.extend(letters(true));
+        old.resize(24 + 520, 0);
+        assert_eq!(path_in_note(&old).as_deref(), Some(path));
+        // What is no such note.
+        assert_eq!(path_in_note(&head(3)), None);
+        assert_eq!(path_in_note(&new[..30]), None);
+        assert_eq!(path_in_note(b"short"), None);
+        assert_eq!(path_in_note(&head(2)), None);
+    }
+
     #[test]
     fn what_was_deleted_is_found_in_the_recycle_bin_by_another_run() {
         let root = folder("recycle");
@@ -685,6 +756,11 @@ mod tests {
         std::fs::write(&file, b"second").expect("written");
         let undo = shell.perform(&FileOperation::Trash { path: file.clone() }).expect("deleted");
         assert!(names(&root).is_empty());
+        // The bin's own note of it says the path it had, whole: that is
+        // what it is found by, however Explorer is set to show names.
+        let lying = in_recycle_bin(&file).expect("in the bin");
+        let note = std::fs::read(note_of(&lying).expect("a note beside it")).expect("the note is read");
+        assert!(same_path(&path_in_note(&note).expect("a path in the note"), &file));
         let mut another_run = FileOperations { quiet: true, ..Default::default() };
         let again = another_run.perform(&undo).expect("put back");
         assert_eq!(again, FileOperation::Trash { path: file.clone() });
