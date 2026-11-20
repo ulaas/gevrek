@@ -2426,6 +2426,32 @@ fn the_floating_layout_leaves_a_window_with_a_place_of_its_own_where_it_is() {
     assert_eq!(desktop.window(palette).rect, place, "nobody else was moved");
 }
 
+/// A window that comes to a workspace under the Floating layout has a
+/// border, as one that was tiled before the layout was set has: it was
+/// floated before a border was ever drawn around it, and left without.
+#[test]
+fn a_window_that_comes_under_the_floating_layout_has_a_border() {
+    let (mut core, mut desktop) = setup(&["one"]);
+    core.monitor_manager
+        .get_focused_workspace_mut(OUTPUT)
+        .expect("workspace")
+        .border_enabled = true;
+    command(
+        &mut core,
+        &mut desktop,
+        DispatchCommand::SetLayout {
+            layout: LayoutType::Floating,
+        },
+    );
+    let editor = open(&mut core, &mut desktop, "editor");
+    assert!(core.monitor_manager.is_window_floating(editor));
+    assert!(
+        desktop.decorated.iter().any(|(window, _)| *window == editor),
+        "no border was drawn around it: {:?}",
+        desktop.decorated
+    );
+}
+
 // ---- floating windows that are moved to another display --------------------
 
 /// Two displays, an editor that is tiled and a viewer that floats, both on

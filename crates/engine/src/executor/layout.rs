@@ -379,6 +379,53 @@ impl Executor {
         }
     }
 
+    /// The windows the Floating layout floated that have no border get
+    /// the one floating windows have.
+    ///
+    /// A tiled window gets its border when it is put in its tile, and a
+    /// window that comes to a workspace under the Floating layout is
+    /// floated before it ever is: `dress_for_floating` only dresses anew
+    /// what has a border, so such a window was left without one, while
+    /// one a rule floats had it.
+    fn dress_floated_by_layout(
+        workspace: &mut crate::workspace::Workspace,
+        window_manager: &mut dyn Desktop,
+    ) {
+        if !workspace.border_enabled || workspace.invisible_borders.enabled {
+            return;
+        }
+        let bare: Vec<WindowHandle> = workspace
+            .floating_windows
+            .iter()
+            .copied()
+            .filter(|window| workspace.floated_by_layout.contains(window))
+            .filter(|window| {
+                let desktop = queries(window_manager);
+                !desktop.has_border(*window)
+                    && desktop.exists(*window)
+                    && !desktop.is_minimized(*window)
+                    && !desktop.is_decoration(*window)
+            })
+            .collect();
+        for window in bare {
+            let focused = queries(window_manager).active_window() == Some(window);
+            if !Self::dress_window(workspace, window_manager, window, true, focused) {
+                continue;
+            }
+            // (On a workspace that is not shown the window is hidden, and
+            // its border with it.)
+            if window_manager.is_hidden_by_backend(window) {
+                let _ = effect(
+                    window_manager,
+                    Effect::Border {
+                        id: window,
+                        change: BorderChange::Visible(false),
+                    },
+                );
+            }
+        }
+    }
+
     /// Draw a window's border (and glow) as its workspace says for a
     /// tiled or a floating window, and remember which it was. Returns
     /// whether the window has a border now.
@@ -544,6 +591,7 @@ impl Executor {
         Self::dress_for_floating(workspace, window_manager);
         let (floated, retiled) = workspace.sync_floating_layout();
         Self::dress_for_floating(workspace, window_manager);
+        Self::dress_floated_by_layout(workspace, window_manager);
         for (windows, shown) in [(floated, true), (retiled, false)] {
             for window in windows {
                 effect(

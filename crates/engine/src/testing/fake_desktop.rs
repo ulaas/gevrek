@@ -66,6 +66,9 @@ pub struct FakeDesktop {
     pub hides_later: bool,
     /// Asked to hide and not hidden yet (`hides_later`).
     pub hiding: Vec<WindowHandle>,
+    /// The windows a border was drawn around, and whether it was the one
+    /// floating windows have, for each time one was drawn.
+    pub decorated: Vec<(WindowHandle, bool)>,
     next_window: isize,
 }
 
@@ -85,6 +88,7 @@ impl FakeDesktop {
             button_down: false,
             hides_later: false,
             hiding: Vec::new(),
+            decorated: Vec::new(),
             next_window: 100,
         }
     }
@@ -491,20 +495,22 @@ impl Desktop for FakeDesktop {
 
     fn decorate_window(
         &mut self,
-        _id: WindowHandle,
-        _look: &crate::workspace::BorderLook,
+        id: WindowHandle,
+        look: &crate::workspace::BorderLook,
         _is_focused: bool,
     ) -> anyhow::Result<()> {
+        self.decorated.push((id, look.floating));
         Ok(())
     }
 
     fn decorate_window_at(
         &mut self,
-        _id: WindowHandle,
+        id: WindowHandle,
         _at: Rect,
-        _look: &crate::workspace::BorderLook,
+        look: &crate::workspace::BorderLook,
         _is_focused: bool,
     ) -> anyhow::Result<()> {
+        self.decorated.push((id, look.floating));
         Ok(())
     }
 
