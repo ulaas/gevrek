@@ -208,6 +208,11 @@ fn keep_greeter(socket: PathBuf) {
         }
         if started.elapsed() < TOO_SOON {
             failures += 1;
+            // (A boot splash that still has the display keeps the
+            // greeter from it.)
+            if failures < TRIES {
+                crate::splash::let_go_again();
+            }
         } else {
             failures = 0;
         }

@@ -69,22 +69,43 @@ pub fn ending(keep_picture: bool) -> &'static [&'static str] {
     }
 }
 
-/// Before the first greeter: a splash that is running lets go of the
-/// display. Comes back when it has (its end has been shown).
-pub fn let_go() {
-    if !plymouth(&["--ping"], Duration::from_secs(2)) {
-        return;
-    }
-    THERE.store(true, Ordering::SeqCst);
+/// Where a running plymouthd writes its process number (what systemd's
+/// units ask as well).
+const PID_FILE: &str = "/run/plymouth/pid";
+
+/// Whether a splash is running. Its file says so without asking it: a
+/// splash busy drawing on a slow display can be late to answer
+/// `--ping` (seen taking more than two seconds on a machine with two
+/// displays), and a splash taken for none keeps the display from the
+/// greeter.
+fn running() -> bool {
+    std::path::Path::new(PID_FILE).exists() || plymouth(&["--ping"], TO_LET_GO)
+}
+
+/// Tell the splash to let go of the display; whether it did.
+fn deactivate() -> bool {
     let since = Instant::now();
     if plymouth(&["deactivate"], TO_LET_GO) {
         log::info!(
             "the boot splash has let go of the display ({} ms)",
             since.elapsed().as_millis()
         );
+        true
     } else {
         log::warn!("the boot splash did not let go of the display");
+        false
     }
+}
+
+/// Before the first greeter: a splash that is running lets go of the
+/// display. Comes back when it has (its end has been shown).
+pub fn let_go() {
+    if !running() {
+        log::info!("there is no boot splash");
+        return;
+    }
+    THERE.store(true, Ordering::SeqCst);
+    deactivate();
     std::thread::spawn(|| {
         std::thread::sleep(GREETER_LATE);
         if THERE.load(Ordering::SeqCst) {
@@ -94,6 +115,14 @@ pub fn let_go() {
             end(true);
         }
     });
+}
+
+/// After a greeter that did not come up: a splash that may still have
+/// the display is told again to let go of it.
+pub fn let_go_again() {
+    if THERE.load(Ordering::SeqCst) {
+        deactivate();
+    }
 }
 
 /// End the splash, if there is one still (once: afterwards this does
