@@ -7,6 +7,7 @@ use super::ring::Ring;
 use crate::WindowHandle;
 use gevrek_model::graph::BorderStyle;
 pub use gevrek_model::layout::WindowContainerBehaviour;
+use gevrek_model::layout::WindowSizes;
 use gevrek_model::settings::StackbarProfile;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -292,6 +293,13 @@ pub struct Workspace {
     #[serde(default)]
     pub bsp_split_ratios: Vec<f32>,
 
+    /// The sizes the configuration gives the windows: what a scrolling
+    /// column is as wide as when it opens, what share Columns and Rows
+    /// start from, what BSP and Spiral keep at a split. A window resized
+    /// by hand keeps the size it was given.
+    #[serde(default)]
+    pub sizes: WindowSizes,
+
     /// Under the scrolling layout: the first column in view. It moves no
     /// more than it must to keep the focused column in view
     /// (`layouts::scrolling`).
@@ -461,6 +469,7 @@ impl Workspace {
             smallest_sizes: HashMap::new(),
             split_ratios: Vec::new(),
             bsp_split_ratios: Vec::new(),
+            sizes: WindowSizes::default(),
             scroll_first: 0,
             scroll_offset: 0,
             scroll_whole_columns: crate::layouts::scrolling_whole_columns_only(),
@@ -592,6 +601,35 @@ impl Workspace {
         self.split_ratios.clear();
     }
 
+    /// Columns and Rows: the shares of `count` windows that have not been
+    /// resized by hand: those the configuration gives them by their
+    /// place, else as much each as the others.
+    fn starting_shares(&self, count: usize) -> Vec<f32> {
+        let shares = self.sizes.shares(count);
+        if shares.len() == count {
+            shares
+        } else {
+            vec![1.0 / count.max(1) as f32; count]
+        }
+    }
+
+    /// Take the sizes the configuration gives the windows. When they are
+    /// other than those the workspace had, the windows are given them
+    /// anew, those resized by hand too: the configuration was changed to
+    /// be seen. False when they are the same.
+    pub fn set_sizes(&mut self, sizes: &WindowSizes) -> bool {
+        if self.sizes == *sizes {
+            return false;
+        }
+        self.sizes = sizes.clone();
+        self.split_ratios.clear();
+        self.bsp_split_ratios.clear();
+        for (place, container) in self.containers.elements_mut().iter_mut().enumerate() {
+            container.strip_width = self.sizes.column_width_at(place);
+        }
+        true
+    }
+
     #[cfg(test)]
     pub(crate) fn bsp_ratios(&self) -> &[f32] {
         &self.bsp_split_ratios
@@ -604,7 +642,8 @@ impl Workspace {
         let needed = container_count.saturating_sub(1);
         self.bsp_split_ratios.truncate(needed);
         while self.bsp_split_ratios.len() < needed {
-            self.bsp_split_ratios.push(BSP_DEFAULT_SPLIT_RATIO);
+            self.bsp_split_ratios
+                .push(self.sizes.split_share().unwrap_or(BSP_DEFAULT_SPLIT_RATIO));
         }
     }
 
@@ -629,7 +668,7 @@ impl Workspace {
             return;
         }
         if self.split_ratios.len() != count {
-            self.split_ratios = vec![1.0 / count as f32; count];
+            self.split_ratios = self.starting_shares(count);
         }
         let old_ratio = self.split_ratios[container_idx];
         let ratio_diff = new_ratio - old_ratio;
@@ -919,7 +958,7 @@ impl Workspace {
             return false;
         }
         if self.split_ratios.len() != count {
-            self.split_ratios = vec![1.0 / count as f32; count];
+            self.split_ratios = self.starting_shares(count);
         }
         let new_ratio =
             (self.split_ratios[container_idx] + delta_px as f32 / extent as f32).clamp(0.1, 0.9);
@@ -1014,8 +1053,14 @@ impl Workspace {
                     | LayoutType::UltrawideVerticalStack
             );
             if self.layout == LayoutType::Scrolling {
-                // Its column is beside the one with the keyboard.
-                let index = self.containers.focused_idx().saturating_add(1);
+                // Its column is beside the one with the keyboard, as wide
+                // as the configuration says a column at that place is.
+                let index = if self.containers.is_empty() {
+                    0
+                } else {
+                    self.containers.focused_idx().saturating_add(1)
+                };
+                container.strip_width = self.sizes.column_width_at(index);
                 self.containers.insert_at(index, container);
             } else if master_family {
                 match self.new_window_placement {
@@ -1027,6 +1072,7 @@ impl Workspace {
                     }
                 }
             } else {
+                container.strip_width = self.sizes.column_width_at(self.containers.len());
                 self.containers.push(container);
             }
             // Reset split_ratios since container count changed - stale ratios
@@ -1047,6 +1093,7 @@ impl Workspace {
         let mut container = Container::new(self.next_container_id);
         self.next_container_id += 1;
         container.add_window(handle);
+        container.strip_width = self.sizes.column_width_at(container_idx);
 
         // Insert at the specified index (preserves order)
         self.containers.insert_at(container_idx, container);
@@ -1427,13 +1474,20 @@ impl Workspace {
             dwindle_preserve_split: self.dwindle_preserve_split,
             dwindle_split_history: self.dwindle_split_history.clone(),
             bsp_split_ratios: self.bsp_split_ratios.clone(),
+            split: self.sizes.split_share(),
+        };
+        // (Columns and Rows: as resized by hand, else as configured.)
+        let shares = if self.split_ratios.len() == active_containers.len() {
+            self.split_ratios.clone()
+        } else {
+            self.sizes.shares(active_containers.len())
         };
         apply_layout_configured(
             self.layout,
             work_area,
             &mut active_containers,
             self.outer_gaps(),
-            &self.split_ratios,
+            &shares,
             config,
         );
 

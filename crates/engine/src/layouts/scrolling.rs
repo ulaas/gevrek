@@ -523,6 +523,76 @@ mod tests {
         assert_eq!(workspace.containers.get(1).unwrap().rect.width, 790);
     }
 
+    use gevrek_model::layout::WindowSizes;
+
+    #[test]
+    fn a_column_opens_as_wide_as_the_configuration_says() {
+        let mut workspace = free_strip(0);
+        workspace.set_sizes(&WindowSizes {
+            column_width: 0.4,
+            by_place: vec![0.7],
+            split: None,
+        });
+        for window in 1..=3 {
+            workspace.add_window(WindowHandle(window), true);
+            workspace.focus_window(WindowHandle(window));
+        }
+        workspace.focus_window(WindowHandle(1));
+        workspace.apply_layout(AREA);
+        let widths: Vec<i32> = workspace
+            .containers
+            .iter()
+            .map(|column| column.rect.width)
+            .collect();
+        assert_eq!(widths, [1400, 800, 800]);
+        // The first is wider than half: the second stands cut off at the
+        // display's edge, the third is out of view.
+        assert_eq!(in_view(&workspace), [1, 2]);
+        assert_eq!(
+            workspace.containers.get(1).unwrap().rect,
+            Rect::new(1400, 0, 800, 1000)
+        );
+        // Sizes changed in the configuration are given to the columns
+        // there are, those made wider by hand too.
+        assert!(workspace.set_column_width(2, 1200, AREA));
+        assert!(workspace.set_sizes(&WindowSizes::default()));
+        assert!(!workspace.set_sizes(&WindowSizes::default()));
+        workspace.apply_layout(AREA);
+        assert!(workspace
+            .containers
+            .iter()
+            .all(|column| column.rect.width == 1000));
+    }
+
+    #[test]
+    fn columns_rows_and_splits_start_from_the_configured_shares() {
+        let mut workspace = free_strip(3);
+        workspace.layout = LayoutType::Columns;
+        workspace.set_sizes(&WindowSizes {
+            by_place: vec![0.6],
+            ..WindowSizes::default()
+        });
+        workspace.apply_layout(AREA);
+        let widths: Vec<i32> = workspace
+            .containers
+            .iter()
+            .map(|column| column.rect.width)
+            .collect();
+        assert_eq!(widths, [1200, 400, 400]);
+        workspace.layout = LayoutType::Rows;
+        workspace.apply_layout(AREA);
+        assert_eq!(workspace.containers.get(0).unwrap().rect.height, 600);
+        // BSP: the first window keeps the share it is given at the split.
+        let mut bsp = free_strip(2);
+        bsp.layout = LayoutType::BSP;
+        bsp.set_sizes(&WindowSizes {
+            split: Some(0.7),
+            ..WindowSizes::default()
+        });
+        bsp.apply_layout(AREA);
+        assert_eq!(bsp.containers.get(0).unwrap().rect.width, 1400);
+    }
+
     #[test]
     fn under_another_layout_nothing_is_out_of_view() {
         let mut workspace = strip(4);

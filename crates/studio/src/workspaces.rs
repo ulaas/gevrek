@@ -21,7 +21,7 @@
 use crate::document::Document;
 use crate::form::Form;
 use egui::{RichText, Ui};
-use gevrek_model::layout::LayoutType;
+use gevrek_model::layout::{LayoutType, WindowSizes};
 use gevrek_model::settings::{
     DesktopConfig, DisplayRef, MonitorSelector, Titled,
 };
@@ -132,6 +132,11 @@ pub struct Line {
     pub name: String,
     pub label: String,
     pub layout: LayoutType,
+    /// How big its windows are, where the layout lets them be sized.
+    pub sizes: WindowSizes,
+    /// The master layouts' share and count (Dwindle: its first split).
+    pub master_ratio: f32,
+    pub master_count: usize,
     /// It stays when it is left empty.
     pub persistent: bool,
     /// The display starts with it.
@@ -193,6 +198,9 @@ pub fn lines(desktop: &DesktopConfig, display: Option<&DisplayRef>, live: &[Live
                 name: profile.name.trim().to_string(),
                 label: profile.label().to_string(),
                 layout: profile.layout,
+                sizes: profile.sizes.clone(),
+                master_ratio: profile.master_ratio,
+                master_count: profile.master_count,
                 persistent: profile.persistent,
                 starts: profile.default,
                 own,
@@ -222,6 +230,10 @@ pub enum Do {
     /// Shown by another title.
     Title(String, String),
     Layout(String, LayoutType),
+    /// Its windows are sized so.
+    Sizes(String, WindowSizes),
+    /// The master area's share, and how many windows are in it.
+    Master(String, f32, usize),
     /// It stays when it is left empty, or not.
     Persistent(String, bool),
     /// The display starts with it.
@@ -267,6 +279,28 @@ pub fn carry_out(
         }
         (Do::Layout(name, layout), None) => {
             desktop.edit_workspace(&name, |profile| profile.layout = layout);
+            Ok(())
+        }
+        (Do::Sizes(name, sizes), Some(display)) => {
+            desktop.edit_workspace_on(display, &name, |profile| profile.sizes = sizes.clone());
+            Ok(())
+        }
+        (Do::Sizes(name, sizes), None) => {
+            desktop.edit_workspace(&name, |profile| profile.sizes = sizes.clone());
+            Ok(())
+        }
+        (Do::Master(name, ratio, count), Some(display)) => {
+            desktop.edit_workspace_on(display, &name, |profile| {
+                profile.master_ratio = ratio;
+                profile.master_count = count;
+            });
+            Ok(())
+        }
+        (Do::Master(name, ratio, count), None) => {
+            desktop.edit_workspace(&name, |profile| {
+                profile.master_ratio = ratio;
+                profile.master_count = count;
+            });
             Ok(())
         }
         (Do::Persistent(name, keep), Some(display)) => {
@@ -556,6 +590,10 @@ impl Page {
                             }
                         });
                     });
+                    // How big its windows are, as its layout lets them be.
+                    if let Some(what) = sizes_row(ui, line) {
+                        todo.push(what);
+                    }
                     // What is to be said of it beside its settings, on a
                     // line of its own: nothing of it lies over a control.
                     let renamed = !same(&line.label, &line.name);
@@ -627,6 +665,10 @@ impl Page {
                                 "default",
                                 "persistent",
                                 "layout",
+                                // (Set on the line of sizes above.)
+                                "sizes",
+                                "master_ratio",
+                                "master_count",
                             ],
                         );
                     }
@@ -733,6 +775,10 @@ impl Page {
             return;
         };
         self.problem = None;
+        // Sizes are dragged: the frames of one drag are one step to undo.
+        let dragged = todo
+            .iter()
+            .all(|what| matches!(what, Do::Sizes(..) | Do::Master(..)));
         for what in todo {
             if let Do::Remove(name) | Do::Name(name, _) = &what {
                 if self.open.as_deref() == Some(name.as_str()) {
@@ -743,8 +789,238 @@ impl Page {
                 self.problem = Some(why);
             }
         }
+        if dragged {
+            if let Ok(workspaces) = serde_json::to_value(&changed.desktop.workspaces) {
+                document.set("/desktop/workspaces", workspaces);
+                return;
+            }
+        }
         document.load(&changed);
     }
+}
+
+/// What can be sized under a layout.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SizedBy {
+    /// Scrolling: the width a column opens with, and by place.
+    Strip,
+    /// Columns (widths) or Rows (heights), by place.
+    Places { across: bool },
+    /// The master area's share, and (`count`) how many are in it.
+    Master { count: bool },
+    /// Dwindle: the share kept at the first split (`master_ratio`).
+    FirstSplit,
+    /// BSP and Spiral: the share kept at every split.
+    Split,
+}
+
+impl SizedBy {
+    pub fn of(layout: LayoutType) -> Option<SizedBy> {
+        match layout {
+            LayoutType::Scrolling => Some(SizedBy::Strip),
+            LayoutType::Columns => Some(SizedBy::Places { across: true }),
+            LayoutType::Rows => Some(SizedBy::Places { across: false }),
+            LayoutType::MasterStack | LayoutType::CenteredMaster => {
+                Some(SizedBy::Master { count: true })
+            }
+            LayoutType::UltrawideVerticalStack => Some(SizedBy::Master { count: false }),
+            LayoutType::Dwindle => Some(SizedBy::FirstSplit),
+            LayoutType::BSP | LayoutType::Spiral => Some(SizedBy::Split),
+            LayoutType::Grid | LayoutType::Monocle | LayoutType::Floating => None,
+        }
+    }
+}
+
+/// A share as a whole percent, and back.
+fn percent(share: f32) -> i32 {
+    (share * 100.0).round() as i32
+}
+
+fn share(percent: i32) -> f32 {
+    percent as f32 / 100.0
+}
+
+/// A share in percent, dragged or typed.
+fn percent_box(ui: &mut Ui, value: &mut i32, range: std::ops::RangeInclusive<i32>, tip: &str) -> bool {
+    ui.add(
+        egui::DragValue::new(value)
+            .range(range)
+            .speed(0.5)
+            .suffix("%"),
+    )
+    .on_hover_text(tip)
+    .changed()
+}
+
+fn ordinal(place: usize) -> String {
+    let number = place + 1;
+    let suffix = match (number % 10, number % 100) {
+        (_, 11..=13) => "th",
+        (1, _) => "st",
+        (2, _) => "nd",
+        (3, _) => "rd",
+        _ => "th",
+    };
+    format!("{number}{suffix}")
+}
+
+/// The sizes of a workspace's windows, on a line of their own below its
+/// settings, as its layout lets them be sized. What was changed, if
+/// anything.
+fn sizes_row(ui: &mut Ui, line: &Line) -> Option<Do> {
+    let kind = SizedBy::of(line.layout)?;
+    let palette = theme::pal(ui.ctx());
+    let mut asked = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.add_space(46.0);
+        ui.label(RichText::new(icons::ARROWS_OUT_LINE_HORIZONTAL).color(palette.faint));
+        let mut sizes = line.sizes.clone();
+        let (least, most) = (percent(WindowSizes::RANGE.0), percent(WindowSizes::RANGE.1));
+        match kind {
+            SizedBy::Strip | SizedBy::Places { .. } => {
+                let mut changed = false;
+                if kind == SizedBy::Strip {
+                    ui.label("New columns");
+                    let mut width = percent(sizes.column_width);
+                    if percent_box(
+                        ui,
+                        &mut width,
+                        least..=most,
+                        "How wide a column is when its window opens, of the display's width. \
+                         Wider than half: the next column stands cut off at the display's edge \
+                         until the view moves to it.",
+                    ) {
+                        sizes.column_width = share(width);
+                        changed = true;
+                    }
+                    ui.add_space(8.0);
+                }
+                let (words, tip) = match kind {
+                    SizedBy::Places { across: false } => (
+                        "Heights",
+                        "Each row's height, of the display's, by its place. The rows after these share what is left.",
+                    ),
+                    SizedBy::Places { across: true } => (
+                        "Widths",
+                        "Each column's width, of the display's, by its place. The columns after these share what is left.",
+                    ),
+                    _ => (
+                        "By place",
+                        "The width of the column at this place, of the display's. The others open as wide as new columns.",
+                    ),
+                };
+                ui.label(words);
+                let mut gone = None;
+                for (place, value) in sizes.by_place.iter_mut().enumerate() {
+                    ui.label(RichText::new(ordinal(place)).size(12.0).color(palette.faint));
+                    let mut size = percent(*value);
+                    if percent_box(ui, &mut size, least..=most, tip) {
+                        *value = share(size);
+                        changed = true;
+                    }
+                    if widgets::small_icon_button(ui, icons::X, "No size of its own").clicked() {
+                        gone = Some(place);
+                    }
+                }
+                if let Some(place) = gone {
+                    sizes.by_place.remove(place);
+                    changed = true;
+                }
+                if sizes.by_place.len() < WindowSizes::MOST_PLACES
+                    && widgets::small_icon_button(
+                        ui,
+                        icons::PLUS,
+                        &format!("Give the {} window a size of its own", ordinal(sizes.by_place.len())),
+                    )
+                    .clicked()
+                {
+                    let next = match kind {
+                        SizedBy::Strip => sizes.column_width,
+                        _ => 0.5,
+                    };
+                    sizes.by_place.push(next);
+                    changed = true;
+                }
+                if sizes.by_place.is_empty() && kind != SizedBy::Strip {
+                    ui.label(
+                        RichText::new("every window as much as the others")
+                            .size(12.0)
+                            .color(palette.faint),
+                    );
+                }
+                if changed {
+                    asked = Some(Do::Sizes(line.name.clone(), sizes));
+                }
+            }
+            SizedBy::Master { count } => {
+                ui.label("Master area");
+                let mut ratio = percent(line.master_ratio);
+                let mut masters = line.master_count;
+                let mut changed = percent_box(
+                    ui,
+                    &mut ratio,
+                    10..=90,
+                    "How much of the display the master area has.",
+                );
+                if count {
+                    ui.add_space(8.0);
+                    ui.label("Windows in it");
+                    changed |= ui
+                        .add(egui::DragValue::new(&mut masters).range(1..=8).speed(0.1))
+                        .on_hover_text("How many windows share the master area.")
+                        .changed();
+                }
+                if changed {
+                    asked = Some(Do::Master(line.name.clone(), share(ratio), masters));
+                }
+            }
+            SizedBy::FirstSplit => {
+                ui.label("First window");
+                let mut ratio = percent(line.master_ratio);
+                if percent_box(
+                    ui,
+                    &mut ratio,
+                    30..=70,
+                    "The share the first window keeps when the second splits it; each window after keeps as much of what is left.",
+                ) {
+                    asked = Some(Do::Master(line.name.clone(), share(ratio), line.master_count));
+                }
+            }
+            SizedBy::Split => {
+                ui.label("At a split, a window keeps");
+                let own = match line.layout {
+                    LayoutType::Spiral => 0.618,
+                    _ => 0.5,
+                };
+                let (split_least, split_most) = (
+                    percent(WindowSizes::SPLIT_RANGE.0),
+                    percent(WindowSizes::SPLIT_RANGE.1),
+                );
+                let mut kept = percent(sizes.split.unwrap_or(own));
+                if percent_box(
+                    ui,
+                    &mut kept,
+                    split_least..=split_most,
+                    "The share of its room a window keeps when the next window splits it.",
+                ) {
+                    sizes.split = Some(share(kept));
+                    asked = Some(Do::Sizes(line.name.clone(), sizes.clone()));
+                }
+                if sizes.split.is_some()
+                    && widgets::small_icon_button(
+                        ui,
+                        icons::ARROW_COUNTER_CLOCKWISE,
+                        "As the layout keeps it by itself",
+                    )
+                    .clicked()
+                {
+                    sizes.split = None;
+                    asked = Some(Do::Sizes(line.name.clone(), sizes));
+                }
+            }
+        }
+    });
+    asked
 }
 
 #[cfg(test)]
@@ -868,5 +1144,45 @@ mod tests {
         assert!(label(&desktop, &left, "chat").is_some());
         assert!(ask(&mut desktop, None, Do::Name("chat".into(), "1".into())).is_err());
         assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
+    }
+
+    #[test]
+    fn the_windows_sizes_are_set_on_one_display_or_on_all() {
+        let mut desktop = gevrek_model::examples::starting_configuration().desktop;
+        let left = DisplayRef::named("DP-1");
+        let right = DisplayRef::named("DP-2");
+        let wide = WindowSizes {
+            column_width: 0.4,
+            by_place: vec![0.7],
+            split: None,
+        };
+        // One display's: the other keeps what every display has.
+        assert!(carry_out(&mut desktop, Some(&left), Do::Sizes("1".into(), wide.clone())).is_ok());
+        assert_eq!(desktop.workspace_on(&left, "1").unwrap().sizes, wide);
+        assert!(desktop.workspace_on(&right, "1").unwrap().sizes.is_default());
+        // Every display's.
+        assert!(carry_out(&mut desktop, None, Do::Master("2".into(), 0.65, 2)).is_ok());
+        for display in [&left, &right] {
+            let profile = desktop.workspace_on(display, "2").unwrap();
+            assert_eq!((profile.master_ratio, profile.master_count), (0.65, 2));
+        }
+        assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
+        // The line shows them.
+        let shown = lines(&desktop, Some(&left), &[]);
+        assert_eq!(shown.iter().find(|line| line.name == "1").unwrap().sizes, wide);
+    }
+
+    #[test]
+    fn every_layout_but_those_with_nothing_to_size_has_sizes() {
+        for layout in LayoutType::all() {
+            let nothing = matches!(
+                layout,
+                LayoutType::Grid | LayoutType::Monocle | LayoutType::Floating
+            );
+            assert_eq!(SizedBy::of(layout).is_none(), nothing, "{layout:?}");
+        }
+        assert_eq!(ordinal(0), "1st");
+        assert_eq!(ordinal(10), "11th");
+        assert_eq!(ordinal(21), "22nd");
     }
 }

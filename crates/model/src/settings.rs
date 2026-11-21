@@ -2,7 +2,9 @@ use crate::command::{DispatchCommand, WindowSelector, WorkspaceSelector};
 use crate::focus::FocusConfig;
 use crate::geometry::Rect;
 use crate::graph::BorderStyle;
-use crate::layout::{DwindleDirection, LayoutType, MasterPosition, NewWindowPlacement};
+use crate::layout::{
+    DwindleDirection, LayoutType, MasterPosition, NewWindowPlacement, WindowSizes,
+};
 use crate::platform::windows::{SystemBackdrop, WindowCorner};
 use crate::rules::{MatchKind, MatchStrategy};
 use crate::snap_zones::{presets as snap_zone_presets, SnapZoneConfig, SnapZoneLayout};
@@ -1680,6 +1682,40 @@ impl DesktopConfig {
                     format!("{path}.master_ratio"),
                     "Master ratio must be between 0.1 and 0.9",
                 ));
+            }
+            let (least, most) = WindowSizes::RANGE;
+            let sized = |share: f32| share.is_finite() && (least..=most).contains(&share);
+            if !sized(workspace.sizes.column_width) {
+                issues.push(ConfigIssue::error(
+                    format!("{path}.sizes.column_width"),
+                    "A column's width must be between 0.1 and 1.0 of the display",
+                ));
+            }
+            if workspace.sizes.by_place.len() > WindowSizes::MOST_PLACES {
+                issues.push(ConfigIssue::error(
+                    format!("{path}.sizes.by_place"),
+                    format!(
+                        "No more than {} places can be given a size of their own",
+                        WindowSizes::MOST_PLACES
+                    ),
+                ));
+            }
+            for (place, share) in workspace.sizes.by_place.iter().enumerate() {
+                if !sized(*share) {
+                    issues.push(ConfigIssue::error(
+                        format!("{path}.sizes.by_place.{place}"),
+                        "A window's size must be between 0.1 and 1.0 of the display",
+                    ));
+                }
+            }
+            if let Some(split) = workspace.sizes.split {
+                let (least, most) = WindowSizes::SPLIT_RANGE;
+                if !(split.is_finite() && (least..=most).contains(&split)) {
+                    issues.push(ConfigIssue::error(
+                        format!("{path}.sizes.split"),
+                        "The share kept at a split must be between 0.1 and 0.9",
+                    ));
+                }
             }
             if !(1..=8).contains(&workspace.master_count) {
                 issues.push(ConfigIssue::error(
@@ -3533,6 +3569,11 @@ pub struct WorkspaceProfile {
     pub window_container_behaviour: crate::layout::WindowContainerBehaviour,
     pub dwindle_direction: DwindleDirection,
     pub dwindle_preserve_split: bool,
+    /// How big the windows are where the layout lets them be sized:
+    /// scrolling columns' widths, the widths of columns and heights of
+    /// rows by their place, the share BSP and Spiral keep at a split.
+    #[serde(default, skip_serializing_if = "WindowSizes::is_default")]
+    pub sizes: WindowSizes,
     pub appearance_override: bool,
     pub border_enabled: bool,
     pub border_width: i32,
@@ -3574,6 +3615,7 @@ impl Default for WorkspaceProfile {
             window_container_behaviour: crate::layout::WindowContainerBehaviour::Column,
             dwindle_direction: DwindleDirection::Alternate,
             dwindle_preserve_split: false,
+            sizes: WindowSizes::default(),
             appearance_override: true,
             border_enabled: true,
             border_width: 4,

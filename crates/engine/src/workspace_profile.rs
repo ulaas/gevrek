@@ -36,6 +36,7 @@ impl WorkspaceProfileApply for WorkspaceProfile {
         workspace.window_container_behaviour = self.window_container_behaviour;
         workspace.dwindle_direction = self.dwindle_direction;
         workspace.dwindle_preserve_split = self.dwindle_preserve_split;
+        workspace.set_sizes(&self.sizes);
         // (Floating windows: the configuration's look for them, on every
         // workspace.)
         workspace.floating_look = appearance.floating.clone();

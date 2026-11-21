@@ -42,6 +42,9 @@ pub struct SpiralLayout {
     pub start: SpiralStart,
     /// Use golden ratio (true) or equal split (false)
     pub use_golden_ratio: bool,
+    /// The share a window keeps when the next splits it, where it is
+    /// given (it stands for `use_golden_ratio`).
+    pub split: Option<f32>,
 }
 
 impl SpiralLayout {
@@ -53,6 +56,7 @@ impl SpiralLayout {
             direction: SpiralDirection::Clockwise,
             start: SpiralStart::TopLeft,
             use_golden_ratio: true,
+            split: None,
         }
     }
 
@@ -82,11 +86,14 @@ impl SpiralLayout {
             direction,
             start,
             use_golden_ratio: golden,
+            split: None,
         }
     }
 
     fn get_ratio(&self) -> f32 {
-        if self.use_golden_ratio {
+        if let Some(split) = self.split {
+            split.clamp(0.1, 0.9)
+        } else if self.use_golden_ratio {
             Self::PHI
         } else {
             0.5

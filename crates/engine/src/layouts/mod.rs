@@ -159,6 +159,9 @@ pub struct LayoutConfig {
     /// pre-split region kept by container i when container i+1 is created.
     /// Missing entries default to 0.5.
     pub bsp_split_ratios: Vec<f32>,
+    /// BSP and Spiral: the share a window keeps when the next splits it,
+    /// where the configuration gives one.
+    pub split: Option<f32>,
     /// The first column in view under the scrolling layout.
     pub scroll_first: usize,
     /// Where the view is on the strip, in pixels; `None`: whole columns
@@ -176,6 +179,7 @@ impl Default for LayoutConfig {
             dwindle_preserve_split: false,
             dwindle_split_history: Vec::new(),
             bsp_split_ratios: Vec::new(),
+            split: None,
             scroll_first: 0,
             scroll_offset: None,
         }
@@ -263,7 +267,10 @@ pub fn apply_layout_configured(
             layout.calculate(work_area, containers, padding);
         }
         LayoutType::Spiral => {
-            let layout = SpiralLayout::new();
+            let layout = SpiralLayout {
+                split: config.split,
+                ..SpiralLayout::new()
+            };
             layout.calculate(work_area, containers, padding);
         }
         LayoutType::Dwindle => {
