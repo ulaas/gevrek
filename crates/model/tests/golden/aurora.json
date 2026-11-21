@@ -2467,6 +2467,27 @@
         }
       },
       {
+        "name": "Send window to workspace 1",
+        "enabled": true,
+        "key": "1",
+        "ctrl": false,
+        "alt": true,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_selector",
+          "selector": {
+            "kind": "name",
+            "value": "1"
+          }
+        }
+      },
+      {
         "name": "Workspace 2",
         "enabled": true,
         "key": "2",
@@ -2502,6 +2523,27 @@
         "long_press_ms": 500,
         "command": {
           "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "name",
+            "value": "2"
+          }
+        }
+      },
+      {
+        "name": "Send window to workspace 2",
+        "enabled": true,
+        "key": "2",
+        "ctrl": false,
+        "alt": true,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_selector",
           "selector": {
             "kind": "name",
             "value": "2"
@@ -2551,6 +2593,27 @@
         }
       },
       {
+        "name": "Send window to workspace 3",
+        "enabled": true,
+        "key": "3",
+        "ctrl": false,
+        "alt": true,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_selector",
+          "selector": {
+            "kind": "name",
+            "value": "3"
+          }
+        }
+      },
+      {
         "name": "Workspace 4",
         "enabled": true,
         "key": "4",
@@ -2586,6 +2649,27 @@
         "long_press_ms": 500,
         "command": {
           "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "name",
+            "value": "4"
+          }
+        }
+      },
+      {
+        "name": "Send window to workspace 4",
+        "enabled": true,
+        "key": "4",
+        "ctrl": false,
+        "alt": true,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_selector",
           "selector": {
             "kind": "name",
             "value": "4"
@@ -2635,6 +2719,27 @@
         }
       },
       {
+        "name": "Send window to workspace 5",
+        "enabled": true,
+        "key": "5",
+        "ctrl": false,
+        "alt": true,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_selector",
+          "selector": {
+            "kind": "name",
+            "value": "5"
+          }
+        }
+      },
+      {
         "name": "Workspace 6",
         "enabled": true,
         "key": "6",
@@ -2670,6 +2775,27 @@
         "long_press_ms": 500,
         "command": {
           "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "name",
+            "value": "6"
+          }
+        }
+      },
+      {
+        "name": "Send window to workspace 6",
+        "enabled": true,
+        "key": "6",
+        "ctrl": false,
+        "alt": true,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_selector",
           "selector": {
             "kind": "name",
             "value": "6"
@@ -2719,6 +2845,27 @@
         }
       },
       {
+        "name": "Send window to workspace 7",
+        "enabled": true,
+        "key": "7",
+        "ctrl": false,
+        "alt": true,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_selector",
+          "selector": {
+            "kind": "name",
+            "value": "7"
+          }
+        }
+      },
+      {
         "name": "Workspace 8",
         "enabled": true,
         "key": "8",
@@ -2761,6 +2908,27 @@
         }
       },
       {
+        "name": "Send window to workspace 8",
+        "enabled": true,
+        "key": "8",
+        "ctrl": false,
+        "alt": true,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_selector",
+          "selector": {
+            "kind": "name",
+            "value": "8"
+          }
+        }
+      },
+      {
         "name": "Workspace 9",
         "enabled": true,
         "key": "9",
@@ -2796,6 +2964,27 @@
         "long_press_ms": 500,
         "command": {
           "command": "move_to_workspace_and_follow",
+          "selector": {
+            "kind": "name",
+            "value": "9"
+          }
+        }
+      },
+      {
+        "name": "Send window to workspace 9",
+        "enabled": true,
+        "key": "9",
+        "ctrl": false,
+        "alt": true,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "move_to_workspace_selector",
           "selector": {
             "kind": "name",
             "value": "9"

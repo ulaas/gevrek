@@ -317,7 +317,8 @@ with Super (the Windows key) held:
 | with Shift+Ctrl | move the window to that monitor |
 | Super+PageDown / U, Super+PageUp / I, Super+mouse wheel | next / previous workspace |
 | with Ctrl | move the window there and follow it |
-| Super+1..9, Super+Ctrl+1..9 | workspace by number; move the window there |
+| Super+1..9, Super+Ctrl+1..9 | workspace by number; move the window there and follow it |
+| Super+Alt+1..9 | send the window to that workspace and stay where you are |
 | Super+Shift+wheel, Super+Ctrl+Shift+wheel | focus / move the window left and right |
 | Super+[ ] , . W | tabs: join the neighbour, leave the tabs, tabs on or off |
 | Super+F, Super+Shift+F, Super+M | one window fills the area; fullscreen; maximize |

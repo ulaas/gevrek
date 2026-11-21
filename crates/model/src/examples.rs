@@ -594,6 +594,17 @@ pub fn standard_bindings() -> Vec<BindingProfile> {
             false,
             carry(WorkspaceSelector::Name(name.to_string())),
         ));
+        // The window goes, and the workspace shown stays.
+        list.push(BindingProfile {
+            alt: true,
+            ..binding(
+                &format!("Send window to workspace {name}"),
+                name,
+                DispatchCommand::MoveToWorkspaceSelector {
+                    selector: WorkspaceSelector::Name(name.to_string()),
+                },
+            )
+        });
     }
 
     // Tabs (niri: windows of one column).
