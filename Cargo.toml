@@ -6,7 +6,7 @@ default-members = [".", "crates/studio"]
 resolver = "2"
 
 [workspace.package]
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 authors = ["Gevrek Contributors"]
 license = "MIT"
