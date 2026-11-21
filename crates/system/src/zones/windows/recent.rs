@@ -171,6 +171,10 @@ pub struct Read {
     /// The files whose time of last opening is other than it was known
     /// (all of them at the first reading).
     pub opened_anew: Vec<String>,
+    /// A shortcut could not be read: the shell was still writing it.
+    /// Its being let go of does not always tell the file system's watch
+    /// anything, so whoever reads asks again soon (see `read_recent`).
+    pub held: bool,
 }
 
 impl Reader {
@@ -211,6 +215,7 @@ impl Reader {
                     // one it has now.)
                     Err(()) => {
                         self.links.remove(&file);
+                        read.held = true;
                         None
                     }
                 },

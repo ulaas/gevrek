@@ -405,10 +405,23 @@ impl SystemBackend {
         let mut reader = recent::Reader::default();
         let mut types = shell::Types::knowing(opened.clone());
         let read = move || {
-            let read = reader.read(&from, &opened, &mut types, recent::MOST);
+            let mut read = reader.read(&from, &opened, &mut types, recent::MOST);
+            // A shortcut the shell still held is read again in a moment
+            // (on the list's own thread): that it was let go of is not
+            // always told, and the list would lack it until the folder
+            // changed again.
+            let mut opened_anew = std::mem::take(&mut read.opened_anew);
+            for _ in 0..40 {
+                if !read.held {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                read = reader.read(&from, &opened, &mut types, recent::MOST);
+                opened_anew.append(&mut read.opened_anew);
+            }
             // A file that was opened has another fact now, wherever a
             // zone shows it.
-            news.tell(shown.reread(&read.opened_anew, &mut types));
+            news.tell(shown.reread(&opened_anew, &mut types));
             read.items
         };
         self.smart.recent = Some(Source::new(
