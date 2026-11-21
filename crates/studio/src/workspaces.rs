@@ -841,7 +841,12 @@ fn share(percent: i32) -> f32 {
 }
 
 /// A share in percent, dragged or typed.
-fn percent_box(ui: &mut Ui, value: &mut i32, range: std::ops::RangeInclusive<i32>, tip: &str) -> bool {
+fn percent_box(
+    ui: &mut Ui,
+    value: &mut i32,
+    range: std::ops::RangeInclusive<i32>,
+    tip: &str,
+) -> bool {
     ui.add(
         egui::DragValue::new(value)
             .range(range)
@@ -905,8 +910,8 @@ fn sizes_row(ui: &mut Ui, line: &Line) -> Option<Do> {
                         "Each column's width, of the display's, by its place. The columns after these share what is left.",
                     ),
                     _ => (
-                        "By place",
-                        "The width of the column at this place, of the display's. The others open as wide as new columns.",
+                        "In view",
+                        "The width of the column at this place in view, counted from the first column in view. As the view moves along the strip, each column takes the width of the place it comes to.",
                     ),
                 };
                 ui.label(words);
@@ -1157,9 +1162,18 @@ mod tests {
             split: None,
         };
         // One display's: the other keeps what every display has.
-        assert!(carry_out(&mut desktop, Some(&left), Do::Sizes("1".into(), wide.clone())).is_ok());
+        assert!(carry_out(
+            &mut desktop,
+            Some(&left),
+            Do::Sizes("1".into(), wide.clone())
+        )
+        .is_ok());
         assert_eq!(desktop.workspace_on(&left, "1").unwrap().sizes, wide);
-        assert!(desktop.workspace_on(&right, "1").unwrap().sizes.is_default());
+        assert!(desktop
+            .workspace_on(&right, "1")
+            .unwrap()
+            .sizes
+            .is_default());
         // Every display's.
         assert!(carry_out(&mut desktop, None, Do::Master("2".into(), 0.65, 2)).is_ok());
         for display in [&left, &right] {
@@ -1169,7 +1183,10 @@ mod tests {
         assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
         // The line shows them.
         let shown = lines(&desktop, Some(&left), &[]);
-        assert_eq!(shown.iter().find(|line| line.name == "1").unwrap().sizes, wide);
+        assert_eq!(
+            shown.iter().find(|line| line.name == "1").unwrap().sizes,
+            wide
+        );
     }
 
     #[test]

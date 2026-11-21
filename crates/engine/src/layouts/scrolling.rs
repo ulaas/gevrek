@@ -143,6 +143,93 @@ pub fn column_in_the_middle(offset: i32, widths: &[i32], room: i32) -> usize {
     widths.len().saturating_sub(1)
 }
 
+/// The widths of the columns when the column `lead` is the first in
+/// view and the places in view are sized: the column at the `k`th place
+/// from the lead is `places[k]` wide; the others, before the lead or
+/// past the places, keep their own width (`own`). In pixels.
+pub fn placed_widths(lead: usize, own: &[i32], places: &[i32]) -> Vec<i32> {
+    own.iter()
+        .enumerate()
+        .map(|(index, width)| {
+            index
+                .checked_sub(lead)
+                .and_then(|place| places.get(place))
+                .copied()
+                .unwrap_or(*width)
+        })
+        .collect()
+}
+
+/// The lead does not begin further on than it must: while the columns
+/// from the one before it to the end, sized from there, fit in the view,
+/// that one leads.
+fn settled_lead(mut lead: usize, own: &[i32], places: &[i32], room: i32) -> usize {
+    lead = lead.min(own.len().saturating_sub(1));
+    while lead > 0
+        && placed_widths(lead - 1, own, places)[lead - 1..]
+            .iter()
+            .sum::<i32>()
+            <= room
+    {
+        lead -= 1;
+    }
+    lead
+}
+
+/// The first column in view of a strip whose places are sized, after the
+/// keyboard went to the column `focused`: where it was while the focused
+/// column is wholly in view, sized from there; the focused column itself
+/// when it is before; else as few columns further on as bring it wholly
+/// in (each column taking the width of the place it comes to).
+pub fn lead_column(lead: usize, focused: usize, own: &[i32], places: &[i32], room: i32) -> usize {
+    if own.is_empty() {
+        return 0;
+    }
+    let focused = focused.min(own.len() - 1);
+    let mut lead = lead.min(own.len() - 1);
+    if focused < lead {
+        lead = focused;
+    }
+    while lead < focused
+        && placed_widths(lead, own, places)[lead..=focused]
+            .iter()
+            .sum::<i32>()
+            > room
+    {
+        lead += 1;
+    }
+    settled_lead(lead, own, places, room)
+}
+
+/// The lead one column on (`step` 1) or back (-1), where the view can go
+/// so far; `None` where it cannot.
+pub fn lead_stepped(
+    lead: usize,
+    step: i32,
+    own: &[i32],
+    places: &[i32],
+    room: i32,
+) -> Option<usize> {
+    let lead = settled_lead(lead, own, places, room);
+    let next = if step > 0 {
+        (lead + 1 < own.len()).then_some(lead + 1)?
+    } else {
+        lead.checked_sub(1)?
+    };
+    let next = settled_lead(next, own, places, room);
+    (next != lead).then_some(next)
+}
+
+/// Where the view is on a strip whose places are sized, with the column
+/// `lead` first in view: at the lead's left edge, but never showing what
+/// is beyond the strip's end. With the widths the columns have there.
+pub fn lead_view(lead: usize, own: &[i32], places: &[i32], room: i32) -> (Vec<i32>, i32) {
+    let widths = placed_widths(lead, own, places);
+    let left: i32 = widths.iter().take(lead).sum();
+    let offset = left.clamp(0, furthest(&widths, room));
+    (widths, offset)
+}
+
 /// The scrolling layout with its view at a place on the strip.
 pub struct ScrollingLayout {
     /// The first column in view (where only whole columns are shown).
@@ -562,6 +649,100 @@ mod tests {
             .containers
             .iter()
             .all(|column| column.rect.width == 1000));
+    }
+
+    fn rects_in_view(workspace: &Workspace) -> Vec<(isize, i32, i32)> {
+        workspace
+            .containers
+            .iter()
+            .filter(|column| !column.offscreen)
+            .filter_map(|column| {
+                column
+                    .focused_window()
+                    .map(|window| (window.0, column.rect.x, column.rect.width))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_columns_take_the_widths_of_the_places_they_come_to() {
+        // The first in view 70%, the next 50%, the others 40%.
+        let mut workspace = free_strip(0);
+        workspace.set_sizes(&WindowSizes {
+            column_width: 0.4,
+            by_place: vec![0.7, 0.5],
+            split: None,
+        });
+        for window in 1..=4 {
+            workspace.add_window(WindowHandle(window), true);
+            workspace.focus_window(WindowHandle(window));
+        }
+        let at = |workspace: &mut Workspace, window: isize| {
+            workspace.focus_window(WindowHandle(window));
+            workspace.apply_layout(AREA);
+            rects_in_view(workspace)
+        };
+        // At the beginning: the first is X, the second Y, cut off.
+        assert_eq!(at(&mut workspace, 1), [(1, 0, 1400), (2, 1400, 1000)]);
+        // One on: the second is X, the third Y.
+        assert_eq!(at(&mut workspace, 2), [(2, 0, 1400), (3, 1400, 1000)]);
+        assert_eq!(at(&mut workspace, 3), [(3, 0, 1400), (4, 1400, 1000)]);
+        // The last: X, and the view does not go past the strip's end.
+        assert_eq!(at(&mut workspace, 4), [(3, -200, 800), (4, 600, 1400)]);
+        // And back again.
+        assert_eq!(at(&mut workspace, 3), [(3, 0, 1400), (4, 1400, 1000)]);
+        assert_eq!(at(&mut workspace, 1), [(1, 0, 1400), (2, 1400, 1000)]);
+        // Each column keeps its own width for when it is past the places.
+        assert!(workspace
+            .containers
+            .iter()
+            .all(|column| (column.strip_width - 0.4).abs() < 1e-6));
+
+        // The wheel moves the view by whole columns, a third of the
+        // first's width at a time; the keyboard goes along when its
+        // column leaves the view.
+        assert!(!workspace.scroll_view(300, AREA));
+        assert!(workspace.scroll_view(300, AREA));
+        workspace.apply_layout(AREA);
+        assert_eq!(rects_in_view(&workspace), [(2, 0, 1400), (3, 1400, 1000)]);
+        assert_eq!(workspace.focused_window(), Some(WindowHandle(2)));
+        assert!(workspace.scroll_view(-500, AREA));
+        workspace.apply_layout(AREA);
+        assert_eq!(rects_in_view(&workspace), [(1, 0, 1400), (2, 1400, 1000)]);
+        assert!(
+            !workspace.scroll_view(-5000, AREA),
+            "nothing before the first"
+        );
+
+        // A place made wider by hand stays so for every column that comes
+        // to it, until the configuration says otherwise.
+        assert!(workspace.set_column_width(0, 1600, AREA));
+        assert_eq!(at(&mut workspace, 2), [(2, 0, 1600), (3, 1600, 1000)]);
+        assert!(!workspace.set_sizes(&WindowSizes {
+            column_width: 0.4,
+            by_place: vec![0.7, 0.5],
+            split: None,
+        }));
+        assert_eq!(at(&mut workspace, 2), [(2, 0, 1600), (3, 1600, 1000)]);
+    }
+
+    #[test]
+    fn the_lead_moves_no_further_than_it_must() {
+        let own = [800, 800, 800, 800];
+        let places = [1400, 1000];
+        assert_eq!(placed_widths(1, &own, &places), [800, 1400, 1000, 800]);
+        assert_eq!(lead_column(0, 0, &own, &places, 2000), 0);
+        assert_eq!(lead_column(0, 1, &own, &places, 2000), 1);
+        assert_eq!(lead_column(3, 1, &own, &places, 2000), 1);
+        // Places that fit: the second stays in view beside the first.
+        assert_eq!(lead_column(0, 1, &own, &[1200, 800], 2000), 0);
+        // Everything from the one before fits: that one leads.
+        assert_eq!(lead_column(1, 1, &[800, 800], &[1200, 800], 2000), 0);
+        assert_eq!(lead_stepped(0, 1, &own, &places, 2000), Some(1));
+        assert_eq!(lead_stepped(0, -1, &own, &places, 2000), None);
+        assert_eq!(lead_stepped(3, 1, &own, &places, 2000), None);
+        assert_eq!(lead_view(3, &own, &places, 2000).1, 1800);
+        assert_eq!(lead_column(0, 0, &[], &places, 2000), 0);
     }
 
     #[test]

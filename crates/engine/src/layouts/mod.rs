@@ -25,8 +25,9 @@ pub use room::make_room;
 pub use rows::RowsLayout;
 pub use scrolling::{
     column_in_the_middle as scrolling_column_in_the_middle, column_width as scrolling_column_width,
-    first_column as scrolling_first_column, scrolled as scrolling_scrolled,
-    set_whole_columns_only as set_scrolling_whole_columns_only,
+    first_column as scrolling_first_column, lead_column as scrolling_lead_column,
+    lead_stepped as scrolling_lead_stepped, lead_view as scrolling_lead_view,
+    scrolled as scrolling_scrolled, set_whole_columns_only as set_scrolling_whole_columns_only,
     view_offset as scrolling_view_offset, whole_columns_only as scrolling_whole_columns_only,
     ScrollingLayout, DEFAULT_WIDTH as SCROLLING_DEFAULT_WIDTH,
     WIDTH_RANGE as SCROLLING_WIDTH_RANGE,

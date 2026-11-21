@@ -300,6 +300,17 @@ pub struct Workspace {
     #[serde(default)]
     pub sizes: WindowSizes,
 
+    /// The sizes as the configuration last gave them (`sizes` can have
+    /// been changed since by hand: a place in view made wider).
+    #[serde(default)]
+    pub given_sizes: WindowSizes,
+
+    /// The scrolling layout, where the places in view are sized: what the
+    /// wheel or the fingers moved the view by that has not yet come to a
+    /// column's step.
+    #[serde(skip)]
+    pub scroll_pending: i32,
+
     /// Under the scrolling layout: the first column in view. It moves no
     /// more than it must to keep the focused column in view
     /// (`layouts::scrolling`).
@@ -470,6 +481,8 @@ impl Workspace {
             split_ratios: Vec::new(),
             bsp_split_ratios: Vec::new(),
             sizes: WindowSizes::default(),
+            given_sizes: WindowSizes::default(),
+            scroll_pending: 0,
             scroll_first: 0,
             scroll_offset: 0,
             scroll_whole_columns: crate::layouts::scrolling_whole_columns_only(),
@@ -547,6 +560,18 @@ impl Workspace {
         let gaps = self.inner_gaps().left / 2 + self.inner_gaps().right / 2;
         let (least, most) = crate::layouts::SCROLLING_WIDTH_RANGE;
         let share = ((window_width + gaps) as f32 / room as f32).clamp(least, most);
+        // Where the places in view are sized, a column that stands at one
+        // gives the place the width.
+        if let Some(place) = self.place_of(container_idx) {
+            let Some(sized) = self.sizes.by_place.get_mut(place) else {
+                return false;
+            };
+            if (*sized - share).abs() < f32::EPSILON {
+                return false;
+            }
+            *sized = share;
+            return true;
+        }
         let Some(container) = self.containers.get_mut(container_idx) else {
             return false;
         };
@@ -557,13 +582,32 @@ impl Workspace {
         true
     }
 
+    /// The place in view a column stands at, where the places are sized
+    /// and it stands at one.
+    fn place_of(&self, container_idx: usize) -> Option<usize> {
+        if !self.sizes_places() {
+            return None;
+        }
+        let position = self
+            .active_container_indices()
+            .iter()
+            .position(|index| *index == container_idx)?;
+        position
+            .checked_sub(self.scroll_first)
+            .filter(|place| *place < self.sizes.by_place.len())
+    }
+
     /// Make a column wider (or, with a negative `delta_px`, narrower).
     fn resize_column(&mut self, container_idx: usize, delta_px: i32, work_area: Rect) -> bool {
         let room = self.strip_room(work_area);
         let Some(container) = self.containers.get(container_idx) else {
             return false;
         };
-        let now = crate::layouts::scrolling_column_width(container.strip_width, room);
+        let share = match self.place_of(container_idx) {
+            Some(place) => self.sizes.column_width_at(place),
+            None => container.strip_width,
+        };
+        let now = crate::layouts::scrolling_column_width(share, room);
         let gaps = self.inner_gaps().left / 2 + self.inner_gaps().right / 2;
         self.set_column_width(container_idx, now.saturating_add(delta_px).saturating_sub(gaps), work_area)
     }
@@ -618,16 +662,53 @@ impl Workspace {
     /// anew, those resized by hand too: the configuration was changed to
     /// be seen. False when they are the same.
     pub fn set_sizes(&mut self, sizes: &WindowSizes) -> bool {
-        if self.sizes == *sizes {
+        // (The same as the configuration gave before: what was changed by
+        // hand since is kept.)
+        if self.given_sizes == *sizes {
             return false;
         }
+        self.given_sizes = sizes.clone();
         self.sizes = sizes.clone();
         self.split_ratios.clear();
         self.bsp_split_ratios.clear();
-        for (place, container) in self.containers.elements_mut().iter_mut().enumerate() {
-            container.strip_width = self.sizes.column_width_at(place);
+        let width = self.sizes.new_column_width();
+        for container in self.containers.elements_mut().iter_mut() {
+            container.strip_width = width;
         }
         true
+    }
+
+    /// The scrolling layout sizes the places in view (the configuration
+    /// gives places sizes of their own): a column is as wide as the place
+    /// it stands at, counted from the first in view.
+    pub fn sizes_places(&self) -> bool {
+        self.layout == LayoutType::Scrolling && !self.sizes.by_place.is_empty()
+    }
+
+    /// The places' widths in pixels, in a view so wide.
+    fn place_widths(&self, room: i32) -> Vec<i32> {
+        (0..self.sizes.by_place.len())
+            .map(|place| {
+                crate::layouts::scrolling_column_width(self.sizes.column_width_at(place), room)
+            })
+            .collect()
+    }
+
+    /// The strip's columns that are laid out, their own widths, and the
+    /// places' widths, in a view so wide.
+    fn strip_widths(&self, room: i32) -> (Vec<usize>, Vec<i32>, Vec<i32>) {
+        let active = self.active_container_indices();
+        let own = active
+            .iter()
+            .filter_map(|index| self.containers.get(*index))
+            .map(|container| crate::layouts::scrolling_column_width(container.strip_width, room))
+            .collect();
+        let places = if self.sizes_places() {
+            self.place_widths(room)
+        } else {
+            Vec::new()
+        };
+        (active, own, places)
     }
 
     #[cfg(test)]
@@ -1054,13 +1135,13 @@ impl Workspace {
             );
             if self.layout == LayoutType::Scrolling {
                 // Its column is beside the one with the keyboard, as wide
-                // as the configuration says a column at that place is.
+                // as the configuration says a new column is.
                 let index = if self.containers.is_empty() {
                     0
                 } else {
                     self.containers.focused_idx().saturating_add(1)
                 };
-                container.strip_width = self.sizes.column_width_at(index);
+                container.strip_width = self.sizes.new_column_width();
                 self.containers.insert_at(index, container);
             } else if master_family {
                 match self.new_window_placement {
@@ -1072,7 +1153,7 @@ impl Workspace {
                     }
                 }
             } else {
-                container.strip_width = self.sizes.column_width_at(self.containers.len());
+                container.strip_width = self.sizes.new_column_width();
                 self.containers.push(container);
             }
             // Reset split_ratios since container count changed - stale ratios
@@ -1093,7 +1174,7 @@ impl Workspace {
         let mut container = Container::new(self.next_container_id);
         self.next_container_id += 1;
         container.add_window(handle);
-        container.strip_width = self.sizes.column_width_at(container_idx);
+        container.strip_width = self.sizes.new_column_width();
 
         // Insert at the specified index (preserves order)
         self.containers.insert_at(container_idx, container);
@@ -1444,22 +1525,58 @@ impl Workspace {
                 .iter()
                 .position(|index| *index == self.containers.focused_idx())
                 .unwrap_or(0);
-            self.scroll_first =
-                crate::layouts::scrolling_first_column(self.scroll_first, focused, &widths, room);
-            // The view follows the keyboard, unless it was moved by
-            // itself and the keyboard is still on the column it was on
-            // then (looking along the strip does not snap back).
-            if self.scroll_held != Some(focused) {
-                self.scroll_held = None;
-                self.scroll_offset = crate::layouts::scrolling_view_offset(
-                    self.scroll_offset,
+            if self.sizes_places() {
+                // The places in view are sized: the first column in view
+                // leads, and every column is as wide as the place it
+                // comes to as the view moves.
+                // (The view stays where it was moved to while the keyboard
+                // stays on the column it was on then.)
+                let places = self.place_widths(room);
+                if self.scroll_held != Some(focused) {
+                    self.scroll_held = None;
+                }
+                let follow = if self.scroll_held.is_some() {
+                    self.scroll_first
+                } else {
+                    focused
+                };
+                let lead = crate::layouts::scrolling_lead_column(
+                    self.scroll_first,
+                    follow,
+                    &widths,
+                    &places,
+                    room,
+                );
+                let (placed, offset) =
+                    crate::layouts::scrolling_lead_view(lead, &widths, &places, room);
+                self.scroll_first = lead;
+                self.scroll_offset = offset;
+                // (For this pass only: each column keeps its own width.)
+                for (container, width) in active_containers.iter_mut().zip(&placed) {
+                    container.strip_width = *width as f32 / room as f32;
+                }
+            } else {
+                self.scroll_first = crate::layouts::scrolling_first_column(
+                    self.scroll_first,
                     focused,
                     &widths,
                     room,
                 );
-            } else {
-                self.scroll_offset =
-                    crate::layouts::scrolling_scrolled(self.scroll_offset, 0, &widths, room);
+                // The view follows the keyboard, unless it was moved by
+                // itself and the keyboard is still on the column it was on
+                // then (looking along the strip does not snap back).
+                if self.scroll_held != Some(focused) {
+                    self.scroll_held = None;
+                    self.scroll_offset = crate::layouts::scrolling_view_offset(
+                        self.scroll_offset,
+                        focused,
+                        &widths,
+                        room,
+                    );
+                } else {
+                    self.scroll_offset =
+                        crate::layouts::scrolling_scrolled(self.scroll_offset, 0, &widths, room);
+                }
             }
         }
 
@@ -1609,6 +1726,9 @@ impl Workspace {
             return false;
         }
         let room = work_area.with_padding(self.outer_gaps()).width.max(1);
+        if self.sizes_places() {
+            return self.scroll_by_places(by, room);
+        }
         let active: Vec<usize> = (0..self.containers.len())
             .filter(|index| {
                 self.containers
@@ -1641,6 +1761,58 @@ impl Workspace {
             if let Some(index) = active.get(middle) {
                 self.containers.focus_at(*index);
                 held = Some(middle);
+            }
+        }
+        self.scroll_held = held;
+        true
+    }
+
+    /// The view moved by itself where the places in view are sized: by
+    /// whole columns, a column each time what it was moved by comes to a
+    /// third of the first column's width. The columns take the widths of
+    /// the places they come to; the keyboard stays where it is while its
+    /// column is in view, else goes to the first column in view.
+    fn scroll_by_places(&mut self, by: i32, room: i32) -> bool {
+        let (active, own, places) = self.strip_widths(room);
+        if active.is_empty() {
+            return false;
+        }
+        let (widths, _) =
+            crate::layouts::scrolling_lead_view(self.scroll_first, &own, &places, room);
+        let step = (widths.get(self.scroll_first).copied().unwrap_or(room) / 3).max(1);
+        if self.scroll_pending.signum() != by.signum() {
+            self.scroll_pending = 0;
+        }
+        self.scroll_pending = self.scroll_pending.saturating_add(by);
+        if self.scroll_pending.abs() < step {
+            return false;
+        }
+        let direction = self.scroll_pending.signum();
+        self.scroll_pending = 0;
+        let Some(lead) = crate::layouts::scrolling_lead_stepped(
+            self.scroll_first,
+            direction,
+            &own,
+            &places,
+            room,
+        ) else {
+            return false;
+        };
+        self.scroll_first = lead;
+        let (widths, offset) = crate::layouts::scrolling_lead_view(lead, &own, &places, room);
+        self.scroll_offset = offset;
+        let mut held = active
+            .iter()
+            .position(|index| *index == self.containers.focused_idx());
+        let in_view = held.is_some_and(|held| {
+            let left: i32 = widths.iter().take(held).sum();
+            let right = left + widths.get(held).copied().unwrap_or(0);
+            left >= offset && right <= offset + room
+        });
+        if !in_view {
+            if let Some(index) = active.get(lead) {
+                self.containers.focus_at(*index);
+                held = Some(lead);
             }
         }
         self.scroll_held = held;

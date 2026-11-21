@@ -341,8 +341,12 @@ pub struct WindowSizes {
     pub column_width: f32,
     /// The sizes of the first windows, by their place (the first window,
     /// the second, ...), each a share of the display (0.1 to 1.0).
-    /// Scrolling: each column's width; a place not given takes
-    /// `column_width`. Columns: each column's width; Rows: each row's
+    /// Scrolling: the width of the column at each place in view, counted
+    /// from the first column in view; as the view moves along the strip
+    /// the columns take the widths of the places they come to (the first
+    /// in view is always as wide as the first place). Columns before the
+    /// view and past the places are `column_width` wide, or as wide as
+    /// they were made. Columns: each column's width; Rows: each row's
     /// height; the windows past those given share what is left evenly, and
     /// when the shares come to more or less than the whole display they
     /// are scaled to fill it.
@@ -387,13 +391,18 @@ impl WindowSizes {
         }
     }
 
-    /// Scrolling: the width of the column at `place` (0: the first), as a
-    /// share of the display's width.
+    /// Scrolling: the width of the column at `place` in view (0: the
+    /// first in view), as a share of the display's width.
     pub fn column_width_at(&self, place: usize) -> f32 {
         let default = Self::within(self.column_width, Self::RANGE, Self::COLUMN_WIDTH);
         self.by_place
             .get(place)
             .map_or(default, |share| Self::within(*share, Self::RANGE, default))
+    }
+
+    /// Scrolling: how wide a column is when its window opens.
+    pub fn new_column_width(&self) -> f32 {
+        Self::within(self.column_width, Self::RANGE, Self::COLUMN_WIDTH)
     }
 
     /// Columns and Rows: the share of each of `count` windows, coming to
