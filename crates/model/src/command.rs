@@ -481,9 +481,9 @@ pub enum DispatchCommand {
     },
     /// Bring a window to the workspace a display shows, floating and in
     /// its middle; given again for that window, put it back as it was
-    /// before: on its workspace, tiled or floating, at its place. (What
-    /// the other button of the mouse does on a window in the panel's
-    /// taskbar.)
+    /// before: on its workspace, tiled or floating, at its place. (A line
+    /// of the menu the other button of the mouse opens on a window in the
+    /// panel's taskbar.)
     ToggleWindowCentered {
         window: WindowSelector,
         target: MonitorTarget,

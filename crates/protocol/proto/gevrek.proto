@@ -1050,6 +1050,8 @@ message DetailedWindowInfo {
   // of the icon theme, or the path of a file of its pixels. Empty where
   // it gave none (the window's picture is then its program's).
   string icon = 23;
+  // It is kept above the other windows (always on top).
+  bool is_always_on_top = 24;
 }
 
 // ============================================================================

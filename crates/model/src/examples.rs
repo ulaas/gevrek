@@ -248,6 +248,7 @@ fn showcase_graph() -> NodeGraph {
 /// | Super+[ ] , . W | tabs: join the neighbour, leave, tabs on or off |
 /// | Super+F, Super+Shift+F, Super+M | one window fills the area; fullscreen; maximize |
 /// | Super+C, Super+V | centre the window; floating or tiled |
+/// | Super+A | a floating window always on top, or not (one a workspace) |
 /// | Super+- =, Super+Shift+- = | narrower / wider; lower / taller |
 ///
 /// | Super+D / Space, Super+S, Super+N | launcher, control centre, notifications |
@@ -661,6 +662,8 @@ pub fn standard_bindings() -> Vec<BindingProfile> {
             true,
             DispatchCommand::ToggleFloatingAside,
         ),
+        // (A floating window only, one on each workspace.)
+        binding("Always on top", "A", DispatchCommand::TogglePinned),
         binding(
             "Narrower",
             "MINUS",

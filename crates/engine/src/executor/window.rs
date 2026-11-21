@@ -47,9 +47,62 @@ impl Executor {
             }
             self.apply_workspace_layout_and_position(workspace, work_area, window_manager)?;
         }
+        // A tiled window is not kept on top: that is for a floating one.
+        if !floating {
+            self.set_window_on_top(window_manager, monitor_manager, handle, false)?;
+        }
         // (The pass that follows shows the tab that takes the place of a
         // window that left its group.)
         self.mark_layout_dirty(monitor);
+        Ok(())
+    }
+
+    /// Keep `handle` above the other windows (always on top), or let it
+    /// be among them again. Only a floating window is kept on top, and
+    /// only one of a workspace's windows: the one kept on top before is
+    /// let go. (A window gevrek does not manage floats by itself: it is
+    /// kept on top as asked, whatever else is.)
+    pub(super) fn set_window_on_top(
+        &mut self,
+        window_manager: &mut dyn Desktop,
+        monitor_manager: &MonitorManager,
+        handle: WindowHandle,
+        on_top: bool,
+    ) -> Result<()> {
+        if on_top {
+            if let Some((monitor, index)) = monitor_manager.find_window(handle) {
+                if !monitor_manager.is_window_floating(handle) {
+                    anyhow::bail!("Only a floating window can be kept on top");
+                }
+                let others: Vec<WindowHandle> = monitor_manager
+                    .get_workspaces(monitor)
+                    .and_then(|workspaces| workspaces.get(index))
+                    .map(|workspace| workspace.all_windows())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|other| *other != handle)
+                    .filter(|other| queries(window_manager).is_always_on_top(*other))
+                    .collect();
+                for other in others {
+                    effect(
+                        window_manager,
+                        Effect::Stack {
+                            id: other,
+                            op: StackOp::AlwaysOnTop(false),
+                        },
+                    )?;
+                }
+            }
+        }
+        if queries(window_manager).is_always_on_top(handle) != on_top {
+            effect(
+                window_manager,
+                Effect::Stack {
+                    id: handle,
+                    op: StackOp::AlwaysOnTop(on_top),
+                },
+            )?;
+        }
         Ok(())
     }
 

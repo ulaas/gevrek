@@ -284,6 +284,9 @@ mod linux {
         /// The windows a button of the taskbar stands for (by the first
         /// of them: another button's list is another menu).
         Windows(u64),
+        /// What can be done with a window of the taskbar (the other
+        /// button on its button), by the window.
+        TaskActions(u64),
     }
 
     /// What the surfaces share.
@@ -1518,13 +1521,6 @@ mod linux {
         let show = asked
             .show
             .and_then(|index| crate::panel::show_tab(&view, index));
-        // The other button on a window of the taskbar.
-        if let Some(command) = asked
-            .centre
-            .and_then(|window| crate::panel::centre_window(&view, window))
-        {
-            state.link.send(Request::Dispatch(command));
-        }
         // A right-click on a workspace's tab: its new name is asked for.
         let rename = asked
             .rename
@@ -1537,13 +1533,24 @@ mod linux {
             .or(asked.sound_menu.map(|anchor| (Menu::Sound, anchor)))
             .or(asked.task_menu.as_ref().map(|(anchor, windows)| {
                 (Menu::Windows(windows.first().copied().unwrap_or(0)), *anchor)
-            }));
+            }))
+            .or(asked
+                .task_actions
+                .map(|(anchor, window)| (Menu::TaskActions(window), anchor)));
         // (The windows a button of the taskbar lists, as they are now.)
         let listed = asked
             .task_menu
             .as_ref()
             .map(|(_, windows)| crate::panel::tasks_of_ids(&view, windows))
             .unwrap_or_default();
+        // (The window the other button was pressed on, as it is now, and
+        // what each line of its menu sends.)
+        let acted = asked.task_actions.and_then(|(_, window)| {
+            let task = crate::panel::tasks_of_ids(&view, &[window]).into_iter().next()?;
+            let commands = crate::panel::TaskAction::ALL
+                .map(|action| (action, action.command(&view, &task)));
+            Some((task, commands))
+        });
         let pressed = asked.pressed;
         let tray = asked.tray;
         // The wheel and the middle button on an icon of the tray.
@@ -1673,6 +1680,12 @@ mod linux {
                     return Flow::Continue;
                 }
                 open_task_menu(shared, panel, anchor, listed, Rc::clone(&alive), control)
+            }
+            Menu::TaskActions(_) => {
+                let Some((task, commands)) = acted else {
+                    return Flow::Continue;
+                };
+                open_task_actions(shared, panel, anchor, task, commands, Rc::clone(&alive), control)
             }
             // Opened when its program has answered, not from here.
             Menu::Tray | Menu::TrayList => return Flow::Continue,
@@ -1995,6 +2008,49 @@ mod linux {
             shared
                 .link
                 .send(Request::Dispatch(crate::panel::go_to_window(window)));
+            Flow::Close
+        })
+    }
+
+    /// The menu of a window of the taskbar (the other button on its
+    /// button): a press on a line sends its command and puts the menu
+    /// away.
+    fn open_task_actions(
+        shared: &Rc<RefCell<State>>,
+        panel: SurfaceId,
+        anchor: egui::Rect,
+        task: crate::panel::Task,
+        commands: [(crate::panel::TaskAction, Option<String>); 2],
+        alive: Rc<()>,
+        control: &mut Control,
+    ) -> SurfaceId {
+        let size = crate::panel::task_actions_size();
+        let state = Rc::clone(shared);
+        let mut fonts = false;
+        control.popup(panel, anchor, size, move |ui, _| {
+            let _held = &alive;
+            let context = ui.ctx().clone();
+            let shared = state.borrow();
+            if !fonts {
+                theme::install_fonts(&context, shared.settings.system_font);
+                fonts = true;
+            }
+            let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
+            theme::apply(&context, &palette, &shared.settings);
+            // (Escape puts a menu away, as a press elsewhere does.)
+            if crate::panel::menu_escape(&context) {
+                return Flow::Close;
+            }
+            let Some(action) = crate::panel::task_actions(ui, &palette, &task) else {
+                return Flow::Continue;
+            };
+            let command = commands
+                .iter()
+                .find(|(each, _)| *each == action)
+                .and_then(|(_, command)| command.clone());
+            if let Some(command) = command {
+                shared.link.send(Request::Dispatch(command));
+            }
             Flow::Close
         })
     }
@@ -2658,7 +2714,7 @@ mod linux {
     ) {
         use crate::app_shortcuts::Plan;
         let planned = state.borrow().running.as_ref().map(|(config, _)| {
-            crate::app_shortcuts::plan(&config.desktop.bindings, &ask.app, &ask.wanted)
+            crate::app_shortcuts::plan(&config.live_bindings(), &ask.app, &ask.wanted)
         });
         // (No configuration known, or a question is up already: refused.)
         let Some(planned) = planned.filter(|_| state.borrow().shortcut_ask.is_none()) else {

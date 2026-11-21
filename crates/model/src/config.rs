@@ -762,6 +762,65 @@ impl Config {
         }
         serde_json::from_value(value)
     }
+
+    /// The key bindings that are live: those the configuration writes, in
+    /// their order, then each of the standard keys
+    /// ([`crate::examples::standard_bindings`]) the configuration does not
+    /// override. A standard key works without being in the file, so one
+    /// added in a later version works at once.
+    ///
+    /// A standard key is overridden where the configuration has a binding
+    /// on the same keys (switched on or off: a binding switched off on
+    /// them is how one is taken away), a key node of the graph on them, or
+    /// a binding of the same command on other keys in the same mode (it
+    /// was moved there).
+    ///
+    /// The hosts number the bindings by their place in this list.
+    pub fn live_bindings(&self) -> Vec<crate::settings::BindingProfile> {
+        use crate::graph::NodeType;
+        use crate::settings::BindingDevice;
+        let written = &self.desktop.bindings;
+        let on_graph: Vec<String> = self
+            .node_graph
+            .nodes
+            .values()
+            .filter_map(|node| match &node.node_type {
+                NodeType::OnKeyPress {
+                    key,
+                    ctrl,
+                    alt,
+                    shift,
+                    win,
+                } => Some(
+                    crate::settings::BindingProfile {
+                        key: key.clone(),
+                        ctrl: *ctrl,
+                        alt: *alt,
+                        shift: *shift,
+                        win: *win,
+                        ..Default::default()
+                    }
+                    .input_key(),
+                ),
+                _ => None,
+            })
+            .collect();
+        let mut live = written.clone();
+        for standard in crate::examples::standard_bindings() {
+            let keys = standard.input_key();
+            let overridden = written.iter().any(|binding| {
+                binding.input_key() == keys
+                    || (binding.command == standard.command
+                        && binding.normalized_submap() == standard.normalized_submap())
+            }) || (standard.device == BindingDevice::Keyboard
+                && standard.normalized_submap() == "default"
+                && on_graph.contains(&keys));
+            if !overridden {
+                live.push(standard);
+            }
+        }
+        live
+    }
 }
 
 impl Default for Config {
@@ -1037,5 +1096,83 @@ mod tests {
                 .count(),
             1
         );
+    }
+}
+
+#[cfg(test)]
+mod live_binding_tests {
+    use super::*;
+    use crate::command::DispatchCommand;
+    use crate::settings::BindingProfile;
+
+    fn on_super(key: &str, command: DispatchCommand) -> BindingProfile {
+        BindingProfile {
+            key: key.to_string(),
+            win: true,
+            command,
+            ..BindingProfile::default()
+        }
+    }
+
+    fn live_on(config: &Config, key: &str) -> Vec<DispatchCommand> {
+        config
+            .live_bindings()
+            .into_iter()
+            .filter(|binding| {
+                binding.win
+                    && !binding.ctrl
+                    && !binding.alt
+                    && !binding.shift
+                    && binding.normalized_key() == key
+            })
+            .map(|binding| binding.command)
+            .collect()
+    }
+
+    /// A standard key works without being written; written keys come
+    /// first, in their order; and a standard key is not live where the
+    /// configuration overrides it: other bindings on its keys (switched
+    /// off too), its command on other keys, or a key node of the graph.
+    #[test]
+    fn the_standard_keys_work_unless_the_configuration_overrides_them() {
+        let mut config = Config::new();
+        config.desktop.bindings.clear();
+        config.node_graph = NodeGraph::new();
+        assert_eq!(live_on(&config, "A"), [DispatchCommand::TogglePinned]);
+        assert_eq!(
+            config.live_bindings().len(),
+            crate::examples::standard_bindings().len()
+        );
+
+        // Its keys bound to something else.
+        config.desktop.bindings = vec![on_super("A", DispatchCommand::CloseActive)];
+        assert_eq!(live_on(&config, "A"), [DispatchCommand::CloseActive]);
+        assert_eq!(config.live_bindings()[0].command, DispatchCommand::CloseActive);
+
+        // Taken away: a binding switched off on its keys.
+        config.desktop.bindings[0].enabled = false;
+        assert!(config
+            .live_bindings()
+            .iter()
+            .all(|binding| !(binding.enabled && binding.command == DispatchCommand::TogglePinned)));
+
+        // Moved: its command on other keys.
+        config.desktop.bindings = vec![on_super("P", DispatchCommand::TogglePinned)];
+        assert!(live_on(&config, "A").is_empty());
+        assert_eq!(live_on(&config, "P"), [DispatchCommand::TogglePinned]);
+
+        // A key node of the graph on its keys.
+        config.desktop.bindings.clear();
+        config.node_graph.add_node(
+            crate::graph::NodeType::OnKeyPress {
+                key: "A".to_string(),
+                ctrl: false,
+                alt: false,
+                shift: false,
+                win: true,
+            },
+            [0.0, 0.0],
+        );
+        assert!(live_on(&config, "A").is_empty());
     }
 }

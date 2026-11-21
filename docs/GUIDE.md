@@ -323,6 +323,7 @@ with Super (the Windows key) held:
 | Super+[ ] , . W | tabs: join the neighbour, leave the tabs, tabs on or off |
 | Super+F, Super+Shift+F, Super+M | one window fills the area; fullscreen; maximize |
 | Super+C, Super+V | centre the window; floating or tiled |
+| Super+A | keep a floating window always on top, or not (one on each workspace) |
 | Super+- =, Super+Shift+- = | narrower / wider; lower / taller |
 | Super+D or Space, Super+S, Super+N | launcher, control centre, notifications |
 | Super+Shift+D | show the desktop, and again the windows |

@@ -380,6 +380,7 @@ impl WmCore {
                 is_managed: !desktop.ignored_by_rules(handle),
                 is_tiled,
                 is_floating: !is_tiled,
+                is_always_on_top: desktop.is_always_on_top(handle),
                 has_border: desktop.has_border(handle),
                 is_border_window: desktop.is_decoration(handle),
                 workspace_id: workspace.id,

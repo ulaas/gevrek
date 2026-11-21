@@ -54,6 +54,12 @@ pub struct Task {
     /// The person minimized it: its button is drawn apart from the
     /// others (`task_look`), and a press brings it back.
     pub minimized: bool,
+    /// It floats (is not in the layout): only such a window can be kept
+    /// on top.
+    pub floating: bool,
+    /// It is kept above the other windows (always on top): its button
+    /// has a pin in its corner.
+    pub on_top: bool,
 }
 
 /// What a window's picture is looked for by. The picture its program
@@ -314,6 +320,8 @@ fn tasks_of(workspace: &Value, shown: bool) -> Vec<Task> {
                 focused: window["is_focused"].as_bool().unwrap_or(false),
                 shown,
                 minimized: window["is_minimized"].as_bool().unwrap_or(false),
+                floating: window["is_floating"].as_bool().unwrap_or(false),
+                on_top: window["is_always_on_top"].as_bool().unwrap_or(false),
             })
         })
         .collect()
@@ -1216,9 +1224,9 @@ pub struct Asked {
     pub show: Option<usize>,
     /// Go to this window (a button of the taskbar).
     pub go: Option<u64>,
-    /// Bring this window to the middle of this display, floating, or
-    /// put it back as it was (the other button on it in the taskbar).
-    pub centre: Option<u64>,
+    /// The other button was pressed on a window of the taskbar: the
+    /// menu of what can be done with it, next to this rectangle.
+    pub task_actions: Option<(egui::Rect, u64)>,
     /// A button of the taskbar that stands for several windows was
     /// pressed (the windows of one program, or those there is no room
     /// for): list these next to this rectangle.
@@ -3113,7 +3121,12 @@ fn draw_tasks(ui: &mut egui::Ui, shown: &Shown, ink: &Ink, asked: &mut Asked) {
     // (The room a button's picture takes before its words, and the count
     // of its windows after them.)
     let before = |button: &Button| if button.picture.is_some() { 22.0 } else { 0.0 };
-    let after = |button: &Button| if button.windows.len() > 1 { 16.0 } else { 0.0 };
+    // (A window kept on top has a pin there, too.)
+    let on_top = |button: &Button| button.windows.iter().any(|task| task.on_top);
+    let after = |button: &Button| {
+        let count = if button.windows.len() > 1 { 16.0 } else { 0.0 };
+        count + if on_top(button) { 14.0 } else { 0.0 }
+    };
     if natural {
         // Each as wide as its words, while they all have room so; else
         // none wider than its share.
@@ -3313,6 +3326,27 @@ fn draw_tasks(ui: &mut egui::Ui, shown: &Shown, ink: &Ink, asked: &mut Asked) {
                         );
                     }
                 }
+                if on_top(button) {
+                    // Kept on top: a pin of the accent's, before the count
+                    // where there are words, else small in its upper
+                    // corner (the count has the lower one).
+                    let (at, size) = if narrow {
+                        (place.right_top() + egui::vec2(-5.0, 5.0), 9.0)
+                    } else {
+                        let count = if many { 16.0 } else { 0.0 };
+                        (
+                            egui::pos2(place.right() - 13.0 - count, place.center().y),
+                            11.0,
+                        )
+                    };
+                    ui.painter().text(
+                        at,
+                        egui::Align2::CENTER_CENTER,
+                        icons::PUSH_PIN,
+                        egui::FontId::proportional(size),
+                        accent,
+                    );
+                }
                 if many {
                     let response = response.hint(format!(
                         "{} windows: {}. A press lists them.",
@@ -3330,16 +3364,18 @@ fn draw_tasks(ui: &mut egui::Ui, shown: &Shown, ink: &Ink, asked: &mut Asked) {
                             "{} (minimized). A press brings it back.",
                             button.chosen.title
                         ))
+                    } else if button.chosen.on_top {
+                        response.hint(format!("{} (always on top)", button.chosen.title))
                     } else {
                         response.hint(&button.chosen.title)
                     };
                     if response.clicked() && !button.has_keys {
                         asked.go = Some(button.chosen.id);
                     }
-                    // The other button: the window to the middle of this
-                    // display, floating; again, back as it was.
+                    // The other button: the menu of what can be done with
+                    // the window (`task_actions`).
                     if response.secondary_clicked() {
-                        asked.centre = Some(button.chosen.id);
+                        asked.task_actions = Some((response.rect, button.chosen.id));
                     }
                 }
                 place
@@ -3463,6 +3499,137 @@ pub fn task_menu(ui: &mut egui::Ui, palette: &theme::Palette, tasks: &[Task]) ->
                         }
                     }
                 });
+        });
+    chosen
+}
+
+/// What can be done with a window of the taskbar: the menu the other
+/// button opens on its button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskAction {
+    /// To the middle of this display, floating; chosen again for the
+    /// window, back as it was.
+    Centre,
+    /// Kept above the other windows, or not: a floating window only, one
+    /// on each workspace (the window manager lets the one before go).
+    OnTop,
+}
+
+impl TaskAction {
+    /// The lines of the menu, in order.
+    pub const ALL: [TaskAction; 2] = [TaskAction::Centre, TaskAction::OnTop];
+
+    /// Whether it can be chosen for this window.
+    pub fn live(self, task: &Task) -> bool {
+        match self {
+            TaskAction::Centre => true,
+            TaskAction::OnTop => task.floating || task.on_top,
+        }
+    }
+
+    /// What its line says for this window.
+    pub fn words(self, task: &Task) -> &'static str {
+        match self {
+            TaskAction::Centre => "Centre on this display, or put back",
+            TaskAction::OnTop if self.live(task) => "Always on top",
+            TaskAction::OnTop => "Always on top (floating windows only)",
+        }
+    }
+
+    /// The command that does it for this window, on this panel's display.
+    pub fn command(self, view: &View, task: &Task) -> Option<String> {
+        use gevrek_model::command::{DispatchCommand, WindowSelector};
+        match self {
+            TaskAction::Centre => centre_window(view, task.id),
+            TaskAction::OnTop => serde_json::to_string(&DispatchCommand::SetWindowPinned {
+                selector: WindowSelector::Handle(task.id as i64),
+                enabled: !task.on_top,
+            })
+            .ok(),
+        }
+    }
+}
+
+/// How large the menu of a window of the taskbar is, in points.
+pub fn task_actions_size() -> egui::Vec2 {
+    egui::vec2(
+        320.0,
+        12.0 + (TRAY_LINE + 2.0) * TaskAction::ALL.len() as f32,
+    )
+}
+
+/// The menu of a window of the taskbar (the other button on its button):
+/// a line for each [`TaskAction`], the one that is on marked. A line that
+/// cannot be chosen for this window is read, not pressed. What was
+/// chosen, if anything was.
+pub fn task_actions(ui: &mut egui::Ui, palette: &theme::Palette, task: &Task) -> Option<TaskAction> {
+    let mut chosen = None;
+    egui::CentralPanel::default()
+        .frame(
+            egui::Frame::new()
+                .fill(palette.surface)
+                .inner_margin(egui::Margin::same(6)),
+        )
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
+            let actions = TaskAction::ALL;
+            let (on, chose) = menu_keys(
+                ui.ctx(),
+                actions.len(),
+                |index| actions[index].live(task),
+                false,
+            );
+            let font = egui::FontId::proportional(13.0);
+            for (index, action) in actions.into_iter().enumerate() {
+                let live = action.live(task);
+                let (line, response) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), TRAY_LINE),
+                    if live {
+                        egui::Sense::click()
+                    } else {
+                        egui::Sense::hover()
+                    },
+                );
+                if live && response.hovered() {
+                    ui.painter()
+                        .rect_filled(line, 6, palette.text.gamma_multiply(0.10));
+                }
+                if on == Some(index) {
+                    menu_mark(ui, line, palette);
+                }
+                let ink = if live { palette.text } else { palette.muted };
+                // (A check where it is on, as a menu's switch has.)
+                let (sign, marked) = match action {
+                    TaskAction::Centre => (icons::ARROWS_IN, false),
+                    TaskAction::OnTop => (icons::PUSH_PIN, task.on_top),
+                };
+                if marked {
+                    ui.painter().text(
+                        egui::pos2(line.left() + 17.0, line.center().y),
+                        egui::Align2::CENTER_CENTER,
+                        icons::CHECK,
+                        font.clone(),
+                        palette.accent,
+                    );
+                }
+                ui.painter().text(
+                    egui::pos2(line.left() + 39.0, line.center().y),
+                    egui::Align2::CENTER_CENTER,
+                    sign,
+                    font.clone(),
+                    ink,
+                );
+                ui.painter().text(
+                    egui::pos2(line.left() + 56.0, line.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    action.words(task),
+                    font.clone(),
+                    ink,
+                );
+                if live && (response.clicked() || (chose && on == Some(index))) {
+                    chosen = Some(action);
+                }
+            }
         });
     chosen
 }
@@ -3713,6 +3880,8 @@ mod tests {
             focused: false,
             shown: true,
             minimized: false,
+            floating: false,
+            on_top: false,
         };
         let label = task_label(&long);
         // (Cut at 24 letters; a space the cut ends on is left out.)
@@ -4043,6 +4212,49 @@ mod tests {
         );
         assert_eq!((first.title.as_str(), second.title.as_str()), ("editor", "video"));
         assert!(first.focused && !second.focused);
+    }
+
+    /// The menu of a window of the taskbar: the window floats and is kept
+    /// on top as the state says, a tiled one cannot be kept on top, and
+    /// the line asks for the other of what it is.
+    #[test]
+    fn the_menu_of_a_window_keeps_a_floating_one_on_top_or_lets_it_go() {
+        use gevrek_model::command::{DispatchCommand, WindowSelector};
+        let monitor = serde_json::json!({
+            "is_focused": true, "workspace": {"id": 1}, "workspaces": [
+                {"id": 1, "name": "1", "detailed_windows": [
+                    {"window_id": 1, "title": "tiled", "is_floating": false},
+                    {"window_id": 2, "title": "floating", "is_floating": true},
+                    {"window_id": 3, "title": "pinned", "is_floating": true, "is_always_on_top": true},
+                ]},
+            ]
+        });
+        let view = view_of(&monitor);
+        let [tiled, floating, pinned] = [&view.tasks[0], &view.tasks[1], &view.tasks[2]];
+        assert!(!tiled.floating && floating.floating && pinned.on_top && !floating.on_top);
+        assert!(TaskAction::Centre.live(tiled));
+        assert!(!TaskAction::OnTop.live(tiled));
+        assert!(TaskAction::OnTop.live(floating) && TaskAction::OnTop.live(pinned));
+        let asked = |task: &Task| -> DispatchCommand {
+            serde_json::from_str(&TaskAction::OnTop.command(&view, task).unwrap()).unwrap()
+        };
+        assert_eq!(
+            asked(floating),
+            DispatchCommand::SetWindowPinned {
+                selector: WindowSelector::Handle(2),
+                enabled: true
+            }
+        );
+        assert_eq!(
+            asked(pinned),
+            DispatchCommand::SetWindowPinned {
+                selector: WindowSelector::Handle(3),
+                enabled: false
+            }
+        );
+        let centred: DispatchCommand =
+            serde_json::from_str(&TaskAction::Centre.command(&view, tiled).unwrap()).unwrap();
+        assert!(matches!(centred, DispatchCommand::ToggleWindowCentered { .. }));
     }
 
     /// A press on a panel is for that panel's display: its workspace of
@@ -4704,6 +4916,8 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
                 focused: id == 3,
                 shown: true,
                 minimized: false,
+                floating: false,
+                on_top: false,
             })
             .collect();
         let system = SystemView {
@@ -4810,6 +5024,8 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
             focused: false,
             shown: true,
             minimized: false,
+            floating: false,
+            on_top: false,
         };
         let tasks = [
             task(1, "firefox", "Navigator"),
@@ -4917,6 +5133,8 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
                 focused: id == 3,
                 shown: true,
                 minimized: false,
+                floating: false,
+                on_top: false,
             })
             .collect()
     }
@@ -5132,6 +5350,8 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
         let mut view = view(&windows_state(), "Monitor ACM2702 (1)").expect("the display");
         view.tasks = vec![Task {
             minimized: true,
+            floating: false,
+            on_top: false,
             ..many_tasks(1).remove(0)
         }];
         let mut went = None;
@@ -5252,6 +5472,8 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
             focused,
             shown: true,
             minimized: false,
+            floating: false,
+            on_top: false,
         };
         let view = View {
             tabs: vec![
@@ -5273,6 +5495,8 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
                     task(3, "Files", false),
                     Task {
                         minimized: true,
+                        floating: false,
+                        on_top: false,
                         ..task(4, "Notes (minimized)", false)
                     },
                 ],

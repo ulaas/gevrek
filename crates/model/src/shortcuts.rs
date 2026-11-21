@@ -91,13 +91,13 @@ pub fn keys_of_command(config: &Config, command: &serde_json::Value) -> Vec<Stri
         .collect()
 }
 
-/// Every enabled key assignment of `config`: the binding profiles first, in
-/// their order, then the graph's key nodes by key.
+/// Every enabled key assignment of `config`: the live bindings first (the
+/// configuration's in their order, then the standard keys it does not
+/// override: `Config::live_bindings`), then the graph's key nodes by key.
 pub fn shortcuts_of(config: &Config) -> Vec<Shortcut> {
     let mut list = Vec::new();
     for binding in config
-        .desktop
-        .bindings
+        .live_bindings()
         .iter()
         .filter(|binding| binding.enabled)
     {
@@ -315,7 +315,12 @@ mod tests {
             },
         ];
         let list = shortcuts_of(&config);
-        assert_eq!(list.len(), 2, "a disabled binding is not listed: {list:?}");
+        // (The standard keys the configuration does not override follow.)
+        assert!(
+            !list.iter().any(|shortcut| shortcut.action.starts_with("Off")),
+            "a disabled binding is not listed: {list:?}"
+        );
+        assert!(list.len() > 2);
         assert_eq!(list[0].keys, format!("{}+Ctrl+O", super_key_name()));
         assert_eq!(list[0].action, "Overview (Toggle overview)");
         assert_eq!(list[0].submap, "default");

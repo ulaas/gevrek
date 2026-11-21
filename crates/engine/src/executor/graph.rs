@@ -1058,6 +1058,17 @@ impl Executor {
                             "Converted window to tiled mode on monitor: {}",
                             monitor_info.name
                         );
+                        // A tiled window is not kept on top (see
+                        // `set_window_on_top`).
+                        if queries(window_manager).is_always_on_top(window_handle) {
+                            effect(
+                                window_manager,
+                                Effect::Stack {
+                                    id: window_handle,
+                                    op: StackOp::AlwaysOnTop(false),
+                                },
+                            )?;
+                        }
                     } else {
                         // Convert from tiled to floating
                         workspace.remove_window(window_handle); // Remove from containers

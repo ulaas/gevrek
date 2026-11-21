@@ -435,6 +435,8 @@ pub struct DetailedWindowInfo {
     pub is_managed: bool,       // Whether window is managed by WM
     pub is_tiled: bool,         // Window is in tiling layout (not floating)
     pub is_floating: bool,      // Window is floating
+    /// It is kept above the other windows (always on top).
+    pub is_always_on_top: bool,
     pub has_border: bool,       // Window has decorative border
     pub is_border_window: bool, // This IS a border window (internal)
     pub workspace_id: usize,    // Which workspace contains this window
@@ -579,6 +581,7 @@ mod change_tests {
             is_managed: true,
             is_tiled: false,
             is_floating: true,
+            is_always_on_top: false,
             has_border: false,
             is_border_window: false,
             workspace_id: 0,

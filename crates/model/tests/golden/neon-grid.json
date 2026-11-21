@@ -3217,6 +3217,23 @@
         }
       },
       {
+        "name": "Always on top",
+        "enabled": true,
+        "key": "A",
+        "ctrl": false,
+        "alt": false,
+        "shift": false,
+        "super": true,
+        "device": "keyboard",
+        "trigger": "press",
+        "submap": "default",
+        "consume": true,
+        "long_press_ms": 500,
+        "command": {
+          "command": "toggle_pinned"
+        }
+      },
+      {
         "name": "Narrower",
         "enabled": true,
         "key": "MINUS",

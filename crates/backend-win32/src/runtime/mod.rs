@@ -1144,9 +1144,8 @@ impl Runtime {
                         .filter_map(|id| {
                             let index = id.checked_sub(1_000_000)? as usize;
                             self.config
-                                .desktop
-                                .bindings
-                                .get(index)
+                    .live_bindings()
+                    .get(index)
                                 .map(|binding| binding.command.clone())
                         })
                         .collect::<Vec<_>>();
@@ -2794,7 +2793,7 @@ impl Runtime {
             }
         }
 
-        for (index, binding) in self.config.desktop.bindings.iter().enumerate() {
+        for (index, binding) in self.config.live_bindings().iter().enumerate() {
             if !binding.enabled
                 || binding.key.trim().is_empty()
                 || binding.normalized_submap() != self.active_binding_submap

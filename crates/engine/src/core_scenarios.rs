@@ -3321,3 +3321,73 @@ fn a_window_followed_into_tabs_is_the_tab_in_front_and_in_sight() {
     assert!(!desktop.window(terminal).visible, "the terminal is behind it");
     assert_eq!(desktop.focused, Some(editor));
 }
+/// A window kept on top is a floating one, and one of each workspace's:
+/// a tiled window is refused, the window kept on top before is let go
+/// when another is, and a window that is tiled again is let go too. The
+/// state the panel reads says which it is.
+#[test]
+fn one_floating_window_of_a_workspace_is_kept_on_top() {
+    use gevrek_model::command::WindowSelector;
+    let (mut core, mut desktop) = setup(&["main", "other"]);
+    let (notes, viewer, editor) = (
+        open(&mut core, &mut desktop, "notes"),
+        open(&mut core, &mut desktop, "viewer"),
+        open(&mut core, &mut desktop, "editor"),
+    );
+    let handle = |window: WindowHandle| WindowSelector::Handle(window.0 as i64);
+    for window in [notes, viewer] {
+        command(
+            &mut core,
+            &mut desktop,
+            DispatchCommand::SetWindowFloating {
+                selector: handle(window),
+                enabled: true,
+            },
+        );
+    }
+    let on_top = |desktop: &FakeDesktop| {
+        [notes, viewer, editor].map(|window| desktop.window(window).always_on_top)
+    };
+    let pin = |core: &mut WmCore, desktop: &mut FakeDesktop, window: WindowHandle| {
+        core.dispatch(
+            desktop,
+            DispatchCommand::SetWindowPinned {
+                selector: handle(window),
+                enabled: true,
+            },
+        )
+    };
+
+    // A tiled window is not kept on top.
+    assert!(pin(&mut core, &mut desktop, editor).is_err());
+    assert_eq!(on_top(&desktop), [false, false, false]);
+
+    pin(&mut core, &mut desktop, notes).expect("notes on top");
+    assert_eq!(on_top(&desktop), [true, false, false]);
+    let told = |core: &WmCore, desktop: &FakeDesktop, window: WindowHandle| {
+        published(core, desktop)
+            .iter()
+            .flat_map(|monitor| &monitor.workspaces)
+            .flat_map(|workspace| &workspace.detailed_windows)
+            .find(|detailed| detailed.handle == window)
+            .map(|detailed| detailed.is_always_on_top)
+    };
+    assert_eq!(told(&core, &desktop, notes), Some(true));
+
+    // Another of the workspace: the one before is let go.
+    pin(&mut core, &mut desktop, viewer).expect("viewer on top");
+    assert_eq!(on_top(&desktop), [false, true, false]);
+    assert_eq!(told(&core, &desktop, notes), Some(false));
+
+    // The toggle lets it go, and keeps it on top again.
+    focus(&mut core, &mut desktop, viewer);
+    command(&mut core, &mut desktop, DispatchCommand::TogglePinned);
+    assert_eq!(on_top(&desktop), [false, false, false]);
+    command(&mut core, &mut desktop, DispatchCommand::TogglePinned);
+    assert_eq!(on_top(&desktop), [false, true, false]);
+
+    // Tiled again, it is among the others.
+    command(&mut core, &mut desktop, DispatchCommand::ToggleFloating);
+    assert!(tiled(&core).contains(&viewer));
+    assert_eq!(on_top(&desktop), [false, false, false]);
+}

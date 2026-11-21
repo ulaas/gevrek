@@ -143,27 +143,13 @@ impl Executor {
                     .active_window()
                     .ok_or_else(|| anyhow::anyhow!("There is no active window"))?;
                 let on_top = !queries(window_manager).is_always_on_top(active);
-                effect(
-                    window_manager,
-                    Effect::Stack {
-                        id: active,
-                        op: StackOp::AlwaysOnTop(on_top),
-                    },
-                )?;
-                Ok(())
+                self.set_window_on_top(window_manager, monitor_manager, active, on_top)
             }
             DispatchCommand::ToggleWindowPinned { selector } => {
                 let target =
                     self.resolve_window_selector(window_manager, monitor_manager, &selector)?;
                 let on_top = !queries(window_manager).is_always_on_top(target);
-                effect(
-                    window_manager,
-                    Effect::Stack {
-                        id: target,
-                        op: StackOp::AlwaysOnTop(on_top),
-                    },
-                )?;
-                Ok(())
+                self.set_window_on_top(window_manager, monitor_manager, target, on_top)
             }
             DispatchCommand::ToggleFloating => {
                 self.action_toggle_floating(window_manager, monitor_manager)
@@ -181,30 +167,12 @@ impl Executor {
                 let active = queries(window_manager)
                     .active_window()
                     .ok_or_else(|| anyhow::anyhow!("There is no active window"))?;
-                if queries(window_manager).is_always_on_top(active) != enabled {
-                    effect(
-                        window_manager,
-                        Effect::Stack {
-                            id: active,
-                            op: StackOp::AlwaysOnTop(enabled),
-                        },
-                    )?;
-                }
-                Ok(())
+                self.set_window_on_top(window_manager, monitor_manager, active, enabled)
             }
             DispatchCommand::SetWindowPinned { selector, enabled } => {
                 let target =
                     self.resolve_window_selector(window_manager, monitor_manager, &selector)?;
-                if queries(window_manager).is_always_on_top(target) != enabled {
-                    effect(
-                        window_manager,
-                        Effect::Stack {
-                            id: target,
-                            op: StackOp::AlwaysOnTop(enabled),
-                        },
-                    )?;
-                }
-                Ok(())
+                self.set_window_on_top(window_manager, monitor_manager, target, enabled)
             }
             DispatchCommand::SetFloating { enabled } => {
                 let active = queries(window_manager)

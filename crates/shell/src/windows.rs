@@ -154,6 +154,9 @@ enum Menu {
     /// The windows a button of the taskbar stands for (by the first of
     /// them: another button's list is another menu).
     Windows(u64),
+    /// What can be done with a window of the taskbar (the other button on
+    /// its button), by the window.
+    TaskActions(u64),
 }
 
 /// What the surfaces share.
@@ -3000,10 +3003,6 @@ fn draw_panel(
     if let Some(command) = asked.show.and_then(|index| panel::show_tab(&view, index)) {
         state.link.send(Request::Dispatch(command));
     }
-    // The other button on a window of the taskbar.
-    if let Some(command) = asked.centre.and_then(|window| panel::centre_window(&view, window)) {
-        state.link.send(Request::Dispatch(command));
-    }
     // (Open as the host has it, too: a menu the host put away for a press
     // elsewhere or for Escape is closed before its drawing is let go of,
     // and the next press on its button is to open it, not to close it.)
@@ -3067,7 +3066,10 @@ fn draw_panel(
         .or(tray_list.map(|anchor| (Menu::Tray, anchor)))
         .or(asked.task_menu.as_ref().map(|(anchor, windows)| {
             (Menu::Windows(windows.first().copied().unwrap_or(0)), *anchor)
-        }));
+        }))
+        .or(asked
+            .task_actions
+            .map(|(anchor, window)| (Menu::TaskActions(window), anchor)));
     // Another workspace is asked for: the menu was for this one.
     if let (Some((id, _)), true, None) = (open, asked.show.is_some(), wanted) {
         control.close(id);
@@ -3177,6 +3179,30 @@ fn draw_panel(
                 line.borrow()
                     .link
                     .send(Request::Dispatch(panel::go_to_window(window)));
+                Flow::Close
+            })
+        }
+        Menu::TaskActions(window) => {
+            // The window as it is now, and what each line sends.
+            let Some(task) = panel::tasks_of_ids(&view, &[window]).into_iter().next() else {
+                return Flow::Continue;
+            };
+            let commands =
+                panel::TaskAction::ALL.map(|action| (action, action.command(&view, &task)));
+            let line = Rc::clone(shared);
+            control.popup(surface, anchor, panel::task_actions_size(), move |ui, _| {
+                let _held = &held;
+                let palette = themed(ui, &mut fonts);
+                let Some(action) = panel::task_actions(ui, &palette, &task) else {
+                    return Flow::Continue;
+                };
+                let command = commands
+                    .iter()
+                    .find(|(each, _)| *each == action)
+                    .and_then(|(_, command)| command.clone());
+                if let Some(command) = command {
+                    line.borrow().link.send(Request::Dispatch(command));
+                }
                 Flow::Close
             })
         }
