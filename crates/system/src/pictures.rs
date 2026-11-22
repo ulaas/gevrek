@@ -46,7 +46,7 @@ pub fn shrink(width: u32, height: u32, pixels: &[u8], side: u32) -> Option<Pictu
 /// The picture of a window (by its handle), no larger than `side` on its
 /// longer side. `None` for a window that is gone, minimised, or gives none.
 #[cfg(target_os = "macos")]
-pub use self::mac::of_window;
+pub use self::mac::{of_screen_area, of_window};
 
 /// ScreenCaptureKit: the picture of one window, alone, as it looks (a
 /// window behind others whole). macOS shows other programs' windows only
@@ -154,21 +154,53 @@ mod mac {
             configuration.setHeight((height * by).round().max(1.0) as usize);
             configuration.setShowsCursor(false);
             configuration.setIgnoreShadowsSingleWindow(true);
-            let (sender, answer) = channel();
-            let block = RcBlock::new(move |image: *mut CGImage, _error: *mut NSError| {
-                let image = (!image.is_null()).then(|| {
-                    objc2_core_foundation::CFRetained::retain(std::ptr::NonNull::new_unchecked(image))
-                });
-                let _ = sender.send(image.map(CarriedImage));
-            });
-            SCScreenshotManager::captureImageWithFilter_configuration_completionHandler(
-                &filter,
-                &configuration,
-                Some(&block),
-            );
-            answer.recv_timeout(WAIT).ok().flatten()?.0
+            captured(|block| {
+                SCScreenshotManager::captureImageWithFilter_configuration_completionHandler(
+                    &filter,
+                    &configuration,
+                    Some(block),
+                )
+            })?
         };
         picture_of(&image, side)
+    }
+
+    type Answer = block2::DynBlock<dyn Fn(*mut CGImage, *mut NSError)>;
+
+    /// The image a capture answers with, waited for.
+    fn captured(capture: impl FnOnce(&Answer)) -> Option<objc2_core_foundation::CFRetained<CGImage>> {
+        let (sender, answer) = channel();
+        let block = RcBlock::new(move |image: *mut CGImage, _error: *mut NSError| {
+            // SAFETY: the answer's image, retained to be carried.
+            let image = std::ptr::NonNull::new(image)
+                .map(|image| unsafe { objc2_core_foundation::CFRetained::retain(image) });
+            let _ = sender.send(image.map(CarriedImage));
+        });
+        capture(&block);
+        answer.recv_timeout(WAIT).ok().flatten().map(|image| image.0)
+    }
+
+    /// What the screen shows in a rectangle of it, in points from the top
+    /// left of the main display (the menu bar's items). A picture with
+    /// its pixels as they are; `None` until the screen may be recorded.
+    pub fn of_screen_area(x: f64, y: f64, width: f64, height: f64) -> Option<crate::icons::Picture> {
+        if !allowed() || width <= 0.0 || height <= 0.0 {
+            return None;
+        }
+        let rect = objc2_core_foundation::CGRect::new(
+            objc2_core_foundation::CGPoint::new(x, y),
+            objc2_core_foundation::CGSize::new(width, height),
+        );
+        // SAFETY: a capture of the rectangle, its answer carried back.
+        let image = captured(|block| unsafe {
+            SCScreenshotManager::captureImageInRect_completionHandler(rect, Some(block))
+        })?;
+        let picture = picture_of(&image, u32::MAX)?;
+        Some(crate::icons::Picture {
+            width: picture.width,
+            height: picture.height,
+            pixels: picture.rgba,
+        })
     }
 
     struct CarriedImage(objc2_core_foundation::CFRetained<CGImage>);

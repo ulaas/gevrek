@@ -151,6 +151,25 @@ mod mac {
                 },
                 _ => eprintln!("fullscreen <window> on|off"),
             },
+            Some("extras") => {
+                // Every program's items of the menu bar, as accessibility
+                // shows them.
+                for app in gevrek_macos::apps::running() {
+                    let element = ax::Element::application(app.pid);
+                    let Ok(bar) = element.element("AXExtrasMenuBar") else { continue };
+                    for item in bar.elements("AXChildren").unwrap_or_default() {
+                        println!(
+                            "{:<36} {:?} title {:?} description {:?} help {:?} {:?}",
+                            app.app_id(),
+                            item.role(),
+                            item.string("AXTitle"),
+                            item.string("AXDescription"),
+                            item.string("AXHelp"),
+                            item.frame()
+                        );
+                    }
+                }
+            }
             Some("tree") => match number(1) {
                 Some(pid) => tree(&ax::Element::application(pid), 0),
                 None => eprintln!("tree <pid>"),

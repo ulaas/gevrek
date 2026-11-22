@@ -189,6 +189,11 @@ impl Element {
         self.elements("AXWindows")
     }
 
+    /// The element an attribute names (`AXExtrasMenuBar`).
+    pub fn element(&self, name: &str) -> Result<Element, AxError> {
+        self.attribute(name).map(Element)
+    }
+
     /// The elements an attribute names (`AXChildren`, `AXWindows`).
     pub fn elements(&self, name: &str) -> Result<Vec<Element>, AxError> {
         let list = self.attribute(name)?;

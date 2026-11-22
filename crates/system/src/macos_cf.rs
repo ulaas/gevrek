@@ -44,6 +44,44 @@ extern "C" {
     pub fn CFRunLoopRunInMode(mode: CFTypeRef, seconds: f64, after_source: bool) -> i32;
 }
 
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    pub fn AXIsProcessTrusted() -> bool;
+    pub fn AXUIElementCreateApplication(pid: i32) -> CFTypeRef;
+    pub fn AXUIElementCopyAttributeValue(element: CFTypeRef, attribute: CFTypeRef, value: *mut CFTypeRef) -> i32;
+    pub fn AXUIElementPerformAction(element: CFTypeRef, action: CFTypeRef) -> i32;
+    pub fn AXValueGetValue(value: CFTypeRef, kind: u32, out: *mut c_void) -> bool;
+}
+
+/// An attribute of an accessibility element (owned), if it has one.
+///
+/// # Safety
+/// `element` is a valid AXUIElement.
+pub unsafe fn attribute(element: CFTypeRef, name: &str) -> Option<Cf> {
+    let name = Cf::string(name);
+    let mut value: CFTypeRef = std::ptr::null();
+    if AXUIElementCopyAttributeValue(element, name.as_ptr(), &mut value) != 0 {
+        return None;
+    }
+    Cf::owned(value)
+}
+
+/// The items of a CFArray, each retained.
+///
+/// # Safety
+/// `array` is a valid CFArray.
+pub unsafe fn items(array: CFTypeRef) -> Vec<Cf> {
+    if CFGetTypeID(array) != CFArrayGetTypeID() {
+        return Vec::new();
+    }
+    (0..CFArrayGetCount(array))
+        .filter_map(|index| {
+            let item = CFArrayGetValueAtIndex(array, index);
+            (!item.is_null()).then(|| Cf(CFRetain(item)))
+        })
+        .collect()
+}
+
 const UTF8: u32 = 0x0800_0100;
 
 /// One reference to a Core Foundation object, let go when dropped.

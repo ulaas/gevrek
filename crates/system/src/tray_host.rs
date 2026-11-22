@@ -218,18 +218,243 @@ fn picture_from(black: &[u8], white: &[u8], side: u32) -> Option<Picture> {
 #[cfg(windows)]
 pub use self::windows::Host;
 
-/// On macOS the icons of the menu bar are the system's: the shell holds no
-/// tray of its own, and there is nothing to start.
 #[cfg(target_os = "macos")]
-pub struct Host;
+pub use self::mac::Host;
 
+/// A picture taken off the menu bar made clear where it shows the bar
+/// itself: the colour of its corners is the ground, a pixel as much clear
+/// as it is near that colour (so an edge drawn soft stays soft), and the
+/// colour of a pixel half clear is what it was before the ground showed
+/// through.
+pub fn without_ground(mut picture: crate::icons::Picture) -> crate::icons::Picture {
+    let (width, height) = (picture.width as usize, picture.height as usize);
+    if width == 0 || height == 0 || picture.pixels.len() < width * height * 4 {
+        return picture;
+    }
+    let corner = |x: usize, y: usize| {
+        let at = (y * width + x) * 4;
+        [0, 1, 2].map(|part| f32::from(picture.pixels[at + part]))
+    };
+    let corners = [corner(0, 0), corner(width - 1, 0), corner(0, height - 1), corner(width - 1, height - 1)];
+    let ground = [0, 1, 2].map(|part| corners.iter().map(|colour| colour[part]).sum::<f32>() / 4.0);
+    let distance_of = |pixel: &[u8]| {
+        (0..3)
+            .map(|part| (f32::from(pixel[part]) - ground[part]).abs())
+            .fold(0.0, f32::max)
+    };
+    // The item's own colour is what is furthest from the ground (an item
+    // of the menu bar is drawn in one colour, mostly): a pixel is as solid
+    // as it is far along the way to it.
+    let furthest = picture
+        .pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|pixel| distance_of(pixel))
+        .fold(0.0, f32::max)
+        .max(1.0);
+    for pixel in picture.pixels.as_chunks_mut::<4>().0 {
+        let colour = [0, 1, 2].map(|part| f32::from(pixel[part]));
+        let distance = distance_of(pixel);
+        let alpha = (distance / furthest).clamp(0.0, 1.0);
+        for part in 0..3 {
+            // What was laid over the ground with this much of it showing.
+            let own = if alpha > 0.0 {
+                (colour[part] - ground[part] * (1.0 - alpha)) / alpha
+            } else {
+                0.0
+            };
+            pixel[part] = own.round().clamp(0.0, 255.0) as u8;
+        }
+        pixel[3] = (alpha * 255.0).round() as u8;
+    }
+    picture
+}
+
+/// The menu bar's items of the other programs, as the shell's tray. macOS
+/// has no tray to stand in for: each program's items are its own, in the
+/// menu bar. They are read through the Accessibility API (each program's
+/// `AXExtrasMenuBar`), pressed through it as a click on them would be, and
+/// pictured from what the screen shows where they are (which needs the
+/// Screen Recording permission; without it an item has no picture). The
+/// system's own items (the Control Centre's, Spotlight's, the input
+/// menu) are left to the menu bar. The items are looked at every few
+/// seconds: nothing tells of them.
 #[cfg(target_os = "macos")]
-impl Host {
-    pub fn start(_changed: impl Fn(Vec<Icon>) + Send + 'static) -> Option<Self> {
-        None
+mod mac {
+    use super::{Icon, Press};
+    use crate::macos_cf::{self as cf, Cf};
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    use objc2_foundation::{NSArray, NSString};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    /// How often the items are looked at.
+    const LOOK: Duration = Duration::from_secs(3);
+
+    /// A program that runs: its process, its bundle id and its name.
+    struct Program {
+        pid: i32,
+        id: String,
+        name: String,
     }
 
-    pub fn press(&self, _key: &str, _press: Press) {}
+    fn programs() -> Vec<Program> {
+        let text = |object: Option<Retained<NSString>>| object.map(|text| text.to_string()).unwrap_or_default();
+        // SAFETY: the workspace's running applications, and their plain
+        // properties.
+        unsafe {
+            let workspace: Retained<AnyObject> = msg_send![class!(NSWorkspace), sharedWorkspace];
+            let running: Retained<NSArray<AnyObject>> = msg_send![&*workspace, runningApplications];
+            running
+                .iter()
+                .map(|app| Program {
+                    pid: msg_send![&*app, processIdentifier],
+                    id: text(msg_send![&*app, bundleIdentifier]),
+                    name: text(msg_send![&*app, localizedName]),
+                })
+                .collect()
+        }
+    }
+
+    /// The system's own items, which the menu bar keeps.
+    fn the_systems(id: &str) -> bool {
+        id.starts_with("com.apple.")
+    }
+
+    /// A program's items of the menu bar (retained elements).
+    fn items_of(pid: i32) -> Vec<Cf> {
+        // SAFETY: the program's element, its extras menu bar and that
+        // bar's children.
+        unsafe {
+            let Some(app) = Cf::owned(cf::AXUIElementCreateApplication(pid)) else {
+                return Vec::new();
+            };
+            let Some(bar) = cf::attribute(app.as_ptr(), "AXExtrasMenuBar") else {
+                return Vec::new();
+            };
+            cf::attribute(bar.as_ptr(), "AXChildren")
+                .map(|children| cf::items(children.as_ptr()))
+                .unwrap_or_default()
+        }
+    }
+
+    /// Where an item is, in points from the top left of the main display.
+    fn frame_of(item: &Cf) -> Option<(f64, f64, f64, f64)> {
+        // SAFETY: AXValues of a point and a size, read into their kinds.
+        unsafe {
+            let mut at = [0f64; 2];
+            let mut size = [0f64; 2];
+            let position = cf::attribute(item.as_ptr(), "AXPosition")?;
+            let extent = cf::attribute(item.as_ptr(), "AXSize")?;
+            (cf::AXValueGetValue(position.as_ptr(), 1, at.as_mut_ptr().cast())
+                && cf::AXValueGetValue(extent.as_ptr(), 2, size.as_mut_ptr().cast()))
+            .then_some((at[0], at[1], size[0], size[1]))
+        }
+    }
+
+    fn said(item: &Cf, name: &str) -> Option<String> {
+        // SAFETY: a text attribute of a valid element.
+        unsafe { cf::attribute(item.as_ptr(), name).and_then(|text| cf::string_of(text.as_ptr())) }
+            .filter(|text| !text.trim().is_empty())
+    }
+
+    /// Every other program's item of the menu bar, as the tray's icons.
+    fn icons() -> Vec<Icon> {
+        let mut icons = Vec::new();
+        for program in programs().into_iter().filter(|program| !the_systems(&program.id)) {
+            for (index, item) in items_of(program.pid).iter().enumerate() {
+                let tip = ["AXTitle", "AXDescription", "AXHelp"]
+                    .iter()
+                    .find_map(|name| said(item, name))
+                    .unwrap_or_else(|| program.name.clone());
+                let picture = frame_of(item)
+                    .and_then(|(x, y, width, height)| crate::pictures::of_screen_area(x, y, width, height))
+                    .map(super::without_ground);
+                let stamp = picture.as_ref().map_or(0, |picture| {
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    picture.pixels.hash(&mut hasher);
+                    hasher.finish()
+                });
+                icons.push(Icon {
+                    key: format!("{}:{index}", program.pid),
+                    tip,
+                    name: format!("{}:{index}", if program.id.is_empty() { &program.name } else { &program.id }),
+                    picture: picture.map(Arc::new),
+                    stamp,
+                });
+            }
+        }
+        icons
+    }
+
+    /// The menu bar's items, told to the shell when they change.
+    pub struct Host {
+        stop: Arc<AtomicBool>,
+    }
+
+    impl Host {
+        pub fn start(changed: impl Fn(Vec<Icon>) + Send + 'static) -> Option<Self> {
+            // SAFETY: a plain question.
+            if !unsafe { cf::AXIsProcessTrusted() } {
+                log::info!("the menu bar's items are read through the Accessibility permission, which the shell has not");
+            }
+            let stop = Arc::new(AtomicBool::new(false));
+            let stopped = Arc::clone(&stop);
+            std::thread::Builder::new()
+                .name("menu bar items".to_string())
+                .spawn(move || {
+                    let mut told: Option<Vec<Icon>> = None;
+                    while !stopped.load(Ordering::Relaxed) {
+                        let now = icons();
+                        if told.as_ref() != Some(&now) {
+                            log::debug!("{} item(s) of other programs in the menu bar", now.len());
+                            changed(now.clone());
+                            told = Some(now);
+                        }
+                        std::thread::sleep(LOOK);
+                    }
+                })
+                .ok()?;
+            Some(Self { stop })
+        }
+
+        /// Press an item: its program does what a click on it does (most
+        /// open their menu). `Menu` asks for the menu where the item has
+        /// one of its own.
+        pub fn press(&self, key: &str, press: Press) {
+            let Some((pid, index)) = key
+                .split_once(':')
+                .and_then(|(pid, index)| Some((pid.parse::<i32>().ok()?, index.parse::<usize>().ok()?)))
+            else {
+                return;
+            };
+            let Some(item) = items_of(pid).into_iter().nth(index) else {
+                log::debug!("menu bar item {key} is gone");
+                return;
+            };
+            let action = |name: &str| {
+                let name = Cf::string(name);
+                // SAFETY: an action of a valid element.
+                unsafe { cf::AXUIElementPerformAction(item.as_ptr(), name.as_ptr()) == 0 }
+            };
+            let done = match press {
+                Press::Menu => action("AXShowMenu") || action("AXPress"),
+                Press::Main => action("AXPress"),
+            };
+            log::debug!("menu bar item {key} pressed ({press:?}): {}", if done { "done" } else { "refused" });
+        }
+    }
+
+    impl Drop for Host {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -688,6 +913,33 @@ mod windows {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_menu_bars_ground_is_taken_out_of_an_items_picture() {
+        let ground = [90u8, 110, 150, 255];
+        let white = [255u8, 255, 255, 255];
+        // Ground at both ends (the corners), the item's white between.
+        let picture = crate::icons::Picture {
+            width: 3,
+            height: 1,
+            pixels: [ground, white, ground].concat(),
+        };
+        let clear = super::without_ground(picture);
+        assert_eq!(clear.pixels[3], 0);
+        assert_eq!(&clear.pixels[4..8], &[255, 255, 255, 255]);
+        assert_eq!(clear.pixels[11], 0);
+        // A soft edge, half the white over the ground: half clear, and
+        // white again.
+        let half = [172u8, 182, 202, 255];
+        let picture = crate::icons::Picture {
+            width: 4,
+            height: 1,
+            pixels: [ground, white, half, ground].concat(),
+        };
+        let clear = super::without_ground(picture);
+        assert!((115..145).contains(&clear.pixels[11]), "{}", clear.pixels[11]);
+        assert!(clear.pixels[8] > 245, "{}", clear.pixels[8]);
+    }
+
     use super::*;
 
     /// A message as a program packs it.
