@@ -10,6 +10,9 @@
 //! - Linux: a layer-shell surface of the Wayland compositor ([`layer`]).
 //! - Windows: a borderless tool window, an application bar where it keeps
 //!   room free ([`win`]).
+//! - macOS: a panel without a frame, on every Space, that does not make the
+//!   shell the active program ([`mac`]); the window manager keeps the
+//!   panel's room.
 //!
 //! The two halves have the same shape (`Shell`, `Control`, `SurfaceId`,
 //! `Sender`, `Draw`, `run`), and [`host`] is the one of the system the
@@ -28,16 +31,21 @@
 
 pub mod dnd;
 pub mod look;
+pub mod place;
 pub mod stall;
 #[cfg(target_os = "linux")]
 pub mod layer;
 #[cfg(windows)]
 pub mod win;
+#[cfg(target_os = "macos")]
+pub mod mac;
 
 #[cfg(target_os = "linux")]
 pub use layer as host;
 #[cfg(windows)]
 pub use win as host;
+#[cfg(target_os = "macos")]
+pub use mac as host;
 
 /// Which edge of the screen a surface is fixed to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

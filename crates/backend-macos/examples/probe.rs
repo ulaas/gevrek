@@ -58,12 +58,14 @@ mod mac {
                 None => eprintln!("close <window>"),
             },
             // Every normal window on the screen, front to back.
+            // (`order all`: every level, with its layer.)
             Some("order") => {
+                let all = args.get(1).map(String::as_str) == Some("all");
                 for window in window_list::server_windows(true)
                     .into_iter()
-                    .filter(|window| window.layer == window_list::NORMAL_LAYER)
+                    .filter(|window| all || window.layer == window_list::NORMAL_LAYER)
                 {
-                    println!("{:>7} {:<20} {:?}", window.id, window.owner, window.bounds);
+                    println!("{:>7} {:<20} layer {:<4} {:?}", window.id, window.owner, window.layer, window.bounds);
                 }
             }
             Some("scroll") => post_scroll(

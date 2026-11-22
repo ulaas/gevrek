@@ -6,12 +6,12 @@
 //!     cargo run -p gevrek-shellkit --example menu            # until closed
 //!     cargo run -p gevrek-shellkit --example menu -- 5       # five seconds
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 fn main() {
     eprintln!("the surface host is there for Linux and Windows only");
 }
 
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 fn main() -> anyhow::Result<()> {
     use gevrek_shellkit::host::{Control, Shell, SurfaceId};
     use gevrek_shellkit::{Edge, Flow, Keyboard, Level, Place};

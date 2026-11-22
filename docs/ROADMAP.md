@@ -1080,9 +1080,18 @@ wanted, strike it when it is not.
 - [ ] macOS in the release workflow: built, signed with a Developer ID
       and notarized on a macOS runner (the secrets: the certificate, an
       app-specific password or an API key).
-- [ ] The shell on macOS: a third `shellkit` host (NSPanel), and
-      `crates/system` for macOS (it builds, with the Linux zones and
-      what has no macOS half yet).
+- [x] The third `shellkit` host (2026-11-22, `shellkit/src/mac`):
+      panels without a frame on every Space, drawn with Metal, that never
+      make the shell the active program; mouse, wheel and keys as egui's
+      input; popups, menus and hints; a press outside the shell found from
+      the mouse's buttons; woken by other threads through a run loop
+      source. The arithmetic of places is shared with the Windows host
+      (`shellkit/src/place.rs`). The `spike` and `menu` examples run on
+      it unchanged.
+- [ ] The rest of that host: drag and drop, the desktop soft behind a
+      surface, screen readers, input methods, the clipboard.
+- [ ] The shell's macOS half: the Windows half is a guest's shell, as
+      macOS needs; made the half of both rather than copied.
 - [ ] Windows in macOS's own full screen (a Space of their own) and on
       other Spaces: left alone now, not looked at.
 
@@ -1153,3 +1162,4 @@ wanted, strike it when it is not.
 | 2026-11-22, late night | macOS 27.2 | Borders on macOS (`borders.rs`): borderless, clear, click-through windows of gevrek's own with a ring drawn by their layer, ordered above their window by its window server id; `MacDesktop` draws, moves, recolours, hides and removes them as the engine asks, and moves them with a window moved by another. The command line's Windows autostart helpers allowed unused on macOS | Every check passes; clippy clean. Seen in the window server's list with Activity Monitor and Dictionary: each border 3 points around its window and directly above it (a window of another program between them stays between), gone on another workspace and back, following a window another program moved, gone on quit. The colours (focused and not) not seen: no screen recording here. Not committed |
 | 2026-11-22, after midnight | macOS 27.2 | Stackbars on macOS (asked for): `stackbars.rs`, non-activating panels with text layers; `MacDesktop::sync_stackbars`; the runtime finishes AppKit's launch and takes clicks from its queue, a click on a tab going to `focus_stackbar_tab`. Borders and bars are put above their window again when the focus changes and every second (a program raises its window after it is asked). The probe can click | Every check passes, 23 tests of the crate; clippy clean. Seen with Activity Monitor and Dictionary grouped: a bar of 30 points over the group, real clicks on each tab show that window and bring its program to the front, the bar kept (the same window) from tab to tab, bar and border above the window shown after each switch. The titles and colours not seen (no screen recording here). Not committed |
 | 2026-11-22, early morning | macOS 27.2 | Decided by the person: commit on a branch and let CI run the other systems' tests (PR #1, draft); FSEvents for the zones on macOS (`gevrek-system` and the shell build there, `check-macos.sh` passes). The rest of input on macOS: mouse buttons and wheel steps as bindings, long presses, a held button's repeat (timed each pass, as on Linux), windows moved and resized with the drag modifier (Option; `GEVREK_MACOS_DRAG_MODIFIER`), the drag started only on a window gevrek manages | 28 tests of the crate; every check passes, clippy clean. Seen with Activity Monitor and Dictionary: Option+wheel to the next workspace and back, a tiled window dragged and put back on drop (as the engine has it), a floating one moved by (-200, 60) and resized by (-100, -70) from its corner exactly. Long presses only in tests. Not committed at the time of writing |
+| 2026-11-22, morning | macOS 27.2 | The third `shellkit` host, for macOS (`mac/`): `Control`, `Sender`, `Shell` and `run` in the Windows host's shape, AppKit panels (a subclass that may take the keyboard though it has no frame), wgpu on Metal, AppKit's events as egui's input, a run loop source for other threads. The arithmetic of places moved out of the Windows host to be shared (`place.rs`). The examples `spike` and `menu` build on macOS | Every check passes; shellkit's 60 tests pass on macOS and it checks for Windows and Linux; clippy clean. Seen: the spike's surface 40 points high at the top of the free room, 328 frames in 3 s on Metal; in `menu` a real click on the panel's button opened the menu under it, a click on its second entry chose it and closed it, a click on Terminal's title bar closed an open menu, a message from another thread ended the shell; 20 frames in 7 s (nothing drawn while still). Typing not tried. Not committed at the time of writing |
