@@ -977,7 +977,8 @@ lesson or a few and lands by itself, in this order:
       program's buffer handed straight to the display.
 - [ ] **person, L** Fingers on a real touchpad, in the studio's gestures
       page and on the desktop.
-- [ ] **person, any** A Mac, for the macOS backend (section 5).
+- [x] **person, any** A Mac, for the macOS backend (section 5): an
+      Apple-silicon laptop with macOS 27.2, from 2026-11-22.
 
 ---
 
@@ -1042,9 +1043,44 @@ wanted, strike it when it is not.
 
 ### macOS
 
-- [ ] The backend: the desktop's windows through the Accessibility API,
-      the displays, the keys. The shared crates type-check for it
-      (`scripts/check-macos.sh`). Waits for a machine.
+- [x] The backend: `gevrek-wm` runs on macOS (`crates/backend-macos`,
+      2026-11-22). Windows through the Accessibility API, tiled, focused,
+      swapped, closed; programs that start and end found; workspaces by
+      parking (a sliver of a hidden window stays in a bottom corner: macOS
+      keeps one; `park.rs`), with a journal that puts them back after a
+      crash; displays with their work areas; the bindings' keys from an
+      event tap (Win is Option, Alt is Control+Option+Command: `keys.rs`).
+      Tried on a Mac with two programs (`GEVREK_MACOS_ONLY` limits it to
+      those named), by commands and by keys.
+- [x] Borders (2026-11-22): a window of gevrek's own around each window
+      (`borders.rs`), put directly above it in the order of windows, that
+      follows it, hides with its workspace, and goes when it closes. The
+      plain ring only, square or rounded; it trails a dragged window a
+      little.
+- [ ] The border's other styles (glow, shadow, dashed, double, gradient),
+      and the corner of each window as it is (it differs with a toolbar).
+- [x] Stackbars (2026-11-22, `stackbars.rs`): a panel over a group's
+      shown window, its titles drawn by Core Animation, the shown tab
+      marked; a click on a tab shows that window without gevrek taking the
+      keyboard (the clicks are taken from AppKit's queue each pass). The
+      bar goes over to the next window shown, and is put above its window
+      again when macOS says the focus changed and once a second after.
+- [ ] The rest of input: mouse and wheel bindings, long presses,
+      touchpad gestures (MultitouchSupport is private).
+- [ ] Keys by the keyboard's layout: they are named by their place on a
+      US keyboard now.
+- [x] An app bundle, signed, for the permissions, and started at login
+      (`packaging/macos`, 2026-11-22): `build-app.sh` makes Gevrek.app
+      (`io.github.ulaas.gevrek`), `install.sh` puts it in ~/Applications;
+      `gevrek start wm` opens it, `gevrek enable-autostart` writes a
+      LaunchAgent.
+- [ ] macOS in the release workflow: built, signed with a Developer ID
+      and notarized on a macOS runner (the secrets: the certificate, an
+      app-specific password or an API key).
+- [ ] `gevrek-system` builds for macOS (Found on the way), and then the
+      shell: a third `shellkit` host (NSPanel), `crates/system` for macOS.
+- [ ] Windows in macOS's own full screen (a Space of their own) and on
+      other Spaces: left alone now, not looked at.
 
 ### Kept an eye on
 
@@ -1060,7 +1096,14 @@ wanted, strike it when it is not.
 
 ## Found on the way
 
-(Nothing yet.)
+- [ ] **any** `gevrek-system` does not build for macOS, and with it
+      `gevrek-shell`: the zones take the Linux half there
+      (`zones/mod.rs`, `not(windows)`), whose `notify` and `jiff` are
+      Linux's dependencies only. `scripts/check-macos.sh` fails on it.
+      Giving macOS `notify` too is not enough: without its default
+      features it has no watcher on macOS, and its two (FSEvents,
+      kqueue) bring crates that are not in the lockfile yet. To decide:
+      which of them, or zones without a watcher on macOS for now.
 
 ## Log
 
@@ -1101,3 +1144,9 @@ wanted, strike it when it is not.
 | 2026-11-18 (8) | Windows 11 and WSL (Fedora 44) | Decided by the person and done: a tile is not made smaller than 120 pixels in BSP, dwindle and the spiral (the rest share the last room in rows); the nodes of one key are run in their order; a scratchpad's window given a place stays an ordinary one. Windows and Linux: every test passes (the studio's not run on Linux), 480 runs of chance clean | Ten windows and more seen on a desktop |
 | 2026-11-18 (9) | Windows 11 and WSL (Fedora 44) | Asked for by the person: what is playing is read on Windows (the sessions players have with the system; it was never asked there, and the control centre said nothing played), with the piece's picture; the control centre drawn anew (a card for what plays, broad bars for the sound and the brightness, a way to the studio); a panel module that opens it (`control_centre`); the other button on a window of the taskbar brings it to the middle of that display, floating, and puts it back as it was (`toggle_window_centered`). Windows and Linux: every test passes, the studio's too | All of it seen on a desktop: Spotify and a browser playing, the new look, the module, the taskbar's other button |
 | 2026-11-18 (10) | Windows 11 and WSL (Fedora 44) | Reported by the person: windows became very small and went out of sight when workspaces were changed. Found in the session: a minimized window (Windows Terminal minimizes itself while it is hidden) was handed the place of its mark, far off every display, as the place to come to and to go back to. Mended in the engine and the Windows backend; a floating window on no display is found; windows minimized behind gevrek's back come back with their workspace. The tests keep out of the person's own folders (they had left 200 copies among the backups). The panel's modules drawn anew as cells that stand along a panel or down a side; down a side the ends keep apart and the clock is in its order. Windows and Linux: every test passes, the studio's too | The panel in all four places and three styles, and the windows after a change of workspace, seen on a desktop. The display that went dark: nothing in any log; the time of the next one |
+| 2026-11-22 | macOS 27.2, Apple silicon, one display | The macOS backend begun (asked for). A spike first, then `crates/backend-macos`: the Accessibility, Core Foundation and Core Graphics calls declared by hand, AppKit through the objc2 crates egui already brings (no new crate in the lockfile); windows matched to their elements by the window server's id, moved and sized (a window that cannot be resized is still placed), closed; displays with the room the menu bar and the Dock leave and their scale; events from each program and window, a window that went still named; where a hidden window waits, measured (`park.rs`). Found: `gevrek-system` does not build for macOS (Found on the way). A Finder window of the person's was closed by mistake while trying an AppleScript | 13 tests of the new crate pass; it checks for Windows and Linux too; clippy clean. Tried on the desktop with the probe, on a Calculator window it started. Not committed |
+| 2026-11-22, later | macOS 27.2 (Windows and Linux type-checked from it) | The host written once for every backend (asked for: the better design before the macOS backend). `gevrek_host::wm`: `HostState` (what only the host owns) in each backend, and `WmHost`, which a backend implements by lending its configuration, core, desktop and host state and answering hooks; configuration requests and the file, commands, reload, binding ids, the published state are its own, once. The Windows runtime and the Wayland host carry it out: `host.rs` 1318 to 537 lines, `runtime/mod.rs` 3360 to 2676. Where the two had drifted they now do the same: Windows settles after every command and a manual trigger, and clears the graph's values before a dispatch; Linux tells `workspace.destroyed` when a reload hands windows over, publishes a new submap at once, and publishes the state after every event told (as Windows did) | 14 tests of the shared host on the engine's fake desktop pass here (one is Windows' refused-revision test, now on the shared code); the Windows and Linux backends and their tests type-check and are clippy-clean in what changed. Their own tests were NOT run (no Windows or Linux here). Not committed |
+| 2026-11-22, evening | macOS 27.2, one display (Windows and Linux type-checked) | The macOS backend made a window manager (asked for): `MacDesktop` (`Desktop`, `WindowQueries`), `MacRuntime` (the loop on the main thread, `WmHost`), programs from NSWorkspace, the journal of parked windows, the keyboard by an event tap; `gevrek-wm` runs it on macOS. Decided by the person: Win is Option on a Mac. Alt was to be Option+Control; a test found that on the same keys as Win+Control in ten pairs of standard bindings, so it is Control+Option+Command. Tried on the desktop with Activity Monitor and Dictionary only: tiled, a window's smallest size learned and room made for it, focus by command and by key, swap and workspaces by key, parked and back, `kill -9` while parked and put back at the next start, quit puts parked windows back | 21 tests of the crate pass, and every check; clippy clean in what is new. Not tried with the whole desktop managed, on two displays, or with many programs. Not committed |
+| 2026-11-22, night | macOS 27.2 | gevrek as a macOS application (asked for): `packaging/macos` (Info.plist, `build-app.sh` that builds and signs Gevrek.app with the keychain's Developer ID or Apple Development identity and the hardened runtime, `install.sh` to ~/Applications with `gevrek` in ~/.local/bin, `uninstall.sh`, README). The command line finds the window manager as `gevrek-wm` on macOS, starts it through `open` from the bundle (so the bundle, not the terminal, is responsible for it), passes `GEVREK_INSTANCE`, `GEVREK_MACOS_ONLY` and `RUST_LOG` on, and says why it did not start; `enable-autostart` writes a LaunchAgent. README: macOS in where it runs and how to build | Built and signed here (Developer ID, team N6FA79GV97; the designated requirement is the bundle id and the team). Started through the bundle, gevrek was refused the Accessibility permission the terminal has: the bundle is the one asked. Allowed by the person, then rebuilt and signed again: the new build ran without being asked again, managed Dictionary, took Option+2 and Option+1 by its event tap, and stopped by `gevrek stop wm`. `install.sh` and the LaunchAgent not run. Not committed |
+| 2026-11-22, late night | macOS 27.2 | Borders on macOS (`borders.rs`): borderless, clear, click-through windows of gevrek's own with a ring drawn by their layer, ordered above their window by its window server id; `MacDesktop` draws, moves, recolours, hides and removes them as the engine asks, and moves them with a window moved by another. The command line's Windows autostart helpers allowed unused on macOS | Every check passes; clippy clean. Seen in the window server's list with Activity Monitor and Dictionary: each border 3 points around its window and directly above it (a window of another program between them stays between), gone on another workspace and back, following a window another program moved, gone on quit. The colours (focused and not) not seen: no screen recording here. Not committed |
+| 2026-11-22, after midnight | macOS 27.2 | Stackbars on macOS (asked for): `stackbars.rs`, non-activating panels with text layers; `MacDesktop::sync_stackbars`; the runtime finishes AppKit's launch and takes clicks from its queue, a click on a tab going to `focus_stackbar_tab`. Borders and bars are put above their window again when the focus changes and every second (a program raises its window after it is asked). The probe can click | Every check passes, 23 tests of the crate; clippy clean. Seen with Activity Monitor and Dictionary grouped: a bar of 30 points over the group, real clicks on each tab show that window and bring its program to the front, the bar kept (the same window) from tab to tab, bar and border above the window shown after each switch. The titles and colours not seen (no screen recording here). Not committed |

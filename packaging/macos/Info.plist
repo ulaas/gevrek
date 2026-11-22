@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- What macOS knows gevrek by: the permissions it is given
+	     (Accessibility) are this id's, with the signature's team. -->
+	<key>CFBundleIdentifier</key>
+	<string>io.github.ulaas.gevrek</string>
+	<key>CFBundleName</key>
+	<string>gevrek</string>
+	<key>CFBundleDisplayName</key>
+	<string>gevrek</string>
+	<key>CFBundleExecutable</key>
+	<string>gevrek-wm</string>
+	<key>CFBundleIconFile</key>
+	<string>gevrek</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@VERSION@</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<!-- A window manager has no Dock icon and no menu bar of its own. -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>MIT licence</string>
+</dict>
+</plist>
