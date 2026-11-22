@@ -1083,9 +1083,8 @@ wanted, strike it when it is not.
       system did with a recognised gesture is the shared host's now
       (`Bindings::gesture`, `gesture_registrations`). The framework loads
       and the built-in trackpad starts (`probe touchpad`).
-- [ ] **person** A swipe tried on the trackpad: `probe touchpad 10`
-      while swiping says how many fingers it saw; then a profile of four
-      fingers (three sideways is macOS's own Spaces, which goes on too).
+- [x] **person** A swipe tried on the trackpad (2026-11-22): `probe
+      touchpad 10` while swiping saw 399 frames, up to five fingers.
 - [x] Keys by the keyboard's layout (2026-11-22, 63279bf): a letter is
       the key that writes it in the layout in use, as on Windows (asked of
       the layout with Carbon's UCKeyTranslate, again when another one is
@@ -1127,20 +1126,28 @@ wanted, strike it when it is not.
       wifi's radio, bluetooth (its radio, devices, connecting; only from
       Gevrek.app, which says why it uses it), the built-in display's
       brightness.
-- [ ] What macOS keeps from the shell, each for a reason of its own, to
-      be decided before anything is written:
-      - the tray: macOS has none; the status items are the menu bar's,
-        drawn by each program in the menu bar's process, and not to be
-        shown or clicked from another program;
-      - what plays: MediaRemote is private, and since macOS 15.4 it
-        answers only Apple's own programs (a helper run as a script, as
-        some tools do, is a way round that Apple may close);
-      - pictures of windows (the switcher's, the zones' thumbnails):
-        ScreenCaptureKit, with the Screen Recording permission and its
-        purple mark in the menu bar while it records;
-      - the wifi's networks by name: macOS tells them only to a program
-        allowed to know the location (Location Services), so the radio is
-        switched here and the networks are left to the menu bar.
+- [x] The rest of the shell's system on macOS that macOS allows (asked
+      for: everything technically possible, 2026-11-22):
+      - pictures of windows through ScreenCaptureKit, with the Screen
+        Recording permission (923de54);
+      - the tray: other programs' items of the menu bar, read and pressed
+        through the Accessibility API, pictured from the screen with the
+        bar's tint taken out (e90daeb);
+      - the wifi's networks and joining one, once gevrek may know the
+        location (Gevrek.app asks, signed with the location entitlement);
+        the programs gevrek starts are their own responsible process, so
+        the questions are Gevrek's, not the terminal's (c91529a).
+- [ ] What plays: MediaRemote answers only Apple's own programs since
+      macOS 15.4. The way round others use (a library of their own loaded
+      into the system's perl, which is Apple's) gets past that check
+      rather than using an interface, and was not done; it is the
+      person's decision whether gevrek should.
+- [ ] **person** The location question answered for Gevrek (it was
+      asked, not yet answered), then the networks seen in the control
+      centre. Whether the shell, now its own responsible process, is
+      asked for Accessibility and Screen Recording again beside the
+      window manager (as Gevrek, or by its own name), to be seen when it
+      runs from the installed bundle.
 - [x] Windows in macOS's own full screen (2026-11-22): a window that
       goes into it leaves the layout and its border goes, as for a hidden
       program; when it comes out it joins the layout again and its border
@@ -1148,11 +1155,11 @@ wanted, strike it when it is not.
       did not come back when its window could be seen again (a program
       shown after Command-H too): it does now. Tried with Dictionary
       (`probe fullscreen <window> on|off`).
-- [ ] Windows on other Spaces: gevrek lists every Space's windows, so a
+- [x] Windows on other Spaces: gevrek lists every Space's windows, so a
       switch of Space drops none; a window first seen on another Space is
-      adopted when that Space is shown, into the workspace in front. To
-      be decided: whether gevrek's workspaces and macOS's Spaces are to
-      know of each other (it needs the window server's private calls).
+      adopted when that Space is shown, into the workspace in front.
+      Decided by the person (2026-11-22): gevrek's workspaces and macOS's
+      Spaces stay independent.
 
 ### Kept an eye on
 
@@ -1233,3 +1240,4 @@ wanted, strike it when it is not.
 | 2026-11-22, morning | macOS 27.2 | The third `shellkit` host, for macOS (`mac/`): `Control`, `Sender`, `Shell` and `run` in the Windows host's shape, AppKit panels (a subclass that may take the keyboard though it has no frame), wgpu on Metal, AppKit's events as egui's input, a run loop source for other threads. The arithmetic of places moved out of the Windows host to be shared (`place.rs`). The examples `spike` and `menu` build on macOS | Every check passes; shellkit's 60 tests pass on macOS and it checks for Windows and Linux; clippy clean. Seen: the spike's surface 40 points high at the top of the free room, 328 frames in 3 s on Metal; in `menu` a real click on the panel's button opened the menu under it, a click on its second entry chose it and closed it, a click on Terminal's title bar closed an open menu, a message from another thread ended the shell; 20 frames in 7 s (nothing drawn while still). Typing not tried. Not committed at the time of writing |
 | 2026-11-22, late morning | macOS 27.2 | The shell on macOS (asked for: on with the plan). The Windows half of the shell is the half of both guests' systems; `gevrek_system` got macOS halves (applications, volume, media and screenshot keys, modifiers, the ends of the session; the rest says it is not there); the macOS host got `reach` and `is_open` as on Windows; the window manager keeps the panel's room (`set_bar`); Gevrek.app carries gevrek-shell | Every check passes; the shell's 232 tests and gevrek-system's 139 pass on macOS; Windows and Linux check. Seen with the window manager on Dictionary: the panel in the room kept for it (36 points under the menu bar, Dictionary below it); `gevrek shell launcher` opened the launcher, typed keys narrowed it (Calendar, then Calculator), Return started Calculator from /System/Applications. Not seen: the panel's look, its buttons, notifications, the power menu. Not committed at the time of writing |
 | 2026-11-22, evening | macOS 27.2 (Windows and Linux type-checked) | Everything open for macOS but the release workflow (asked for). `gevrek_system`: Core Audio's volume and its changes, the clipboard, network, battery, wifi's radio, bluetooth, brightness (483d4d4). The macOS surface host: the desktop soft behind a surface, drag and drop both ways with the shell's pass made inside AppKit's drag loop (b943d78); input methods and the clipboard (4def974); screen readers (ff2fe68). Double and dashed borders (243980d). Letters by the keyboard's layout, for bindings and the panels (63279bf). Touchpad gestures through MultitouchSupport, and the handling of a recognised gesture moved into the shared host, which Windows uses too (4a1c077). What macOS keeps from the shell written down with its reasons | Every check passes; Windows and Linux check. Tried: the system's numbers printed; a volume change heard once; soft parts made; the example's file dragged onto itself as a move, a copy and with Option a copy; a, Option-E E, s, Backspace, d typed "aéd"; copied and pasted twice "xyzxyz" (the pasteboard put back); the label and the field seen by the AX tree; each border style captured; German, French, Turkish F layouts read. Not tried: a swipe (nobody at the trackpad), bluetooth (only from the bundle), a real input method's list. Committed and pushed |
+| 2026-11-22, night | macOS 27.2 (Windows and Linux type-checked) | Asked for: what is left of macOS, and every shell feature technically possible; Spaces left independent (decided). Windows in macOS's own full screen leave the layout and come back, and a border once hidden comes back (6305865); the border's corner measured, 17 points for every kind of window (e9ffa64); the zones' flaky test found and fixed (70ab792). Pictures of windows (923de54), the tray from the menu bar's items (e90daeb), the wifi's networks once the location may be known, and programs started as their own responsible process; build-app.sh fixed (c91529a). What plays not done: the only way is to get past Apple's check, left to the person | Every check passes; CI green to e9ffa64. Tried: full screen in and out with Dictionary; corners measured in captures; a Calculator window pictured; four menu bar items found, pictured, one pressed (its menu opened and was closed); the location question posted for Gevrek (locationd), not answered; the shell responsible for itself. The touchpad tried by the person: 399 frames, five fingers. Committed and pushed |

@@ -36,11 +36,12 @@ MultitouchSupport. macOS's own gestures go on beside them: give gevrek's
 profiles four fingers, or turn macOS's off in System Settings, Trackpad,
 More Gestures.
 
-What macOS keeps to itself: the menu bar's status items (there is no tray
-to show them in), what is playing (only Apple's programs are told), and
-pictures of other programs' windows (they would need Screen Recording).
-The wifi's networks are not named either (macOS names them only to a
-program allowed to know the location): they are chosen in the menu bar.
+What macOS asks before the shell has it: pictures of windows (for the
+switcher) and of the menu bar's items (the tray) need Screen Recording;
+the tray reads and presses the menu bar's items with Accessibility; the
+wifi's networks are named only once gevrek may know the location. Each is
+asked for once, in Gevrek's name. What plays is not shown: macOS tells it
+only to Apple's own programs.
 
 To try gevrek on a few programs only, without it taking over the
 desktop, name their bundle ids:
