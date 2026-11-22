@@ -6,6 +6,11 @@
 //! instead (`wpctl`, of its session manager), started once for every
 //! question.
 //!
+//! On macOS, the volume of what is heard and of the microphone is asked of
+//! and told to the system through its scripting's own settings (`get volume
+//! settings`), which need no permission; the devices and the programs'
+//! own volumes are not there yet.
+//!
 //! On Windows, the default device of each kind is asked through the
 //! system's own interface for it (the endpoint volume of Core Audio), and
 //! [`watch`] tells when what is heard changes, whoever changed it (the
@@ -24,7 +29,8 @@ pub enum Device {
     Microphone,
 }
 
-#[cfg(not(windows))]
+// (wpctl's names of the devices: macOS asks its own way.)
+#[cfg(not(any(windows, target_os = "macos")))]
 impl Device {
     fn name(self) -> &'static str {
         match self {
@@ -92,7 +98,7 @@ fn ask(arguments: &[&str]) -> Option<String> {
 }
 
 /// How loud the device is now. `None`: there is no sound server to ask.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn level(device: Device) -> Option<Level> {
     #[cfg(target_os = "linux")]
     if crate::sound_server::there() {
@@ -103,7 +109,7 @@ pub fn level(device: Device) -> Option<Level> {
 
 /// Make the device louder or quieter by so many percent of full, never
 /// above full. Returns how loud it is afterwards.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn change(device: Device, by_percent: i32) -> Option<Level> {
     #[cfg(target_os = "linux")]
     if crate::sound_server::there() {
@@ -119,7 +125,7 @@ pub fn change(device: Device, by_percent: i32) -> Option<Level> {
 }
 
 /// Mute the device, or let it be heard again. Returns how it is afterwards.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn toggle_mute(device: Device) -> Option<Level> {
     #[cfg(target_os = "linux")]
     if crate::sound_server::there() {
@@ -386,6 +392,82 @@ fn toggle_stream_mute_by(id: u32) -> bool {
 /// On Windows: the devices to play on and to record from as the system
 /// lists them, and the programs that play now on the device that is
 /// heard, each known by the number of its process.
+/// The volume settings as macOS's scripting tells them: `output volume:50,
+/// input volume:75, alert volume:100, output muted:false`.
+#[cfg(target_os = "macos")]
+fn volume_settings() -> Option<std::collections::HashMap<String, String>> {
+    let output = Command::new("/usr/bin/osascript")
+        .args(["-e", "get volume settings"])
+        .output()
+        .ok()?;
+    output.status.success().then(|| {
+        String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .split(", ")
+            .filter_map(|pair| pair.split_once(':'))
+            .map(|(key, value)| (key.trim().to_string(), value.trim().to_string()))
+            .collect()
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn set_volume(words: &str) -> Option<()> {
+    let output = Command::new("/usr/bin/osascript")
+        .args(["-e", &format!("set volume {words}")])
+        .output()
+        .ok()?;
+    output.status.success().then_some(())
+}
+
+/// How loud the device is now.
+#[cfg(target_os = "macos")]
+pub fn level(device: Device) -> Option<Level> {
+    let settings = volume_settings()?;
+    let (volume, muted) = match device {
+        Device::Speaker => ("output volume", settings.get("output muted").map(String::as_str) == Some("true")),
+        // (The microphone has no mute of its own: at nothing, it is mute.)
+        Device::Microphone => ("input volume", false),
+    };
+    let percent: u32 = settings.get(volume)?.parse().ok()?;
+    Some(Level {
+        percent,
+        muted: muted || (device == Device::Microphone && percent == 0),
+    })
+}
+
+/// Make the device louder or quieter by so many percent of full.
+#[cfg(target_os = "macos")]
+pub fn change(device: Device, by_percent: i32) -> Option<Level> {
+    let now = level(device)?;
+    let wanted = (now.percent as i32 + by_percent).clamp(0, 100);
+    match device {
+        Device::Speaker => set_volume(&format!("output volume {wanted}"))?,
+        Device::Microphone => set_volume(&format!("input volume {wanted}"))?,
+    }
+    level(device)
+}
+
+/// Mute the device, or let it be heard again.
+#[cfg(target_os = "macos")]
+pub fn toggle_mute(device: Device) -> Option<Level> {
+    let now = level(device)?;
+    match device {
+        Device::Speaker => set_volume(&format!("output muted {}", !now.muted))?,
+        // (Muting the microphone is setting it to nothing; it is not kept
+        // what it was.)
+        Device::Microphone => set_volume(if now.muted { "input volume 75" } else { "input volume 0" })?,
+    }
+    level(device)
+}
+
+/// macOS tells of no change of the volume that the shell could hear
+/// without a listener of Core Audio's: not yet. (`false`: nothing is
+/// watched; the shell asks when it shows the volume.)
+#[cfg(target_os = "macos")]
+pub fn watch(_tell: impl Fn(Level) + Send + Sync + 'static) -> bool {
+    false
+}
+
 #[cfg(windows)]
 pub fn mixer() -> Mixer {
     let mixer = Mixer {

@@ -580,9 +580,75 @@ fn collect(root: &Path, dir: &Path, found: &mut Vec<(String, PathBuf)>, depth: u
 }
 
 /// The applications installed on this system.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn installed() -> Vec<App> {
     installed_in(&data_dirs(), &locales())
+}
+
+/// The folders macOS's applications are in.
+#[cfg(target_os = "macos")]
+pub fn application_folders() -> Vec<PathBuf> {
+    let mut folders = vec![
+        PathBuf::from("/Applications"),
+        PathBuf::from("/Applications/Utilities"),
+        PathBuf::from("/System/Applications"),
+        PathBuf::from("/System/Applications/Utilities"),
+    ];
+    if let Some(home) = dirs::home_dir() {
+        folders.push(home.join("Applications"));
+    }
+    folders
+}
+
+/// The applications in these folders: each `.app` bundle, by its name, and
+/// started by `open` (as the Finder does). The first of two of one name
+/// stands.
+pub fn bundles_in(folders: &[PathBuf]) -> Vec<App> {
+    let mut found: Vec<App> = Vec::new();
+    for folder in folders {
+        let Ok(entries) = std::fs::read_dir(folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|extension| extension.to_str()) != Some("app") {
+                continue;
+            }
+            let Some(name) = path.file_stem().and_then(|stem| stem.to_str()).map(str::to_string) else {
+                continue;
+            };
+            if found.iter().any(|app| app.name == name) {
+                continue;
+            }
+            found.push(App {
+                id: path.to_string_lossy().into_owned(),
+                name,
+                generic_name: String::new(),
+                comment: String::new(),
+                keywords: Vec::new(),
+                icon: String::new(),
+                command: vec![
+                    "/usr/bin/open".to_string(),
+                    "-a".to_string(),
+                    path.to_string_lossy().into_owned(),
+                ],
+                terminal: false,
+                dbus_activatable: false,
+                directory: None,
+                entry: path,
+                actions: Vec::new(),
+            });
+        }
+    }
+    found.sort_by_key(|app| app.name.to_lowercase());
+    found
+}
+
+/// The applications installed on this Mac: the bundles of its application
+/// folders.
+#[cfg(target_os = "macos")]
+pub fn installed() -> Vec<App> {
+    bundles_in(&application_folders())
 }
 
 /// The applications installed on this system: those of the Start menu.
@@ -675,6 +741,29 @@ pub fn start(app: &App) -> std::io::Result<Option<u32>> {
 #[cfg(windows)]
 pub fn start_elevated(app: &App) -> std::io::Result<Option<u32>> {
     crate::start_menu::start_as(app, true)
+}
+
+/// Start an application on a Mac: its command (`open` and its bundle).
+/// `open` ends at once: the number of the application's own process is
+/// not known.
+#[cfg(target_os = "macos")]
+pub fn start(app: &App) -> std::io::Result<Option<u32>> {
+    let (program, arguments) = app
+        .command
+        .split_first()
+        .ok_or_else(|| std::io::Error::other(format!("{} has nothing to start", app.name)))?;
+    std::process::Command::new(program).args(arguments).spawn()?;
+    Ok(None)
+}
+
+/// macOS asks for an administrator's rights in the program that needs them,
+/// not when it is started.
+#[cfg(target_os = "macos")]
+pub fn start_elevated(app: &App) -> std::io::Result<Option<u32>> {
+    Err(std::io::Error::other(format!(
+        "{} is not started as an administrator on macOS: a program asks for that itself",
+        app.name
+    )))
 }
 
 /// How well an application answers what was typed; higher is better,

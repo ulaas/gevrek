@@ -720,7 +720,7 @@ impl Running {
     /// `screen.shared` event's fields): the zones cover what is not for
     /// other eyes while any is, as the configuration says.
     // (Only a compositor of ours tells; Windows gives no such sign.)
-    #[cfg_attr(windows, allow(dead_code))]
+    #[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
     pub fn screen_shared(&self, fields: &[(String, String)]) {
         self.zones.borrow_mut().screen_shared(shared_now(fields));
     }

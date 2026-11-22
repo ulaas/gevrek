@@ -101,6 +101,8 @@ pub struct Control {
     levels: Vec<(SurfaceId, Level)>,
     keyboards: Vec<(SurfaceId, Keyboard)>,
     captures: Vec<(SurfaceId, bool)>,
+    /// Surfaces that take the pointer, or no longer.
+    reaches: Vec<(SurfaceId, bool)>,
     windows: Vec<(SurfaceId, isize)>,
 }
 
@@ -261,6 +263,14 @@ impl Control {
             .map(|(_, number)| *number)
     }
 
+    /// Where a surface takes the pointer: `parts` of it (in its points), or,
+    /// with none, nowhere (what is under it gets the pointer). macOS takes
+    /// the pointer over a whole window or not at all: with any part, the
+    /// whole surface takes it.
+    pub fn reach(&mut self, id: SurfaceId, parts: Vec<egui::Rect>) {
+        self.reaches.push((id, !parts.is_empty()));
+    }
+
     /// Put a surface at another level among the windows.
     pub fn set_level(&mut self, id: SurfaceId, level: Level) {
         self.levels.push((id, level));
@@ -284,9 +294,11 @@ impl Control {
     }
 
     pub fn is_open(&self, id: SurfaceId) -> bool {
-        self.known.contains(&id)
-            || self.open.iter().any(|(opened, ..)| *opened == id)
-            || self.popups.iter().any(|(opened, ..)| *opened == id)
+        // (Also one asked for earlier in this pass, which is made when the
+        // pass is over; not one asked to close.)
+        let asked_for = self.open.iter().any(|(asked, ..)| *asked == id)
+            || self.popups.iter().any(|(asked, ..)| *asked == id);
+        (self.known.contains(&id) || asked_for) && !self.close.contains(&id)
     }
 
     /// End the shell's loop.
@@ -861,6 +873,7 @@ impl Host {
             let levels = std::mem::take(&mut self.control.levels);
             let keyboards = std::mem::take(&mut self.control.keyboards);
             let captures = std::mem::take(&mut self.control.captures);
+            let reaches = std::mem::take(&mut self.control.reaches);
             if opens.is_empty()
                 && popups.is_empty()
                 && puts.is_empty()
@@ -870,6 +883,7 @@ impl Host {
                 && levels.is_empty()
                 && keyboards.is_empty()
                 && captures.is_empty()
+                && reaches.is_empty()
             {
                 break;
             }
@@ -930,6 +944,11 @@ impl Host {
                     if keyboard == Keyboard::Exclusive {
                         self.surfaces[index].window.makeKeyAndOrderFront(None);
                     }
+                }
+            }
+            for (id, takes) in reaches {
+                if let Some(index) = self.index_of(id) {
+                    self.surfaces[index].window.setIgnoresMouseEvents(!takes);
                 }
             }
             for (id, exclude) in captures {

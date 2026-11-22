@@ -3,8 +3,8 @@
 #
 #     packaging/macos/build-app.sh            -> target/macos/Gevrek.app
 #
-# The bundle holds the window manager (its executable), the command line
-# and the settings program. macOS gives the Accessibility permission to
+# The bundle holds the window manager (its executable), the command line,
+# the shell and the settings program. macOS gives the Accessibility permission to
 # the bundle (its id and its signature's team), so it is kept from one
 # build to the next, as it is not for a bare binary started from a
 # terminal (which gets the terminal's).
@@ -26,11 +26,11 @@ out="target/macos"
 app="$out/Gevrek.app"
 
 echo "Building gevrek $version (release)..."
-cargo build --release --bin gevrek-wm --bin gevrek --bin gevrek-studio
+cargo build --release --bin gevrek-wm --bin gevrek --bin gevrek-studio --bin gevrek-shell
 
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-for program in gevrek-wm gevrek gevrek-studio; do
+for program in gevrek-wm gevrek gevrek-studio gevrek-shell; do
     cp "$target_dir/release/$program" "$app/Contents/MacOS/"
 done
 sed "s/@VERSION@/$version/g" packaging/macos/Info.plist > "$app/Contents/Info.plist"
@@ -53,7 +53,7 @@ echo "Signing with: $identity"
 # The programs inside first, then the bundle (whose executable is the
 # window manager). The hardened runtime is what notarization asks for;
 # gevrek needs no exception from it.
-for program in gevrek gevrek-studio; do
+for program in gevrek gevrek-studio gevrek-shell; do
     codesign --force --options runtime --timestamp=none --sign "$identity" \
         --identifier "io.github.ulaas.gevrek.$program" "$app/Contents/MacOS/$program"
 done

@@ -1090,8 +1090,17 @@ wanted, strike it when it is not.
       it unchanged.
 - [ ] The rest of that host: drag and drop, the desktop soft behind a
       surface, screen readers, input methods, the clipboard.
-- [ ] The shell's macOS half: the Windows half is a guest's shell, as
-      macOS needs; made the half of both rather than copied.
+- [x] The shell on macOS (2026-11-22): the Windows half
+      (`shell/src/windows.rs`) is the half of both guests' systems; the
+      window manager keeps the panel's room on macOS as on Windows.
+      `gevrek_system` has macOS halves: the applications (the bundles of
+      the application folders, started by `open`), the volume (by the
+      system's scripting), the keys of what plays and of the sound, the
+      screenshot keys, the modifiers held, the ends of the session.
+- [ ] What the shell does not have on macOS yet: the tray (the menu
+      bar's own), what plays (MediaRemote is private), pictures of
+      windows (Screen Recording), the volume heard of when it changes,
+      the clipboard for the launcher, the network and the battery.
 - [ ] Windows in macOS's own full screen (a Space of their own) and on
       other Spaces: left alone now, not looked at.
 
@@ -1163,3 +1172,4 @@ wanted, strike it when it is not.
 | 2026-11-22, after midnight | macOS 27.2 | Stackbars on macOS (asked for): `stackbars.rs`, non-activating panels with text layers; `MacDesktop::sync_stackbars`; the runtime finishes AppKit's launch and takes clicks from its queue, a click on a tab going to `focus_stackbar_tab`. Borders and bars are put above their window again when the focus changes and every second (a program raises its window after it is asked). The probe can click | Every check passes, 23 tests of the crate; clippy clean. Seen with Activity Monitor and Dictionary grouped: a bar of 30 points over the group, real clicks on each tab show that window and bring its program to the front, the bar kept (the same window) from tab to tab, bar and border above the window shown after each switch. The titles and colours not seen (no screen recording here). Not committed |
 | 2026-11-22, early morning | macOS 27.2 | Decided by the person: commit on a branch and let CI run the other systems' tests (PR #1, draft); FSEvents for the zones on macOS (`gevrek-system` and the shell build there, `check-macos.sh` passes). The rest of input on macOS: mouse buttons and wheel steps as bindings, long presses, a held button's repeat (timed each pass, as on Linux), windows moved and resized with the drag modifier (Option; `GEVREK_MACOS_DRAG_MODIFIER`), the drag started only on a window gevrek manages | 28 tests of the crate; every check passes, clippy clean. Seen with Activity Monitor and Dictionary: Option+wheel to the next workspace and back, a tiled window dragged and put back on drop (as the engine has it), a floating one moved by (-200, 60) and resized by (-100, -70) from its corner exactly. Long presses only in tests. Not committed at the time of writing |
 | 2026-11-22, morning | macOS 27.2 | The third `shellkit` host, for macOS (`mac/`): `Control`, `Sender`, `Shell` and `run` in the Windows host's shape, AppKit panels (a subclass that may take the keyboard though it has no frame), wgpu on Metal, AppKit's events as egui's input, a run loop source for other threads. The arithmetic of places moved out of the Windows host to be shared (`place.rs`). The examples `spike` and `menu` build on macOS | Every check passes; shellkit's 60 tests pass on macOS and it checks for Windows and Linux; clippy clean. Seen: the spike's surface 40 points high at the top of the free room, 328 frames in 3 s on Metal; in `menu` a real click on the panel's button opened the menu under it, a click on its second entry chose it and closed it, a click on Terminal's title bar closed an open menu, a message from another thread ended the shell; 20 frames in 7 s (nothing drawn while still). Typing not tried. Not committed at the time of writing |
+| 2026-11-22, late morning | macOS 27.2 | The shell on macOS (asked for: on with the plan). The Windows half of the shell is the half of both guests' systems; `gevrek_system` got macOS halves (applications, volume, media and screenshot keys, modifiers, the ends of the session; the rest says it is not there); the macOS host got `reach` and `is_open` as on Windows; the window manager keeps the panel's room (`set_bar`); Gevrek.app carries gevrek-shell | Every check passes; the shell's 232 tests and gevrek-system's 139 pass on macOS; Windows and Linux check. Seen with the window manager on Dictionary: the panel in the room kept for it (36 points under the menu bar, Dictionary below it); `gevrek shell launcher` opened the launcher, typed keys narrowed it (Calendar, then Calculator), Return started Calculator from /System/Applications. Not seen: the panel's look, its buttons, notifications, the power menu. Not committed at the time of writing |

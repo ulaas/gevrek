@@ -35,6 +35,10 @@ jiff = { workspace = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 jiff = { workspace = true }
+# The keys of what plays and of the sound, which only AppKit makes
+# (`every_key`).
+objc2 = "0.6"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSGeometry", "objc2-core-foundation"] }
 
 # Windows: the Start menu and the shell's pictures of what is in it.
 [target.'cfg(windows)'.dependencies]

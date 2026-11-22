@@ -10,6 +10,8 @@ Build and install (for this user; no administrator needed):
 Then:
 
     gevrek start wm             the window manager
+    gevrek start shell          the panel, the launcher and the rest of the
+                                shell (in the room the window manager keeps)
     gevrek enable-autostart     start it when you sign in (a LaunchAgent)
     gevrek stop wm              stop it; every window is put back
     gevrek-studio               the settings

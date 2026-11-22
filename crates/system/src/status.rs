@@ -238,6 +238,12 @@ pub fn network() -> Option<Network> {
     None
 }
 
+/// macOS is not waited on yet: `false`, and the shell looks by the clock.
+#[cfg(target_os = "macos")]
+pub fn wait_for_network_change() -> bool {
+    false
+}
+
 #[cfg(windows)]
 mod windows_net {
     use super::Adapter;

@@ -276,7 +276,7 @@ const PREVIEW_HEIGHT: f32 = 200.0;
 pub const SHOWN: usize = 10;
 
 /// Draw the switcher and take in its keys.
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
 pub fn draw(
     ui: &mut egui::Ui,
     palette: &theme::Palette,

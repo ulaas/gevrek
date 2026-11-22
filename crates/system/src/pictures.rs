@@ -45,6 +45,13 @@ pub fn shrink(width: u32, height: u32, pixels: &[u8], side: u32) -> Option<Pictu
 
 /// The picture of a window (by its handle), no larger than `side` on its
 /// longer side. `None` for a window that is gone, minimised, or gives none.
+/// A picture of a window: not on macOS yet (the window server shows other
+/// programs' windows only to a program that may record the screen).
+#[cfg(target_os = "macos")]
+pub fn of_window(_handle: isize, _side: u32) -> Option<Picture> {
+    None
+}
+
 #[cfg(windows)]
 pub fn of_window(handle: isize, side: u32) -> Option<Picture> {
     use windows::Win32::Foundation::{HWND, RECT};

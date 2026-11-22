@@ -22,7 +22,7 @@
 // Each system's half uses its part of the panel's code (who keeps the
 // panel's room differs between them), and the tests use all of it: what
 // one half leaves unused is not dead.
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 #[allow(dead_code)]
 mod panel;
 
@@ -32,42 +32,42 @@ mod activate;
 mod clipboard;
 // The control centre is the same on both; what it asks is carried out by
 // each system's half.
-#[cfg(any(target_os = "linux", windows))]
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
+#[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
 mod control;
 // The tutorial's card. (Drawn here; put on a surface by each system's
 // half as that is written.)
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 #[allow(dead_code)]
 mod coach;
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 #[allow(dead_code)]
 mod tutoring;
 mod frost;
 #[cfg(target_os = "linux")]
 mod inhibit;
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 mod launcher;
 #[cfg(target_os = "linux")]
 mod media;
 // (On Windows: the keyboard's own keys for what plays.)
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 #[path = "media_keys.rs"]
 mod media;
 // The stack is the same on both; the service on the bus is Linux's.
 #[cfg(target_os = "linux")]
 mod app_shortcuts;
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 #[allow(dead_code)]
 mod notifications;
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 #[allow(dead_code)]
 mod osd;
 #[cfg(target_os = "linux")]
 mod polkit;
 #[cfg(target_os = "linux")]
 mod portal;
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 mod power;
 #[cfg(target_os = "linux")]
 mod record;
@@ -79,34 +79,34 @@ mod screencast;
 mod screenshot;
 #[cfg(target_os = "linux")]
 mod sleep;
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 mod switcher;
 #[cfg(target_os = "linux")]
 mod thumbs;
 // What the tray shows is the same wherever it is drawn; the tray on the
 // bus is Linux's.
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 #[allow(dead_code)]
 mod tray;
 // Which icons of the tray stand on the panel: the same on both systems.
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 mod tray_choice;
 // Shown by the shell on Windows; on Linux the settings program's window
 // is still the list, and only the tests use this.
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 #[cfg_attr(not(windows), allow(dead_code))]
 mod shortcuts;
 // The overview of every workspace, where the shell draws it (a
 // compositor shows the workspaces themselves).
 // The zones of the desktop: containers that hold its icons.
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 mod zones;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 mod overview;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 mod windows;
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 fn main() {
     eprintln!("gevrek-shell runs on Linux and on Windows.");
     std::process::exit(1);
@@ -117,7 +117,7 @@ fn main() -> anyhow::Result<()> {
     linux::run()
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn main() -> anyhow::Result<()> {
     windows::run()
 }

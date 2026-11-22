@@ -700,12 +700,18 @@ impl WmHost for MacRuntime {
     fn set_animations(&mut self, _animations: &gevrek_model::settings::AnimationProfile) {}
 
     // (The menu bar and the Dock are left out of each display's work area
-    // already: `displays.rs`.)
+    // already: `displays.rs`.) The room of gevrek's own panel is kept here,
+    // as on Windows: macOS lets no program keep room free of the others,
+    // and the shell's panel is put where the window manager says
+    // (`gevrek_shellkit::mac`, `Control::open_at`).
     fn configure_monitors(&mut self) {
         gevrek_engine::config_apply::configure_monitor_profiles(
             &mut self.core.monitor_manager,
             &self.config.desktop,
         );
+        self.core
+            .monitor_manager
+            .set_bar(Some(self.config.desktop.shell.panel.clone()));
     }
 
     fn rules(&self) -> &Arc<Mutex<RuleEngine>> {

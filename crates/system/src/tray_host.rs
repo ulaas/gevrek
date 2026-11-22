@@ -218,6 +218,20 @@ fn picture_from(black: &[u8], white: &[u8], side: u32) -> Option<Picture> {
 #[cfg(windows)]
 pub use self::windows::Host;
 
+/// On macOS the icons of the menu bar are the system's: the shell holds no
+/// tray of its own, and there is nothing to start.
+#[cfg(target_os = "macos")]
+pub struct Host;
+
+#[cfg(target_os = "macos")]
+impl Host {
+    pub fn start(_changed: impl Fn(Vec<Icon>) + Send + 'static) -> Option<Self> {
+        None
+    }
+
+    pub fn press(&self, _key: &str, _press: Press) {}
+}
+
 #[cfg(windows)]
 mod windows {
     use super::{picture_from, take, told, Icon, Kept, Press};
