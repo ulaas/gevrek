@@ -140,6 +140,17 @@ mod mac {
                 }
                 println!("{frames} frames, at most {most} finger(s)");
             }
+            Some("fullscreen") => match (number(1), args.get(2).map(String::as_str)) {
+                // Into macOS's own full screen, or out of it.
+                (Some(id), Some(state @ ("on" | "off"))) => match window_list::find(id as u32) {
+                    Some(window) => println!(
+                        "full screen {state}: {:?}",
+                        window.element.set_fullscreen(state == "on")
+                    ),
+                    None => eprintln!("no window {id}"),
+                },
+                _ => eprintln!("fullscreen <window> on|off"),
+            },
             Some("tree") => match number(1) {
                 Some(pid) => tree(&ax::Element::application(pid), 0),
                 None => eprintln!("tree <pid>"),

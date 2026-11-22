@@ -64,6 +64,10 @@ pub struct MacRuntime {
     tap: Option<crate::keys::KeyTap>,
     /// A window being moved or resized with the mouse.
     drag: Option<Drag>,
+    /// Windows whose border and bar are to be put above them again at a
+    /// time: macOS's animation out of full screen puts the window back
+    /// on top after gevrek ordered them.
+    overlays_due: Vec<(WindowHandle, Instant)>,
     /// The touchpads, listened to while a gesture profile is on.
     touchpad: Option<crate::touchpad::Touchpad>,
     /// What the touchpads' fingers make: the configuration's gestures.
@@ -143,6 +147,7 @@ impl MacRuntime {
             tap: None,
             drag: None,
             touchpad: None,
+            overlays_due: Vec::new(),
             gestures: gevrek_engine::gesture::GestureRecognizer::default(),
             looked_at_programs: Instant::now(),
             looked_at_windows: Instant::now(),
@@ -233,6 +238,7 @@ impl MacRuntime {
             self.handle_ax_events();
             self.handle_keys();
             self.handle_gestures();
+            self.raise_overlays_due();
             self.handle_clicks();
             self.run_queued_commands();
             self.apply_configuration_changes();
@@ -307,12 +313,15 @@ impl MacRuntime {
         let Some(id) = self.desktop.track(element.clone(), app) else {
             return;
         };
+        // A window found in macOS's own full screen is known, and joins the
+        // layout when it comes out of it.
+        let away = self.desktop.own_space_changed(id) == Some(true);
         if let Some(observer) = self.observers.get_mut(&app.pid) {
             if let Err(error) = observer.watch_window(&element) {
                 log::debug!("window {id:?} not watched: {error}");
             }
         }
-        if !self.starting {
+        if !self.starting && !away {
             self.window_event(WindowEvent::Created(id));
         }
     }
@@ -368,6 +377,23 @@ impl MacRuntime {
                 }
                 AxEventKind::Moved | AxEventKind::Resized => {
                     let Some(id) = known else { continue };
+                    // Into macOS's own full screen (a Space of its own), or
+                    // back: it leaves the layout, or comes back to it.
+                    if let Some(away) = self.desktop.own_space_changed(id) {
+                        log::debug!(
+                            "window {id:?} {} macOS's full screen",
+                            if away { "went into" } else { "came out of" }
+                        );
+                        self.window_event(if away {
+                            WindowEvent::Unmapped(id)
+                        } else {
+                            WindowEvent::Created(id)
+                        });
+                        if !away {
+                            self.overlays_due.push((id, Instant::now() + FULL_SCREEN_ANIMATION));
+                        }
+                        continue;
+                    }
                     let parked = self.desktop.get(id).is_some_and(|window| window.parked);
                     if parked || self.desktop.moved_by_gevrek(id) {
                         continue;
@@ -402,8 +428,14 @@ impl MacRuntime {
                 AxEventKind::Hidden | AxEventKind::Shown => {
                     let hidden = event.kind == AxEventKind::Hidden;
                     for id in self.desktop.windows_of(event.pid) {
-                        if let Some(window) = self.desktop.windows.get_mut(&id) {
-                            window.app_hidden = hidden;
+                        let Some(window) = self.desktop.windows.get_mut(&id) else {
+                            continue;
+                        };
+                        // (A window in macOS's full screen is away already.)
+                        let was_away = window.away();
+                        window.app_hidden = hidden;
+                        if window.away() == was_away {
+                            continue;
                         }
                         self.window_event(if hidden {
                             WindowEvent::Unmapped(id)
@@ -425,6 +457,26 @@ impl MacRuntime {
     /// AppKit's queue (gevrek does not run AppKit's loop): a click on a
     /// stackbar's tab shows that tab's window. Everything else goes on to
     /// AppKit as it would in its own loop.
+    /// Put the borders and bars that are due above their windows again.
+    fn raise_overlays_due(&mut self) {
+        if self.overlays_due.is_empty() {
+            return;
+        }
+        let now = Instant::now();
+        let due: Vec<WindowHandle> = self
+            .overlays_due
+            .iter()
+            .filter(|(_, at)| *at <= now)
+            .map(|(id, _)| *id)
+            .collect();
+        self.overlays_due.retain(|(_, at)| *at > now);
+        for id in due {
+            if self.desktop.exists(id) {
+                self.desktop.raise_overlays(id);
+            }
+        }
+    }
+
     /// What the touchpads' fingers did since the last pass, as gestures.
     fn handle_gestures(&mut self) {
         let Some(touchpad) = &self.touchpad else {
@@ -764,6 +816,10 @@ impl WmHost for MacRuntime {
         }
     }
 }
+
+/// How long macOS takes to bring a window out of its full screen (its
+/// animation), with some to spare.
+const FULL_SCREEN_ANIMATION: Duration = Duration::from_millis(1200);
 
 /// A move or resize of a window with the mouse, from where it began.
 #[derive(Debug, Clone)]

@@ -1138,8 +1138,18 @@ wanted, strike it when it is not.
       - the wifi's networks by name: macOS tells them only to a program
         allowed to know the location (Location Services), so the radio is
         switched here and the networks are left to the menu bar.
-- [ ] Windows in macOS's own full screen (a Space of their own) and on
-      other Spaces: left alone now, not looked at.
+- [x] Windows in macOS's own full screen (2026-11-22): a window that
+      goes into it leaves the layout and its border goes, as for a hidden
+      program; when it comes out it joins the layout again and its border
+      is put above it once macOS's animation is over. A border once hidden
+      did not come back when its window could be seen again (a program
+      shown after Command-H too): it does now. Tried with Dictionary
+      (`probe fullscreen <window> on|off`).
+- [ ] Windows on other Spaces: gevrek lists every Space's windows, so a
+      switch of Space drops none; a window first seen on another Space is
+      adopted when that Space is shown, into the workspace in front. To
+      be decided: whether gevrek's workspaces and macOS's Spaces are to
+      know of each other (it needs the window server's private calls).
 
 ### Kept an eye on
 

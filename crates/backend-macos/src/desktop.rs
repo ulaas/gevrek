@@ -70,6 +70,9 @@ pub struct MacWindow {
     pub parked: bool,
     /// Its program is hidden (Command-H).
     pub app_hidden: bool,
+    /// It is in macOS's own full screen: on a Space of its own, out of
+    /// gevrek's reach until it comes back.
+    pub own_space: bool,
     /// The smallest size its program let it have, as far as gevrek has
     /// seen (a size it was given and would not take): 0 where unknown.
     /// macOS has no way to ask.
@@ -77,6 +80,13 @@ pub struct MacWindow {
 }
 
 impl MacWindow {
+    /// It is away from the desktop gevrek arranges, though it exists: its
+    /// program is hidden, or it is in macOS's own full screen. It leaves
+    /// the layout until it is back, and its border goes with it.
+    pub fn away(&self) -> bool {
+        self.app_hidden || self.own_space
+    }
+
     pub fn managed_kind(&self) -> bool {
         MANAGED_SUBROLES.contains(&self.subrole.as_str())
     }
@@ -157,7 +167,7 @@ impl MacDesktop {
     pub fn shown_window_ids(&self) -> std::collections::HashSet<u32> {
         self.windows
             .iter()
-            .filter(|(_, window)| !window.parked && !window.minimized && !window.app_hidden)
+            .filter(|(_, window)| !window.parked && !window.minimized && !window.away())
             .map(|(id, _)| window_id_of(*id))
             .collect()
     }
@@ -229,6 +239,7 @@ impl MacDesktop {
             rect,
             parked,
             app_hidden: false,
+            own_space: false,
             smallest: (0, 0),
             app: app.clone(),
             element,
@@ -247,6 +258,17 @@ impl MacDesktop {
             window.title = window.element.title();
             window.minimized = window.element.is_minimized();
         }
+    }
+
+    /// Whether the window went into macOS's own full screen, or came out
+    /// of it, since it was last looked at: its new state, if it changed.
+    pub fn own_space_changed(&mut self, id: WindowHandle) -> Option<bool> {
+        let window = self.windows.get_mut(&id)?;
+        let now = window.element.is_fullscreen();
+        (now != window.own_space).then(|| {
+            window.own_space = now;
+            now
+        })
     }
 
     /// The windows of one program.
@@ -457,7 +479,7 @@ impl WindowQueries for MacDesktop {
                     y: rect.y,
                     width: rect.width,
                     height: rect.height,
-                    is_visible: !window.minimized && !window.app_hidden,
+                    is_visible: !window.minimized && !window.away(),
                     is_minimized: window.minimized,
                     is_maximized: window.maximized,
                 }
@@ -483,7 +505,7 @@ impl WindowQueries for MacDesktop {
 
     fn is_visible(&self, id: WindowHandle) -> bool {
         self.get(id)
-            .is_some_and(|window| !window.minimized && !window.parked && !window.app_hidden)
+            .is_some_and(|window| !window.minimized && !window.parked && !window.away())
     }
 
     fn is_always_on_top(&self, _id: WindowHandle) -> bool {
@@ -521,7 +543,7 @@ impl WindowQueries for MacDesktop {
     }
 
     fn hidden_by_app(&self, id: WindowHandle) -> bool {
-        self.get(id).is_some_and(|window| window.app_hidden)
+        self.get(id).is_some_and(MacWindow::away)
     }
 
     fn is_decoration(&self, _id: WindowHandle) -> bool {
@@ -566,7 +588,7 @@ impl WindowQueries for MacDesktop {
             path: window.app.path.clone(),
             app_id: window.app.app_id(),
             has_parent: false,
-            is_visible: !window.minimized && !window.app_hidden,
+            is_visible: !window.minimized && !window.away(),
             // (A floating panel is what a tool window is on Windows.)
             is_tool_window: window.subrole == "AXFloatingWindow",
             is_noactivate: false,
@@ -839,12 +861,12 @@ impl Desktop for MacDesktop {
     ) -> anyhow::Result<()> {
         let visible = self
             .get(id)
-            .is_some_and(|window| !window.parked && !window.minimized && !window.app_hidden);
+            .is_some_and(|window| !window.parked && !window.minimized && !window.away());
         if let Some(borders) = &mut self.borders {
             borders.draw(id, at, look, is_focused);
-            if !visible {
-                borders.set_visible(id, false);
-            }
+            // Both ways: a window back from being away (its program shown
+            // again, out of macOS's full screen) has its border back.
+            borders.set_visible(id, visible);
         }
         Ok(())
     }
@@ -877,7 +899,7 @@ impl Desktop for MacDesktop {
             // A bar over a window that is not to be seen is not either.
             .filter(|state| {
                 self.get(state.key)
-                    .is_some_and(|window| !window.parked && !window.minimized && !window.app_hidden)
+                    .is_some_and(|window| !window.parked && !window.minimized && !window.away())
             })
             .map(|state| {
                 let (x, y, width, _) = state.rect;
