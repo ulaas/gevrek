@@ -41,6 +41,19 @@ fi
 # session does not inherit this one's display.
 finish() {
     systemctl --user start --job-mode=replace-irreversibly gevrek-shutdown.target
+    # The session is over when its services are down, not when they are
+    # told to go: systemd says the target is reached while the shell and
+    # the portals are still stopping, and a gevrek started over those
+    # stops is refused (the transaction is destructive), so the next
+    # login ended as it began. systemd has no call that waits for its
+    # jobs to be done: they are looked at until none is left, a few
+    # seconds at most.
+    waited=0
+    while [ "$waited" -lt 50 ] && [ -n "$(systemctl --user list-jobs --no-legend 2>/dev/null)" ]; do
+        sleep 0.2
+        waited=$((waited + 1))
+    done
+    [ "$waited" -lt 50 ] || echo 'The services of the session are still stopping after ten seconds.'
     systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP
 }
 
