@@ -27,6 +27,11 @@
 	<!-- A window manager has no Dock icon and no menu bar of its own. -->
 	<key>LSUIElement</key>
 	<true/>
+	<!-- Why the shell's control centre touches bluetooth (its radio and
+	     the paired devices): macOS ends a program that does without
+	     saying. -->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>gevrek's control centre shows bluetooth's devices, connects them and switches the radio.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>MIT licence</string>
 </dict>

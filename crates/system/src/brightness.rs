@@ -9,7 +9,7 @@
 //! nothing to set, and that is said.
 
 use std::path::Path;
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 use std::path::PathBuf;
 
 /// How bright a display is.
@@ -50,7 +50,7 @@ impl Brightness {
 
 /// Where the system lists its backlights (`GEVREK_BACKLIGHT_DIR` names
 /// another place: the checks have a folder of their own).
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn backlights() -> PathBuf {
     std::env::var_os("GEVREK_BACKLIGHT_DIR")
         .map(PathBuf::from)
@@ -95,10 +95,89 @@ pub fn device_in(folder: &Path) -> Option<(String, Brightness)> {
 
 /// How bright the machine's own display is; `None`: it has none whose
 /// brightness can be set.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn read() -> Option<Brightness> {
     device_in(&backlights()).map(|(_, brightness)| brightness)
 }
+
+/// The built-in display's brightness, through DisplayServices (the
+/// system's own, loaded when it is first asked: it is not in the public
+/// frameworks). `None` on a Mac without a built-in display, or where it is
+/// not there.
+#[cfg(target_os = "macos")]
+mod mac {
+    use super::Brightness;
+    use std::ffi::{c_void, CString};
+    use std::sync::OnceLock;
+
+    type Get = unsafe extern "C" fn(u32, *mut f32) -> i32;
+    type Set = unsafe extern "C" fn(u32, f32) -> i32;
+
+    extern "C" {
+        fn dlopen(path: *const i8, mode: i32) -> *mut c_void;
+        fn dlsym(handle: *mut c_void, name: *const i8) -> *mut c_void;
+    }
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGGetActiveDisplayList(max: u32, out: *mut u32, count: *mut u32) -> i32;
+        fn CGDisplayIsBuiltin(display: u32) -> u32;
+    }
+
+    fn calls() -> Option<(Get, Set)> {
+        static CALLS: OnceLock<Option<(usize, usize)>> = OnceLock::new();
+        let (get, set) = (*CALLS.get_or_init(|| {
+            let path = CString::new("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices").ok()?;
+            // SAFETY: the framework loaded once and kept; its two calls
+            // looked up by name.
+            unsafe {
+                let handle = dlopen(path.as_ptr(), 1);
+                if handle.is_null() {
+                    return None;
+                }
+                let get = dlsym(handle, c"DisplayServicesGetBrightness".as_ptr());
+                let set = dlsym(handle, c"DisplayServicesSetBrightness".as_ptr());
+                (!get.is_null() && !set.is_null()).then_some((get as usize, set as usize))
+            }
+        }))?;
+        // SAFETY: the calls' signatures, as every tool that uses them has
+        // them.
+        Some(unsafe { (std::mem::transmute::<usize, Get>(get), std::mem::transmute::<usize, Set>(set)) })
+    }
+
+    fn built_in() -> Option<u32> {
+        let mut ids = [0u32; 16];
+        let mut count = 0u32;
+        // SAFETY: room for 16 ids.
+        unsafe {
+            CGGetActiveDisplayList(16, ids.as_mut_ptr(), &mut count);
+            ids[..count as usize].iter().copied().find(|id| CGDisplayIsBuiltin(*id) != 0)
+        }
+    }
+
+    pub fn read() -> Option<Brightness> {
+        let (get, _) = calls()?;
+        let display = built_in()?;
+        let mut level = 0f32;
+        // SAFETY: a value written by the call.
+        (unsafe { get(display, &mut level) } == 0).then(|| Brightness {
+            now: (level * 100.0).round() as u32,
+            most: 100,
+        })
+    }
+
+    pub fn change(by_percent: i32) -> Option<Brightness> {
+        let (_, set) = calls()?;
+        let display = built_in()?;
+        let now = read()?;
+        let wanted = (now.now as i32 + by_percent).clamp(1, 100);
+        // SAFETY: a plain call.
+        unsafe { set(display, wanted as f32 / 100.0) };
+        read()
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub use mac::{change, read};
 
 /// How bright the machine's own display is, as Windows' display driver
 /// says (a laptop's panel; a desktop machine's displays have nothing of
@@ -315,7 +394,7 @@ pub fn change(by_percent: i32) -> Option<Brightness> {
 }
 
 /// Not set by gevrek here: the system's own keys do it.
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 pub fn change(_by_percent: i32) -> Option<Brightness> {
     None
 }

@@ -235,7 +235,7 @@ pub fn rescan() -> bool {
     took
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 pub fn rescan() -> bool {
     false
 }
@@ -296,19 +296,77 @@ pub fn join(name: &str, known: bool, password: Option<&str>) -> bool {
     }
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 pub fn read() -> Option<Wifi> {
     None
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 pub fn set_enabled(_on: bool) -> bool {
     false
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 pub fn join(_name: &str, _known: bool, _password: Option<&str>) -> bool {
     false
+}
+
+#[cfg(target_os = "macos")]
+pub use mac::{join, read, rescan, set_enabled};
+
+/// CoreWLAN, macOS's wireless interface. macOS names the networks in reach
+/// (and the one in use) only to a program that may know the machine's
+/// location: without that, the radio is switched here and its networks are
+/// left to the menu bar's own.
+#[cfg(target_os = "macos")]
+mod mac {
+    use super::Wifi;
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+
+    #[link(name = "CoreWLAN", kind = "framework")]
+    extern "C" {}
+
+    /// The Mac's wireless interface, if it has one.
+    fn interface() -> Option<Retained<AnyObject>> {
+        // SAFETY: CoreWLAN's shared client and its default interface.
+        unsafe {
+            let client: Option<Retained<AnyObject>> = msg_send![class!(CWWiFiClient), sharedWiFiClient];
+            msg_send![&*client?, interface]
+        }
+    }
+
+    pub fn read() -> Option<Wifi> {
+        let interface = interface()?;
+        // SAFETY: a plain property of the interface.
+        let enabled: bool = unsafe { msg_send![&*interface, powerOn] };
+        Some(Wifi {
+            enabled,
+            networks: Vec::new(),
+        })
+    }
+
+    /// Switch the radio on, or off. Whether the system took it.
+    pub fn set_enabled(on: bool) -> bool {
+        let Some(interface) = interface() else {
+            return false;
+        };
+        // SAFETY: the interface's own setter; no error is read back.
+        unsafe { msg_send![&*interface, setPower: on, error: std::ptr::null_mut::<*mut AnyObject>()] }
+    }
+
+    /// Looking for networks gives no names here (see the module).
+    pub fn rescan() -> bool {
+        false
+    }
+
+    /// Joining needs the network's name (see the module): the menu bar's
+    /// own list joins.
+    pub fn join(name: &str, _known: bool, _password: Option<&str>) -> bool {
+        log::info!("{name} is joined from the menu bar on macOS: gevrek is told no network's name");
+        false
+    }
 }
 
 #[cfg(windows)]

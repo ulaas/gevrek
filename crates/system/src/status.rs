@@ -123,9 +123,48 @@ pub fn battery() -> Option<Battery> {
     )
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 pub fn battery() -> Option<Battery> {
     None
+}
+
+/// The Mac's own battery, as its power sources tell (IOKit). `None` for a
+/// Mac without one.
+#[cfg(target_os = "macos")]
+pub fn battery() -> Option<Battery> {
+    use crate::macos_cf::{self as cf, Cf};
+    #[link(name = "IOKit", kind = "framework")]
+    extern "C" {
+        fn IOPSCopyPowerSourcesInfo() -> cf::CFTypeRef;
+        fn IOPSCopyPowerSourcesList(blob: cf::CFTypeRef) -> cf::CFTypeRef;
+        fn IOPSGetPowerSourceDescription(blob: cf::CFTypeRef, source: cf::CFTypeRef) -> cf::CFTypeRef;
+    }
+    // SAFETY: Copy calls (owned), the descriptions lent by the blob while it
+    // is held, read at once.
+    unsafe {
+        let blob = Cf::owned(IOPSCopyPowerSourcesInfo())?;
+        let list = Cf::owned(IOPSCopyPowerSourcesList(blob.as_ptr()))?;
+        (0..cf::CFArrayGetCount(list.as_ptr())).find_map(|index| {
+            let source = cf::CFArrayGetValueAtIndex(list.as_ptr(), index);
+            let description = IOPSGetPowerSourceDescription(blob.as_ptr(), source);
+            if description.is_null() {
+                return None;
+            }
+            if cf::string_of(cf::value(description, "Type")).as_deref() != Some("InternalBattery") {
+                return None;
+            }
+            let current = cf::number_of(cf::value(description, "Current Capacity"))?;
+            let most = cf::number_of(cf::value(description, "Max Capacity"))
+                .filter(|most| *most > 0)
+                .unwrap_or(100);
+            let mains = cf::string_of(cf::value(description, "Power Source State")).as_deref()
+                == Some("AC Power");
+            Some(Battery {
+                percent: (current * 100 / most).clamp(0, 100) as u8,
+                charging: mains,
+            })
+        })
+    }
 }
 
 /// A battery from Windows' power status: the battery's flags (128: the
@@ -233,15 +272,144 @@ pub fn wait_for_network_change() -> bool {
     unsafe { NotifyAddrChange(std::ptr::null_mut(), std::ptr::null()) == 0 }
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 pub fn network() -> Option<Network> {
     None
 }
 
-/// macOS is not waited on yet: `false`, and the shell looks by the clock.
+#[cfg(target_os = "macos")]
+mod mac_net {
+    use crate::macos_cf::{self as cf, Cf};
+
+    #[link(name = "SystemConfiguration", kind = "framework")]
+    extern "C" {
+        pub fn SCDynamicStoreCreate(
+            alloc: cf::CFTypeRef,
+            name: cf::CFTypeRef,
+            callout: Option<extern "C" fn(cf::CFTypeRef, cf::CFTypeRef, *mut std::ffi::c_void)>,
+            context: *mut std::ffi::c_void,
+        ) -> cf::CFTypeRef;
+        pub fn SCDynamicStoreCopyValue(store: cf::CFTypeRef, key: cf::CFTypeRef) -> cf::CFTypeRef;
+        pub fn SCDynamicStoreSetNotificationKeys(
+            store: cf::CFTypeRef,
+            keys: cf::CFTypeRef,
+            patterns: cf::CFTypeRef,
+        ) -> bool;
+        pub fn SCDynamicStoreCreateRunLoopSource(
+            alloc: cf::CFTypeRef,
+            store: cf::CFTypeRef,
+            order: isize,
+        ) -> cf::CFTypeRef;
+        pub fn SCNetworkInterfaceCopyAll() -> cf::CFTypeRef;
+        pub fn SCNetworkInterfaceGetBSDName(interface: cf::CFTypeRef) -> cf::CFTypeRef;
+        pub fn SCNetworkInterfaceGetInterfaceType(interface: cf::CFTypeRef) -> cf::CFTypeRef;
+        pub fn SCNetworkInterfaceGetLocalizedDisplayName(interface: cf::CFTypeRef) -> cf::CFTypeRef;
+    }
+
+    pub fn store(callout: Option<extern "C" fn(cf::CFTypeRef, cf::CFTypeRef, *mut std::ffi::c_void)>) -> Option<Cf> {
+        let name = Cf::string("gevrek");
+        // SAFETY: an owned store (a Create call).
+        unsafe { Cf::owned(SCDynamicStoreCreate(std::ptr::null(), name.as_ptr(), callout, std::ptr::null_mut())) }
+    }
+
+    /// A value of the dynamic store, owned.
+    pub fn read(store: &Cf, key: &str) -> Option<Cf> {
+        let key = Cf::string(key);
+        // SAFETY: a Copy call: owned.
+        unsafe { Cf::owned(SCDynamicStoreCopyValue(store.as_ptr(), key.as_ptr())) }
+    }
+
+    /// The kind and the shown name of the interface with this BSD name
+    /// (`en0`): ("IEEE80211", "Wi-Fi").
+    pub fn interface(bsd: &str) -> Option<(String, String)> {
+        // SAFETY: an owned array of interfaces, read while held.
+        unsafe {
+            let all = Cf::owned(SCNetworkInterfaceCopyAll())?;
+            (0..cf::CFArrayGetCount(all.as_ptr())).find_map(|index| {
+                let interface = cf::CFArrayGetValueAtIndex(all.as_ptr(), index);
+                (cf::string_of(SCNetworkInterfaceGetBSDName(interface)).as_deref() == Some(bsd)).then(|| {
+                    (
+                        cf::string_of(SCNetworkInterfaceGetInterfaceType(interface)).unwrap_or_default(),
+                        cf::string_of(SCNetworkInterfaceGetLocalizedDisplayName(interface)).unwrap_or_default(),
+                    )
+                })
+            })
+        }
+    }
+}
+
+/// The network the Mac is on: its primary interface, as the system's
+/// configuration has it. The name of a wireless network is shown where
+/// macOS tells it (it tells only programs that may know the location);
+/// else the interface's own ("Wi-Fi", "Ethernet").
+#[cfg(target_os = "macos")]
+pub fn network() -> Option<Network> {
+    use crate::macos_cf as cf;
+    let store = mac_net::store(None)?;
+    let Some(global) = mac_net::read(&store, "State:/Network/Global/IPv4") else {
+        return Some(Network {
+            connected: false,
+            wireless: false,
+            name: String::new(),
+        });
+    };
+    // SAFETY: a dictionary held while it is read.
+    let primary = unsafe { cf::string_of(cf::value(global.as_ptr(), "PrimaryInterface")) }?;
+    let (kind, shown) = mac_net::interface(&primary).unwrap_or_default();
+    let wireless = kind == "IEEE80211";
+    let ssid = wireless
+        .then(|| mac_net::read(&store, &format!("State:/Network/Interface/{primary}/AirPort")))
+        .flatten()
+        // SAFETY: a dictionary held while it is read.
+        .and_then(|airport| unsafe { cf::string_of(cf::value(airport.as_ptr(), "SSID_STR")) })
+        .filter(|ssid| !ssid.is_empty());
+    Some(Network {
+        connected: true,
+        wireless,
+        name: ssid.unwrap_or(shown),
+    })
+}
+
+/// Wait until the Mac's network changes (its primary interface, an
+/// address, the wireless network joined), as the system's configuration
+/// tells. `false` where it cannot be waited on.
 #[cfg(target_os = "macos")]
 pub fn wait_for_network_change() -> bool {
-    false
+    use crate::macos_cf::{self as cf, Cf};
+    extern "C" fn changed(_store: cf::CFTypeRef, _keys: cf::CFTypeRef, _info: *mut std::ffi::c_void) {}
+    let Some(store) = mac_net::store(Some(changed)) else {
+        return false;
+    };
+    let patterns = [
+        Cf::string("State:/Network/Global/IPv4"),
+        Cf::string("State:/Network/Interface/.*/IPv4"),
+        Cf::string("State:/Network/Interface/.*/AirPort"),
+    ];
+    let raw: Vec<cf::CFTypeRef> = patterns.iter().map(Cf::as_ptr).collect();
+    // SAFETY: an owned array of the patterns (retained by it), the store's
+    // own run loop source added to this thread's run loop, which runs until
+    // the source fires (or an hour passes).
+    unsafe {
+        let Some(patterns) = Cf::owned(cf::CFArrayCreate(
+            std::ptr::null(),
+            raw.as_ptr(),
+            raw.len() as isize,
+            &cf::kCFTypeArrayCallBacks as *const std::ffi::c_void,
+        )) else {
+            return false;
+        };
+        if !mac_net::SCDynamicStoreSetNotificationKeys(store.as_ptr(), std::ptr::null(), patterns.as_ptr()) {
+            return false;
+        }
+        let Some(source) = Cf::owned(mac_net::SCDynamicStoreCreateRunLoopSource(std::ptr::null(), store.as_ptr(), 0)) else {
+            return false;
+        };
+        let run_loop = cf::CFRunLoopGetCurrent();
+        cf::CFRunLoopAddSource(run_loop, source.as_ptr(), cf::kCFRunLoopDefaultMode);
+        cf::CFRunLoopRunInMode(cf::kCFRunLoopDefaultMode, 3600.0, true);
+        // (The source is released with the store; the run loop drops it.)
+    }
+    true
 }
 
 #[cfg(windows)]

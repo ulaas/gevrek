@@ -21,6 +21,8 @@ pub mod every_key;
 pub mod icons;
 pub mod idle;
 pub mod look;
+#[cfg(target_os = "macos")]
+mod macos_cf;
 pub mod pictures;
 pub mod playing;
 pub mod power_profile;

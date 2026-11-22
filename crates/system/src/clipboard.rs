@@ -8,6 +8,11 @@
 //! manager marks as not to be kept is not kept. Kept while the shell runs,
 //! not written down.
 //!
+//! On macOS the pasteboard's count of changes is looked at twice a second
+//! (macOS tells no program when the pasteboard changes); what a password
+//! manager marks as concealed or transient (the `org.nspasteboard` types
+//! macOS's programs agree on) is not kept.
+//!
 //! On Linux the shell keeps the clipboard through the compositor
 //! (`gevrek-shell`'s own `clipboard`), which this does not replace.
 
@@ -36,6 +41,61 @@ pub struct Keeper {
     put: windows_keeper::Put,
 }
 
+#[cfg(target_os = "macos")]
+mod mac_keeper {
+    use super::{remember, Keeper};
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
+    use objc2_foundation::NSString;
+    use std::sync::{Arc, Mutex};
+
+    /// What password managers put on the pasteboard to say: not to be kept.
+    const NOT_KEPT: &[&str] = &["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType"];
+
+    /// How often the pasteboard is looked at.
+    const LOOK: std::time::Duration = std::time::Duration::from_millis(500);
+
+    pub fn start() -> Option<Keeper> {
+        let texts = Arc::new(Mutex::new(Vec::new()));
+        let kept = Arc::clone(&texts);
+        std::thread::Builder::new()
+            .name("gevrek-clipboard".to_string())
+            .spawn(move || {
+                let board = NSPasteboard::generalPasteboard();
+                let mut seen = board.changeCount();
+                loop {
+                    std::thread::sleep(LOOK);
+                    let count = board.changeCount();
+                    if count == seen {
+                        continue;
+                    }
+                    seen = count;
+                    let concealed = board.types().is_some_and(|types| {
+                        types.iter().any(|kind| NOT_KEPT.contains(&kind.to_string().as_str()))
+                    });
+                    if concealed {
+                        continue;
+                    }
+                    // SAFETY: the system's constant.
+                    let Some(text) = board.stringForType(unsafe { NSPasteboardTypeString }) else {
+                        continue;
+                    };
+                    let mut texts = kept.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    remember(&mut texts, &text.to_string());
+                }
+            })
+            .ok()?;
+        Some(Keeper { texts })
+    }
+
+    /// Make `text` what is on the pasteboard.
+    pub fn put(text: &str) {
+        let board = NSPasteboard::generalPasteboard();
+        board.clearContents();
+        // SAFETY: the system's constant.
+        board.setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString });
+    }
+}
+
 impl Keeper {
     /// The texts as they are now.
     pub fn copied(&self) -> Vec<String> {
@@ -49,7 +109,9 @@ impl Keeper {
     pub fn put(&self, text: &str) {
         #[cfg(windows)]
         self.put.put(text);
-        #[cfg(not(windows))]
+        #[cfg(target_os = "macos")]
+        mac_keeper::put(text);
+        #[cfg(not(any(windows, target_os = "macos")))]
         let _ = text;
     }
 }
@@ -61,7 +123,11 @@ pub fn start() -> Option<Keeper> {
     {
         windows_keeper::start()
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        mac_keeper::start()
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         None
     }

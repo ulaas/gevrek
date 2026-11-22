@@ -6,10 +6,10 @@
 //! instead (`wpctl`, of its session manager), started once for every
 //! question.
 //!
-//! On macOS, the volume of what is heard and of the microphone is asked of
-//! and told to the system through its scripting's own settings (`get volume
-//! settings`), which need no permission; the devices and the programs'
-//! own volumes are not there yet.
+//! On macOS, the default devices' volume and mute are asked of and told to
+//! Core Audio, and [`watch`] tells when what is heard changes, whoever
+//! changed it; the list of devices and the programs' own volumes are not
+//! there yet.
 //!
 //! On Windows, the default device of each kind is asked through the
 //! system's own interface for it (the endpoint volume of Core Audio), and
@@ -392,80 +392,264 @@ fn toggle_stream_mute_by(id: u32) -> bool {
 /// On Windows: the devices to play on and to record from as the system
 /// lists them, and the programs that play now on the device that is
 /// heard, each known by the number of its process.
-/// The volume settings as macOS's scripting tells them: `output volume:50,
-/// input volume:75, alert volume:100, output muted:false`.
 #[cfg(target_os = "macos")]
-fn volume_settings() -> Option<std::collections::HashMap<String, String>> {
-    let output = Command::new("/usr/bin/osascript")
-        .args(["-e", "get volume settings"])
-        .output()
-        .ok()?;
-    output.status.success().then(|| {
-        String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .split(", ")
-            .filter_map(|pair| pair.split_once(':'))
-            .map(|(key, value)| (key.trim().to_string(), value.trim().to_string()))
-            .collect()
-    })
-}
+pub use self::core_audio::{change, level, toggle_mute, watch};
 
+/// The default devices' volume and mute through Core Audio's own interface:
+/// asked and set without a program between, and told when they change,
+/// whoever changed them (the keyboard's keys are the system's on a Mac).
 #[cfg(target_os = "macos")]
-fn set_volume(words: &str) -> Option<()> {
-    let output = Command::new("/usr/bin/osascript")
-        .args(["-e", &format!("set volume {words}")])
-        .output()
-        .ok()?;
-    output.status.success().then_some(())
-}
+mod core_audio {
+    use super::{percent_of, stepped, Device, Level};
+    use std::ffi::c_void;
+    use std::sync::Mutex;
 
-/// How loud the device is now.
-#[cfg(target_os = "macos")]
-pub fn level(device: Device) -> Option<Level> {
-    let settings = volume_settings()?;
-    let (volume, muted) = match device {
-        Device::Speaker => ("output volume", settings.get("output muted").map(String::as_str) == Some("true")),
-        // (The microphone has no mute of its own: at nothing, it is mute.)
-        Device::Microphone => ("input volume", false),
-    };
-    let percent: u32 = settings.get(volume)?.parse().ok()?;
-    Some(Level {
-        percent,
-        muted: muted || (device == Device::Microphone && percent == 0),
-    })
-}
-
-/// Make the device louder or quieter by so many percent of full.
-#[cfg(target_os = "macos")]
-pub fn change(device: Device, by_percent: i32) -> Option<Level> {
-    let now = level(device)?;
-    let wanted = (now.percent as i32 + by_percent).clamp(0, 100);
-    match device {
-        Device::Speaker => set_volume(&format!("output volume {wanted}"))?,
-        Device::Microphone => set_volume(&format!("input volume {wanted}"))?,
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct Address {
+        selector: u32,
+        scope: u32,
+        element: u32,
     }
-    level(device)
-}
 
-/// Mute the device, or let it be heard again.
-#[cfg(target_os = "macos")]
-pub fn toggle_mute(device: Device) -> Option<Level> {
-    let now = level(device)?;
-    match device {
-        Device::Speaker => set_volume(&format!("output muted {}", !now.muted))?,
-        // (Muting the microphone is setting it to nothing; it is not kept
-        // what it was.)
-        Device::Microphone => set_volume(if now.muted { "input volume 75" } else { "input volume 0" })?,
+    type Listener = extern "C" fn(u32, u32, *const Address, *mut c_void) -> i32;
+
+    #[link(name = "CoreAudio", kind = "framework")]
+    extern "C" {
+        fn AudioObjectGetPropertyData(
+            object: u32,
+            address: *const Address,
+            qualifier_size: u32,
+            qualifier: *const c_void,
+            size: *mut u32,
+            data: *mut c_void,
+        ) -> i32;
+        fn AudioObjectSetPropertyData(
+            object: u32,
+            address: *const Address,
+            qualifier_size: u32,
+            qualifier: *const c_void,
+            size: u32,
+            data: *const c_void,
+        ) -> i32;
+        fn AudioObjectAddPropertyListener(
+            object: u32,
+            address: *const Address,
+            listener: Listener,
+            client: *mut c_void,
+        ) -> i32;
     }
-    level(device)
-}
+    #[link(name = "AudioToolbox", kind = "framework")]
+    extern "C" {
+        fn AudioHardwareServiceGetPropertyData(
+            object: u32,
+            address: *const Address,
+            qualifier_size: u32,
+            qualifier: *const c_void,
+            size: *mut u32,
+            data: *mut c_void,
+        ) -> i32;
+        fn AudioHardwareServiceSetPropertyData(
+            object: u32,
+            address: *const Address,
+            qualifier_size: u32,
+            qualifier: *const c_void,
+            size: u32,
+            data: *const c_void,
+        ) -> i32;
+        fn AudioHardwareServiceAddPropertyListener(
+            object: u32,
+            address: *const Address,
+            listener: Listener,
+            client: *mut c_void,
+        ) -> i32;
+    }
 
-/// macOS tells of no change of the volume that the shell could hear
-/// without a listener of Core Audio's: not yet. (`false`: nothing is
-/// watched; the shell asks when it shows the volume.)
-#[cfg(target_os = "macos")]
-pub fn watch(_tell: impl Fn(Level) + Send + Sync + 'static) -> bool {
-    false
+    /// Core Audio's names are four letters.
+    const fn four(name: &[u8; 4]) -> u32 {
+        u32::from_be_bytes(*name)
+    }
+    const SYSTEM: u32 = 1;
+    const GLOBAL: u32 = four(b"glob");
+    const MAIN: u32 = 0;
+
+    fn scope(device: Device) -> u32 {
+        match device {
+            Device::Speaker => four(b"outp"),
+            Device::Microphone => four(b"inpt"),
+        }
+    }
+
+    fn default_device_address(device: Device) -> Address {
+        Address {
+            selector: match device {
+                Device::Speaker => four(b"dOut"),
+                Device::Microphone => four(b"dIn "),
+            },
+            scope: GLOBAL,
+            element: MAIN,
+        }
+    }
+
+    fn volume_address(device: Device) -> Address {
+        // (The device's one volume, whatever its channels: what the menu
+        // bar's slider moves.)
+        Address {
+            selector: four(b"vmvc"),
+            scope: scope(device),
+            element: MAIN,
+        }
+    }
+
+    fn mute_address(device: Device) -> Address {
+        Address {
+            selector: four(b"mute"),
+            scope: scope(device),
+            element: MAIN,
+        }
+    }
+
+    /// The default device of this kind.
+    fn device_id(device: Device) -> Option<u32> {
+        let address = default_device_address(device);
+        let mut id = 0u32;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        // SAFETY: a plain property read into a value of its size.
+        let status = unsafe {
+            AudioObjectGetPropertyData(SYSTEM, &address, 0, std::ptr::null(), &mut size, &mut id as *mut u32 as *mut c_void)
+        };
+        (status == 0 && id != 0).then_some(id)
+    }
+
+    fn volume_of(id: u32, device: Device) -> Option<f32> {
+        let address = volume_address(device);
+        let mut volume = 0f32;
+        let mut size = std::mem::size_of::<f32>() as u32;
+        // SAFETY: as above.
+        let status = unsafe {
+            AudioHardwareServiceGetPropertyData(id, &address, 0, std::ptr::null(), &mut size, &mut volume as *mut f32 as *mut c_void)
+        };
+        (status == 0).then_some(volume)
+    }
+
+    fn muted(id: u32, device: Device) -> bool {
+        let address = mute_address(device);
+        let mut mute = 0u32;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        // SAFETY: as above.
+        let status = unsafe {
+            AudioObjectGetPropertyData(id, &address, 0, std::ptr::null(), &mut size, &mut mute as *mut u32 as *mut c_void)
+        };
+        status == 0 && mute != 0
+    }
+
+    /// How loud the device is now. `None`: there is no such device, or it
+    /// has no volume of its own (a digital output).
+    pub fn level(device: Device) -> Option<Level> {
+        let id = device_id(device)?;
+        let volume = volume_of(id, device)?;
+        Some(Level {
+            percent: percent_of(volume),
+            muted: muted(id, device),
+        })
+    }
+
+    /// Make the device louder or quieter by so many percent of full.
+    pub fn change(device: Device, by_percent: i32) -> Option<Level> {
+        let id = device_id(device)?;
+        let volume = stepped(volume_of(id, device)?, by_percent);
+        let address = volume_address(device);
+        // SAFETY: a plain property written from a value of its size.
+        unsafe {
+            AudioHardwareServiceSetPropertyData(id, &address, 0, std::ptr::null(), std::mem::size_of::<f32>() as u32, &volume as *const f32 as *const c_void);
+        }
+        // Louder is heard: a muted device is let be heard again.
+        if by_percent > 0 && muted(id, device) {
+            set_mute(id, device, false);
+        }
+        level(device)
+    }
+
+    fn set_mute(id: u32, device: Device, mute: bool) {
+        let address = mute_address(device);
+        let value = u32::from(mute);
+        // SAFETY: as above.
+        unsafe {
+            AudioObjectSetPropertyData(id, &address, 0, std::ptr::null(), std::mem::size_of::<u32>() as u32, &value as *const u32 as *const c_void);
+        }
+    }
+
+    /// Mute the device, or let it be heard again.
+    pub fn toggle_mute(device: Device) -> Option<Level> {
+        let id = device_id(device)?;
+        set_mute(id, device, !muted(id, device));
+        level(device)
+    }
+
+    /// What is told of, and the device it is told of now.
+    struct Watched {
+        tell: Box<dyn Fn(Level) + Send + Sync>,
+        on: Mutex<Option<u32>>,
+        /// What was told last: Core Audio calls back once for each channel
+        /// of a change, and it is told once.
+        told: Mutex<Option<Level>>,
+    }
+
+    extern "C" fn heard(_object: u32, _count: u32, _addresses: *const Address, client: *mut c_void) -> i32 {
+        // SAFETY: the client is the `Watched` given when listening began,
+        // kept for the program's life (see `watch`).
+        let watched = unsafe { &*(client as *const Watched) };
+        follow(watched);
+        if let Some(level) = level(Device::Speaker) {
+            let mut told = watched.told.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if *told != Some(level) {
+                *told = Some(level);
+                drop(told);
+                (watched.tell)(level);
+            }
+        }
+        0
+    }
+
+    /// Listen to the default output's volume and mute (once for each
+    /// device that becomes the default).
+    fn follow(watched: &Watched) {
+        let Some(id) = device_id(Device::Speaker) else {
+            return;
+        };
+        let mut on = watched.on.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if *on == Some(id) {
+            return;
+        }
+        *on = Some(id);
+        let client = watched as *const Watched as *mut c_void;
+        // SAFETY: listeners with the kept `Watched` as their client.
+        unsafe {
+            AudioHardwareServiceAddPropertyListener(id, &volume_address(Device::Speaker), heard, client);
+            AudioObjectAddPropertyListener(id, &mute_address(Device::Speaker), heard, client);
+        }
+    }
+
+    /// Tell `tell` how loud what is heard is each time that changes,
+    /// whoever changed it, and when another device becomes the default.
+    /// `false` where there is nothing to listen to.
+    pub fn watch(tell: impl Fn(Level) + Send + Sync + 'static) -> bool {
+        device_id(Device::Speaker).is_some() && {
+            // Kept for the program's life: Core Audio calls back with it.
+            let watched: &'static Watched = Box::leak(Box::new(Watched {
+                tell: Box::new(tell),
+                on: Mutex::new(None),
+                told: Mutex::new(level(Device::Speaker)),
+            }));
+            follow(watched);
+            let client = watched as *const Watched as *mut c_void;
+            // SAFETY: as above, on the system object (the default output).
+            unsafe {
+                AudioObjectAddPropertyListener(SYSTEM, &default_device_address(Device::Speaker), heard, client);
+            }
+            true
+        }
+    }
 }
 
 #[cfg(windows)]
