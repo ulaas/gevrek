@@ -62,6 +62,8 @@ pub struct MacRuntime {
     keys: std::rc::Rc<std::cell::RefCell<crate::keys::Shared>>,
     /// The keyboard tap, once it is installed.
     tap: Option<crate::keys::KeyTap>,
+    /// A window being moved or resized with the mouse.
+    drag: Option<Drag>,
     looked_at_programs: Instant,
     looked_at_windows: Instant,
     /// Passes of the loop a second, measured.
@@ -135,6 +137,7 @@ impl MacRuntime {
             observers: HashMap::new(),
             keys: Default::default(),
             tap: None,
+            drag: None,
             looked_at_programs: Instant::now(),
             looked_at_windows: Instant::now(),
             passes_per_second: 0.0,
@@ -170,6 +173,7 @@ impl MacRuntime {
                  Privacy & Security, Accessibility, then start gevrek again"
             );
         }
+        self.keys.borrow_mut().drag_modifier = drag_modifier();
         // Without the keyboard gevrek still runs (the CLI and the editor
         // drive it); it says why the keys do nothing.
         match crate::keys::KeyTap::install(self.keys.clone()) {
@@ -444,16 +448,79 @@ impl MacRuntime {
         }
     }
 
-    /// The keys that hit bindings since the last pass, run.
+    /// The keys and buttons that hit bindings since the last pass, run;
+    /// and the drags of windows with the mouse, carried out.
     fn handle_keys(&mut self) {
-        let hits = {
+        let (hits, drags) = {
             let mut keys = self.keys.borrow_mut();
             keys.paused = self.host.paused();
-            std::mem::take(&mut keys.hits)
+            keys.managed = self.desktop.shown_window_ids();
+            keys.tick(Instant::now());
+            (std::mem::take(&mut keys.hits), std::mem::take(&mut keys.drags))
         };
         for hit in hits {
             self.bindings_triggered(&hit);
         }
+        self.handle_drags(drags);
+    }
+
+    /// A window moved or resized with the mouse (the drag modifier and
+    /// the left or the right button). Only where the pointer is last in a
+    /// pass is the window put: a program takes a while to take a new size.
+    fn handle_drags(&mut self, drags: Vec<crate::keys::DragEvent>) {
+        use crate::keys::DragEvent;
+        let mut to = None;
+        for drag in drags {
+            match drag {
+                DragEvent::Start { window, resize, at } => {
+                    let id = handle_of(window);
+                    let Some(rect) = self.desktop.get(id).map(|window| window.rect) else {
+                        continue;
+                    };
+                    let _ = self.desktop.apply(&gevrek_engine::Effect::Focus(Some(id)));
+                    self.drag = Some(Drag {
+                        id,
+                        resize,
+                        // The right button resizes from the corner nearest
+                        // to the pointer.
+                        from_left: at.0 < rect.x + rect.width / 2,
+                        from_top: at.1 < rect.y + rect.height / 2,
+                        start_pointer: at,
+                        start_rect: rect,
+                    });
+                    self.window_event(WindowEvent::DragStarted(id));
+                }
+                DragEvent::To(at) => to = Some(at),
+                DragEvent::End => {
+                    if let Some(at) = to.take() {
+                        self.drag_to(at);
+                    }
+                    if let Some(drag) = self.drag.take() {
+                        // The engine decides what the drop means: a floating
+                        // window stays, a tiled one swaps places or goes back.
+                        self.window_event(WindowEvent::DragEnded(drag.id));
+                    }
+                }
+            }
+        }
+        if let Some(at) = to {
+            self.drag_to(at);
+        }
+    }
+
+    fn drag_to(&mut self, at: (i32, i32)) {
+        let Some(drag) = self.drag.clone() else {
+            return;
+        };
+        let rect = drag.rect_at(at);
+        let Some(landed) = self.desktop.drag_to(drag.id, rect, drag.resize) else {
+            return;
+        };
+        self.window_event(if drag.resize {
+            WindowEvent::Resized(drag.id, landed.width, landed.height)
+        } else {
+            WindowEvent::Moved(drag.id, landed.x, landed.y)
+        });
     }
 
     /// Watch the programs that started since the last look, and let go of
@@ -654,6 +721,60 @@ impl WmHost for MacRuntime {
     }
 }
 
+/// A move or resize of a window with the mouse, from where it began.
+#[derive(Debug, Clone)]
+struct Drag {
+    id: WindowHandle,
+    resize: bool,
+    /// When resizing: the left edge moves (else the right), the top edge
+    /// moves (else the bottom).
+    from_left: bool,
+    from_top: bool,
+    start_pointer: (i32, i32),
+    start_rect: gevrek_engine::Rect,
+}
+
+impl Drag {
+    /// Where the window is with the pointer at `at`: moved with it, or the
+    /// edges nearest to where the button went down following it, the
+    /// others staying.
+    fn rect_at(&self, at: (i32, i32)) -> gevrek_engine::Rect {
+        let (dx, dy) = (at.0 - self.start_pointer.0, at.1 - self.start_pointer.1);
+        let start = self.start_rect;
+        if !self.resize {
+            return gevrek_engine::Rect::new(start.x + dx, start.y + dy, start.width, start.height);
+        }
+        let min = crate::keys::MIN_DRAG_SIZE;
+        let width = if self.from_left { start.width - dx } else { start.width + dx }.max(min);
+        let height = if self.from_top { start.height - dy } else { start.height + dy }.max(min);
+        let x = if self.from_left { start.x + start.width - width } else { start.x };
+        let y = if self.from_top { start.y + start.height - height } else { start.y };
+        gevrek_engine::Rect::new(x, y, width, height)
+    }
+}
+
+/// What, held alone, lets the mouse move (left button) and resize (right
+/// button) windows: gevrek's Win key, Option on a Mac, or what
+/// `GEVREK_MACOS_DRAG_MODIFIER` names (`option`, `control`, `shift`,
+/// `command`, several with commas; `none`: the mouse drags no window). Some
+/// programs use Option with the mouse themselves (Finder copies what is
+/// dragged with it).
+fn drag_modifier() -> Option<crate::keys::Held> {
+    let named = std::env::var("GEVREK_MACOS_DRAG_MODIFIER").unwrap_or_else(|_| "option".to_string());
+    let mut held = crate::keys::Held::default();
+    for name in named.split(',') {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "option" | "alt" => held.option = true,
+            "control" | "ctrl" => held.control = true,
+            "shift" => held.shift = true,
+            "command" | "cmd" => held.command = true,
+            "none" | "" => {}
+            other => log::warn!("GEVREK_MACOS_DRAG_MODIFIER: no modifier '{other}'"),
+        }
+    }
+    (held != crate::keys::Held::default()).then_some(held)
+}
+
 /// The programs gevrek may manage, where `GEVREK_MACOS_ONLY` names them
 /// (bundle ids, separated by commas: `com.apple.calculator,com.apple.dictionary`):
 /// to try gevrek on a few programs without it taking over the desktop.
@@ -690,4 +811,45 @@ pub fn run(
     runtime.start()?;
     ready();
     runtime.run()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn drag(resize: bool, from_left: bool, from_top: bool) -> Drag {
+        Drag {
+            id: WindowHandle(1),
+            resize,
+            from_left,
+            from_top,
+            start_pointer: (500, 400),
+            start_rect: gevrek_engine::Rect::new(100, 100, 600, 500),
+        }
+    }
+
+    #[test]
+    fn a_dragged_window_moves_with_the_pointer() {
+        assert_eq!(
+            drag(false, false, false).rect_at((530, 380)),
+            gevrek_engine::Rect::new(130, 80, 600, 500)
+        );
+    }
+
+    #[test]
+    fn a_resize_moves_the_edges_nearest_to_where_it_began() {
+        // From the bottom-right: the top-left corner stays.
+        assert_eq!(
+            drag(true, false, false).rect_at((550, 420)),
+            gevrek_engine::Rect::new(100, 100, 650, 520)
+        );
+        // From the top-left: the bottom-right corner stays.
+        assert_eq!(
+            drag(true, true, true).rect_at((450, 380)),
+            gevrek_engine::Rect::new(50, 80, 650, 520)
+        );
+        // Never smaller than the least size.
+        let tiny = drag(true, false, false).rect_at((-2000, -2000));
+        assert_eq!((tiny.width, tiny.height), (crate::keys::MIN_DRAG_SIZE, crate::keys::MIN_DRAG_SIZE));
+    }
 }

@@ -1,5 +1,10 @@
-//! The keys gevrek's bindings are on, taken from the keyboard before any
-//! program sees them (an event tap of the window server).
+//! The keys and mouse buttons gevrek's bindings are on, taken before any
+//! program sees them (an event tap of the window server): keys, the mouse's
+//! buttons (`LEFT`, `RIGHT`, `MIDDLE`, `X1`, `X2`) and the steps of its
+//! wheel (`WHEEL_UP`, `WHEEL_DOWN`; the touchpad's scrolling is left to the
+//! programs), long presses, a held button's repeat; and windows moved (the
+//! left button) and resized (the right) with the drag modifier held, on a
+//! window gevrek manages.
 //!
 //! A key that hits a binding is told to the host (`bindings_triggered`);
 //! one whose binding says so (`consume`) goes no further, with its release
@@ -32,6 +37,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::ffi::c_void;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 /// The modifier keys held, as a Mac has them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -172,10 +178,21 @@ pub fn matching(
     held: Held,
     trigger: BindingTrigger,
 ) -> (Vec<i32>, bool) {
+    matching_on(bindings, BindingDevice::Keyboard, key, held, trigger)
+}
+
+/// As `matching`, for a key or a mouse button (or wheel step).
+pub fn matching_on(
+    bindings: &[(i32, Hotkey)],
+    device: BindingDevice,
+    key: &str,
+    held: Held,
+    trigger: BindingTrigger,
+) -> (Vec<i32>, bool) {
     let mut ids = Vec::new();
     let mut consume = false;
     for (id, hotkey) in bindings {
-        let hit = hotkey.device == BindingDevice::Keyboard
+        let hit = hotkey.device == device
             && gevrek_model::keys::canonical_key_name(&hotkey.key) == key
             && Held::of_binding(hotkey) == held;
         if !hit {
@@ -189,6 +206,62 @@ pub fn matching(
     (ids, consume)
 }
 
+/// The name bindings give a mouse button (as on the other systems), by the
+/// window server's number of it.
+pub fn mouse_button_name(number: u32) -> Option<&'static str> {
+    Some(match number {
+        0 => "LEFT",
+        1 => "RIGHT",
+        2 => "MIDDLE",
+        3 => "X1",
+        4 => "X2",
+        _ => return None,
+    })
+}
+
+/// A held key or button starts repeating its binding after this long, then
+/// at this rate (as on Linux). Keys repeat as macOS repeats them; this is
+/// for the mouse's buttons, which macOS does not repeat.
+const REPEAT_DELAY: Duration = Duration::from_millis(400);
+const REPEAT_INTERVAL: Duration = Duration::from_millis(40);
+
+/// A window is not dragged smaller than this.
+pub const MIN_DRAG_SIZE: i32 = 80;
+
+/// What a drag of a window with the mouse did, for the runtime to carry
+/// out (the tap only notes it: it must answer at once).
+#[derive(Debug, Clone, PartialEq)]
+pub enum DragEvent {
+    /// The button went down on a window gevrek manages, with the drag
+    /// modifier held: the left button moves it, the right resizes it.
+    Start {
+        window: u32,
+        resize: bool,
+        at: (i32, i32),
+    },
+    /// The pointer is here now.
+    To((i32, i32)),
+    End,
+}
+
+/// A key or button that is down and that a long press (or, for a button, a
+/// repeat) binding waits on.
+#[derive(Debug, Clone)]
+struct Down {
+    /// The key code, or `BUTTON + number` for a mouse button.
+    code: u32,
+    device: BindingDevice,
+    name: String,
+    held: Held,
+    since: Instant,
+    last_repeat: Option<Instant>,
+    /// Long-press bindings (by id) that ran already.
+    long_fired: Vec<i32>,
+}
+
+/// Mouse buttons are kept apart from key codes by this.
+const BUTTON: u32 = 0x1000;
+
 /// What the tap shares with the runtime (both on the main thread).
 #[derive(Default)]
 pub struct Shared {
@@ -198,9 +271,139 @@ pub struct Shared {
     pub paused: bool,
     /// The keys that hit bindings since the runtime last looked.
     pub hits: Vec<HotkeyEvent>,
+    /// The windows gevrek manages and shows now, by window server id: a
+    /// drag starts only on one of them.
+    pub managed: HashSet<u32>,
+    /// What, held alone, makes the left button move a window and the
+    /// right one resize it; `None`: the mouse does not drag windows.
+    pub drag_modifier: Option<Held>,
+    /// What the drags did since the runtime last looked.
+    pub drags: Vec<DragEvent>,
     /// Keys held whose press was kept from the programs: their repeats
     /// and their release are kept too.
     swallowed: HashSet<u16>,
+    /// The same of mouse buttons.
+    swallowed_buttons: HashSet<u32>,
+    /// The button that holds a drag.
+    dragging: Option<u32>,
+    held: Vec<Down>,
+}
+
+impl Shared {
+    /// What is held down that a long press or a button's repeat binding
+    /// waits on, run when it is due. Called every pass; `now` is given so
+    /// that tests can move time.
+    pub fn tick(&mut self, now: Instant) {
+        if self.paused {
+            return;
+        }
+        for index in 0..self.held.len() {
+            let down = self.held[index].clone();
+            let down_for = now.saturating_duration_since(down.since);
+            let hits = |hotkey: &Hotkey| {
+                hotkey.device == down.device
+                    && gevrek_model::keys::canonical_key_name(&hotkey.key) == down.name
+                    && Held::of_binding(hotkey) == down.held
+            };
+            let long: Vec<i32> = self
+                .bindings
+                .iter()
+                .filter(|(id, hotkey)| {
+                    hits(hotkey)
+                        && hotkey.trigger == BindingTrigger::LongPress
+                        && down_for.as_millis() >= u128::from(hotkey.long_press_ms)
+                        && !down.long_fired.contains(id)
+                })
+                .map(|(id, _)| *id)
+                .collect();
+            if !long.is_empty() {
+                self.held[index].long_fired.extend(long.iter().copied());
+                let event = hotkey_event(long, &down, BindingTrigger::LongPress, down_for);
+                self.hits.push(event);
+            }
+            if down.device == BindingDevice::Mouse {
+                let next = match down.last_repeat {
+                    None => down.since + REPEAT_DELAY,
+                    Some(last) => last + REPEAT_INTERVAL,
+                };
+                if now >= next {
+                    let repeat: Vec<i32> = self
+                        .bindings
+                        .iter()
+                        .filter(|(_, hotkey)| hits(hotkey) && hotkey.trigger == BindingTrigger::Repeat)
+                        .map(|(id, _)| *id)
+                        .collect();
+                    if !repeat.is_empty() {
+                        self.held[index].last_repeat = Some(now);
+                        let event = hotkey_event(repeat, &down, BindingTrigger::Repeat, down_for);
+                        self.hits.push(event);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Remember a key or button that went down, where a long press (or a
+    /// button's repeat) binding waits on it.
+    fn hold(&mut self, code: u32, device: BindingDevice, name: &str, held: Held) {
+        let waits = self.bindings.iter().any(|(_, hotkey)| {
+            hotkey.device == device
+                && gevrek_model::keys::canonical_key_name(&hotkey.key) == name
+                && Held::of_binding(hotkey) == held
+                && (hotkey.trigger == BindingTrigger::LongPress
+                    || (device == BindingDevice::Mouse && hotkey.trigger == BindingTrigger::Repeat))
+        });
+        if waits && !self.held.iter().any(|down| down.code == code) {
+            self.held.push(Down {
+                code,
+                device,
+                name: name.to_string(),
+                held,
+                since: Instant::now(),
+                last_repeat: None,
+                long_fired: Vec::new(),
+            });
+        }
+    }
+
+    fn release(&mut self, code: u32) {
+        self.held.retain(|down| down.code != code);
+    }
+
+    /// Tell the runtime of bindings a key or button hit.
+    fn hit(&mut self, ids: Vec<i32>, device: BindingDevice, key: &str, held: Held, trigger: BindingTrigger) {
+        if ids.is_empty() {
+            return;
+        }
+        let down = Down {
+            code: 0,
+            device,
+            name: key.to_string(),
+            held,
+            since: Instant::now(),
+            last_repeat: None,
+            long_fired: Vec::new(),
+        };
+        self.hits.push(hotkey_event(ids, &down, trigger, Duration::ZERO));
+    }
+}
+
+/// A binding's event, its modifiers as the binding has them (Alt is
+/// Control, Option and Command held together).
+fn hotkey_event(ids: Vec<i32>, down: &Down, trigger: BindingTrigger, held_for: Duration) -> HotkeyEvent {
+    let held = down.held;
+    let alt = held.command && held.control && held.option;
+    HotkeyEvent {
+        registration_ids: ids,
+        key: down.name.clone(),
+        ctrl: held.control && !alt,
+        alt,
+        shift: held.shift,
+        win: held.option && !alt,
+        device: down.device,
+        trigger,
+        held_ms: held_for.as_millis() as u32,
+    }
 }
 
 /// The event tap, while it is installed.
@@ -212,8 +415,20 @@ pub struct KeyTap {
     _shared: Rc<RefCell<Shared>>,
 }
 
+const LEFT_DOWN: u32 = 1;
+const LEFT_UP: u32 = 2;
+const RIGHT_DOWN: u32 = 3;
+const RIGHT_UP: u32 = 4;
+const LEFT_DRAGGED: u32 = 6;
+const RIGHT_DRAGGED: u32 = 7;
 const KEY_DOWN: u32 = 10;
 const KEY_UP: u32 = 11;
+const SCROLL_WHEEL: u32 = 22;
+const OTHER_DOWN: u32 = 25;
+const OTHER_UP: u32 = 26;
+const BUTTON_NUMBER_FIELD: u32 = 3;
+const SCROLL_DELTA_FIELD: u32 = 11;
+const SCROLL_CONTINUOUS_FIELD: u32 = 88;
 const TAP_DISABLED_BY_TIMEOUT: u32 = 0xFFFF_FFFE;
 const TAP_DISABLED_BY_USER_INPUT: u32 = 0xFFFF_FFFF;
 const KEYCODE_FIELD: u32 = 9;
@@ -225,7 +440,21 @@ impl KeyTap {
     /// Monitoring).
     pub fn install(shared: Rc<RefCell<Shared>>) -> anyhow::Result<Self> {
         let user_info = Rc::as_ptr(&shared) as *mut c_void;
-        let mask = (1u64 << KEY_DOWN) | (1u64 << KEY_UP);
+        let mask = [
+            KEY_DOWN,
+            KEY_UP,
+            LEFT_DOWN,
+            LEFT_UP,
+            RIGHT_DOWN,
+            RIGHT_UP,
+            LEFT_DRAGGED,
+            RIGHT_DRAGGED,
+            SCROLL_WHEEL,
+            OTHER_DOWN,
+            OTHER_UP,
+        ]
+        .iter()
+        .fold(0u64, |mask, kind| mask | (1u64 << kind));
         // SAFETY: a session tap at the head, that may change events, with a
         // callback and a pointer to the boxed state it is kept with.
         let port = unsafe {
@@ -287,61 +516,168 @@ extern "C" fn tap_callback(
         log::warn!("the keyboard tap was switched off by the system");
         return event;
     }
-    if kind != KEY_DOWN && kind != KEY_UP {
-        return event;
-    }
-    // SAFETY: a valid key event, read only.
-    let (code, flags, repeat) = unsafe {
-        (
-            ffi::CGEventGetIntegerValueField(event, KEYCODE_FIELD) as u16,
-            ffi::CGEventGetFlags(event),
-            ffi::CGEventGetIntegerValueField(event, AUTOREPEAT_FIELD) != 0,
-        )
-    };
     let Ok(mut shared) = shared.try_borrow_mut() else {
         return event;
     };
-    let trigger = match (kind, repeat) {
-        (KEY_UP, _) => BindingTrigger::Release,
+    // SAFETY: a valid event, read only.
+    let flags = unsafe { ffi::CGEventGetFlags(event) };
+    let held = Held::of_flags(flags);
+    let keep = match kind {
+        KEY_DOWN | KEY_UP => key_event(&mut shared, event, kind == KEY_UP, held),
+        LEFT_DOWN | RIGHT_DOWN | OTHER_DOWN | LEFT_UP | RIGHT_UP | OTHER_UP => {
+            let number = match kind {
+                LEFT_DOWN | LEFT_UP => 0,
+                RIGHT_DOWN | RIGHT_UP => 1,
+                // SAFETY: a valid mouse event, read only.
+                _ => unsafe { ffi::CGEventGetIntegerValueField(event, BUTTON_NUMBER_FIELD) as u32 },
+            };
+            let up = matches!(kind, LEFT_UP | RIGHT_UP | OTHER_UP);
+            button_event(&mut shared, event, number, up, held)
+        }
+        LEFT_DRAGGED | RIGHT_DRAGGED => {
+            if shared.dragging.is_some() {
+                let at = location(event);
+                shared.drags.push(DragEvent::To(at));
+                true
+            } else {
+                false
+            }
+        }
+        SCROLL_WHEEL => wheel_event(&mut shared, event, held),
+        _ => false,
+    };
+    if keep {
+        std::ptr::null()
+    } else {
+        event
+    }
+}
+
+/// Where the event happened, in points from the top-left of the main
+/// display.
+fn location(event: ffi::CFTypeRef) -> (i32, i32) {
+    // SAFETY: a valid event, read only.
+    let at = unsafe { ffi::CGEventGetLocation(event) };
+    (at.x.round() as i32, at.y.round() as i32)
+}
+
+/// A key: its bindings. Returns whether it is kept from the programs.
+fn key_event(shared: &mut Shared, event: ffi::CFTypeRef, up: bool, held: Held) -> bool {
+    // SAFETY: a valid key event, read only.
+    let (code, repeat) = unsafe {
+        (
+            ffi::CGEventGetIntegerValueField(event, KEYCODE_FIELD) as u16,
+            ffi::CGEventGetIntegerValueField(event, AUTOREPEAT_FIELD) != 0,
+        )
+    };
+    let trigger = match (up, repeat) {
+        (true, _) => BindingTrigger::Release,
         (_, true) => BindingTrigger::Repeat,
         _ => BindingTrigger::Press,
     };
     // A key whose press was kept: its repeats and release are kept too.
     let was_swallowed = shared.swallowed.contains(&code);
-    if kind == KEY_UP {
+    if up {
         shared.swallowed.remove(&code);
+        shared.release(u32::from(code));
     }
     let Some(key) = key_name(code) else {
-        return if was_swallowed { std::ptr::null() } else { event };
+        return was_swallowed;
     };
     if shared.paused {
-        return if was_swallowed { std::ptr::null() } else { event };
+        return was_swallowed;
     }
-    let held = Held::of_flags(flags);
     let (ids, consume) = matching(&shared.bindings, &key, held, trigger);
-    if !ids.is_empty() {
-        // (As the binding has them: Alt is the three held together.)
-        let alt = held.command && held.control && held.option;
-        shared.hits.push(HotkeyEvent {
-            registration_ids: ids,
-            key,
-            ctrl: held.control && !alt,
-            alt,
-            shift: held.shift,
-            win: held.option && !alt,
-            device: BindingDevice::Keyboard,
-            trigger,
-            held_ms: 0,
-        });
+    shared.hit(ids, BindingDevice::Keyboard, &key, held, trigger);
+    if trigger == BindingTrigger::Press {
+        shared.hold(u32::from(code), BindingDevice::Keyboard, &key, held);
+        if consume {
+            shared.swallowed.insert(code);
+        }
     }
-    if consume && trigger == BindingTrigger::Press {
-        shared.swallowed.insert(code);
+    consume || was_swallowed
+}
+
+/// A mouse button: a drag of a window, or its bindings. Returns whether it
+/// is kept from the programs.
+fn button_event(shared: &mut Shared, event: ffi::CFTypeRef, number: u32, up: bool, held: Held) -> bool {
+    if up {
+        shared.release(BUTTON + number);
+        if shared.dragging == Some(number) {
+            shared.dragging = None;
+            shared.drags.push(DragEvent::End);
+            return true;
+        }
+    } else if !shared.paused
+        && shared.dragging.is_none()
+        && number <= 1
+        && shared.drag_modifier == Some(held)
+    {
+        let at = location(event);
+        if let Some(window) = managed_window_at(&shared.managed, at) {
+            shared.dragging = Some(number);
+            shared.drags.push(DragEvent::Start {
+                window,
+                resize: number == 1,
+                at,
+            });
+            return true;
+        }
     }
-    if consume || was_swallowed {
-        std::ptr::null()
-    } else {
-        event
+    let was_swallowed = up && shared.swallowed_buttons.remove(&number);
+    let Some(name) = mouse_button_name(number) else {
+        return was_swallowed;
+    };
+    if shared.paused {
+        return was_swallowed;
     }
+    let trigger = if up { BindingTrigger::Release } else { BindingTrigger::Press };
+    let (ids, consume) = matching_on(&shared.bindings, BindingDevice::Mouse, name, held, trigger);
+    shared.hit(ids, BindingDevice::Mouse, name, held, trigger);
+    if !up {
+        shared.hold(BUTTON + number, BindingDevice::Mouse, name, held);
+        if consume {
+            shared.swallowed_buttons.insert(number);
+        }
+    }
+    consume || was_swallowed
+}
+
+/// A step of a mouse's wheel: its bindings (`WHEEL_UP`, `WHEEL_DOWN`).
+/// The touchpad's scrolling, which is continuous, is left to the programs:
+/// a swipe would be many steps.
+fn wheel_event(shared: &mut Shared, event: ffi::CFTypeRef, held: Held) -> bool {
+    // SAFETY: a valid scroll event, read only.
+    let (delta, continuous) = unsafe {
+        (
+            ffi::CGEventGetIntegerValueField(event, SCROLL_DELTA_FIELD),
+            ffi::CGEventGetIntegerValueField(event, SCROLL_CONTINUOUS_FIELD) != 0,
+        )
+    };
+    if continuous || delta == 0 || shared.paused {
+        return false;
+    }
+    let name = if delta > 0 { "WHEEL_UP" } else { "WHEEL_DOWN" };
+    let (ids, consume) =
+        matching_on(&shared.bindings, BindingDevice::Mouse, name, held, BindingTrigger::Press);
+    shared.hit(ids, BindingDevice::Mouse, name, held, BindingTrigger::Press);
+    consume
+}
+
+/// The window gevrek manages that is in front at a place on the screen:
+/// `None` where the window in front there is another (one of a program
+/// gevrek leaves alone, a panel) or there is none.
+fn managed_window_at(managed: &HashSet<u32>, (x, y): (i32, i32)) -> Option<u32> {
+    let own = std::process::id() as i32;
+    crate::window_list::server_windows(true)
+        .into_iter()
+        .filter(|window| window.layer == crate::window_list::NORMAL_LAYER && window.pid != own)
+        .find(|window| {
+            let b = window.bounds;
+            x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height
+        })
+        .map(|window| window.id)
+        .filter(|id| managed.contains(id))
 }
 
 impl KeyTap {
@@ -485,6 +821,89 @@ mod tests {
             }
         }
         assert!(clashes.is_empty(), "on the same keys on a Mac: {clashes:#?}");
+    }
+
+    fn mouse(key: &str, trigger: BindingTrigger, long_press_ms: u32) -> Hotkey {
+        Hotkey {
+            device: BindingDevice::Mouse,
+            trigger,
+            long_press_ms,
+            ..Hotkey::new(key.to_string(), false, false, false, true)
+        }
+    }
+
+    #[test]
+    fn a_mouse_binding_is_not_a_keys_and_the_other_way_round() {
+        let bindings = vec![
+            (1, mouse("WHEEL_UP", BindingTrigger::Press, 0)),
+            (2, hotkey("LEFT", true, false, false, false)),
+        ];
+        assert_eq!(
+            matching_on(&bindings, BindingDevice::Mouse, "WHEEL_UP", OPTION, BindingTrigger::Press),
+            (vec![1], true)
+        );
+        // `LEFT` is an arrow key on the keyboard and a button of the mouse.
+        assert_eq!(
+            matching_on(&bindings, BindingDevice::Mouse, "LEFT", OPTION, BindingTrigger::Press),
+            (vec![], false)
+        );
+        assert_eq!(matching(&bindings, "LEFT", OPTION, BindingTrigger::Press), (vec![2], false));
+        assert_eq!(mouse_button_name(0), Some("LEFT"));
+        assert_eq!(mouse_button_name(2), Some("MIDDLE"));
+        assert_eq!(mouse_button_name(9), None);
+    }
+
+    #[test]
+    fn a_long_press_runs_once_when_it_is_long_enough() {
+        let mut shared = Shared {
+            bindings: vec![(7, {
+                let mut hotkey = hotkey("J", true, false, false, false);
+                hotkey.trigger = BindingTrigger::LongPress;
+                hotkey.long_press_ms = 500;
+                hotkey
+            })],
+            ..Shared::default()
+        };
+        shared.hold(0x26, BindingDevice::Keyboard, "J", OPTION);
+        let since = shared.held[0].since;
+        shared.tick(since + Duration::from_millis(300));
+        assert!(shared.hits.is_empty());
+        shared.tick(since + Duration::from_millis(520));
+        shared.tick(since + Duration::from_millis(900));
+        assert_eq!(shared.hits.len(), 1, "once");
+        assert_eq!(shared.hits[0].registration_ids, vec![7]);
+        assert_eq!(shared.hits[0].trigger, BindingTrigger::LongPress);
+        assert!(shared.hits[0].win && !shared.hits[0].alt);
+        // Released, it is not timed any more.
+        shared.release(0x26);
+        assert!(shared.held.is_empty());
+    }
+
+    #[test]
+    fn a_held_button_repeats_after_a_while_then_steadily() {
+        let mut shared = Shared {
+            bindings: vec![(3, mouse("X1", BindingTrigger::Repeat, 0))],
+            ..Shared::default()
+        };
+        shared.hold(BUTTON + 3, BindingDevice::Mouse, "X1", OPTION);
+        let since = shared.held[0].since;
+        shared.tick(since + Duration::from_millis(300));
+        assert!(shared.hits.is_empty(), "not before the delay");
+        shared.tick(since + Duration::from_millis(410));
+        shared.tick(since + Duration::from_millis(430));
+        shared.tick(since + Duration::from_millis(455));
+        assert_eq!(shared.hits.len(), 2, "at the delay, then 40 ms after");
+        // A key repeats as macOS repeats it: it is not timed here.
+        let mut keys = Shared {
+            bindings: vec![(4, {
+                let mut hotkey = hotkey("K", true, false, false, false);
+                hotkey.trigger = BindingTrigger::Repeat;
+                hotkey
+            })],
+            ..Shared::default()
+        };
+        keys.hold(0x28, BindingDevice::Keyboard, "K", OPTION);
+        assert!(keys.held.is_empty());
     }
 
     #[test]

@@ -21,7 +21,9 @@ newer build signed the same way keeps it.
 
 The keys of the bindings: gevrek's Win key is Option, its Alt is
 Control+Option+Command, Ctrl is Control. Nothing is on Command alone, so
-copy, paste and quit stay every program's.
+copy, paste and quit stay every program's. With Option held, the left
+button moves the window under the pointer and the right button resizes it
+(GEVREK_MACOS_DRAG_MODIFIER names another modifier, or `none`).
 
 To try gevrek on a few programs only, without it taking over the
 desktop, name their bundle ids:

@@ -134,6 +134,34 @@ impl MacDesktop {
         }
     }
 
+    /// Put a window where the mouse drags it: moved (its place only, which
+    /// is quick), or resized. Its border follows; what it reports of its
+    /// place in answer is gevrek's own. Returns where it stands.
+    pub fn drag_to(&mut self, id: WindowHandle, rect: Rect, resize: bool) -> Option<Rect> {
+        let window = self.windows.get_mut(&id)?;
+        self.placed_at.insert(id, Instant::now());
+        let landed = if resize {
+            window.element.set_frame(rect).ok()?
+        } else {
+            window.element.set_position(rect.x, rect.y).ok()?;
+            Rect::new(rect.x, rect.y, window.rect.width, window.rect.height)
+        };
+        window.rect = landed;
+        if let Some(borders) = &mut self.borders {
+            borders.follow(id, landed);
+        }
+        Some(landed)
+    }
+
+    /// The windows gevrek manages and shows now, by window server id.
+    pub fn shown_window_ids(&self) -> std::collections::HashSet<u32> {
+        self.windows
+            .iter()
+            .filter(|(_, window)| !window.parked && !window.minimized && !window.app_hidden)
+            .map(|(id, _)| window_id_of(*id))
+            .collect()
+    }
+
     /// The window came to the front: what gevrek draws around and over it
     /// is put above it again. (A program raises its window a moment after
     /// it is asked, after gevrek ordered its border: this is called when

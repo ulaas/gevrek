@@ -15,8 +15,9 @@
 //! - [`apps`]: the programs that run, and their bundle ids (what rules
 //!   match as a window's application).
 //! - [`displays`]: the displays, their work areas and scale.
-//! - [`keys`]: the bindings' keys, from an event tap (Win is Option there;
-//!   see the module).
+//! - [`keys`]: the bindings' keys and mouse buttons, from an event tap
+//!   (Win is Option there; see the module), and windows dragged with the
+//!   mouse.
 //! - [`park`] and [`journal`]: where a window of a hidden workspace waits,
 //!   and the record that brings it back after a crash. macOS has no way to
 //!   hide another program's window, and keeps a sliver of one on screen.
@@ -31,7 +32,7 @@
 //!   gevrek's own that are clicked.
 //!
 //! Not yet: animations (a program redraws for every size it is given: too slow),
-//! touchpad gestures, mouse bindings, long presses.
+//! touchpad gestures.
 //!
 //! Coordinates are points, the logical pixels the engine works in, with
 //! the origin at the top-left of the main display.

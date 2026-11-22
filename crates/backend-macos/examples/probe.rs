@@ -66,6 +66,19 @@ mod mac {
                     println!("{:>7} {:<20} {:?}", window.id, window.owner, window.bounds);
                 }
             }
+            Some("scroll") => post_scroll(
+                args.get(1).map(String::as_str) == Some("up"),
+                args.get(2).map(String::as_str).unwrap_or(""),
+            ),
+            Some("drag") => match (number(1), number(2), number(3), number(4)) {
+                (Some(x1), Some(y1), Some(x2), Some(y2)) => post_drag(
+                    (x1, y1),
+                    (x2, y2),
+                    args.get(5).map(String::as_str).unwrap_or(""),
+                    args.get(6).map(String::as_str) == Some("right"),
+                ),
+                _ => eprintln!("drag x1 y1 x2 y2 [modifiers] [right]"),
+            },
             Some("click") => match (number(1), number(2)) {
                 (Some(x), Some(y)) => post_click(x, y),
                 _ => eprintln!("click x y"),
@@ -92,6 +105,14 @@ mod mac {
         ) -> *const std::ffi::c_void;
         fn CGEventSetFlags(event: *const std::ffi::c_void, flags: u64);
         fn CGEventPost(tap: u32, event: *const std::ffi::c_void);
+        fn CGEventCreateScrollWheelEvent2(
+            source: *const std::ffi::c_void,
+            units: u32,
+            wheel_count: u32,
+            wheel1: i32,
+            wheel2: i32,
+            wheel3: i32,
+        ) -> *const std::ffi::c_void;
         fn CGEventCreateMouseEvent(
             source: *const std::ffi::c_void,
             kind: u32,
@@ -109,6 +130,64 @@ mod mac {
     struct Point {
         x: f64,
         y: f64,
+    }
+
+    fn flags_of(held: &str) -> u64 {
+        held.split(',')
+            .map(|name| match name.trim() {
+                "shift" => 0x0002_0000,
+                "control" => 0x0004_0000,
+                "option" => 0x0008_0000,
+                "command" => 0x0010_0000,
+                _ => 0,
+            })
+            .fold(0, |flags, flag| flags | flag)
+    }
+
+    /// One notch of a mouse's wheel (in lines, so not continuous).
+    fn post_scroll(up: bool, held: &str) {
+        // SAFETY: an event made, given its flags, posted and released.
+        unsafe {
+            let event = CGEventCreateScrollWheelEvent2(std::ptr::null(), 1, 1, if up { 1 } else { -1 }, 0, 0);
+            CGEventSetFlags(event, flags_of(held));
+            CGEventPost(0, event);
+            CFRelease(event);
+        }
+        println!("scrolled {} with {held:?}", if up { "up" } else { "down" });
+    }
+
+    /// Press a button at one place, move to another in steps, release.
+    fn post_drag(from: (i32, i32), to: (i32, i32), held: &str, right: bool) {
+        let (down, dragged, up, button) = if right { (3u32, 7u32, 4u32, 1u32) } else { (1, 6, 2, 0) };
+        let flags = flags_of(held);
+        let post = |kind: u32, (x, y): (i32, i32)| {
+            // SAFETY: an event made, given its flags, posted and released.
+            unsafe {
+                let event = CGEventCreateMouseEvent(
+                    std::ptr::null(),
+                    kind,
+                    Point { x: f64::from(x), y: f64::from(y) },
+                    button,
+                );
+                CGEventSetFlags(event, flags);
+                CGEventPost(0, event);
+                CFRelease(event);
+            }
+        };
+        post(down, from);
+        std::thread::sleep(Duration::from_millis(60));
+        let steps = 20;
+        for step in 1..=steps {
+            let at = (
+                from.0 + (to.0 - from.0) * step / steps,
+                from.1 + (to.1 - from.1) * step / steps,
+            );
+            post(dragged, at);
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+        post(up, to);
+        println!("dragged from {from:?} to {to:?} with {held:?}{}", if right { " (right)" } else { "" });
     }
 
     /// Click the left button at a place on the screen (points from the
