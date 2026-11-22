@@ -322,6 +322,33 @@ pub fn desktop_no_longer_kept() {
         .unwrap_or_else(|error| error.into_inner()) = None;
 }
 
+/// Whether a top-level window is where the desktop begins, going down
+/// the order the windows lie in: Explorer's desktop, or a surface of the
+/// shell kept below the windows (the one the zones are drawn on). No
+/// program's window belongs below it.
+fn is_desktop_band(hwnd: HWND) -> bool {
+    // SAFETY: plain queries of a window; the buffer outlives the call.
+    unsafe {
+        let mut class = [0u16; 256];
+        let length = GetClassNameW(hwnd, &mut class);
+        if length <= 0 {
+            return false;
+        }
+        let class = String::from_utf16_lossy(&class[..length as usize]);
+        desktop_band_class(&class)
+            && GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST.0 as i32 == 0
+            && IsWindowVisible(hwnd).as_bool()
+    }
+}
+
+/// The classes of the windows the desktop is made of: Explorer's, and the
+/// shell's surfaces (`Gevrek_Shell_<name>`, `gevrek_shellkit::place`; of
+/// those, only the ones kept below the windows are not topmost). Not the
+/// shell's menus, hints or backdrops, whose classes begin otherwise.
+fn desktop_band_class(class: &str) -> bool {
+    matches!(class, "Progman" | "WorkerW") || class.starts_with("Gevrek_Shell_")
+}
+
 pub trait HwndExt {
     fn to_hwnd(self) -> HWND;
     fn from_hwnd(hwnd: HWND) -> Self;
@@ -2860,6 +2887,12 @@ impl WindowManager {
     /// keyboard: Windows lets no other program put a window above that
     /// one, but it lets that one be put below another.) Its border goes
     /// with it. Nothing happens when none of `above` is on the screen.
+    ///
+    /// Never below the desktop: a minimized window is still "visible" to
+    /// Windows and lies at the very bottom, under the surface the zones
+    /// are drawn on and under Explorer's own desktop. A window put below
+    /// that one would be covered by the desktop. So minimized windows are
+    /// not counted, and the search ends where the desktop begins.
     pub fn put_below(&mut self, handle: WindowHandle, above: &[WindowHandle]) -> Result<()> {
         // SAFETY: plain queries of the windows' order, and one change of it.
         unsafe {
@@ -2872,8 +2905,12 @@ impl WindowManager {
             let mut next = GetTopWindow(None).unwrap_or_default();
             let mut looked_at = 0;
             while !next.is_invalid() && looked_at < 4096 {
+                if is_desktop_band(next) {
+                    break;
+                }
                 if above.iter().any(|window| window.to_hwnd() == next)
                     && IsWindowVisible(next).as_bool()
+                    && !IsIconic(next).as_bool()
                 {
                     lowest = Some(next);
                 }
@@ -9258,6 +9295,35 @@ mod unresponsive_window_tests {
                 elapsed < Duration::from_millis(500),
                 "{name} blocked for {elapsed:?} on a frozen window"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod desktop_band_tests {
+    use super::desktop_band_class;
+
+    /// A tiled window put below the floating ones is never put below
+    /// these: below them the desktop covers it.
+    #[test]
+    fn the_desktop_begins_at_explorer_or_at_a_surface_of_the_shell() {
+        for class in [
+            "Progman",
+            "WorkerW",
+            "Gevrek_Shell_gevrek-zones",
+            "Gevrek_Shell_gevrek-zones.dev",
+        ] {
+            assert!(desktop_band_class(class), "{class}");
+        }
+        for class in [
+            "Chrome_WidgetWin_1",
+            "Gevrek_ShellPopup_gevrek-zones",
+            "Gevrek_ShellHint_gevrek-zones",
+            "Gevrek_ShellBackdrop_gevrek-zones",
+            "Gevrek_Border",
+            "Shell_TrayWnd",
+        ] {
+            assert!(!desktop_band_class(class), "{class}");
         }
     }
 }

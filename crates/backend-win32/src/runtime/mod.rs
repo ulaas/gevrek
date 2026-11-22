@@ -807,7 +807,10 @@ impl Runtime {
             // keyboard to by itself in that moment (it does when the window
             // that had it is hidden, and picks one on any display) does
             // not get it, and the display keeps the keyboard. A window the
-            // person presses on does.
+            // person presses on does, and so does a window that is opening
+            // (one launched on the empty workspace just shown): Windows
+            // gives it the keyboard because it is new, not by a choice of
+            // its own.
             if crate::dwm::window_manager::desktop_kept_just_now()
                 && crate::windows_key::pressed_just_now().is_none()
             {
@@ -815,9 +818,18 @@ impl Runtime {
                 // SAFETY: a plain query.
                 let desktop = unsafe { windows::Win32::UI::WindowsAndMessaging::GetShellWindow() };
                 let before = events.len();
+                let opening: Vec<crate::dwm::WindowHandle> = events
+                    .iter()
+                    .filter_map(|event| match event {
+                        crate::dwm::WindowEvent::Focused(window) if self.is_opening(*window) => {
+                            Some(*window)
+                        }
+                        _ => None,
+                    })
+                    .collect();
                 events.retain(|event| {
                     !matches!(event, crate::dwm::WindowEvent::Focused(window)
-                        if window.to_hwnd() != desktop)
+                        if window.to_hwnd() != desktop && !opening.contains(window))
                 });
                 if events.len() != before {
                     log::debug!("A window Windows gave the keyboard to by itself does not keep it");
@@ -2153,6 +2165,17 @@ impl Runtime {
         visible.then_some(output)
     }
 
+    /// A window that is opening: one gevrek manages but has not taken in
+    /// yet (its opening is not told, or not handled, so far). Windows
+    /// gives a new window the keyboard by itself; it is not one of the
+    /// windows Windows picks when the window with the keyboard goes.
+    fn is_opening(&self, window: crate::dwm::WindowHandle) -> bool {
+        !self.core.executor.window_state.get(window).known
+            && self.core.monitor_manager.find_window(window).is_none()
+            && self.window_manager.window_exists(window)
+            && !self.window_manager.should_ignore_window(window)
+    }
+
     /// The focused window of `output`'s visible workspace has closed: the
     /// window used before it there gets the focus, unless the system has
     /// already given it to a window of that workspace. Left to itself,
@@ -2178,10 +2201,15 @@ impl Runtime {
                             .is_some_and(|workspaces| workspaces.focused_idx() == index)
                 })
         };
+        // Nor when a window that is opening has it (the main window of a
+        // program whose splash screen just closed): it is on no workspace
+        // yet, but it took the keyboard as a new window does, and keeps it.
         if self
             .window_manager
             .get_active_window()
-            .is_some_and(|foreground| on_that_workspace(self, foreground))
+            .is_some_and(|foreground| {
+                on_that_workspace(self, foreground) || self.is_opening(foreground)
+            })
         {
             return;
         }
