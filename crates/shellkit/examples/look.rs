@@ -19,12 +19,12 @@
 //! It is in the middle of the display the pointer is on, below the
 //! windows: put them aside to see it, or press "Raise" on it.
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 fn main() {
-    eprintln!("the surface host is there for Linux and Windows only");
+    eprintln!("the surface host is there for Linux, Windows and macOS only");
 }
 
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 fn main() -> anyhow::Result<()> {
     use gevrek_shellkit::host::{Control, Shell, SurfaceId};
     use gevrek_shellkit::look::BlurRegion;

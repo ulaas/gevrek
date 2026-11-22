@@ -30,10 +30,17 @@
 //! buttons, as often as a menu or a surface that takes the keyboard when
 //! pressed is open.
 //!
-//! Not here yet: drag and drop, the desktop shown soft behind a surface,
-//! screen readers, input methods (composed text arrives once it is
-//! committed), the clipboard.
+//! The desktop is shown soft behind the parts of a surface it asks for
+//! (`Control::set_blur_regions`): views that show what is behind the
+//! window out of focus, under what egui draws.
+//!
+//! Drags are dropped on a surface and begin out of it as anywhere on a Mac
+//! (`drag`): Option copies, Command moves.
+//!
+//! Not here yet: screen readers, input methods (composed text arrives once
+//! it is committed), the clipboard.
 
+mod drag;
 pub mod input;
 
 use crate::dnd::{DragEvent, DragStart, DropAnswer};
@@ -43,12 +50,13 @@ use crate::{Edge, Flow, Keyboard, Level, Place, Timings};
 use anyhow::Context as _;
 use egui_wgpu::wgpu;
 use objc2::rc::Retained;
-use objc2::{define_class, msg_send, AnyThread, MainThreadMarker, MainThreadOnly};
+use objc2::{define_class, msg_send, AnyThread, MainThreadMarker, MainThreadOnly, Message};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSColor, NSEvent,
-    NSEventMask, NSEventType, NSPanel, NSResponder, NSScreen, NSTrackingArea,
-    NSTrackingAreaOptions, NSWindow, NSWindowCollectionBehavior, NSWindowSharingType,
-    NSWindowStyleMask,
+    NSApplication, NSApplicationActivationPolicy, NSAutoresizingMaskOptions, NSBackingStoreType,
+    NSColor, NSEvent, NSEventMask, NSEventType, NSPanel, NSResponder, NSScreen, NSTrackingArea,
+    NSTrackingAreaOptions, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
+    NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowCollectionBehavior,
+    NSWindowOrderingMode, NSWindowSharingType, NSWindowStyleMask,
 };
 use objc2_foundation::{NSDate, NSObject, NSPoint, NSRect, NSSize};
 use std::ffi::c_void;
@@ -103,6 +111,12 @@ pub struct Control {
     captures: Vec<(SurfaceId, bool)>,
     /// Surfaces that take the pointer, or no longer.
     reaches: Vec<(SurfaceId, bool)>,
+    /// The parts of surfaces behind which the desktop is shown soft.
+    blurs: Vec<(SurfaceId, Vec<BlurRegion>)>,
+    /// Surfaces that take drops, or no longer.
+    drops: Vec<(SurfaceId, bool)>,
+    /// Drags to begin out of surfaces.
+    drags: Vec<(SurfaceId, DragStart)>,
     windows: Vec<(SurfaceId, isize)>,
 }
 
@@ -236,23 +250,34 @@ impl Control {
         self.outside.len() != before
     }
 
-    /// Let other programs' drags be dropped on a surface. Not yet on
-    /// macOS: nothing is dropped.
-    pub fn accept_drops(&mut self, _id: SurfaceId, _standing: Option<DropAnswer>) {}
-
-    /// What a surface would do with the drag over it. (Nothing is dragged
-    /// over one on macOS yet.)
-    pub fn answer_drag(&mut self, _id: SurfaceId, _answer: DropAnswer) {}
-
-    /// What happened to drags over and out of a surface: nothing, on macOS
-    /// yet.
-    pub fn drag_events(&mut self, _id: SurfaceId) -> Vec<DragEvent> {
-        Vec::new()
+    /// Let other programs' drags be dropped on a surface, or no longer
+    /// (`None`). `standing` is what the surface takes of any drag until it
+    /// says more of the one over it ([`Control::answer_drag`]). What
+    /// happens is asked for with [`Control::drag_events`].
+    pub fn accept_drops(&mut self, id: SurfaceId, standing: Option<DropAnswer>) {
+        drag::accept(id.0, standing);
+        self.drops.push((id, standing.is_some()));
     }
 
-    /// Drag files or text out of a surface. Not yet on macOS.
-    pub fn start_drag(&mut self, from: SurfaceId, _drag: DragStart) {
-        log::debug!("surface {from:?} asked to drag something out: not yet on macOS");
+    /// What the surface would do with the drag that is over it, where it
+    /// is now: held until it says otherwise or the drag is gone.
+    pub fn answer_drag(&mut self, id: SurfaceId, answer: DropAnswer) {
+        drag::answer(id.0, answer);
+    }
+
+    /// What happened to drags over and out of a surface since it last
+    /// asked.
+    pub fn drag_events(&mut self, id: SurfaceId) -> Vec<DragEvent> {
+        drag::take_events(id.0)
+    }
+
+    /// Begin a drag of files (or text) out of a surface, while the mouse
+    /// button that will drop it is held on it. The surface is told that
+    /// the button was let go and the pointer is gone (it is the drag's
+    /// from here on), and, when the drag is over, how it ended
+    /// ([`DragEvent::Ended`]).
+    pub fn start_drag(&mut self, from: SurfaceId, drag: DragStart) {
+        self.drags.push((from, drag));
     }
 
     /// The window of a surface, as the window server numbers it.
@@ -281,11 +306,16 @@ impl Control {
         self.keyboards.push((id, keyboard));
     }
 
-    /// The desktop shown soft behind parts of a surface: not yet on macOS.
-    pub fn set_blur_regions(&mut self, _id: SurfaceId, _regions: &[BlurRegion]) {}
+    /// The desktop shown soft behind these parts of a surface (and behind
+    /// no other part of it), each time they change.
+    pub fn set_blur_regions(&mut self, id: SurfaceId, regions: &[BlurRegion]) {
+        self.blurs.push((id, regions.to_vec()));
+    }
 
+    /// Whether the desktop can be shown soft behind a surface: macOS shows
+    /// it so behind any window (a visual effect view).
     pub fn blur_available(&self) -> bool {
-        false
+        true
     }
 
     /// Leave a surface out of pictures and recordings of the screen.
@@ -453,7 +483,15 @@ fn window_level(level: Level) -> isize {
     }
 }
 
-fn make_panel(mtm: MainThreadMarker, level: Level, popped: Option<Popped>) -> Retained<NSWindow> {
+/// A panel, and the view egui is drawn into: its content is a container
+/// with the parts shown soft at the bottom (`blur`) and the drawing over
+/// them, seen through where nothing is drawn.
+fn make_panel(
+    mtm: MainThreadMarker,
+    id: SurfaceId,
+    level: Level,
+    popped: Option<Popped>,
+) -> (Retained<NSWindow>, Retained<NSView>) {
     let rect = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(10.0, 10.0));
     let style = NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel;
     // SAFETY: the panel class's own initializer, with plain arguments.
@@ -484,8 +522,18 @@ fn make_panel(mtm: MainThreadMarker, level: Level, popped: Option<Popped>) -> Re
     );
     window.setAcceptsMouseMovedEvents(true);
     window.setIgnoresMouseEvents(matches!(popped, Some(Popped::Hint { .. })));
+    let size = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(10.0, 10.0));
+    // (The container is where drags are dropped and begin.)
+    let container = drag::SurfaceView::new(mtm, size, id.0);
+    container.setWantsLayer(true);
+    window.setContentView(Some(&container));
+    let drawing = NSView::initWithFrame(mtm.alloc(), container.bounds());
+    drawing.setWantsLayer(true);
+    drawing.setAutoresizingMask(
+        NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
+    );
+    container.addSubview(&drawing);
     if let Some(view) = window.contentView() {
-        view.setWantsLayer(true);
         // Moves of the pointer over the surface, whichever program is
         // active (the shell never is).
         let options = NSTrackingAreaOptions::MouseMoved
@@ -504,7 +552,48 @@ fn make_panel(mtm: MainThreadMarker, level: Level, popped: Option<Popped>) -> Re
         };
         view.addTrackingArea(&area);
     }
-    window
+    (window, drawing)
+}
+
+/// The parts of a surface behind which the desktop is shown soft: views
+/// that show what is behind the window out of focus, under the drawing,
+/// with round corners. `height` is the surface's, in points (a view is
+/// measured from its bottom).
+fn soft_parts(
+    mtm: MainThreadMarker,
+    container: &NSView,
+    drawing: &NSView,
+    regions: &[BlurRegion],
+    height: f64,
+) -> Vec<Retained<NSVisualEffectView>> {
+    regions
+        .iter()
+        .filter(|region| {
+            region.rect.is_finite() && region.rect.width() > 0.0 && region.rect.height() > 0.0
+        })
+        .map(|region| {
+            let rect = region.rect;
+            let frame = NSRect::new(
+                NSPoint::new(f64::from(rect.min.x), height - f64::from(rect.max.y)),
+                NSSize::new(f64::from(rect.width()), f64::from(rect.height())),
+            );
+            let view = NSVisualEffectView::initWithFrame(mtm.alloc(), frame);
+            view.setMaterial(NSVisualEffectMaterial::Popover);
+            view.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
+            view.setState(NSVisualEffectState::Active);
+            view.setWantsLayer(true);
+            if let Some(layer) = view.layer() {
+                layer.setCornerRadius(f64::from(region.radius.max(0.0)));
+                layer.setMasksToBounds(true);
+            }
+            container.addSubview_positioned_relativeTo(
+                &view,
+                NSWindowOrderingMode::Below,
+                Some(drawing),
+            );
+            view
+        })
+        .collect()
 }
 
 // --- displays ----------------------------------------------------------------
@@ -581,6 +670,10 @@ struct Surface {
     /// The size the graphics surface was made for, in pixels.
     configured: (u32, u32),
     window: Retained<NSWindow>,
+    /// The view egui is drawn into (over the soft parts).
+    drawing: Retained<NSView>,
+    /// The parts shown soft, as last asked for, and their views.
+    soft: (Vec<BlurRegion>, Vec<Retained<NSVisualEffectView>>),
     id: SurfaceId,
     place: Place,
     popped: Option<(SurfaceId, egui::Rect, Popped)>,
@@ -597,6 +690,8 @@ struct Surface {
     again_at: Option<Instant>,
     cursor: egui::CursorIcon,
     pointer_inside: bool,
+    /// The last press or move with a button held: a drag out begins by it.
+    last_mouse: Option<Retained<NSEvent>>,
 }
 
 impl Surface {
@@ -739,10 +834,98 @@ impl Host {
             .setFrame_display(rect_of(area, height), false);
         surface.area = area;
         surface.scale = surface.window.backingScaleFactor() as f32;
+        if !surface.soft.0.is_empty() {
+            self.shape_soft(index);
+        }
+        let surface = &mut self.surfaces[index];
         if let Some(gpu) = &self.gpu {
             surface.configure_target(&gpu.device);
         }
         surface.redraw = true;
+    }
+
+    /// Surfaces with news of drags draw again.
+    fn take_in_drags(&mut self) {
+        for id in drag::touched() {
+            if let Some(index) = self.index_of(SurfaceId(id)) {
+                self.surfaces[index].redraw = true;
+            }
+        }
+    }
+
+    /// Draw every surface that is due.
+    fn draw_due(&mut self) {
+        let now = Instant::now();
+        for index in 0..self.surfaces.len() {
+            let surface = &mut self.surfaces[index];
+            if surface.again_at.is_some_and(|at| now >= at) {
+                surface.again_at = None;
+                surface.redraw = true;
+            }
+            if surface.redraw {
+                self.draw(index);
+            }
+        }
+    }
+
+    /// Begin a drag out of a surface, by the mouse event that moved with
+    /// its button held.
+    fn begin_drag(&mut self, id: SurfaceId, started: &DragStart) {
+        let Some(index) = self.index_of(id) else {
+            return;
+        };
+        let surface = &mut self.surfaces[index];
+        let (Some(event), Some(view)) = (surface.last_mouse.clone(), surface.window.contentView())
+        else {
+            log::debug!("surface {id:?}: no press to begin a drag by");
+            return;
+        };
+        // SAFETY: the content view of every surface is a `SurfaceView`
+        // (`make_panel`).
+        let view: Retained<drag::SurfaceView> = unsafe { Retained::cast_unchecked(view) };
+        if view.begin(started, &event) {
+            // The drag has the pointer from here on: the surface lets go.
+            let pos = surface.events.iter().rev().find_map(|event| match event {
+                egui::Event::PointerMoved(pos) => Some(*pos),
+                _ => None,
+            });
+            for button in [egui::PointerButton::Primary, egui::PointerButton::Secondary] {
+                surface.events.push(egui::Event::PointerButton {
+                    pos: pos.unwrap_or_default(),
+                    button,
+                    pressed: false,
+                    modifiers: surface.modifiers,
+                });
+            }
+            surface.events.push(egui::Event::PointerGone);
+            surface.redraw = true;
+        } else {
+            log::debug!("surface {id:?}: the drag did not begin");
+        }
+    }
+
+    /// Make the soft parts of a surface what it last asked for.
+    fn shape_soft(&mut self, index: usize) {
+        let mtm = self.mtm;
+        let surface = &mut self.surfaces[index];
+        for view in surface.soft.1.drain(..) {
+            view.removeFromSuperview();
+        }
+        let Some(container) = surface.window.contentView() else {
+            return;
+        };
+        surface.soft.1 = soft_parts(
+            mtm,
+            &container,
+            &surface.drawing,
+            &surface.soft.0,
+            f64::from(surface.area.height),
+        );
+        log::debug!(
+            "surface {:?} shows the desktop soft behind {} part(s)",
+            surface.id,
+            surface.soft.1.len()
+        );
     }
 
     fn settle_all(&mut self) {
@@ -758,14 +941,17 @@ impl Host {
         popped: Option<(SurfaceId, egui::Rect, Popped)>,
         draw: Draw,
     ) -> anyhow::Result<Surface> {
-        let window = make_panel(self.mtm, place.level, popped.map(|(_, _, popped)| popped));
-        let view = window.contentView().context("the panel's view")?;
-        let handle = raw_window_handle::RawWindowHandle::AppKit(
-            raw_window_handle::AppKitWindowHandle::new(
+        let (window, view) = make_panel(
+            self.mtm,
+            id,
+            place.level,
+            popped.map(|(_, _, popped)| popped),
+        );
+        let handle =
+            raw_window_handle::RawWindowHandle::AppKit(raw_window_handle::AppKitWindowHandle::new(
                 std::ptr::NonNull::new(Retained::as_ptr(&view) as *mut c_void)
                     .context("the view")?,
-            ),
-        );
+            ));
         // SAFETY: the view lives as long as the window, which lives as long
         // as `Surface`, whose graphics surface is its first field and so is
         // dropped before the window it draws on.
@@ -786,11 +972,12 @@ impl Host {
                     ..Default::default()
                 }))
                 .context("no graphics adapter draws on this window")?;
-            let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                memory_hints: wgpu::MemoryHints::MemoryUsage,
-                ..Default::default()
-            }))
-            .context("the graphics device")?;
+            let (device, queue) =
+                pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                    memory_hints: wgpu::MemoryHints::MemoryUsage,
+                    ..Default::default()
+                }))
+                .context("the graphics device")?;
             let info = adapter.get_info();
             log::debug!("drawing with {} ({:?})", info.name, info.backend);
             device.on_uncaptured_error(std::sync::Arc::new(|error| {
@@ -831,6 +1018,8 @@ impl Host {
             alpha,
             configured: (0, 0),
             window,
+            drawing: view,
+            soft: (Vec::new(), Vec::new()),
             id,
             place,
             popped,
@@ -845,6 +1034,7 @@ impl Host {
             again_at: None,
             cursor: egui::CursorIcon::Default,
             pointer_inside: false,
+            last_mouse: None,
         })
     }
 
@@ -859,6 +1049,14 @@ impl Host {
         } else {
             surface.window.orderFrontRegardless();
         }
+        log::debug!(
+            "surface {:?} shown at {:?}, level {}, visible {}, occlusion {:?}",
+            surface.id,
+            surface.area,
+            surface.window.level(),
+            surface.window.isVisible(),
+            surface.window.occlusionState()
+        );
     }
 
     /// What the drawings and the messages asked for, carried out.
@@ -874,6 +1072,9 @@ impl Host {
             let keyboards = std::mem::take(&mut self.control.keyboards);
             let captures = std::mem::take(&mut self.control.captures);
             let reaches = std::mem::take(&mut self.control.reaches);
+            let blurs = std::mem::take(&mut self.control.blurs);
+            let drops = std::mem::take(&mut self.control.drops);
+            let drags = std::mem::take(&mut self.control.drags);
             if opens.is_empty()
                 && popups.is_empty()
                 && puts.is_empty()
@@ -884,6 +1085,9 @@ impl Host {
                 && keyboards.is_empty()
                 && captures.is_empty()
                 && reaches.is_empty()
+                && blurs.is_empty()
+                && drops.is_empty()
+                && drags.is_empty()
             {
                 break;
             }
@@ -918,7 +1122,12 @@ impl Host {
                     self.show(index);
                 }
             }
-            for (id, area) in self.surfaces.iter().filter_map(|surface| surface.put.map(|area| (surface.id, area))).collect::<Vec<_>>() {
+            for (id, area) in self
+                .surfaces
+                .iter()
+                .filter_map(|surface| surface.put.map(|area| (surface.id, area)))
+                .collect::<Vec<_>>()
+            {
                 if let Some(index) = self.index_of(id) {
                     if self.surfaces[index].area != area {
                         self.settle(index);
@@ -944,6 +1153,27 @@ impl Host {
                     if keyboard == Keyboard::Exclusive {
                         self.surfaces[index].window.makeKeyAndOrderFront(None);
                     }
+                }
+            }
+            for (id, regions) in blurs {
+                if let Some(index) = self.index_of(id) {
+                    self.surfaces[index].soft.0 = regions;
+                    self.shape_soft(index);
+                }
+            }
+            for (id, on) in drops {
+                if let Some(view) = self
+                    .index_of(id)
+                    .and_then(|index| self.surfaces[index].window.contentView())
+                {
+                    drag::register(&view, on);
+                }
+            }
+            for (id, started) in drags {
+                if drag::dragging_out() {
+                    log::debug!("surface {id:?}: a drag is under way already");
+                } else {
+                    self.begin_drag(id, &started);
                 }
             }
             for (id, takes) in reaches {
@@ -982,6 +1212,7 @@ impl Host {
             for id in closing {
                 if let Some(index) = self.index_of(id) {
                     let surface = self.surfaces.remove(index);
+                    drag::forget(id.0);
                     surface.window.orderOut(None);
                     surface.window.close();
                 }
@@ -1013,6 +1244,15 @@ impl Host {
         };
         let kind = event.r#type();
         let surface = &mut self.surfaces[index];
+        if matches!(
+            kind,
+            NSEventType::LeftMouseDown
+                | NSEventType::LeftMouseDragged
+                | NSEventType::RightMouseDown
+                | NSEventType::RightMouseDragged
+        ) {
+            surface.last_mouse = Some(event.retain());
+        }
         let modifiers = input::modifiers_of(event.modifierFlags());
         surface.modifiers = modifiers;
         let height = surface.area.height as f32;
@@ -1045,7 +1285,9 @@ impl Host {
                 };
                 let pressed = matches!(
                     kind,
-                    NSEventType::LeftMouseDown | NSEventType::RightMouseDown | NSEventType::OtherMouseDown
+                    NSEventType::LeftMouseDown
+                        | NSEventType::RightMouseDown
+                        | NSEventType::OtherMouseDown
                 );
                 let pos = at();
                 if pressed {
@@ -1072,7 +1314,10 @@ impl Host {
                 });
             }
             NSEventType::ScrollWheel => {
-                let (x, y) = (event.scrollingDeltaX() as f32, event.scrollingDeltaY() as f32);
+                let (x, y) = (
+                    event.scrollingDeltaX() as f32,
+                    event.scrollingDeltaY() as f32,
+                );
                 let unit = if event.hasPreciseScrollingDeltas() {
                     egui::MouseWheelUnit::Point
                 } else {
@@ -1146,7 +1391,10 @@ impl Host {
             .collect();
         for id in waiting {
             let index = self.index_of(id).expect("just seen");
-            if matches!(self.surfaces[index].popped, Some((_, _, Popped::Menu | Popped::Sub))) {
+            if matches!(
+                self.surfaces[index].popped,
+                Some((_, _, Popped::Menu | Popped::Sub))
+            ) {
                 self.control.close(id);
             } else {
                 self.control.outside.push(id);
@@ -1228,7 +1476,10 @@ impl Host {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
             other => {
-                log::debug!("no frame to draw into on surface {:?}: {other:?}", surface.id);
+                log::debug!(
+                    "no frame to draw into on surface {:?}: {other:?}",
+                    surface.id
+                );
                 surface.configure_target(&gpu.device);
                 surface.again_at = Some(Instant::now() + Duration::from_millis(100));
                 return;
@@ -1281,6 +1532,110 @@ impl Host {
 // --- the shell ----------------------------------------------------------------
 
 /// The main thread's surfaces.
+/// The shell's pass made from within AppKit's loop of a drag: news of
+/// drags, other threads' messages and what is due are drawn. AppKit's
+/// events are its own meanwhile (the drag takes the mouse).
+fn nested_pass<M>(
+    host: &mut Host,
+    messages: &std::sync::mpsc::Receiver<M>,
+    on_message: &mut impl FnMut(M, &mut Control),
+) {
+    host.take_in_drags();
+    for message in messages.try_iter() {
+        on_message(message, &mut host.control);
+    }
+    host.carry_out();
+    host.draw_due();
+    host.carry_out();
+}
+
+thread_local! {
+    /// The pass to make while AppKit runs a drag (set during the wait).
+    static PASS: std::cell::Cell<Option<*mut dyn FnMut()>> = const { std::cell::Cell::new(None) };
+    /// The pass is being made (a timer never makes it twice at once).
+    static PASSING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[repr(C)]
+struct TimerContext {
+    version: isize,
+    info: *mut c_void,
+    retain: *const c_void,
+    release: *const c_void,
+    copy_description: *const c_void,
+}
+
+#[link(name = "CoreFoundation", kind = "framework")]
+extern "C" {
+    static kCFRunLoopCommonModes: *const c_void;
+    fn CFAbsoluteTimeGetCurrent() -> f64;
+    fn CFRunLoopTimerCreate(
+        alloc: *const c_void,
+        fire: f64,
+        interval: f64,
+        flags: usize,
+        order: isize,
+        callout: extern "C" fn(*const c_void, *mut c_void),
+        context: *mut TimerContext,
+    ) -> *const c_void;
+    fn CFRunLoopAddTimer(run_loop: *const c_void, timer: *const c_void, mode: *const c_void);
+    fn CFRunLoopTimerInvalidate(timer: *const c_void);
+    fn CFRelease(object: *const c_void);
+}
+
+extern "C" fn pass_now(_timer: *const c_void, _info: *mut c_void) {
+    if PASSING.with(|passing| passing.replace(true)) {
+        return;
+    }
+    if let Some(pass) = PASS.with(|kept| kept.get()) {
+        // SAFETY: set only while the loop waits, and the pass it points to
+        // outlives the wait (see `run_with_outputs`).
+        unsafe { (*pass)() };
+    }
+    PASSING.with(|passing| passing.set(false));
+}
+
+/// A timer, sixty times a second in every mode of the run loop (AppKit's
+/// drag runs in its own), while a drag out is under way.
+struct DuringDrag(*const c_void);
+
+impl DuringDrag {
+    fn new() -> Self {
+        let mut context = TimerContext {
+            version: 0,
+            info: std::ptr::null_mut(),
+            retain: std::ptr::null(),
+            release: std::ptr::null(),
+            copy_description: std::ptr::null(),
+        };
+        // SAFETY: a repeating timer on this thread's run loop, let go when
+        // dropped.
+        unsafe {
+            let timer = CFRunLoopTimerCreate(
+                std::ptr::null(),
+                CFAbsoluteTimeGetCurrent() + 1.0 / 60.0,
+                1.0 / 60.0,
+                0,
+                0,
+                pass_now,
+                &mut context,
+            );
+            CFRunLoopAddTimer(CFRunLoopGetCurrent(), timer, kCFRunLoopCommonModes);
+            Self(timer)
+        }
+    }
+}
+
+impl Drop for DuringDrag {
+    fn drop(&mut self) {
+        // SAFETY: the timer made in `new`.
+        unsafe {
+            CFRunLoopTimerInvalidate(self.0);
+            CFRelease(self.0);
+        }
+    }
+}
+
 pub struct Shell<M: 'static> {
     host: Host,
     app: Retained<NSApplication>,
@@ -1344,13 +1699,18 @@ impl<M: 'static> Shell<M> {
         mut on_outputs: impl FnMut(&[String], &mut Control),
     ) -> anyhow::Result<Timings> {
         let names = |host: &Host| {
-            let mut names: Vec<String> = host.displays.iter().map(|display| display.name.clone()).collect();
+            let mut names: Vec<String> = host
+                .displays
+                .iter()
+                .map(|display| display.name.clone())
+                .collect();
             names.sort();
             names
         };
         let mut known = names(&self.host);
         on_outputs(&known, &mut self.host.control);
         self.host.carry_out();
+        let mut during: Option<DuringDrag> = None;
         loop {
             if self.host.control.quit || (until_empty && self.host.surfaces.is_empty()) {
                 break;
@@ -1366,28 +1726,60 @@ impl<M: 'static> Shell<M> {
                     .iter()
                     .filter_map(|surface| surface.again_at)
                     .min()
-                    .map_or(Duration::from_secs(3600), |at| at.saturating_duration_since(now))
+                    .map_or(Duration::from_secs(3600), |at| {
+                        at.saturating_duration_since(now)
+                    })
             };
-            if self.host.surfaces.iter().any(Surface::takes_presses_outside) {
+            if self
+                .host
+                .surfaces
+                .iter()
+                .any(Surface::takes_presses_outside)
+            {
                 wait = wait.min(OUTSIDE_LOOK);
             }
             wait = wait.min(DISPLAYS_LOOK);
-            // SAFETY: the default mode; this thread's run loop.
-            unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, wait.as_secs_f64(), true) };
+            // A drag out of a surface: AppKit runs it in a loop of its own
+            // (from within the wait below) until it is over. The shell's
+            // own pass is made from inside that loop meanwhile, by a timer
+            // that is there only while the drag is.
+            if drag::dragging_out() && during.is_none() {
+                during = Some(DuringDrag::new());
+            }
+            {
+                let (host, messages) = (&mut self.host, &self.messages);
+                let mut pass = || nested_pass(host, messages, &mut on_message);
+                let pass: &mut dyn FnMut() = &mut pass;
+                // SAFETY: the same pointer with a longer name for its
+                // lifetime: it is taken back below, before `pass` ends,
+                // and used only from the timer, which runs within the wait.
+                let pass: *mut (dyn FnMut() + 'static) =
+                    unsafe { std::mem::transmute(pass as *mut dyn FnMut()) };
+                PASS.with(|kept| kept.set(Some(pass)));
+                // SAFETY: the default mode; this thread's run loop.
+                unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, wait.as_secs_f64(), true) };
+                PASS.with(|kept| kept.set(None));
+            }
+            if !drag::dragging_out() {
+                during = None;
+            }
             // What AppKit has: the surfaces' own as egui input, the rest
             // to AppKit as its own loop would hand it on.
             let past = NSDate::distantPast();
             // SAFETY: the system's constant.
             let mode = unsafe { objc2_foundation::NSDefaultRunLoopMode };
-            while let Some(event) =
-                self.app
-                    .nextEventMatchingMask_untilDate_inMode_dequeue(NSEventMask::Any, Some(&past), mode, true)
-            {
+            while let Some(event) = self.app.nextEventMatchingMask_untilDate_inMode_dequeue(
+                NSEventMask::Any,
+                Some(&past),
+                mode,
+                true,
+            ) {
                 if !self.host.take_in(&event) {
                     self.app.sendEvent(&event);
                 }
             }
             self.host.look_at_the_buttons();
+            self.host.take_in_drags();
             for message in self.messages.try_iter() {
                 on_message(message, &mut self.host.control);
             }
@@ -1405,19 +1797,10 @@ impl<M: 'static> Shell<M> {
                     }
                 }
             }
-            let now = Instant::now();
-            for index in 0..self.host.surfaces.len() {
-                let surface = &mut self.host.surfaces[index];
-                if surface.again_at.is_some_and(|at| now >= at) {
-                    surface.again_at = None;
-                    surface.redraw = true;
-                }
-                if surface.redraw {
-                    self.host.draw(index);
-                }
-            }
+            self.host.draw_due();
             self.host.carry_out();
         }
+        drop(during);
         for surface in self.host.surfaces.drain(..) {
             surface.window.orderOut(None);
             surface.window.close();

@@ -8,7 +8,7 @@
 
 #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 fn main() {
-    eprintln!("the surface host is there for Linux and Windows only");
+    eprintln!("the surface host is there for Linux, Windows and macOS only");
 }
 
 #[cfg(any(target_os = "linux", windows, target_os = "macos"))]
