@@ -94,6 +94,10 @@ mod mac {
                     .and_then(|text| text.parse().ok())
                     .unwrap_or(15.0),
             ),
+            Some("tree") => match number(1) {
+                Some(pid) => tree(&ax::Element::application(pid), 0),
+                None => eprintln!("tree <pid>"),
+            },
             Some(other) => eprintln!("no command {other}"),
         }
     }
@@ -417,6 +421,23 @@ mod mac {
                     }
                 }
             }
+        }
+    }
+
+    /// What a program shows to screen readers: its elements' roles, titles and
+    /// values, a few levels down.
+    fn tree(element: &gevrek_macos::ax::Element, depth: usize) {
+        let words: Vec<String> = ["AXTitle", "AXDescription", "AXValue"]
+            .iter()
+            .filter_map(|name| element.string(name).filter(|text| !text.is_empty()).map(|text| format!("{name}={text:?}")))
+            .collect();
+        println!("{}{} {}", "  ".repeat(depth), element.role(), words.join(" "));
+        if depth >= 8 {
+            return;
+        }
+        let children = if depth == 0 { element.windows() } else { element.elements("AXChildren") };
+        for child in children.unwrap_or_default() {
+            tree(&child, depth + 1);
         }
     }
 }

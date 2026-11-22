@@ -2140,6 +2140,7 @@ dependencies = [
 name = "gevrek-shellkit"
 version = "0.7.4"
 dependencies = [
+ "accesskit_macos",
  "accesskit_unix",
  "accesskit_windows",
  "anyhow",

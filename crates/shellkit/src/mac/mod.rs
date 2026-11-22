@@ -43,8 +43,10 @@
 //! any Mac program: dead keys, and input methods with their list of
 //! choices by the text cursor (`view`).
 //!
-//! Not here yet: screen readers.
+//! What a surface shows is described to screen readers (VoiceOver) once
+//! one listens (`access`).
 
+mod access;
 mod drag;
 pub mod input;
 mod view;
@@ -676,6 +678,9 @@ struct Surface {
     /// The size the graphics surface was made for, in pixels.
     configured: (u32, u32),
     window: Retained<NSWindow>,
+    /// What it shows, as screen readers are told it. (Before `content`,
+    /// the view it took over.)
+    access: access::Access,
     /// The window's content: drags and typed text go through it.
     content: Retained<view::SurfaceView>,
     /// The view egui is drawn into (over the soft parts).
@@ -852,6 +857,15 @@ impl Host {
         surface.redraw = true;
     }
 
+    /// What screen readers asked since the last pass (see `access`).
+    fn access_news(&mut self) {
+        for surface in &mut self.surfaces {
+            if surface.access.news(&surface.context, &mut surface.events) {
+                surface.redraw = true;
+            }
+        }
+    }
+
     /// Surfaces with news of drags draw again.
     fn take_in_drags(&mut self) {
         for id in drag::touched() {
@@ -951,6 +965,8 @@ impl Host {
             place.level,
             popped.map(|(_, _, popped)| popped),
         );
+        // (Before the window is first shown: see `access`.)
+        let access = access::Access::new(&content);
         let handle =
             raw_window_handle::RawWindowHandle::AppKit(raw_window_handle::AppKitWindowHandle::new(
                 std::ptr::NonNull::new(Retained::as_ptr(&view) as *mut c_void)
@@ -1022,6 +1038,7 @@ impl Host {
             alpha,
             configured: (0, 0),
             window,
+            access,
             content,
             drawing: view,
             soft: (Vec::new(), Vec::new()),
@@ -1463,6 +1480,10 @@ impl Host {
             self.control.close(id);
             return;
         }
+        let focused = surface.window.isKeyWindow();
+        surface
+            .access
+            .update(output.platform_output.accesskit_update.take(), focused);
         if let Some(ime) = &output.platform_output.ime {
             surface.content.set_caret(ime.cursor_rect);
         }
@@ -1561,6 +1582,7 @@ fn nested_pass<M>(
     on_message: &mut impl FnMut(M, &mut Control),
 ) {
     host.take_in_drags();
+    host.access_news();
     for message in messages.try_iter() {
         on_message(message, &mut host.control);
     }
@@ -1800,6 +1822,7 @@ impl<M: 'static> Shell<M> {
             }
             self.host.look_at_the_buttons();
             self.host.take_in_drags();
+            self.host.access_news();
             for message in self.messages.try_iter() {
                 on_message(message, &mut self.host.control);
             }

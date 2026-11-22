@@ -186,7 +186,12 @@ impl Element {
 
     /// The windows of a program element, as the program lists them.
     pub fn windows(&self) -> Result<Vec<Element>, AxError> {
-        let list = self.attribute("AXWindows")?;
+        self.elements("AXWindows")
+    }
+
+    /// The elements an attribute names (`AXChildren`, `AXWindows`).
+    pub fn elements(&self, name: &str) -> Result<Vec<Element>, AxError> {
+        let list = self.attribute(name)?;
         Ok(list
             .array_items()
             .into_iter()
