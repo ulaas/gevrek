@@ -36,7 +36,9 @@ mod worker;
 fn main() -> anyhow::Result<()> {
     // (A service of the system: no person's configuration is its own, so
     // the build and the version say.)
-    gevrek_logging::Logging::new("gevrek-dm", log::LevelFilter::Info).without_setting().init();
+    gevrek_logging::Logging::new("gevrek-dm", log::LevelFilter::Info)
+        .without_setting()
+        .init();
     match std::env::args().nth(1).as_deref() {
         Some("--worker") => worker::run(),
         None => service::run(),

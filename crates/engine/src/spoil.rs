@@ -116,8 +116,7 @@ pub fn spoil(document: &mut Value, all: &[Vec<String>], chance: &mut Chance) -> 
         (4, Value::Number(number)) => {
             let by = [-1.0, 0.0, 1000.0, -1000.0, 0.5, 1e9][chance.below(6)];
             let now = number.as_f64().unwrap_or(0.0) * by;
-            *value = serde_json::Number::from_f64(now.trunc())
-                .map_or(Value::Null, Value::Number);
+            *value = serde_json::Number::from_f64(now.trunc()).map_or(Value::Null, Value::Number);
             format!("times {by}")
         }
         (5, Value::Array(list)) => {
@@ -132,7 +131,11 @@ pub fn spoil(document: &mut Value, all: &[Vec<String>], chance: &mut Chance) -> 
             format!("made {} long", list.len())
         }
         (7, Value::Object(map)) if !map.is_empty() => {
-            let key = map.keys().nth(chance.below(map.len())).cloned().unwrap_or_default();
+            let key = map
+                .keys()
+                .nth(chance.below(map.len()))
+                .cloned()
+                .unwrap_or_default();
             map.remove(&key);
             format!("without {key}")
         }
