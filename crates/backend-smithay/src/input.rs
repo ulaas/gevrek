@@ -1,6 +1,8 @@
 //! Input from any Smithay input backend (the nested window, libinput):
 //! the pointer and the keyboard of the seat.
 
+use gevrek_host::wm::bindings::Bindings as _;
+use gevrek_host::wm::commands::Commands as _;
 use crate::state::State;
 use gevrek_engine::events::WindowEvent;
 use gevrek_engine::input::HotkeyEvent;
@@ -692,9 +694,7 @@ impl State {
         trigger: BindingTrigger,
     ) {
         if !ids.is_empty() {
-            self.bindings_triggered(
-                ids.clone(),
-                HotkeyEvent {
+            self.bindings_triggered(&HotkeyEvent {
                     registration_ids: ids,
                     key: name.to_string(),
                     ctrl: modifiers.0,
@@ -808,9 +808,7 @@ impl State {
             }
         }
         for (ids, held, trigger, held_ms) in due {
-            self.bindings_triggered(
-                ids.clone(),
-                HotkeyEvent {
+            self.bindings_triggered(&HotkeyEvent {
                     registration_ids: ids,
                     key: held.name,
                     ctrl: held.modifiers.0,
@@ -1216,9 +1214,7 @@ impl State {
                     if ids.is_empty() {
                         continue;
                     }
-                    self.bindings_triggered(
-                        ids.clone(),
-                        HotkeyEvent {
+                    self.bindings_triggered(&HotkeyEvent {
                             registration_ids: ids,
                             key,
                             ctrl: modifiers.ctrl,

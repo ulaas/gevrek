@@ -4,6 +4,7 @@
 //! session starts, when a device is plugged in, and when the
 //! configuration changes.
 
+use gevrek_host::wm::published::Published as _;
 use crate::state::State;
 use gevrek_model::input::{AccelProfile, InputConfig, PointerConfig, ScrollMethod, TouchpadConfig};
 use smithay::input::keyboard::XkbConfig;
@@ -144,10 +145,10 @@ impl State {
                 ("index".to_string(), now.index.to_string()),
             ];
             self.keyboard_layout = Some(now);
-            self.overlay_stale = true;
+            self.host.state_stale.set(true);
             // (The state is published before the event: who asks for it
             // on hearing the event gets the new layout.)
-            self.publish_overlay(None);
+            self.publish_state(None);
             if changed {
                 self.emit(
                     gevrek_engine::executor::RuntimeEventKind::KeyboardLayoutChanged,

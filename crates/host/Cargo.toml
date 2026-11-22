@@ -8,12 +8,21 @@ description = "What every gevrek host process shares: configuration store, file 
 
 [dependencies]
 gevrek-model = { path = "../model" }
+# The core the host runs (`wm`): the engine is below the host, never the
+# other way round.
+gevrek-engine = { path = "../engine" }
 anyhow = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The time of day, for the night light's key (`wm::commands`).
+jiff = { workspace = true }
 tokio = { workspace = true }
 
 # The job that ends the programs gevrek started when gevrek ends.
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true }
+
+# The shared host (`wm`) is tried on the engine's fake desktop.
+[dev-dependencies]
+gevrek-engine = { path = "../engine", features = ["test-support"] }

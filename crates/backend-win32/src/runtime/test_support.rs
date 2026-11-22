@@ -11,7 +11,6 @@ use crate::dwm::{
 use crate::hotkey::HotkeyManager;
 use crate::persistence::PersistenceManager;
 use crate::runtime::executor::Executor;
-use std::collections::HashSet;
 use std::mem::ManuallyDrop;
 use std::sync::{Arc, Mutex};
 
@@ -130,30 +129,23 @@ pub(crate) fn test_runtime(config: Config) -> ManuallyDrop<Runtime> {
         ),
         hotkey_manager: HotkeyManager::inert(),
         registered_hotkey_ids: Vec::new(),
-        active_binding_submap: "default".to_string(),
         rule_engine,
-        startup_process_manager: super::process_manager::StartupProcessManager::new(),
-        workspace_creation_hooks_fired: HashSet::new(),
         persistence: PersistenceManager::new(),
-        config_watcher: None,
-        debug_overlay_data: None,
-        stop_flag: Arc::new(Mutex::new(false)),
-        pause_flag: Arc::new(Mutex::new(false)),
-        config_receiver,
-        manual_command_receiver,
-        node_event_broadcast: None,
+        host: gevrek_host::wm::HostState {
+            config_receiver: Some(config_receiver),
+            command_receiver: Some(manual_command_receiver),
+            stop_flag: Some(Arc::new(Mutex::new(false))),
+            pause_flag: Some(Arc::new(Mutex::new(false))),
+            ..Default::default()
+        },
         event_loop_fps: 0.0,
         gesture_progress: None,
-        published_monitors: Vec::new(),
-        state_stale: std::cell::Cell::new(false),
         hot_corners: Default::default(),
         gesture_progress_updated: None,
         display_change_pending: None,
         held_openings: Default::default(),
         elevated_helper: false,
         elevated_helper_asked: false,
-        config_publisher: None,
-        config_dirty: false,
         notices: Vec::new(),
         // Tests do not look for other programs on the desktop they run on.
         notices_checked: Some(std::time::Instant::now()),

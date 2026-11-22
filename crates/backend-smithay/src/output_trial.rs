@@ -13,6 +13,8 @@
 //! (`State::live_outputs`). Subscribers are told (`output.trial`), so a
 //! settings window can ask.
 
+use gevrek_host::wm::reload::Reload as _;
+use gevrek_host::wm::configuration::Configuration as _;
 use crate::state::State;
 use gevrek_engine::executor::RuntimeEventKind;
 use gevrek_model::command::TrialAnswer;

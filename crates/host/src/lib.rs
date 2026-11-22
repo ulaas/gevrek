@@ -5,7 +5,8 @@
 //! the loop.
 //!
 //! Portable: the Windows host (`gevrek-win32`) and the Wayland host
-//! (`gevrek-smithay`) both use it.
+//! (`gevrek-smithay`) both use it, and [`wm`] is the host itself, written
+//! once for every backend.
 
 pub mod backend_info;
 pub mod command;
@@ -17,3 +18,4 @@ pub mod lock;
 pub mod process_manager;
 pub mod shortcuts;
 pub mod wake;
+pub mod wm;

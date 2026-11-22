@@ -1961,7 +1961,9 @@ name = "gevrek-host"
 version = "0.7.4"
 dependencies = [
  "anyhow",
+ "gevrek-engine",
  "gevrek-model",
+ "jiff",
  "log",
  "serde",
  "serde_json",

@@ -16,6 +16,7 @@
 //! output under the pointer (libinput reports distances in the units the
 //! pointer moves in).
 
+use gevrek_host::wm::commands::Commands as _;
 use crate::state::State;
 use gevrek_engine::executor::RuntimeEventKind;
 use gevrek_engine::overlay_data::GestureProgressData;

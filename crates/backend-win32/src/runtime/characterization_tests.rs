@@ -12,6 +12,8 @@
 use super::event_coalescing::coalesce_window_events;
 use super::test_support::{finish, test_runtime, TestWindow, MONITOR};
 use super::Runtime;
+use gevrek_host::wm::commands::Commands as _;
+use gevrek_host::wm::configuration::Configuration as _;
 use crate::config::Config;
 use crate::dwm::layouts::LayoutType;
 use crate::dwm::{hidden_journal, MonitorHandle, MonitorInfo, WindowEvent, WindowHandle};
@@ -54,7 +56,7 @@ fn drive(runtime: &mut Runtime, events: Vec<WindowEvent>) {
 }
 
 fn dispatch(runtime: &mut Runtime, command: DispatchCommand) {
-    runtime.execute_runtime_dispatch(command).unwrap();
+    runtime.run_command(command).unwrap();
     runtime
         .core
         .executor
@@ -433,7 +435,7 @@ fn an_apply_based_on_a_revision_the_runtime_has_moved_past_is_refused() {
 
     let mut runtime = test_runtime(Config::new());
     let (sender, receiver) = std::sync::mpsc::channel();
-    runtime.config_receiver = receiver;
+    runtime.host.config_receiver = Some(receiver);
     let (publisher, watch) = config_channel(runtime.config.clone());
     runtime.set_config_publisher(publisher);
     let published = watch.borrow().revision;
@@ -442,7 +444,7 @@ fn an_apply_based_on_a_revision_the_runtime_has_moved_past_is_refused() {
     // A hotkey toggles the stackbar: changed here, not yet published.
     let stackbar = !runtime.config.desktop.appearance.stackbar.enabled;
     runtime.config.desktop.appearance.stackbar.enabled = stackbar;
-    runtime.config_dirty = true;
+    runtime.host.config_dirty = true;
 
     // The editor's configuration was made from `published`.
     let mut edited = Config::new();

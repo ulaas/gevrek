@@ -27,10 +27,15 @@ use crate::dwm::{
 use crate::hotkey::{GestureEvent, GesturePhase, GestureRegistration, Hotkey, HotkeyManager};
 use crate::node_editor::LogEntry;
 use crate::persistence::PersistenceManager;
-use crate::settings::{DesktopConfig, ReservedArea, WorkspaceProfile, SnapZoneSettings};
+use crate::settings::{DesktopConfig, SnapZoneSettings};
 use anyhow::Result;
-use std::collections::HashSet;
 use std::sync::mpsc::Receiver;
+use gevrek_host::wm::bindings::{shortcut_name, Bindings as _};
+use gevrek_host::wm::commands::Commands as _;
+use gevrek_host::wm::configuration::Configuration as _;
+use gevrek_host::wm::published::Published as _;
+use gevrek_host::wm::reload::Reload as _;
+use gevrek_host::wm::{HostState, Parts, WmHost};
 use std::sync::{Arc, Mutex};
 
 pub use command::{Direction, DispatchCommand, MonitorTarget, WindowSelector, WorkspaceSelector};
@@ -56,35 +61,17 @@ pub struct Runtime {
     window_manager: WindowManager,
     /// Everything the WM knows and decides. The runtime is its host.
     core: core::WmCore,
+    /// What the host owns, the same on every system (`gevrek_host::wm`):
+    /// the server's channels, the configuration's publisher and watcher,
+    /// the live binding submap, the startup programs.
+    host: HostState,
     window_monitor: WindowMonitor,
     hotkey_manager: HotkeyManager,
     registered_hotkey_ids: Vec<i32>,
-    active_binding_submap: String,
     rule_engine: Arc<Mutex<RuleEngine>>,
-    startup_process_manager: process_manager::StartupProcessManager,
-    /// Persistent workspace creation hooks already fired in this runtime
-    /// session. Hot reload internally rebuilds workspace objects and must not
-    /// relaunch user programs merely because configuration was reapplied.
-    workspace_creation_hooks_fired: HashSet<(crate::dwm::MonitorHandle, String)>,
     persistence: PersistenceManager,
-    /// Polling watcher for the configuration file; `None` until the host provides the config
-    /// path via `set_config_watch`.
-    config_watcher: Option<ConfigFileWatcher>,
-    debug_overlay_data: Option<Arc<Mutex<Option<OverlayData>>>>,
-    stop_flag: Arc<Mutex<bool>>,
-    pause_flag: Arc<Mutex<bool>>,
-    config_receiver: Receiver<config_store::ConfigRequest>,
-    manual_command_receiver: Receiver<ManualCommand>,
-    node_event_broadcast: Option<gevrek_engine::executor::NodeEventBroadcast>,
     event_loop_fps: f64,
     gesture_progress: Option<crate::dwm::GestureProgressData>,
-    /// The outputs as last published, to tell subscribers what changed.
-    published_monitors: Vec<gevrek_engine::overlay_data::MonitorData>,
-    /// Something was told, or done, since the state was last published:
-    /// it is published again at the end of the pass. (Who hears of a
-    /// change asks for the state; an answer from before the change showed
-    /// a panel the old until something else happened.)
-    state_stale: std::cell::Cell<bool>,
     /// The corner of a display the pointer is in, and since when
     /// (`desktop.hot_corners`).
     hot_corners: gevrek_engine::hot_corners::Watch,
@@ -98,10 +85,6 @@ pub struct Runtime {
     /// and whether its task was already run for want of one.
     elevated_helper: bool,
     elevated_helper_asked: bool,
-    /// Publishes the running configuration to readers (the gRPC server).
-    config_publisher: Option<config_store::ConfigPublisher>,
-    /// `config` changed since the last publish.
-    config_dirty: bool,
     /// What there is to tell the person at the machine (`conflicts`).
     notices: Vec<gevrek_engine::overlay_data::Notice>,
     /// When that was last looked into; `None`: on the next pass.
@@ -408,30 +391,25 @@ impl Runtime {
             core: core::WmCore::new(executor, monitor_manager, focus_manager, snap_zone_manager),
             hotkey_manager,
             registered_hotkey_ids: Vec::new(),
-            active_binding_submap: "default".to_string(),
             rule_engine: rule_engine_shared,
-            startup_process_manager: process_manager::StartupProcessManager::new(),
-            workspace_creation_hooks_fired: HashSet::new(),
             persistence,
-            config_watcher: None,
-            debug_overlay_data,
-            stop_flag,
-            pause_flag,
-            config_receiver,
-            manual_command_receiver,
-            node_event_broadcast,
+            host: HostState {
+                config_receiver: Some(config_receiver),
+                command_receiver: Some(manual_command_receiver),
+                overlay: debug_overlay_data,
+                pause_flag: Some(pause_flag),
+                stop_flag: Some(stop_flag),
+                events: node_event_broadcast,
+                ..HostState::default()
+            },
             event_loop_fps: 0.0,
             gesture_progress: None,
-            published_monitors: Vec::new(),
-            state_stale: std::cell::Cell::new(false),
             hot_corners: Default::default(),
             gesture_progress_updated: None,
             display_change_pending: None,
             held_openings: held::Held::default(),
             elevated_helper: false,
             elevated_helper_asked: false,
-            config_publisher: None,
-            config_dirty: false,
             notices: Vec::new(),
             notices_checked: None,
             wallpaper_colour: Default::default(),
@@ -450,116 +428,14 @@ impl Runtime {
     /// Make this runtime the owner that readers see. The current
     /// configuration is published right away.
     pub fn set_config_publisher(&mut self, publisher: config_store::ConfigPublisher) {
-        publisher.publish(&self.config);
-        self.config_publisher = Some(publisher);
-        self.config_dirty = false;
+        self.host.publish_to(publisher, &self.config);
     }
 
-    /// Apply a configuration the server asked for, or a change of the
-    /// configuration file. Runs while execution is paused too: an Apply from
-    /// the editor must not wait for the resume.
-    fn apply_configuration_changes(&mut self) {
-        // Resolved here, on the runtime thread, against the running
-        // config (see `ConfigRequest::resolve`).
-        let mut request = self.config_receiver.try_recv().ok();
-        if let Some(base) = request.as_ref().and_then(|request| request.base_revision()) {
-            // A change made here since the last publish (a hotkey toggle)
-            // gets its revision first; the request is then judged against
-            // what really runs.
-            self.publish_config_if_changed();
-            let running = self
-                .config_publisher
-                .as_ref()
-                .map(|publisher| publisher.revision());
-            if running.is_some_and(|running| running != base) {
-                log::info!(
-                    "Refusing a configuration based on revision {base}: revision {} is running",
-                    running.unwrap_or_default()
-                );
-                // The server already saved the refused configuration; put
-                // the running one back so the file watcher does not load it.
-                if let Some(watcher) = &mut self.config_watcher {
-                    if let Err(error) = self.config.save(watcher.path()) {
-                        log::warn!("Could not restore the configuration file: {error}");
-                    }
-                    watcher.acknowledge();
-                }
-                if let Some(publisher) = &self.config_publisher {
-                    publisher.refuse_request();
-                }
-                request = None;
-            }
-        }
-        let from_request = request.is_some();
-        let mut hot_reload = request.map(|request| request.resolve(&self.config));
-        if hot_reload.is_some() {
-            // Channel-driven reloads include the WM's own config writes
-            // (UpdateConfiguration and PushGraph persist the file before
-            // pushing), so acknowledge the current mtime to keep the
-            // watcher from reloading the same change again.
-            if let Some(watcher) = &mut self.config_watcher {
-                watcher.acknowledge();
-            }
-        } else if let Some(watcher) = &mut self.config_watcher {
-            // Poll the config file for
-            // external edits and hot-reload on a confirmed change.
-            if watcher.poll() {
-                match Config::load(watcher.path()) {
-                    Ok(config) => {
-                        log::info!(
-                            "Configuration file changed on disk; hot-reloading {}",
-                            watcher.path().display()
-                        );
-                        hot_reload = Some(config);
-                    }
-                    Err(error) => {
-                        log::warn!("Configuration file changed but could not be loaded: {error}");
-                    }
-                }
-            }
-        }
-        if let Some(new_config) = hot_reload {
-            self.reload_configuration(new_config);
-            // The state as it is now, before anybody is told that the
-            // configuration is: who made the change asks for the state as
-            // soon as it hears, and is to get what the change made of it
-            // (a workspace's new title, on its tab).
-            self.send_debug_overlay_data(Some("configuration".to_string()));
-            if from_request {
-                // Its own publish, right away: the server waits for this
-                // request, and its revision must not be shared with a
-                // toggle made later in the same pass.
-                self.config_dirty = false;
-                if let Some(publisher) = &self.config_publisher {
-                    let revision = publisher.publish_request(&self.config);
-                    log::debug!("Published requested configuration as revision {}", revision);
-                }
-            }
-        }
-    }
-
-    /// Publish the configuration if it changed since the last publish.
-    fn publish_config_if_changed(&mut self) {
-        if !self.config_dirty {
-            return;
-        }
-        self.config_dirty = false;
-        if let Some(publisher) = &self.config_publisher {
-            let revision = publisher.publish(&self.config);
-            log::debug!("Published running configuration revision {}", revision);
-        }
-    }
-
-    /// Point the configuration file watcher at the WM's config file
-    ///. The initial enabled state comes from
-    /// `desktop.watch_configuration`.
+    /// Point the configuration file watcher at the WM's config file. The
+    /// initial enabled state comes from `desktop.watch_configuration`.
     pub fn set_config_watch(&mut self, path: std::path::PathBuf) {
-        let enabled = self.config.desktop.watch_configuration;
-        self.config_watcher = Some(ConfigFileWatcher::new(path, enabled));
-        log::info!(
-            "Configuration file watch {}",
-            if enabled { "enabled" } else { "disabled" }
-        );
+        self.host
+            .watch_configuration_file(path, self.config.desktop.watch_configuration);
     }
 
     fn emit_runtime_event(
@@ -568,26 +444,7 @@ impl Runtime {
         window_handle: Option<crate::dwm::WindowHandle>,
         fields: impl IntoIterator<Item = (String, String)>,
     ) {
-        // (A window that is dragged tells of its place many times a
-        // second; nothing that is published follows it.)
-        if !matches!(
-            kind,
-            RuntimeEventKind::WindowMoved | RuntimeEventKind::WindowResized
-        ) {
-            self.state_stale.set(true);
-        }
-        let Some(broadcast) = &self.node_event_broadcast else {
-            return;
-        };
-        broadcast(NodeExecutionEvent::Runtime(RuntimeExtensionEvent {
-            kind,
-            timestamp_ms: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as i64,
-            window_handle,
-            fields: fields.into_iter().collect(),
-        }));
+        self.host.emit(kind, window_handle, fields);
     }
 
     fn emit_window_extension_event(&self, event: &crate::dwm::WindowEvent) {
@@ -636,7 +493,7 @@ impl Runtime {
         log::info!("Startup execution completed");
 
         // Register hotkeys from OnKeyPress nodes
-        self.register_hotkeys()?;
+        self.refresh_bindings()?;
 
         // Ensure each monitor has at least one workspace (auto-create default if needed)
         self.ensure_default_workspaces()?;
@@ -666,9 +523,9 @@ impl Runtime {
         }
 
         self.apply_appearance_profile();
-        self.startup_process_manager
+        self.host.startup
             .configure(&self.config.desktop.startup, false);
-        self.startup_process_manager.tick();
+        self.host.startup.tick();
 
         // A taskbar that a window manager which was ended left hidden.
         crate::taskbar::Taskbar::show_what_was_left_hidden();
@@ -681,7 +538,7 @@ impl Runtime {
         self.apply_display_settings_at_start();
         self.tell_display_modes();
         // Send initial data to debug overlay
-        self.send_debug_overlay_data(None);
+        self.publish_state(None);
 
         // Main event loop
         log::info!("Entering main event loop");
@@ -734,11 +591,7 @@ impl Runtime {
             // Check stop flag (handle poisoned mutex gracefully)
             // Use a scope to ensure the guard is dropped before we call mutable methods
             {
-                let should_stop = self
-                    .stop_flag
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                if *should_stop {
+                if self.host.stop_requested() {
                     log::info!("Stop flag detected, exiting main event loop");
                     break;
                 }
@@ -748,72 +601,12 @@ impl Runtime {
             // used to add ~16 ms of latency per queued command). Commands are
             // drained up front, so a client flooding the queue cannot starve
             // window events.
-            let queued_commands: Vec<ManualCommand> =
-                self.manual_command_receiver.try_iter().collect();
-            if !queued_commands.is_empty() {
+            if self.run_queued_commands() {
                 last_work = Some(std::time::Instant::now());
-            }
-            for command in queued_commands {
-                // The caller gives up after its reply timeout and drops the
-                // receiver. Running the command afterwards would apply it
-                // after the client was told it failed.
-                if command.caller_gave_up() {
-                    log::warn!(
-                        "Skipping runtime command {:?}: the caller already timed out",
-                        command.command
-                    );
-                    continue;
-                }
-                let label = format!("{:?}", command.command);
-                let result = match &command.command {
-                    // A built-in alias runs as its command; a number names a
-                    // Manual Trigger node of the graph.
-                    RuntimeCommand::Trigger(target) => {
-                        match Executor::manual_target_command(target) {
-                            Ok(Some(dispatch)) => self.execute_runtime_dispatch(dispatch),
-                            Ok(None) => self.core.executor.execute_manual_target(
-                                &mut self.window_manager,
-                                &mut self.core.monitor_manager,
-                                target,
-                            ),
-                            Err(error) => Err(error),
-                        }
-                        .map(|_| RuntimeCommandResult::Complete)
-                    }
-                    RuntimeCommand::Dispatch(dispatch) => self
-                        .execute_runtime_dispatch(dispatch.clone())
-                        .map(|_| RuntimeCommandResult::Complete),
-                    RuntimeCommand::DispatchBatch {
-                        commands,
-                        stop_on_error,
-                    } => {
-                        let results = run_dispatch_batch(commands, *stop_on_error, |dispatch| {
-                            self.execute_runtime_dispatch(dispatch.clone())
-                                .map_err(|error| error.to_string())
-                        });
-                        Ok(RuntimeCommandResult::Batch(results))
-                    }
-                    // On Windows a check sends real input through the
-                    // system (tests/desktop does); the WM has no input
-                    // path of its own to feed.
-                    RuntimeCommand::InjectInput(_) => Err(anyhow::anyhow!(
-                        "Made-up input is not taken on Windows; send real input through the system"
-                    )),
-                }
-                .map_err(|error| error.to_string());
-
-                if let Err(result) = &result {
-                    log::warn!("Runtime command '{}' failed: {}", label, result);
-                }
-                let _ = command.response.send(result);
             }
 
             pass_times.mark(std::time::Instant::now());
-            // Check pause flag (handle poisoned mutex gracefully)
-            let is_paused = *self
-                .pause_flag
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let is_paused = self.host.paused();
             if is_paused != input_suspended {
                 // Paused: bindings stop consuming input and queued input is
                 // dropped, so keys pressed during the pause are neither
@@ -864,7 +657,7 @@ impl Runtime {
 
             // Send overlay data every second
             if last_overlay_update.elapsed() >= std::time::Duration::from_secs(1) {
-                self.send_debug_overlay_data(None);
+                self.publish_state(None);
                 last_overlay_update = std::time::Instant::now();
             }
 
@@ -1114,83 +907,7 @@ impl Runtime {
                     hotkey_events.len()
                 );
                 for hotkey_event in hotkey_events {
-                    // (Only a shortcut that is registered comes here: its
-                    // name, never a key that was typed.)
-                    log::debug!(
-                        "the shortcut {} was used ({:?}, {:?}, held {} ms)",
-                        shortcut_name(&hotkey_event),
-                        hotkey_event.device,
-                        hotkey_event.trigger,
-                        hotkey_event.held_ms,
-                    );
-                    self.emit_runtime_event(
-                        RuntimeEventKind::BindingTriggered,
-                        None,
-                        [
-                            ("device".to_string(), format!("{:?}", hotkey_event.device)),
-                            ("trigger".to_string(), format!("{:?}", hotkey_event.trigger)),
-                            ("key".to_string(), hotkey_event.key.clone()),
-                            ("ctrl".to_string(), hotkey_event.ctrl.to_string()),
-                            ("alt".to_string(), hotkey_event.alt.to_string()),
-                            ("shift".to_string(), hotkey_event.shift.to_string()),
-                            ("win".to_string(), hotkey_event.win.to_string()),
-                            ("held_ms".to_string(), hotkey_event.held_ms.to_string()),
-                        ],
-                    );
-                    let graph_triggered = hotkey_event.registration_ids.iter().any(|id| *id < 0);
-                    let declarative_commands = hotkey_event
-                        .registration_ids
-                        .iter()
-                        .filter_map(|id| {
-                            let index = id.checked_sub(1_000_000)? as usize;
-                            self.config
-                    .live_bindings()
-                    .get(index)
-                                .map(|binding| binding.command.clone())
-                        })
-                        .collect::<Vec<_>>();
-                    for command in declarative_commands {
-                        if let Err(error) = self.execute_runtime_dispatch(command) {
-                            log::error!("Error executing declarative binding: {}", error);
-                        }
-                    }
-                    // Trigger OnKeyPress nodes that match this hotkey
-                    if graph_triggered {
-                        if let Err(e) = self.core.executor.execute_hotkey(
-                            &mut self.window_manager,
-                            &mut self.core.monitor_manager,
-                            &mut self.core.focus_manager,
-                            &hotkey_event,
-                        ) {
-                            log::error!("Error executing hotkey event: {}", e);
-                        }
-                    }
-
-                    // Handle pending focus operations (from CycleFocusNext/CycleFocusPrevious nodes)
-                    if let Some(focus_op) = self.core.executor.take_pending_focus_op() {
-                        match focus_op {
-                            PendingFocusOp::CycleNext => {
-                                if let Some(window_handle) = self.core.focus_manager.cycle_next() {
-                                    if let Err(e) = self.window_manager.focus_window(window_handle)
-                                    {
-                                        log::error!("Error focusing window: {}", e);
-                                    }
-                                    log::debug!("the keyboard goes to {window_handle:?}, the next window in the history of the focus");
-                                }
-                            }
-                            PendingFocusOp::CyclePrevious => {
-                                if let Some(window_handle) =
-                                    self.core.focus_manager.cycle_previous()
-                                {
-                                    if let Err(e) = self.window_manager.focus_window(window_handle)
-                                    {
-                                        log::error!("Error focusing window: {}", e);
-                                    }
-                                    log::debug!("the keyboard goes to {window_handle:?}, the window before in the history of the focus");
-                                }
-                            }
-                        }
-                    }
+                    self.bindings_triggered(&hotkey_event);
                 }
             }
 
@@ -1404,7 +1121,7 @@ impl Runtime {
 
                 // Send overlay update for important events
                 if needs_overlay_update {
-                    self.send_debug_overlay_data(Some(event_name.clone()));
+                    self.publish_state(Some(event_name.clone()));
                 }
             }
 
@@ -1435,11 +1152,11 @@ impl Runtime {
             crate::dwm::hidden_journal::flush();
             // (After the windows were put where they are for this pass.)
             self.cut_columns();
-            self.startup_process_manager.tick();
+            self.host.startup.tick();
             let active_animation_count = self.window_manager.active_animation_count();
             if active_animation_count != last_animation_count {
                 last_animation_count = active_animation_count;
-                self.send_debug_overlay_data(Some(format!(
+                self.publish_state(Some(format!(
                     "Animations active: {active_animation_count}"
                 )));
             }
@@ -1463,7 +1180,7 @@ impl Runtime {
                     .core
                     .settle_moved_windows(&mut self.window_manager, std::time::Instant::now());
                 if !joined.is_empty() {
-                    self.send_debug_overlay_data(Some(
+                    self.publish_state(Some(
                         "A floating window joined the display it was moved to".to_string(),
                     ));
                 }
@@ -1507,7 +1224,7 @@ impl Runtime {
             if self.config.desktop.hot_corners.watched() {
                 if let Some(command) = self.hot_corner_due() {
                     log::debug!("a hot corner runs {}", command.display_name());
-                    if let Err(error) = self.execute_runtime_dispatch(command) {
+                    if let Err(error) = self.run_command(command) {
                         log::error!("A hot corner's command could not be run: {error}");
                     }
                 }
@@ -1576,8 +1293,8 @@ impl Runtime {
             // Readers see every configuration change made during this pass.
             self.publish_config_if_changed();
             // And the state, where something was told or done in it.
-            if self.state_stale.get() {
-                self.send_debug_overlay_data(None);
+            if self.host.state_stale.get() {
+                self.publish_state(None);
             }
 
             self.window_manager.tick_effects();
@@ -1598,7 +1315,7 @@ impl Runtime {
                     for monitor in changed {
                         self.core.executor.mark_layout_dirty(monitor);
                     }
-                    self.state_stale.set(true);
+                    self.host.state_stale.set(true);
                 }
             }
 
@@ -1739,7 +1456,7 @@ impl Runtime {
                 restored_composition
             );
         }
-        self.startup_process_manager.shutdown();
+        self.host.startup.shutdown();
 
         match self.window_manager.destroy_all_borders() {
             Ok(count) if count > 0 => log::info!(
@@ -1960,7 +1677,7 @@ impl Runtime {
         self.apply_appearance_profile();
         self.core
             .refresh_changed_borders(&mut self.window_manager, &before, true);
-        self.send_debug_overlay_data(Some("accent".to_string()));
+        self.publish_state(Some("accent".to_string()));
     }
 
     /// Make the displays what `desktop.outputs` asks for (their places,
@@ -2163,7 +1880,7 @@ impl Runtime {
                     }
                 }
                 self.config.desktop.outputs = trial.previous;
-                self.config_dirty = true;
+                self.host.config_dirty = true;
                 if crate::dwm::monitor::set_unmanaged_outputs(&self.config.desktop.outputs) {
                     self.handle_display_change();
                 }
@@ -2233,15 +1950,10 @@ impl Runtime {
                 log::warn!("{}. {}", notice.title, notice.text);
             }
         }
-        let count = notices.len();
         self.notices = notices;
-        self.send_debug_overlay_data(Some("Notices changed".to_string()));
-        // Whoever shows them (the panel) asks for the state at once.
-        self.emit_runtime_event(
-            RuntimeEventKind::NoticesChanged,
-            None,
-            [("count".to_string(), count.to_string())],
-        );
+        // (Publishing tells that they are others: whoever shows them, the
+        // panel, asks for the state at once.)
+        self.publish_state(Some("Notices changed".to_string()));
     }
 
     /// Re-enumerate monitors and carry workspaces and windows over to the
@@ -2336,7 +2048,7 @@ impl Runtime {
             &self.core.monitor_manager,
             &changes,
         );
-        self.send_debug_overlay_data(Some("Display configuration changed".to_string()));
+        self.publish_state(Some("Display configuration changed".to_string()));
     }
 
     fn build_snap_zone_manager(
@@ -2362,64 +2074,6 @@ impl Runtime {
     fn apply_workspace_profiles(&mut self) {
         self.apply_appearance_profile();
         self.apply_workspace_profile_set(|_| true, true);
-    }
-
-    /// Apply the enabled workspace profiles selected by `include`.
-    /// `focus_default` switches each monitor to its `default` profile's
-    /// workspace, which only startup should do.
-    fn apply_workspace_profile_set(
-        &mut self,
-        include: impl Fn(&WorkspaceProfile) -> bool,
-        focus_default: bool,
-    ) {
-        let created = self.core.apply_workspace_profile_set(
-            &self.config.desktop.workspaces,
-            &crate::system_look::appearance(&self.config.desktop.appearance),
-            include,
-            focus_default,
-        );
-        // The host tells listeners and starts the on-created-empty program.
-        for workspace in created {
-            self.emit_runtime_event(
-                RuntimeEventKind::WorkspaceCreated,
-                None,
-                [
-                    ("monitor".to_string(), workspace.monitor.0.to_string()),
-                    ("name".to_string(), workspace.profile.name.clone()),
-                    (
-                        "persistent".to_string(),
-                        workspace.profile.persistent.to_string(),
-                    ),
-                ],
-            );
-            self.run_workspace_created_empty_hook(workspace.monitor, &workspace.profile);
-        }
-    }
-
-    fn run_workspace_created_empty_hook(
-        &mut self,
-        monitor: crate::dwm::MonitorHandle,
-        profile: &WorkspaceProfile,
-    ) {
-        let Some(launch) = &profile.on_created_empty else {
-            return;
-        };
-        let key = (monitor, profile.name.trim().to_ascii_lowercase());
-        if !self.workspace_creation_hooks_fired.insert(key) {
-            return;
-        }
-        match process_manager::spawn_launch(launch) {
-            Ok(child) => log::info!(
-                "Workspace '{}' created empty; launched process {}",
-                profile.name,
-                child.id()
-            ),
-            Err(error) => log::error!(
-                "Workspace '{}' on-created-empty launch failed: {}",
-                profile.name,
-                error
-            ),
-        }
     }
 
     fn apply_appearance_profile(&mut self) {
@@ -2554,105 +2208,6 @@ impl Runtime {
     }
 
     /// Send authoritative all-workspace state to the debug overlay and IPC.
-    fn send_debug_overlay_data(&mut self, last_event: Option<String>) {
-        self.state_stale.set(false);
-        if let Some(ref overlay_data_mutex) = self.debug_overlay_data {
-            let (monitor_data, total_windows) = self
-                .core
-                .monitor_data(&self.window_manager, &self.config.desktop);
-
-            for (kind, fields) in
-                gevrek_engine::overlay_data::changes(&self.published_monitors, &monitor_data)
-            {
-                self.emit_runtime_event(kind, None, fields);
-            }
-            self.published_monitors = monitor_data.clone();
-            let overlay_data = OverlayData {
-                timestamp: std::time::SystemTime::now(),
-                monitors: monitor_data,
-                graph_node_count: self.config.node_graph.nodes.len(),
-                total_windows,
-                event_loop_fps: self.event_loop_fps,
-                last_event,
-                active_animations: self.window_manager.active_animation_count(),
-                active_binding_submap: self.active_binding_submap.clone(),
-                tiling_suspended: self.core.executor.tiling_suspended(),
-                desktop_shown: self.core.executor.desktop_shown(),
-                gesture: {
-                    let backend = self.hotkey_manager.gesture_backend_status();
-                    crate::dwm::GestureStateData {
-                        available: backend.available,
-                        backend: backend.backend,
-                        device_count: backend.device_count,
-                        configured_count: self
-                            .config
-                            .desktop
-                            .gestures
-                            .profiles
-                            .iter()
-                            .filter(|profile| {
-                                self.config.desktop.gestures.enabled && profile.enabled
-                            })
-                            .count() as u32,
-                        active: self.gesture_progress.clone(),
-                        last_error: backend.last_error,
-                    }
-                },
-                rule_states: self
-                    .rule_engine
-                    .lock()
-                    .map(|engine| {
-                        engine
-                            .rule_states()
-                            .into_iter()
-                            .map(|(name, enabled, dynamic)| crate::dwm::RuleStateData {
-                                name,
-                                enabled,
-                                dynamic,
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                scratchpad_states: self.core.scratchpad_data(),
-                startup_states: self
-                    .startup_process_manager
-                    .states()
-                    .into_iter()
-                    .map(|state| crate::dwm::StartupStateData {
-                        id: state.id,
-                        name: state.name,
-                        enabled: state.enabled,
-                        status: state.status,
-                        pid: state.pid,
-                        restart_count: state.restart_count,
-                        last_exit_code: state.last_exit_code,
-                        last_error: state.last_error,
-                    })
-                    .collect(),
-                metrics: None, // Performance metrics can be added later
-                notices: self.notices.clone(),
-                // (The system draws the wallpaper here; where the theme
-                // asks for its colour, it is read from the system's.)
-                accent: self.core.wallpaper_accent,
-                keyboard_layout: None,
-                // (Windows' own compositor shows the frames.)
-                frames: Vec::new(),
-            };
-
-            // Write to shared state (handle poisoned mutex gracefully)
-            match overlay_data_mutex.lock() {
-                Ok(mut data) => {
-                    *data = Some(overlay_data);
-                }
-                Err(poisoned) => {
-                    // Recover from poisoned mutex
-                    let mut data = poisoned.into_inner();
-                    *data = Some(overlay_data);
-                }
-            }
-        }
-    }
-
     /// The command of the hot corner the pointer has been in for long
     /// enough, if one is due now.
     fn hot_corner_due(&mut self) -> Option<DispatchCommand> {
@@ -2722,123 +2277,33 @@ impl Runtime {
     }
 
     /// Register all OnKeyPress nodes as hotkeys
-    fn register_hotkeys(&mut self) -> Result<()> {
-        if self.active_binding_submap != "default"
-            && !self.config.desktop.bindings.iter().any(|binding| {
-                binding.enabled && binding.normalized_submap() == self.active_binding_submap
-            })
-        {
-            log::warn!(
-                "Binding submap '{}' no longer exists; returning to default",
-                self.active_binding_submap
-            );
-            self.active_binding_submap = "default".to_string();
-        }
-        log::info!(
-            "Registering graph inputs and declarative bindings for submap '{}'",
-            self.active_binding_submap
-        );
-
+    /// Take these hotkeys through the keyboard and mouse hook, in place of
+    /// those taken before, and the touchpad gestures of the configuration.
+    fn install_hotkeys(&mut self, bindings: Vec<(i32, Hotkey)>) -> Result<()> {
         for id in self.registered_hotkey_ids.drain(..) {
-            if let Err(e) = self.hotkey_manager.unregister(id) {
-                log::warn!("Failed to unregister previous hotkey {}: {}", id, e);
+            if let Err(error) = self.hotkey_manager.unregister(id) {
+                log::warn!("Failed to unregister previous hotkey {id}: {error}");
             }
         }
-
-        // Collect hotkeys first to avoid borrow issues
-        let mut hotkeys_to_register = Vec::new();
-        for (graph_index, (node_id, node)) in
-            self.core.executor.get_graph().nodes.iter().enumerate()
-        {
-            if let crate::node_editor::NodeType::OnKeyPress {
-                key,
-                ctrl,
-                alt,
-                shift,
-                win,
-            } = &node.node_type
-            {
-                if !key.is_empty() {
-                    let hotkey = Hotkey::new(key.clone(), *ctrl, *alt, *shift, *win);
-                    // Negative IDs are reserved for global automation-graph
-                    // inputs; declarative binding IDs start at 1,000,000.
-                    let id = (-1i32).saturating_sub(graph_index as i32);
-                    hotkeys_to_register.push((
-                        hotkey,
-                        id,
-                        key.clone(),
-                        *ctrl,
-                        *alt,
-                        *shift,
-                        *win,
-                        *node_id,
-                    ));
+        for (id, hotkey) in bindings {
+            let name = shortcut_name(&hotkey.key, hotkey.ctrl, hotkey.alt, hotkey.shift, hotkey.win);
+            match self.hotkey_manager.register(hotkey, id) {
+                Ok(()) => {
+                    log::debug!("the shortcut {name} is registered (id {id})");
+                    self.registered_hotkey_ids.push(id);
                 }
+                Err(error) => log::warn!("Failed to register the shortcut {name} (id {id}): {error}"),
             }
         }
-
-        // Now register them
-        let mut hotkey_count = 0;
-        for (hotkey, id, key, ctrl, alt, shift, win, node_id) in hotkeys_to_register {
-            if let Err(e) = self.hotkey_manager.register(hotkey, id) {
-                log::warn!("Failed to register hotkey for node {}: {}", node_id, e);
-            } else {
-                log::debug!(
-                    "the shortcut {} of the graph's node {} is registered",
-                    shortcut_name_of(&key, ctrl, alt, shift, win),
-                    node_id
-                );
-                self.registered_hotkey_ids.push(id);
-                hotkey_count += 1;
-            }
-        }
-
-        for (index, binding) in self.config.live_bindings().iter().enumerate() {
-            if !binding.enabled
-                || binding.key.trim().is_empty()
-                || binding.normalized_submap() != self.active_binding_submap
-            {
-                continue;
-            }
-            let id = 1_000_000i32.saturating_add(index as i32);
-            let hotkey = Hotkey {
-                key: binding.key.clone(),
-                ctrl: binding.ctrl,
-                alt: binding.alt,
-                shift: binding.shift,
-                win: binding.win,
-                device: binding.device,
-                trigger: binding.trigger,
-                consume: binding.consume,
-                long_press_ms: binding.long_press_ms,
-            };
-            if let Err(error) = self.hotkey_manager.register(hotkey, id) {
-                log::warn!(
-                    "Failed to register declarative binding '{}': {}",
-                    binding.name,
-                    error
-                );
-            } else {
-                log::debug!(
-                    "the shortcut '{}' ({}) is registered",
-                    binding.name,
-                    shortcut_name_of(&binding.key, binding.ctrl, binding.alt, binding.shift, binding.win)
-                );
-                self.registered_hotkey_ids.push(id);
-                hotkey_count += 1;
-            }
-        }
-
-        let gesture_registrations = if self.config.desktop.gestures.enabled {
-            self.config
-                .desktop
-                .gestures
+        let gestures = &self.config.desktop.gestures;
+        let gesture_registrations = if gestures.enabled {
+            gestures
                 .profiles
                 .iter()
                 .enumerate()
                 .filter(|(_, gesture)| gesture.enabled)
                 .map(|(index, gesture)| GestureRegistration {
-                    id: 2_000_000i32.saturating_add(index as i32),
+                    id: gevrek_host::wm::bindings::gesture_id(index),
                     fingers: gesture.fingers,
                     direction: gesture.direction,
                     distance_percent: gesture.distance_percent,
@@ -2850,12 +2315,11 @@ impl Runtime {
         self.hotkey_manager
             .configure_gestures(
                 gesture_registrations,
-                self.config.desktop.gestures.idle_timeout_ms,
-                self.config.desktop.gestures.axis_lock_ratio,
+                gestures.idle_timeout_ms,
+                gestures.axis_lock_ratio,
             )
             .map_err(anyhow::Error::msg)?;
-
-        log::info!("Registered {} hotkeys", hotkey_count);
+        log::info!("Registered {} hotkeys", self.registered_hotkey_ids.len());
         Ok(())
     }
 
@@ -2908,7 +2372,7 @@ impl Runtime {
                 .registration_ids
                 .iter()
                 .filter_map(|id| {
-                    let index = id.checked_sub(2_000_000)? as usize;
+                    let index = gevrek_host::wm::bindings::gesture_index(*id)?;
                     self.config
                         .desktop
                         .gestures
@@ -2918,332 +2382,18 @@ impl Runtime {
                 })
                 .collect::<Vec<_>>();
             for command in commands {
-                if let Err(error) = self.execute_runtime_dispatch(command) {
+                if let Err(error) = self.run_command(command) {
                     log::error!("Error executing gesture action: {error}");
                 }
             }
         }
-        self.send_debug_overlay_data(Some(format!(
+        self.publish_state(Some(format!(
             "Gesture {}: {} finger{} {}",
             event.phase.config_name(),
             event.fingers,
             if event.fingers == 1 { "" } else { "s" },
             direction.unwrap_or("pending"),
         )));
-    }
-
-    fn execute_runtime_dispatch(&mut self, command: DispatchCommand) -> Result<()> {
-        self.state_stale.set(true);
-        let command_name = command.display_name().to_string();
-        let command_json = serde_json::to_string(&command).unwrap_or_else(|_| command_name.clone());
-        let result = match command {
-            DispatchCommand::SetBindingSubmap { name } => {
-                let name = name.trim().to_ascii_lowercase();
-                if name.is_empty() {
-                    anyhow::bail!("Binding submap name cannot be empty");
-                }
-                if name != "default"
-                    && !self
-                        .config
-                        .desktop
-                        .bindings
-                        .iter()
-                        .any(|binding| binding.enabled && binding.normalized_submap() == name)
-                {
-                    anyhow::bail!("No enabled binding submap named '{name}' exists");
-                }
-                if self.active_binding_submap != name {
-                    self.active_binding_submap = name;
-                    self.register_hotkeys()?;
-                    log::debug!(
-                        "Active binding submap is now '{}'",
-                        self.active_binding_submap
-                    );
-                    // Told at once: who shows the keys' mode (the panel)
-                    // asks for the state as soon as the command is done.
-                    self.send_debug_overlay_data(Some("keys' mode".to_string()));
-                }
-                Ok(())
-            }
-            DispatchCommand::ResetBindingSubmap => {
-                if self.active_binding_submap != "default" {
-                    self.active_binding_submap = "default".to_string();
-                    self.register_hotkeys()?;
-                    log::debug!("Returned to the default binding submap");
-                    self.send_debug_overlay_data(Some("keys' mode".to_string()));
-                }
-                Ok(())
-            }
-            DispatchCommand::Quit => {
-                log::info!("Quit: the window manager stops");
-                *self
-                    .stop_flag
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
-                Ok(())
-            }
-            // (Where a new window opens is Windows' own to say.)
-            DispatchCommand::ExpectWindow { .. } => Ok(()),
-            DispatchCommand::PickWindow => {
-                crate::pick::toggle();
-                Ok(())
-            }
-            // (Windows shows only the windows of one workspace: the
-            // others are put away where nothing can draw them.)
-            // The shell draws it on Windows (a window that is put away
-            // is drawn by nobody here: the shell remembers pictures).
-            DispatchCommand::WorkspaceOverview => {
-                if crate::conflicts::shell_runs() {
-                    self.emit_runtime_event(
-                        RuntimeEventKind::ShellCommand,
-                        None,
-                        [(
-                            "action".to_string(),
-                            gevrek_model::command::SHELL_WORKSPACE_OVERVIEW.to_string(),
-                        )],
-                    );
-                    Ok(())
-                } else {
-                    Err(anyhow::anyhow!(
-                        "The overview of every workspace is gevrek-shell's on Windows, and it does not run"
-                    ))
-                }
-            }
-            // The system owns the keyboard layouts and the keys here.
-            DispatchCommand::KeyboardLayout { .. } => Err(anyhow::anyhow!(
-                "Keyboard layouts are switched by Windows itself (Win+Space)"
-            )),
-            DispatchCommand::ShortcutsInhibit => {
-                Err(anyhow::anyhow!("No program takes gevrek's keys on Windows"))
-            }
-            DispatchCommand::OutputTrial { answer } => {
-                if self.answer_display_trial(answer) {
-                    Ok(())
-                } else {
-                    Err(anyhow::anyhow!("No display settings are on trial"))
-                }
-            }
-            DispatchCommand::Shell { action } => {
-                self.emit_runtime_event(
-                    RuntimeEventKind::ShellCommand,
-                    None,
-                    [("action".to_string(), action.id())],
-                );
-                // The night light is the window manager's: its key
-                // switches it on or off (within its hours, when the
-                // configuration gives it hours), the configuration says so
-                // afterwards, and it is said on the screen: outside its
-                // hours nothing turns warm yet, and that must not look
-                // like a key that does nothing.
-                if action == gevrek_model::command::ShellAction::NightLight {
-                    let on = !self.config.desktop.night_light.enabled;
-                    self.config.desktop.night_light.enabled = on;
-                    self.config_dirty = true;
-                    // (Looked at with the next pass, not in two seconds.)
-                    self.wallpaper_looked = None;
-                    log::info!(
-                        "The night light is switched {}",
-                        if on { "on" } else { "off" }
-                    );
-                    let said = DispatchCommand::Osd {
-                        text: self
-                            .config
-                            .desktop
-                            .night_light
-                            .said_when_switched(crate::night_light::minutes_now()),
-                        level: None,
-                    };
-                    self.emit_runtime_event(
-                        RuntimeEventKind::ShellCommand,
-                        None,
-                        said.shell_fields().unwrap_or_default(),
-                    );
-                }
-                Ok(())
-            }
-            DispatchCommand::NightLightPreview {
-                temperature,
-                seconds,
-            } => {
-                self.night_light.preview(temperature, seconds);
-                // (Looked at with the next pass.)
-                self.wallpaper_looked = None;
-                Ok(())
-            }
-            // What the shell shows for someone else: told as its keys are.
-            command @ (DispatchCommand::Notify { .. }
-            | DispatchCommand::Osd { .. }
-            | DispatchCommand::AppShortcut { .. }
-            | DispatchCommand::Zones { .. }) => {
-                self.emit_runtime_event(
-                    RuntimeEventKind::ShellCommand,
-                    None,
-                    command.shell_fields().unwrap_or_default(),
-                );
-                Ok(())
-            }
-            // The shell shows the list where it runs (a surface, no window
-            // to keep floating); the settings program's window is for when
-            // it does not, and the same key closes that one while it is open.
-            DispatchCommand::ShowShortcuts => {
-                if !gevrek_host::shortcuts::is_open() && crate::conflicts::shell_runs() {
-                    self.emit_runtime_event(
-                        RuntimeEventKind::ShellCommand,
-                        None,
-                        [(
-                            "action".to_string(),
-                            gevrek_model::command::SHELL_SHORTCUTS.to_string(),
-                        )],
-                    );
-                    Ok(())
-                } else {
-                    gevrek_host::shortcuts::toggle()
-                }
-            }
-            DispatchCommand::Exec { program, args } => {
-                let launch = gevrek_model::settings::LaunchProfile {
-                    program,
-                    args,
-                    ..Default::default()
-                };
-                gevrek_engine::Desktop::launch(&mut self.window_manager, &launch).map(|pid| {
-                    log::debug!("Started '{}' as PID {pid}", launch.program);
-                })
-            }
-            DispatchCommand::LaunchStartup { id } => self.startup_process_manager.launch(&id),
-            DispatchCommand::StopStartup { id } => self.startup_process_manager.stop(&id),
-            DispatchCommand::RestartStartup { id } => self.startup_process_manager.restart(&id),
-            DispatchCommand::ToggleMouseFollowsFocus => {
-                let enabled = !self.core.focus_manager.mouse_follows_focus();
-                self.core.focus_manager.set_mouse_follows_focus(enabled);
-                // Mirror the toggle into the live config so a later hot
-                // reload (which re-applies `desktop.focus`) does not revert
-                // it; the flag is also serialized with the config document.
-                self.config.desktop.focus.mouse_follows_focus = enabled;
-                self.config_dirty = true;
-                log::info!(
-                    "Mouse-follows-focus {}",
-                    if enabled { "enabled" } else { "disabled" }
-                );
-                Ok(())
-            }
-            DispatchCommand::WatchConfiguration { enabled } => {
-                if let Some(watcher) = &mut self.config_watcher {
-                    watcher.set_enabled(enabled);
-                } else {
-                    log::warn!(
-                        "Configuration watch toggled but the runtime has no config file path"
-                    );
-                }
-                // Mirror the toggle into the live config like
-                // mouse-follows-focus so a later hot reload does not revert
-                // it; the flag is also serialized with the config document.
-                self.config.desktop.watch_configuration = enabled;
-                self.config_dirty = true;
-                log::info!(
-                    "Configuration file watch {}",
-                    if enabled { "enabled" } else { "disabled" }
-                );
-                Ok(())
-            }
-            DispatchCommand::ToggleStackbar => {
-                // Runtime-owned on/off toggle,
-                // mirrored into the live config like mouse-follows-focus so a
-                // later hot reload does not revert it.
-                let enabled = !self.config.desktop.appearance.stackbar.enabled;
-                self.config.desktop.appearance.stackbar.enabled = enabled;
-                self.config_dirty = true;
-                self.apply_appearance_profile();
-                // Re-layout every monitor so container rects reserve (or
-                // release) the stackbar strip; the layout pass also creates
-                // or destroys the stackbar windows themselves.
-                for monitor in self.core.monitor_manager.get_all_monitors_ordered() {
-                    self.core.executor.mark_layout_dirty(monitor.handle);
-                }
-                self.core.flush_pending_layouts(&mut self.window_manager)?;
-                log::info!("Stackbar {}", if enabled { "enabled" } else { "disabled" });
-                Ok(())
-            }
-            DispatchCommand::ToggleTransparency => {
-                // Runtime-owned on/off
-                // toggle, mirrored into the live config like
-                // mouse-follows-focus so a later hot reload does not revert
-                // it. When off, every window renders fully opaque.
-                let enabled = !self.config.desktop.appearance.transparency_enabled;
-                self.config.desktop.appearance.transparency_enabled = enabled;
-                self.config_dirty = true;
-                self.apply_focus_effects();
-                log::info!(
-                    "Transparency {}",
-                    if enabled { "enabled" } else { "disabled" }
-                );
-                Ok(())
-            }
-            DispatchCommand::SetTransparencyAlpha { alpha } => {
-                // Set the inactive-window
-                // alpha at runtime, mirrored into the live config.
-                let alpha = alpha.max(20);
-                self.config.desktop.appearance.inactive_window_opacity = alpha;
-                self.config_dirty = true;
-                self.apply_focus_effects();
-                log::info!("Transparency alpha set to {alpha}");
-                Ok(())
-            }
-            DispatchCommand::SetGlobalWorkAreaOffset {
-                left,
-                top,
-                right,
-                bottom,
-            } => {
-                // Mirrored into the live config
-                // and applied to every monitor after the Windows work area
-                // and monitor reservations.
-                let offset = ReservedArea {
-                    left: left.clamp(0, 10_000),
-                    top: top.clamp(0, 10_000),
-                    right: right.clamp(0, 10_000),
-                    bottom: bottom.clamp(0, 10_000),
-                };
-                self.config.desktop.work_area_offset = offset;
-                self.config_dirty = true;
-                self.core
-                    .monitor_manager
-                    .set_global_work_area_offset(offset);
-                // Re-layout every monitor so the new offset takes effect.
-                for monitor in self.core.monitor_manager.get_all_monitors_ordered() {
-                    self.core.executor.mark_layout_dirty(monitor.handle);
-                }
-                self.core.flush_pending_layouts(&mut self.window_manager)?;
-                log::info!(
-                    "Global work-area offset set to {},{},{},{}",
-                    offset.left,
-                    offset.top,
-                    offset.right,
-                    offset.bottom
-                );
-                Ok(())
-            }
-            command => {
-                let result = self.core.dispatch(&mut self.window_manager, command);
-                if result.is_ok() {
-                    self.apply_focus_effects();
-                }
-                result
-            }
-        };
-        let mut fields = vec![
-            ("command".to_string(), command_name),
-            ("payload".to_string(), command_json),
-        ];
-        let kind = match &result {
-            Ok(()) => RuntimeEventKind::DispatchSucceeded,
-            Err(error) => {
-                fields.push(("error".to_string(), error.to_string()));
-                RuntimeEventKind::DispatchFailed
-            }
-        };
-        self.emit_runtime_event(kind, None, fields);
-        result
     }
 
     /// Save current window manager state to disk for restoration on next startup.
@@ -3255,21 +2405,187 @@ impl Runtime {
     }
 }
 
-/// A shortcut as it is written (`Ctrl+Alt+T`), for the log.
-fn shortcut_name_of(key: &str, ctrl: bool, alt: bool, shift: bool, win: bool) -> String {
-    let mut name = String::new();
-    for (held, modifier) in [(win, "Win"), (ctrl, "Ctrl"), (alt, "Alt"), (shift, "Shift")] {
-        if held {
-            name.push_str(modifier);
-            name.push('+');
+/// The Windows runtime is a host of the shared kind (`gevrek_host::wm`):
+/// it lends its parts, and says what only Windows knows.
+impl WmHost for Runtime {
+    type Desktop = WindowManager;
+
+    fn parts(&mut self) -> Parts<'_, WindowManager> {
+        Parts {
+            config: &mut self.config,
+            core: &mut self.core,
+            desktop: &mut self.window_manager,
+            host: &mut self.host,
         }
     }
-    name.push_str(key);
-    name
-}
 
-fn shortcut_name(event: &gevrek_engine::input::HotkeyEvent) -> String {
-    shortcut_name_of(&event.key, event.ctrl, event.alt, event.shift, event.win)
+    fn host(&self) -> &HostState {
+        &self.host
+    }
+
+    fn config(&self) -> &Config {
+        &self.config
+    }
+
+    fn settle(&mut self) {
+        if let Err(error) = self.core.flush_pending_layouts(&mut self.window_manager) {
+            log::warn!("layout: {error}");
+        }
+        self.apply_focus_effects();
+    }
+
+    fn install_bindings(&mut self, bindings: Vec<(i32, Hotkey)>) -> Result<()> {
+        self.install_hotkeys(bindings)
+    }
+
+    fn apply_appearance(&mut self) {
+        self.apply_appearance_profile();
+    }
+
+    fn reload_system(&mut self, old: &Config) {
+        // What there is to tell may have changed with the settings.
+        self.notices_checked = None;
+        // And whether the accent is the wallpaper's.
+        self.wallpaper_looked = None;
+        // And whether the scrolling layout's columns have to be whole.
+        self.follow_scrolling_room();
+        // A display switched off or on again in `desktop.outputs` leaves
+        // or joins the monitors, as one that is unplugged or plugged in.
+        if crate::dwm::monitor::set_unmanaged_outputs(&self.config.desktop.outputs) {
+            self.handle_display_change();
+        }
+        // Where the displays are, their modes and their turns.
+        if old.desktop.outputs != self.config.desktop.outputs {
+            self.outputs_changed(&old.desktop.outputs);
+        }
+    }
+
+    fn set_animations(&mut self, animations: &gevrek_model::settings::AnimationProfile) {
+        self.window_manager
+            .set_animation_profile(crate::system_look::animations(animations));
+    }
+
+    fn configure_monitors(&mut self) {
+        Self::configure_monitor_profiles(&mut self.core.monitor_manager, &self.config.desktop);
+    }
+
+    fn snap_zone_modifier_probe(&self) -> fn(gevrek_model::snap_zones::SnapZoneModifier) -> bool {
+        snap_zone_modifier_held
+    }
+
+    fn rules(&self) -> &Arc<Mutex<RuleEngine>> {
+        &self.rule_engine
+    }
+
+    // (With what Windows' own settings ask of every program: less
+    // movement, more contrast.)
+    fn system_appearance(
+        &self,
+        appearance: &gevrek_model::settings::AppearanceProfile,
+    ) -> gevrek_model::settings::AppearanceProfile {
+        crate::system_look::appearance(appearance)
+    }
+
+    fn prune_windows(&mut self) {
+        self.window_manager.prune_dead_windows();
+    }
+
+    fn system_state(&self) -> gevrek_host::wm::published::SystemState {
+        let gestures = self.hotkey_manager.gesture_backend_status();
+        gevrek_host::wm::published::SystemState {
+            event_loop_fps: self.event_loop_fps,
+            active_animations: self.window_manager.active_animation_count(),
+            gestures_available: gestures.available,
+            gesture_backend: gestures.backend,
+            gesture_devices: gestures.device_count,
+            gesture: self.gesture_progress.clone(),
+            gesture_error: gestures.last_error,
+            notices: self.notices.clone(),
+            // (Windows switches the layouts itself, and its own
+            // compositor shows the frames.)
+            keyboard_layout: None,
+            frames: Vec::new(),
+        }
+    }
+
+    // (Where a new window opens is Windows' own to say.)
+    fn expect_window(&mut self, _output: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn pick_window(&mut self) -> Result<()> {
+        crate::pick::toggle();
+        Ok(())
+    }
+
+    // Windows shows only the windows of one workspace: the others are put
+    // away where nothing can draw them. The shell draws the overview (it
+    // remembers pictures of them).
+    fn workspace_overview(&mut self) -> Result<()> {
+        if !crate::conflicts::shell_runs() {
+            anyhow::bail!(
+                "The overview of every workspace is gevrek-shell's on Windows, and it does not run"
+            );
+        }
+        self.emit_runtime_event(
+            RuntimeEventKind::ShellCommand,
+            None,
+            [(
+                "action".to_string(),
+                gevrek_model::command::SHELL_WORKSPACE_OVERVIEW.to_string(),
+            )],
+        );
+        Ok(())
+    }
+
+    // The system owns the keyboard layouts and the keys here.
+    fn keyboard_layout(&mut self, _target: gevrek_model::command::LayoutTarget) -> Result<()> {
+        anyhow::bail!("Keyboard layouts are switched by Windows itself (Win+Space)")
+    }
+
+    fn shortcuts_inhibit(&mut self) -> Result<()> {
+        anyhow::bail!("No program takes gevrek's keys on Windows")
+    }
+
+    fn answer_output_trial(&mut self, answer: gevrek_model::command::TrialAnswer) -> bool {
+        self.answer_display_trial(answer)
+    }
+
+    // The shell shows the list where it runs (a surface, no window to keep
+    // floating); the settings program's window is for when it does not, and
+    // the same key closes that one while it is open.
+    fn show_shortcuts(&mut self) -> Result<()> {
+        if gevrek_host::shortcuts::is_open() || !crate::conflicts::shell_runs() {
+            return gevrek_host::shortcuts::toggle();
+        }
+        self.emit_runtime_event(
+            RuntimeEventKind::ShellCommand,
+            None,
+            [(
+                "action".to_string(),
+                gevrek_model::command::SHELL_SHORTCUTS.to_string(),
+            )],
+        );
+        Ok(())
+    }
+
+    fn night_light_switched(&mut self) {
+        // (Looked at with the next pass, not in two seconds.)
+        self.wallpaper_looked = None;
+    }
+
+    fn preview_night_light(&mut self, temperature: u32, seconds: u32) -> Result<()> {
+        self.night_light.preview(temperature, seconds);
+        // (Looked at with the next pass.)
+        self.wallpaper_looked = None;
+        Ok(())
+    }
+
+    // On Windows a check sends real input through the system (tests/desktop
+    // does); the WM has no input path of its own to feed.
+    fn inject_input(&mut self, _steps: &[gevrek_host::input_injection::InjectedInput]) -> Result<()> {
+        anyhow::bail!("Made-up input is not taken on Windows; send real input through the system")
+    }
 }
 
 #[cfg(test)]
