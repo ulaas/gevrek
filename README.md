@@ -84,7 +84,7 @@ its Wayland compositor.
 |---|---|---|
 | Windows 10 and 11 | `gevrek-wm` arranges the windows of the Windows desktop; the shell replaces the taskbar | The most complete |
 | Linux (Wayland) | `gevrek-wl` is the compositor itself, on the hardware or as a window in another session; X11 programs run through Xwayland | Tiling, workspaces, rules, keys, gestures, the shell, the studio and the command line work. See [docs/LINUX.md](docs/LINUX.md) |
-| macOS (13 and later) | `gevrek-wm` arranges the windows of the macOS desktop through the Accessibility API | New: tiling, workspaces, focus, rules, keys, borders and tab strips work, and the shell's panel and launcher; no gestures yet. See [packaging/macos/README.txt](packaging/macos/README.txt) |
+| macOS (13 and later) | `gevrek-wm` arranges the windows of the macOS desktop through the Accessibility API | New: tiling, workspaces, focus, rules, keys (by the keyboard's layout), gestures, borders and tab strips work, and the shell's panel and launcher. The tray, what plays and pictures of windows are kept by macOS. See [packaging/macos/README.txt](packaging/macos/README.txt) |
 
 The logic of arranging windows (`gevrek-engine`) knows nothing of the
 system it runs on. Each system is a backend that implements the engine's

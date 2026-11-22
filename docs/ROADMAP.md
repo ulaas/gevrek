@@ -1057,8 +1057,12 @@ wanted, strike it when it is not.
       follows it, hides with its workspace, and goes when it closes. The
       plain ring only, square or rounded; it trails a dragged window a
       little.
-- [ ] The border's other styles (glow, shadow, dashed, double, gradient),
-      and the corner of each window as it is (it differs with a toolbar).
+- [x] The double and dashed borders, as on Windows (2026-11-22,
+      243980d): two thin rings; dashes along the band, laid anew when the
+      window's size changes. Glow, shadow and gradient are refused by the
+      configuration on every system, so there is nothing to draw.
+- [ ] The corner of each window as it is (it differs with a toolbar): a
+      rounded border follows a middle corner of 12 points now.
 - [x] Stackbars (2026-11-22, `stackbars.rs`): a panel over a group's
       shown window, its titles drawn by Core Animation, the shown tab
       marked; a click on a tab shows that window without gevrek taking the
@@ -1069,9 +1073,22 @@ wanted, strike it when it is not.
       and windows moved and resized with Option and the mouse
       (2026-11-22, `keys.rs`). The touchpad's scrolling is not a wheel's
       steps (it is left to the programs).
-- [ ] Touchpad gestures (MultitouchSupport is private).
-- [ ] Keys by the keyboard's layout: they are named by their place on a
-      US keyboard now.
+- [x] Touchpad gestures (2026-11-22, 4a1c077): the fingers from
+      MultitouchSupport (private, loaded with dlopen while a gesture
+      profile is on; without it there are no gestures and nothing else
+      changes) through the engine's recogniser, as on Windows. What every
+      system did with a recognised gesture is the shared host's now
+      (`Bindings::gesture`, `gesture_registrations`). The framework loads
+      and the built-in trackpad starts (`probe touchpad`).
+- [ ] **person** A swipe tried on the trackpad: `probe touchpad 10`
+      while swiping says how many fingers it saw; then a profile of four
+      fingers (three sideways is macOS's own Spaces, which goes on too).
+- [x] Keys by the keyboard's layout (2026-11-22, 63279bf): a letter is
+      the key that writes it in the layout in use, as on Windows (asked of
+      the layout with Carbon's UCKeyTranslate, again when another one is
+      selected); every other key by its place. The panels' shortcuts the
+      same. Checked against German, French and Turkish F without
+      selecting them (`probe layout <id>`).
 - [x] An app bundle, signed, for the permissions, and started at login
       (`packaging/macos`, 2026-11-22): `build-app.sh` makes Gevrek.app
       (`io.github.ulaas.gevrek`), `install.sh` puts it in ~/Applications;
@@ -1088,8 +1105,12 @@ wanted, strike it when it is not.
       source. The arithmetic of places is shared with the Windows host
       (`shellkit/src/place.rs`). The `spike` and `menu` examples run on
       it unchanged.
-- [ ] The rest of that host: drag and drop, the desktop soft behind a
-      surface, screen readers, input methods, the clipboard.
+- [x] The rest of that host (2026-11-22): the desktop soft behind the
+      parts a surface asks for, and drag and drop both ways, with the
+      shell's pass made inside AppKit's loop of a drag (b943d78); text
+      through the system's input methods (dead keys, the input methods'
+      composing) and Command-C, X, V (4def974); screen readers through
+      AccessKit (ff2fe68).
 - [x] The shell on macOS (2026-11-22): the Windows half
       (`shell/src/windows.rs`) is the half of both guests' systems; the
       window manager keeps the panel's room on macOS as on Windows.
@@ -1097,10 +1118,26 @@ wanted, strike it when it is not.
       the application folders, started by `open`), the volume (by the
       system's scripting), the keys of what plays and of the sound, the
       screenshot keys, the modifiers held, the ends of the session.
-- [ ] What the shell does not have on macOS yet: the tray (the menu
-      bar's own), what plays (MediaRemote is private), pictures of
-      windows (Screen Recording), the volume heard of when it changes,
-      the clipboard for the launcher, the network and the battery.
+- [x] More of `gevrek_system` on macOS (2026-11-22, 483d4d4): the
+      volume through Core Audio and heard of when it changes, the
+      clipboard kept for the launcher, the network and the battery, the
+      wifi's radio, bluetooth (its radio, devices, connecting; only from
+      Gevrek.app, which says why it uses it), the built-in display's
+      brightness.
+- [ ] What macOS keeps from the shell, each for a reason of its own, to
+      be decided before anything is written:
+      - the tray: macOS has none; the status items are the menu bar's,
+        drawn by each program in the menu bar's process, and not to be
+        shown or clicked from another program;
+      - what plays: MediaRemote is private, and since macOS 15.4 it
+        answers only Apple's own programs (a helper run as a script, as
+        some tools do, is a way round that Apple may close);
+      - pictures of windows (the switcher's, the zones' thumbnails):
+        ScreenCaptureKit, with the Screen Recording permission and its
+        purple mark in the menu bar while it records;
+      - the wifi's networks by name: macOS tells them only to a program
+        allowed to know the location (Location Services), so the radio is
+        switched here and the networks are left to the menu bar.
 - [ ] Windows in macOS's own full screen (a Space of their own) and on
       other Spaces: left alone now, not looked at.
 
@@ -1117,6 +1154,11 @@ wanted, strike it when it is not.
 ---
 
 ## Found on the way
+
+- [ ] **any** CI: the Linux test
+      `zones::draw::...everything_of_the_desktop_is_painted...` failed
+      once on a push of the macOS branch (2026-11-22) and passed when run
+      again; `draw.rs` was not touched. A test that fails now and then.
 
 - [x] **any** `gevrek-system` did not build for macOS, and with it
       `gevrek-shell` (the zones take the Linux half there, whose `notify`
@@ -1173,3 +1215,4 @@ wanted, strike it when it is not.
 | 2026-11-22, early morning | macOS 27.2 | Decided by the person: commit on a branch and let CI run the other systems' tests (PR #1, draft); FSEvents for the zones on macOS (`gevrek-system` and the shell build there, `check-macos.sh` passes). The rest of input on macOS: mouse buttons and wheel steps as bindings, long presses, a held button's repeat (timed each pass, as on Linux), windows moved and resized with the drag modifier (Option; `GEVREK_MACOS_DRAG_MODIFIER`), the drag started only on a window gevrek manages | 28 tests of the crate; every check passes, clippy clean. Seen with Activity Monitor and Dictionary: Option+wheel to the next workspace and back, a tiled window dragged and put back on drop (as the engine has it), a floating one moved by (-200, 60) and resized by (-100, -70) from its corner exactly. Long presses only in tests. Not committed at the time of writing |
 | 2026-11-22, morning | macOS 27.2 | The third `shellkit` host, for macOS (`mac/`): `Control`, `Sender`, `Shell` and `run` in the Windows host's shape, AppKit panels (a subclass that may take the keyboard though it has no frame), wgpu on Metal, AppKit's events as egui's input, a run loop source for other threads. The arithmetic of places moved out of the Windows host to be shared (`place.rs`). The examples `spike` and `menu` build on macOS | Every check passes; shellkit's 60 tests pass on macOS and it checks for Windows and Linux; clippy clean. Seen: the spike's surface 40 points high at the top of the free room, 328 frames in 3 s on Metal; in `menu` a real click on the panel's button opened the menu under it, a click on its second entry chose it and closed it, a click on Terminal's title bar closed an open menu, a message from another thread ended the shell; 20 frames in 7 s (nothing drawn while still). Typing not tried. Not committed at the time of writing |
 | 2026-11-22, late morning | macOS 27.2 | The shell on macOS (asked for: on with the plan). The Windows half of the shell is the half of both guests' systems; `gevrek_system` got macOS halves (applications, volume, media and screenshot keys, modifiers, the ends of the session; the rest says it is not there); the macOS host got `reach` and `is_open` as on Windows; the window manager keeps the panel's room (`set_bar`); Gevrek.app carries gevrek-shell | Every check passes; the shell's 232 tests and gevrek-system's 139 pass on macOS; Windows and Linux check. Seen with the window manager on Dictionary: the panel in the room kept for it (36 points under the menu bar, Dictionary below it); `gevrek shell launcher` opened the launcher, typed keys narrowed it (Calendar, then Calculator), Return started Calculator from /System/Applications. Not seen: the panel's look, its buttons, notifications, the power menu. Not committed at the time of writing |
+| 2026-11-22, evening | macOS 27.2 (Windows and Linux type-checked) | Everything open for macOS but the release workflow (asked for). `gevrek_system`: Core Audio's volume and its changes, the clipboard, network, battery, wifi's radio, bluetooth, brightness (483d4d4). The macOS surface host: the desktop soft behind a surface, drag and drop both ways with the shell's pass made inside AppKit's drag loop (b943d78); input methods and the clipboard (4def974); screen readers (ff2fe68). Double and dashed borders (243980d). Letters by the keyboard's layout, for bindings and the panels (63279bf). Touchpad gestures through MultitouchSupport, and the handling of a recognised gesture moved into the shared host, which Windows uses too (4a1c077). What macOS keeps from the shell written down with its reasons | Every check passes; Windows and Linux check. Tried: the system's numbers printed; a volume change heard once; soft parts made; the example's file dragged onto itself as a move, a copy and with Option a copy; a, Option-E E, s, Backspace, d typed "aéd"; copied and pasted twice "xyzxyz" (the pasteboard put back); the label and the field seen by the AX tree; each border style captured; German, French, Turkish F layouts read. Not tried: a swipe (nobody at the trackpad), bluetooth (only from the bundle), a real input method's list. Committed and pushed |

@@ -27,6 +27,21 @@ copy, paste and quit stay every program's. With Option held, the left
 button moves the window under the pointer and the right button resizes it
 (GEVREK_MACOS_DRAG_MODIFIER names another modifier, or `none`).
 
+A letter of a binding is the key that writes it in the keyboard layout
+in use (Win+Z is the key marked Z on a German keyboard too); the other
+keys are named by their place.
+
+Touchpad gestures (desktop.gestures) read the fingers through macOS's
+MultitouchSupport. macOS's own gestures go on beside them: give gevrek's
+profiles four fingers, or turn macOS's off in System Settings, Trackpad,
+More Gestures.
+
+What macOS keeps to itself: the menu bar's status items (there is no tray
+to show them in), what is playing (only Apple's programs are told), and
+pictures of other programs' windows (they would need Screen Recording).
+The wifi's networks are not named either (macOS names them only to a
+program allowed to know the location): they are chosen in the menu bar.
+
 To try gevrek on a few programs only, without it taking over the
 desktop, name their bundle ids:
 
