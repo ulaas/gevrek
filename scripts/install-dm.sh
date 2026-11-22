@@ -12,7 +12,8 @@
 # The programs go to /usr/local/bin (the greeter runs as a user of its own
 # and cannot read your home), the unit to /etc/systemd/system, the PAM
 # files to /etc/pam.d. The session a login opens is the one installed for
-# the person (`cargo xtask install --session`), else /usr/local/bin's.
+# the person (`cargo xtask install --session`), else /usr/local/bin's;
+# your own copy of the session's script is brought up to date with it.
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BIN=/usr/local/bin
@@ -59,6 +60,14 @@ for name in "${PROGRAMS[@]}"; do
     sudo install -m 0755 "$REPO/target/release/$name" "$BIN/$name"
 done
 sudo install -m 0755 "$REPO/resources/gevrek-session" "$BIN/gevrek-session"
+# A login runs your own copy before that one, where you have one (`cargo
+# xtask install --session` put it there): it is brought up to date too,
+# or a login would go on running the older script. (Only the script: it
+# finds its programs beside itself, and they are that install's.)
+if [ -e "$HOME/.local/bin/gevrek-session" ]; then
+    install -m 0755 "$REPO/resources/gevrek-session" "$HOME/.local/bin/gevrek-session"
+    echo "also brought up to date: $HOME/.local/bin/gevrek-session"
+fi
 sudo install -m 0644 "$PAM_FILE" /etc/pam.d/gevrek-dm
 sudo install -m 0644 "$REPO/resources/dm/pam-gevrek-greeter" /etc/pam.d/gevrek-greeter
 sudo install -Dm 0644 "$REPO/resources/dm/sysusers.conf" /etc/sysusers.d/gevrek-dm.conf

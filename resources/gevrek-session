@@ -37,9 +37,36 @@ if ! command -v systemctl >/dev/null 2>&1 || ! systemctl --user show-environment
     esac
 fi
 
+# The session's own targets and services go down with it, and the next
+# session does not inherit this one's display.
+finish() {
+    systemctl --user start --job-mode=replace-irreversibly gevrek-shutdown.target
+    systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP
+}
+
 if systemctl --user -q is-active gevrek.service gevrek-safe.service gevrek-previous.service; then
-    echo 'A gevrek session is already running.'
-    exit 1
+    # A gevrek whose login is over is left from a session that was cut
+    # off (its login manager was killed): it has no display any more, and
+    # it goes, so that this login is not turned away until a reboot.
+    # (The login it belongs to is the one the user's services were last
+    # given; logind says whether that one is still there.)
+    theirs=$(systemctl --user show-environment 2>/dev/null | sed -n 's/^XDG_SESSION_ID=//p')
+    state=
+    if [ -n "$theirs" ] && command -v loginctl >/dev/null 2>&1; then
+        state=$(loginctl show-session "$theirs" -p State --value 2>/dev/null) || state=gone
+        [ -n "$state" ] || state=gone
+    fi
+    case "$state" in
+        closing|gone)
+            echo "A gevrek of a login that is over (session $theirs: $state) is stopped."
+            systemctl --user stop gevrek.service gevrek-safe.service gevrek-previous.service
+            finish
+            ;;
+        *)
+            echo 'A gevrek session is already running.'
+            exit 1
+            ;;
+    esac
 fi
 
 # One graphical session for a user at a time: its services hang on
@@ -61,10 +88,23 @@ if command -v dbus-update-activation-environment >/dev/null 2>&1; then
     dbus-update-activation-environment --all
 fi
 
-# Until gevrek ends.
-systemctl --user --wait start "$unit"
+# A login manager that ends the session (it is stopped or started again,
+# the machine goes down) ends this script, not the service: gevrek is
+# stopped here, and does not stay behind with no login and no display.
+# (Waited for in the background: a shell runs a trap only between its
+# commands.)
+ended() {
+    trap '' TERM HUP INT
+    echo 'The login ended the session: gevrek is stopped.'
+    systemctl --user stop "$unit"
+    finish
+    exit 143
+}
+trap ended TERM HUP INT
 
-# The session's own targets and services go down with it, and the next
-# session does not inherit this one's display.
-systemctl --user start --job-mode=replace-irreversibly gevrek-shutdown.target
-systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP
+# Until gevrek ends.
+systemctl --user --wait start "$unit" &
+wait $!
+
+trap - TERM HUP INT
+finish

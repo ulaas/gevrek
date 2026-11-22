@@ -172,10 +172,11 @@ pub fn run() -> anyhow::Result<()> {
         }
     };
     say(&Answer::yes());
-    // A person's session starts when the service says that its console
-    // is the one shown (gevrek is given the display only there); a
-    // service that is gone says nothing, and nothing is started.
-    if order.kind == Kind::User {
+    // A session starts when the service says that its console is the
+    // one shown (gevrek is given the display only there), the greeter's
+    // as a person's; a service that is gone says nothing, and nothing is
+    // started.
+    {
         let mut go = String::new();
         log::debug!("the session waits for its console to be shown");
         if std::io::stdin().lock().read_line(&mut go).unwrap_or(0) == 0 {

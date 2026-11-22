@@ -124,7 +124,7 @@ fn session_command() -> String {
 
 /// Start a worker with its order; its first line says whether the
 /// session was opened. (What is written to it afterwards is the word
-/// that a person's session may start.)
+/// that the session may start.)
 fn start_worker(order: &Order) -> anyhow::Result<(Child, Answer, std::process::ChildStdin)> {
     let mut child = Command::new(std::env::current_exe()?)
         .arg("--worker")
@@ -145,7 +145,10 @@ fn start_worker(order: &Order) -> anyhow::Result<(Child, Answer, std::process::C
         log::debug!("the worker's answer was not understood: {error}");
         Answer::no("The session could not be opened.")
     });
-    log::debug!("the worker answered: {}", if answer.ok { "yes" } else { "no" });
+    log::debug!(
+        "the worker answered: {}",
+        if answer.ok { "yes" } else { "no" }
+    );
     if !answer.ok {
         match child.wait() {
             Ok(status) => log::debug!("the worker that said no ended: {status}"),
@@ -166,6 +169,12 @@ const FOR_THE_VEIL: Duration = Duration::from_millis(800);
 /// after a few that did not come up.
 fn keep_greeter(socket: PathBuf) {
     let mut failures = 0;
+    // The service's first greeter has its console shown: a service that
+    // is started again while another console is the one shown (a
+    // session's, a text login's) had a greeter that logind gave no
+    // display to, and no login came up. (A greeter started again later
+    // takes no console from a session that is running.)
+    let mut first = true;
     loop {
         let mut environment = vec![
             (
@@ -209,7 +218,22 @@ fn keep_greeter(socket: PathBuf) {
         };
         let started = Instant::now();
         match start_worker(&order) {
-            Ok((mut worker, answer, _to)) if answer.ok => {
+            Ok((mut worker, answer, mut to)) if answer.ok => {
+                // (The worker holds the console by now: logind starts no
+                // text login on it when it is shown.)
+                if first {
+                    match crate::console::show(GREETER_CONSOLE) {
+                        Ok(()) => log::debug!("console {GREETER_CONSOLE} is shown for the greeter"),
+                        Err(error) => {
+                            log::warn!("console {GREETER_CONSOLE} was not shown: {error}")
+                        }
+                    }
+                    first = false;
+                }
+                match writeln!(to, "go") {
+                    Ok(()) => log::debug!("the greeter's worker is told to begin"),
+                    Err(error) => log::warn!("the greeter's worker was not told to begin: {error}"),
+                }
                 log::info!("the greeter is started");
                 GREETER.store(worker.id() as i32, Ordering::SeqCst);
                 match worker.wait() {
@@ -420,7 +444,10 @@ fn power(machine: &impl Machine, restart: bool, running: &AtomicBool) -> Answer 
         log::debug!("the machine is not switched off: a session is running");
         return Answer::no("A session is running.");
     }
-    log::debug!("the greeter asks to {}", if restart { "restart" } else { "switch off" });
+    log::debug!(
+        "the greeter asks to {}",
+        if restart { "restart" } else { "switch off" }
+    );
     if machine.power(restart) {
         Answer::yes()
     } else {
@@ -699,10 +726,7 @@ mod tests {
             assert!(!answer.ok);
             assert!(!running.load(Ordering::SeqCst));
         }
-        assert!(machine
-            .did()
-            .iter()
-            .all(|did| matches!(did, Did::Open(_))));
+        assert!(machine.did().iter().all(|did| matches!(did, Did::Open(_))));
         assert_eq!(machine.did().len(), 2);
     }
 
