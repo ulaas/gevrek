@@ -65,6 +65,8 @@ pub mod runtime;
 #[cfg(target_os = "macos")]
 pub mod stackbars;
 #[cfg(target_os = "macos")]
+pub mod touchpad;
+#[cfg(target_os = "macos")]
 pub mod window_list;
 
 /// What this backend is and can do (`gevrek_host::backend_info`).

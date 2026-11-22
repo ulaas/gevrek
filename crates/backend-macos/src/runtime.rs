@@ -64,6 +64,10 @@ pub struct MacRuntime {
     tap: Option<crate::keys::KeyTap>,
     /// A window being moved or resized with the mouse.
     drag: Option<Drag>,
+    /// The touchpads, listened to while a gesture profile is on.
+    touchpad: Option<crate::touchpad::Touchpad>,
+    /// What the touchpads' fingers make: the configuration's gestures.
+    gestures: gevrek_engine::gesture::GestureRecognizer,
     looked_at_programs: Instant,
     looked_at_windows: Instant,
     /// Passes of the loop a second, measured.
@@ -138,6 +142,8 @@ impl MacRuntime {
             keys: Default::default(),
             tap: None,
             drag: None,
+            touchpad: None,
+            gestures: gevrek_engine::gesture::GestureRecognizer::default(),
             looked_at_programs: Instant::now(),
             looked_at_windows: Instant::now(),
             passes_per_second: 0.0,
@@ -226,6 +232,7 @@ impl MacRuntime {
             }
             self.handle_ax_events();
             self.handle_keys();
+            self.handle_gestures();
             self.handle_clicks();
             self.run_queued_commands();
             self.apply_configuration_changes();
@@ -418,6 +425,21 @@ impl MacRuntime {
     /// AppKit's queue (gevrek does not run AppKit's loop): a click on a
     /// stackbar's tab shows that tab's window. Everything else goes on to
     /// AppKit as it would in its own loop.
+    /// What the touchpads' fingers did since the last pass, as gestures.
+    fn handle_gestures(&mut self) {
+        let Some(touchpad) = &self.touchpad else {
+            return;
+        };
+        let mut events = Vec::new();
+        for (frame, at) in touchpad.frames() {
+            events.extend(self.gestures.feed_frame(frame, at));
+        }
+        events.extend(self.gestures.tick(crate::touchpad::clock_ms()));
+        for event in events {
+            self.gesture(&event);
+        }
+    }
+
     fn handle_clicks(&mut self) {
         use objc2_app_kit::{NSEventMask, NSEventType};
         let app = objc2_app_kit::NSApplication::sharedApplication(self.mtm);
@@ -677,6 +699,18 @@ impl WmHost for MacRuntime {
 
     fn install_bindings(&mut self, bindings: Vec<(i32, Hotkey)>) -> anyhow::Result<()> {
         self.keys.borrow_mut().bindings = bindings;
+        // The gestures go with the bindings (both are the configuration's
+        // ways of running a command).
+        let registrations = gevrek_host::wm::bindings::gesture_registrations(&self.config);
+        let gestures = &self.config.desktop.gestures;
+        let wanted = !registrations.is_empty();
+        self.gestures
+            .configure(registrations, gestures.idle_timeout_ms, gestures.axis_lock_ratio);
+        if wanted && self.touchpad.is_none() {
+            self.touchpad = crate::touchpad::Touchpad::start();
+        } else if !wanted {
+            self.touchpad = None;
+        }
         Ok(())
     }
 
@@ -721,7 +755,11 @@ impl WmHost for MacRuntime {
     fn system_state(&self) -> SystemState {
         SystemState {
             event_loop_fps: self.passes_per_second,
-            gesture_backend: "none".to_string(),
+            gesture_backend: if self.touchpad.is_some() {
+                "multitouch".to_string()
+            } else {
+                "none".to_string()
+            },
             ..SystemState::default()
         }
     }

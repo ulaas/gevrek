@@ -120,6 +120,26 @@ mod mac {
                     println!("  {name}");
                 }
             }
+            Some("touchpad") => {
+                // The touchpads' contacts for a few seconds.
+                let seconds = args.get(1).and_then(|text| text.parse().ok()).unwrap_or(5.0);
+                let Some(touchpad) = gevrek_macos::touchpad::Touchpad::start() else {
+                    println!("no touchpad to listen to");
+                    return;
+                };
+                println!("listening to the touchpad for {seconds} s");
+                let until = Instant::now() + Duration::from_secs_f64(seconds);
+                let mut frames = 0;
+                let mut most = 0;
+                while Instant::now() < until {
+                    std::thread::sleep(Duration::from_millis(50));
+                    for (frame, _) in touchpad.frames() {
+                        frames += 1;
+                        most = most.max(frame.contacts.len());
+                    }
+                }
+                println!("{frames} frames, at most {most} finger(s)");
+            }
             Some("tree") => match number(1) {
                 Some(pid) => tree(&ax::Element::application(pid), 0),
                 None => eprintln!("tree <pid>"),

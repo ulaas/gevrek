@@ -24,7 +24,7 @@ use crate::dwm::{
     FocusManager, MonitorManager, OverlayData, RuleEngine, WindowManager, WindowMonitor,
     SnapZoneManager,
 };
-use crate::hotkey::{GestureEvent, GesturePhase, GestureRegistration, Hotkey, HotkeyManager};
+use crate::hotkey::{GestureEvent, Hotkey, HotkeyManager};
 use crate::node_editor::LogEntry;
 use crate::persistence::PersistenceManager;
 use crate::settings::{DesktopConfig, SnapZoneSettings};
@@ -2296,22 +2296,7 @@ impl Runtime {
             }
         }
         let gestures = &self.config.desktop.gestures;
-        let gesture_registrations = if gestures.enabled {
-            gestures
-                .profiles
-                .iter()
-                .enumerate()
-                .filter(|(_, gesture)| gesture.enabled)
-                .map(|(index, gesture)| GestureRegistration {
-                    id: gevrek_host::wm::bindings::gesture_id(index),
-                    fingers: gesture.fingers,
-                    direction: gesture.direction,
-                    distance_percent: gesture.distance_percent,
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let gesture_registrations = gevrek_host::wm::bindings::gesture_registrations(&self.config);
         self.hotkey_manager
             .configure_gestures(
                 gesture_registrations,
@@ -2324,76 +2309,17 @@ impl Runtime {
     }
 
     fn process_gesture_event(&mut self, event: GestureEvent) {
-        let direction = event.direction.map(|direction| direction.config_name());
-        let kind = match event.phase {
-            GesturePhase::Started => RuntimeEventKind::GestureStarted,
-            GesturePhase::Updated => RuntimeEventKind::GestureUpdated,
-            GesturePhase::Completed => RuntimeEventKind::GestureCompleted,
-            GesturePhase::Cancelled => RuntimeEventKind::GestureCancelled,
-        };
+        // (What the gesture's overlay shows: Windows only.)
         self.gesture_progress = Some(crate::dwm::GestureProgressData {
             phase: event.phase.config_name().to_string(),
             fingers: event.fingers,
-            direction: direction.map(str::to_string),
+            direction: event.direction.map(|direction| direction.config_name().to_string()),
             progress: event.progress,
             delta_x: event.delta_x,
             delta_y: event.delta_y,
         });
         self.gesture_progress_updated = Some(std::time::Instant::now());
-        self.emit_runtime_event(
-            kind,
-            None,
-            [
-                ("fingers".to_string(), event.fingers.to_string()),
-                (
-                    "direction".to_string(),
-                    direction.unwrap_or("pending").to_string(),
-                ),
-                ("progress".to_string(), format!("{:.4}", event.progress)),
-                ("delta_x".to_string(), format!("{:.4}", event.delta_x)),
-                ("delta_y".to_string(), format!("{:.4}", event.delta_y)),
-            ],
-        );
-        log::log!(
-            if event.phase == GesturePhase::Updated {
-                log::Level::Trace
-            } else {
-                log::Level::Debug
-            },
-            "Gesture {}: {} finger{} {} {:.0}%",
-            event.phase.config_name(),
-            event.fingers,
-            if event.fingers == 1 { "" } else { "s" },
-            direction.unwrap_or("pending"),
-            event.progress * 100.0,
-        );
-        if event.phase == GesturePhase::Completed {
-            let commands = event
-                .registration_ids
-                .iter()
-                .filter_map(|id| {
-                    let index = gevrek_host::wm::bindings::gesture_index(*id)?;
-                    self.config
-                        .desktop
-                        .gestures
-                        .profiles
-                        .get(index)
-                        .map(|gesture| gesture.command.clone())
-                })
-                .collect::<Vec<_>>();
-            for command in commands {
-                if let Err(error) = self.run_command(command) {
-                    log::error!("Error executing gesture action: {error}");
-                }
-            }
-        }
-        self.publish_state(Some(format!(
-            "Gesture {}: {} finger{} {}",
-            event.phase.config_name(),
-            event.fingers,
-            if event.fingers == 1 { "" } else { "s" },
-            direction.unwrap_or("pending"),
-        )));
+        self.gesture(&event);
     }
 
     /// Save current window manager state to disk for restoration on next startup.

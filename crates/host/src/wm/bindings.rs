@@ -17,7 +17,9 @@
 
 use super::WmHost;
 use crate::wm::commands::Commands;
+use crate::wm::published::Published;
 use gevrek_engine::executor::{PendingFocusOp, RuntimeEventKind};
+use gevrek_engine::gesture::{GestureEvent, GesturePhase, GestureRegistration};
 use gevrek_engine::input::{Hotkey, HotkeyEvent};
 use gevrek_engine::Effect;
 use gevrek_model::config::Config;
@@ -48,6 +50,28 @@ pub fn binding_index(id: i32) -> Option<usize> {
     (BINDING_IDS..GESTURE_IDS)
         .contains(&id)
         .then(|| (id - BINDING_IDS) as usize)
+}
+
+/// The touchpad gestures the configuration has on, as a recognizer takes
+/// them (ids as [`gesture_id`] gives them out): none while gestures are
+/// off.
+pub fn gesture_registrations(config: &Config) -> Vec<GestureRegistration> {
+    let gestures = &config.desktop.gestures;
+    if !gestures.enabled {
+        return Vec::new();
+    }
+    gestures
+        .profiles
+        .iter()
+        .enumerate()
+        .filter(|(_, gesture)| gesture.enabled)
+        .map(|(index, gesture)| GestureRegistration {
+            id: gesture_id(index),
+            fingers: gesture.fingers,
+            direction: gesture.direction,
+            distance_percent: gesture.distance_percent,
+        })
+        .collect()
 }
 
 /// Which gesture profile an id is, if it is one.
@@ -209,6 +233,70 @@ pub trait Bindings: WmHost {
             }
         }
         self.settle();
+    }
+
+    /// A touchpad gesture went on (as a recognizer saw it): told to
+    /// extensions as it goes, and the commands of the profiles it matched
+    /// run once it is complete.
+    fn gesture(&mut self, event: &GestureEvent) {
+        let direction = event.direction.map(|direction| direction.config_name());
+        let kind = match event.phase {
+            GesturePhase::Started => RuntimeEventKind::GestureStarted,
+            GesturePhase::Updated => RuntimeEventKind::GestureUpdated,
+            GesturePhase::Completed => RuntimeEventKind::GestureCompleted,
+            GesturePhase::Cancelled => RuntimeEventKind::GestureCancelled,
+        };
+        self.host().emit(
+            kind,
+            None,
+            [
+                ("fingers".to_string(), event.fingers.to_string()),
+                (
+                    "direction".to_string(),
+                    direction.unwrap_or("pending").to_string(),
+                ),
+                ("progress".to_string(), format!("{:.4}", event.progress)),
+                ("delta_x".to_string(), format!("{:.4}", event.delta_x)),
+                ("delta_y".to_string(), format!("{:.4}", event.delta_y)),
+            ],
+        );
+        let said = format!(
+            "Gesture {}: {} finger{} {}",
+            event.phase.config_name(),
+            event.fingers,
+            if event.fingers == 1 { "" } else { "s" },
+            direction.unwrap_or("pending"),
+        );
+        log::log!(
+            if event.phase == GesturePhase::Updated {
+                log::Level::Trace
+            } else {
+                log::Level::Debug
+            },
+            "{said} {:.0}%",
+            event.progress * 100.0,
+        );
+        if event.phase == GesturePhase::Completed {
+            let commands: Vec<_> = event
+                .registration_ids
+                .iter()
+                .filter_map(|id| {
+                    let index = gesture_index(*id)?;
+                    self.config()
+                        .desktop
+                        .gestures
+                        .profiles
+                        .get(index)
+                        .map(|gesture| gesture.command.clone())
+                })
+                .collect();
+            for command in commands {
+                if let Err(error) = self.run_command(command) {
+                    log::error!("Error executing gesture action: {error}");
+                }
+            }
+        }
+        self.publish_state(Some(said));
     }
 }
 
