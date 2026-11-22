@@ -1077,8 +1077,9 @@ wanted, strike it when it is not.
 - [ ] macOS in the release workflow: built, signed with a Developer ID
       and notarized on a macOS runner (the secrets: the certificate, an
       app-specific password or an API key).
-- [ ] `gevrek-system` builds for macOS (Found on the way), and then the
-      shell: a third `shellkit` host (NSPanel), `crates/system` for macOS.
+- [ ] The shell on macOS: a third `shellkit` host (NSPanel), and
+      `crates/system` for macOS (it builds, with the Linux zones and
+      what has no macOS half yet).
 - [ ] Windows in macOS's own full screen (a Space of their own) and on
       other Spaces: left alone now, not looked at.
 
@@ -1096,14 +1097,12 @@ wanted, strike it when it is not.
 
 ## Found on the way
 
-- [ ] **any** `gevrek-system` does not build for macOS, and with it
-      `gevrek-shell`: the zones take the Linux half there
-      (`zones/mod.rs`, `not(windows)`), whose `notify` and `jiff` are
-      Linux's dependencies only. `scripts/check-macos.sh` fails on it.
-      Giving macOS `notify` too is not enough: without its default
-      features it has no watcher on macOS, and its two (FSEvents,
-      kqueue) bring crates that are not in the lockfile yet. To decide:
-      which of them, or zones without a watcher on macOS for now.
+- [x] **any** `gevrek-system` did not build for macOS, and with it
+      `gevrek-shell` (the zones take the Linux half there, whose `notify`
+      was Linux's only). Decided: FSEvents. It builds, and
+      `scripts/check-macos.sh` passes (2026-11-22). Three tests of the
+      Linux zones are Linux's own and left out on macOS (inotify's paired
+      renames, Linux's user id).
 
 ## Log
 

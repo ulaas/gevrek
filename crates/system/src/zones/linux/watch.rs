@@ -610,6 +610,9 @@ mod tests {
     }
 
     #[test]
+    // (inotify's own: the two halves of a rename, paired. FSEvents does not
+    // pair them: on macOS the change is `Lost`, and the folder is read again.)
+    #[cfg_attr(target_os = "macos", ignore = "inotify's own")]
     fn the_kernel_tells_of_a_file_made_renamed_and_removed() {
         // On the system's own temporary folder: a folder of Windows
         // mounted into WSL tells nothing.

@@ -225,6 +225,9 @@ mod tests {
     }
 
     #[test]
+    // (Linux's own: the person's id as Linux tells it. macOS borrows these
+    // zones until it has its own.)
+    #[cfg_attr(target_os = "macos", ignore = "Linux's own")]
     fn a_launcher_is_only_trusted_when_the_person_allowed_exactly_this_file() {
         let root = crate::zones::linux::testing::folder("trust");
         let places = Places::under(&root);
