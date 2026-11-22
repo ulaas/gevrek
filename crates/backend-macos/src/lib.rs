@@ -57,6 +57,8 @@ pub mod displays;
 #[cfg(target_os = "macos")]
 pub mod keys;
 #[cfg(target_os = "macos")]
+pub mod layout;
+#[cfg(target_os = "macos")]
 pub mod observer;
 #[cfg(target_os = "macos")]
 pub mod runtime;

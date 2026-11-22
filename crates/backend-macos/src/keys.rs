@@ -26,9 +26,10 @@
 //! Win with Control, and the standard bindings have both (`Lock the
 //! screen` and `Move window right`, `Move` and `Send window to workspace`).
 //!
-//! Keys are named by where they are on the keyboard (the US layout's
-//! names), and through the same virtual-key codes as on the other systems
-//! (`gevrek_model::keys`), so a binding is written the same everywhere.
+//! Keys are named through the same virtual-key codes as on the other
+//! systems (`gevrek_model::keys`), so a binding is written the same
+//! everywhere: a letter by the key that writes it in the layout in use
+//! (`layout`), every other key by its place.
 
 use crate::ffi;
 use gevrek_engine::input::{Hotkey, HotkeyEvent};
@@ -70,15 +71,15 @@ impl Held {
     }
 }
 
-/// The name a binding gives the key with this macOS key code (its place on
-/// the keyboard), through its Windows virtual-key code.
+/// The name a binding gives the key with this macOS key code by its place
+/// on the keyboard (the US layout's), through its Windows virtual-key code.
 pub fn key_name(code: u16) -> Option<String> {
-    gevrek_model::keys::vk_to_key_name(virtual_key(code)?)
+    gevrek_model::keys::vk_to_key_name(place_key(code)?)
 }
 
 /// The virtual-key code of the key at a place on a Mac keyboard
-/// (`kVK_*` of Carbon's Events.h).
-fn virtual_key(code: u16) -> Option<u16> {
+/// (`kVK_*` of Carbon's Events.h), as the US layout has it.
+pub fn place_key(code: u16) -> Option<u16> {
     Some(match code {
         0x00 => b'A' as u16,
         0x01 => b'S' as u16,
@@ -287,6 +288,8 @@ pub struct Shared {
     /// The button that holds a drag.
     dragging: Option<u32>,
     held: Vec<Down>,
+    /// What the layout in use makes of the keys.
+    layout: crate::layout::Layout,
 }
 
 impl Shared {
@@ -581,7 +584,14 @@ fn key_event(shared: &mut Shared, event: ffi::CFTypeRef, up: bool, held: Held) -
         shared.swallowed.remove(&code);
         shared.release(u32::from(code));
     }
-    let Some(key) = key_name(code) else {
+    if trigger == BindingTrigger::Press {
+        shared.layout.refresh();
+    }
+    let Some(key) = shared
+        .layout
+        .virtual_key(code)
+        .and_then(gevrek_model::keys::vk_to_key_name)
+    else {
         return was_swallowed;
     };
     if shared.paused {

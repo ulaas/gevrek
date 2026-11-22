@@ -1370,7 +1370,8 @@ impl Host {
                     surface.redraw = true;
                     return true;
                 }
-                if let Some(key) = input::key_of(event.keyCode()) {
+                let written = event.charactersIgnoringModifiers().map(|text| text.to_string());
+                if let Some(key) = input::logical_key(event.keyCode(), written.as_deref()) {
                     // Command and a key: what egui knows as copy, cut and
                     // paste are its own events.
                     if pressed && modifiers.command && key == egui::Key::C {
@@ -1384,7 +1385,7 @@ impl Host {
                     }
                     surface.events.push(egui::Event::Key {
                         key,
-                        physical_key: Some(key),
+                        physical_key: input::key_of(event.keyCode()),
                         pressed,
                         repeat: pressed && event.isARepeat(),
                         modifiers,

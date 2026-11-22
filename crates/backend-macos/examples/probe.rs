@@ -94,6 +94,32 @@ mod mac {
                     .and_then(|text| text.parse().ok())
                     .unwrap_or(15.0),
             ),
+            Some("layout") => {
+                // The letters as the selected layout names them.
+                let layout = match args.get(1) {
+                    Some(id) => gevrek_macos::layout::Layout::named(id),
+                    None => {
+                        let mut layout = gevrek_macos::layout::Layout::default();
+                        layout.refresh();
+                        Some(layout)
+                    }
+                };
+                let Some(layout) = layout else {
+                    eprintln!("no such layout");
+                    return;
+                };
+                let names: Vec<String> = (0x00..=0x32u16)
+                    .filter_map(|code| {
+                        let named = layout.virtual_key(code).and_then(gevrek_model::keys::vk_to_key_name);
+                        let placed = gevrek_macos::keys::key_name(code);
+                        (named != placed).then(|| format!("{code:#04x}: {placed:?} -> {named:?}"))
+                    })
+                    .collect();
+                println!("{} keys named otherwise than by their place", names.len());
+                for name in names {
+                    println!("  {name}");
+                }
+            }
             Some("tree") => match number(1) {
                 Some(pid) => tree(&ax::Element::application(pid), 0),
                 None => eprintln!("tree <pid>"),

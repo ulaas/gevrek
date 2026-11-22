@@ -87,6 +87,22 @@ pub fn key_of(code: u16) -> Option<egui::Key> {
     })
 }
 
+/// The key as egui names it for shortcuts: by the letter it writes in
+/// the keyboard's layout (`written`: what it writes with no modifier
+/// held), as on the other systems; every other key by its place.
+pub fn logical_key(code: u16, written: Option<&str>) -> Option<egui::Key> {
+    let letter = written
+        .and_then(|text| {
+            let mut characters = text.chars();
+            match (characters.next(), characters.next()) {
+                (Some(character), None) if character.is_ascii_alphabetic() => Some(character),
+                _ => None,
+            }
+        })
+        .and_then(|letter| egui::Key::from_name(&letter.to_ascii_uppercase().to_string()));
+    letter.or_else(|| key_of(code))
+}
+
 /// The modifiers held, as egui has them: Command is the key a Mac's
 /// shortcuts are on (`command`).
 pub fn modifiers_of(flags: NSEventModifierFlags) -> egui::Modifiers {
@@ -164,5 +180,16 @@ mod tests {
         assert_eq!(key_of(0x35), Some(egui::Key::Escape));
         assert_eq!(key_of(0x7D), Some(egui::Key::ArrowDown));
         assert_eq!(key_of(0x3A), None);
+    }
+
+    #[test]
+    fn a_letter_is_the_one_the_layout_writes() {
+        // German: the key at the US layout's Y writes z.
+        assert_eq!(logical_key(0x10, Some("z")), Some(egui::Key::Z));
+        assert_eq!(logical_key(0x10, Some("y")), Some(egui::Key::Y));
+        // What writes no letter is named by its place.
+        assert_eq!(logical_key(0x12, Some("&")), Some(egui::Key::Num1));
+        assert_eq!(logical_key(0x7B, Some("\u{F702}")), Some(egui::Key::ArrowLeft));
+        assert_eq!(logical_key(0x00, None), Some(egui::Key::A));
     }
 }
