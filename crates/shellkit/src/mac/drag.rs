@@ -1,6 +1,7 @@
-//! Drag and drop on macOS: a surface's view is where other programs' drags
-//! are dropped (AppKit's dragging destination) and where drags out of it
-//! begin (its dragging source).
+//! Drag and drop on macOS: a surface's view (`view::SurfaceView`) is where
+//! other programs' drags are dropped (AppKit's dragging destination) and
+//! where drags out of it begin (its dragging source); what it is asked is
+//! answered here.
 //!
 //! AppKit asks the view while the drag is under way and wants its answer
 //! at once: the answer is the one the surface last gave (or its standing
@@ -17,9 +18,9 @@ use crate::dnd::{
 };
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2::{class, define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSResponder, NSView};
-use objc2_foundation::{NSArray, NSObject, NSPoint, NSRect, NSSize, NSString};
+use objc2::{class, msg_send};
+use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSView};
+use objc2_foundation::{NSArray, NSPoint, NSRect, NSSize, NSString};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
@@ -223,214 +224,190 @@ fn kinds_of(pasteboard: &AnyObject) -> Vec<String> {
         .unwrap_or_default()
 }
 
-define_class!(
-    // SAFETY: NSView has no subclassing requirements; the one ivar is a
-    // plain number, dropped with the view.
-    #[unsafe(super(NSView, NSResponder, NSObject))]
-    #[thread_kind = MainThreadOnly]
-    #[name = "GevrekSurfaceView"]
-    #[ivars = Cell<u32>]
-    pub struct SurfaceView;
+// What AppKit asks of a surface's view (`view::SurfaceView`) about drags.
 
-    impl SurfaceView {
-        #[unsafe(method(draggingEntered:))]
-        fn dragging_entered(&self, info: &AnyObject) -> usize {
-            let id = self.ivars().get();
-            if !with_slot(id, |slot| slot.accepting) {
-                return 0;
-            }
-            // SAFETY: the dragging info's own properties.
-            let (mask, pasteboard): (usize, Retained<AnyObject>) =
-                unsafe { (msg_send![info, draggingSourceOperationMask], msg_send![info, draggingPasteboard]) };
-            let allowed = actions_of(mask);
-            let kinds = kinds_of(&pasteboard);
-            let offered = Offered {
-                files: kinds.iter().any(|kind| kind == FILE_URL),
-                kinds,
-                allowed,
-                payload: Some(payload_of(&pasteboard, allowed)),
-            };
-            with_slot(id, |slot| {
-                slot.offered = allowed;
-                slot.answer = slot.standing.unwrap_or(DropAnswer::REFUSE);
-            });
-            tell(id, DragEvent::Entered { at: self.at(info), offered });
-            self.operation()
-        }
-
-        #[unsafe(method(draggingUpdated:))]
-        fn dragging_updated(&self, info: &AnyObject) -> usize {
-            let id = self.ivars().get();
-            if !with_slot(id, |slot| slot.accepting) {
-                return 0;
-            }
-            let at = self.at(info);
-            // (AppKit asks again and again while the pointer rests: only a
-            // move is news.)
-            let moved = with_slot(id, |slot| {
-                !matches!(slot.events.last(), Some(DragEvent::Moved { at: last }) if *last == at)
-            });
-            if moved {
-                tell(id, DragEvent::Moved { at });
-            }
-            self.operation()
-        }
-
-        #[unsafe(method(draggingExited:))]
-        fn dragging_exited(&self, _info: Option<&AnyObject>) {
-            let id = self.ivars().get();
-            if with_slot(id, |slot| slot.accepting) {
-                tell(id, DragEvent::Left);
-            }
-        }
-
-        #[unsafe(method(prepareForDragOperation:))]
-        fn prepare(&self, _info: &AnyObject) -> bool {
-            true
-        }
-
-        #[unsafe(method(performDragOperation:))]
-        fn perform(&self, info: &AnyObject) -> bool {
-            self.dropped(info)
-        }
-
-        // The view as the source of a drag out of the surface.
-
-        #[unsafe(method(draggingSession:sourceOperationMaskForDraggingContext:))]
-        fn source_mask(&self, _session: &AnyObject, _context: isize) -> usize {
-            mask_of(with_slot(self.ivars().get(), |slot| slot.out))
-        }
-
-        #[unsafe(method(draggingSession:endedAtPoint:operation:))]
-        fn ended(&self, _session: &AnyObject, _at: NSPoint, operation: usize) {
-            let id = self.ivars().get();
-            log::debug!("surface {id}: the drag out ended with operation {operation}");
-            OUT.with(|out| out.set(false));
-            tell(id, DragEvent::Ended { outcome: outcome_of(operation) });
-        }
+/// A drag came over the surface: what it would come to.
+pub fn entered(view: &NSView, id: u32, info: &AnyObject) -> usize {
+    if !with_slot(id, |slot| slot.accepting) {
+        return 0;
     }
-);
+    // SAFETY: the dragging info's own properties.
+    let (mask, pasteboard): (usize, Retained<AnyObject>) = unsafe {
+        (
+            msg_send![info, draggingSourceOperationMask],
+            msg_send![info, draggingPasteboard],
+        )
+    };
+    let allowed = actions_of(mask);
+    let kinds = kinds_of(&pasteboard);
+    let offered = Offered {
+        files: kinds.iter().any(|kind| kind == FILE_URL),
+        kinds,
+        allowed,
+        payload: Some(payload_of(&pasteboard, allowed)),
+    };
+    with_slot(id, |slot| {
+        slot.offered = allowed;
+        slot.answer = slot.standing.unwrap_or(DropAnswer::REFUSE);
+    });
+    tell(
+        id,
+        DragEvent::Entered {
+            at: at(view, info),
+            offered,
+        },
+    );
+    operation(id)
+}
 
-impl SurfaceView {
-    /// Something was let go on the surface: whether it is taken, and what
-    /// it is told of.
-    fn dropped(&self, info: &AnyObject) -> bool {
-        let id = self.ivars().get();
-        let (accepting, offered, answer) =
-            with_slot(id, |slot| (slot.accepting, slot.offered, slot.answer));
-        log::debug!(
-            "surface {id}: dropped, {offered:?} offered, {:?} held, {answer:?} answered",
-            held_of(NSEvent::modifierFlags_class())
-        );
-        let Some(action) = accepting
-            .then(|| dnd::negotiate(offered, held_of(NSEvent::modifierFlags_class()), answer))
-            .flatten()
-        else {
-            return false;
-        };
-        // SAFETY: the dragging info's pasteboard.
-        let pasteboard: Retained<AnyObject> = unsafe { msg_send![info, draggingPasteboard] };
-        let payload = payload_of(&pasteboard, offered);
-        tell(
-            id,
-            DragEvent::Dropped {
-                at: self.at(info),
-                payload,
-                action,
-            },
-        );
-        true
+/// The drag over the surface moved (or rests): what it would come to.
+pub fn updated(view: &NSView, id: u32, info: &AnyObject) -> usize {
+    if !with_slot(id, |slot| slot.accepting) {
+        return 0;
+    }
+    let at = at(view, info);
+    // (AppKit asks again and again while the pointer rests: only a move
+    // is news.)
+    let moved = with_slot(
+        id,
+        |slot| !matches!(slot.events.last(), Some(DragEvent::Moved { at: last }) if *last == at),
+    );
+    if moved {
+        tell(id, DragEvent::Moved { at });
+    }
+    operation(id)
+}
+
+/// The drag went away.
+pub fn exited(id: u32) {
+    if with_slot(id, |slot| slot.accepting) {
+        tell(id, DragEvent::Left);
     }
 }
 
-impl SurfaceView {
-    pub fn new(mtm: MainThreadMarker, frame: NSRect, id: u32) -> Retained<Self> {
-        let this = mtm.alloc::<Self>().set_ivars(Cell::new(id));
-        // SAFETY: NSView's initializer.
-        unsafe { msg_send![super(this), initWithFrame: frame] }
-    }
+/// Something was let go on the surface: whether it is taken, and what it
+/// is told of.
+pub fn dropped(view: &NSView, id: u32, info: &AnyObject) -> bool {
+    let (accepting, offered, answer) =
+        with_slot(id, |slot| (slot.accepting, slot.offered, slot.answer));
+    let Some(action) = accepting
+        .then(|| dnd::negotiate(offered, held_of(NSEvent::modifierFlags_class()), answer))
+        .flatten()
+    else {
+        return false;
+    };
+    // SAFETY: the dragging info's pasteboard.
+    let pasteboard: Retained<AnyObject> = unsafe { msg_send![info, draggingPasteboard] };
+    let payload = payload_of(&pasteboard, offered);
+    tell(
+        id,
+        DragEvent::Dropped {
+            at: at(view, info),
+            payload,
+            action,
+        },
+    );
+    true
+}
 
-    /// Where the drag is, in the surface's points (from its top).
-    fn at(&self, info: &AnyObject) -> egui::Pos2 {
-        // SAFETY: the dragging info's place, in the window's coordinates.
-        let point: NSPoint = unsafe { msg_send![info, draggingLocation] };
-        let height = self.bounds().size.height;
-        egui::pos2(point.x as f32, (height - point.y) as f32)
-    }
+/// What the source of a drag out of the surface allows.
+pub fn source_mask(id: u32) -> usize {
+    mask_of(with_slot(id, |slot| slot.out))
+}
 
-    /// What the drag over the surface would come to now.
-    fn operation(&self) -> usize {
-        let (offered, answer) = with_slot(self.ivars().get(), |slot| (slot.offered, slot.answer));
-        mask_of_action(dnd::negotiate(
-            offered,
-            held_of(NSEvent::modifierFlags_class()),
-            answer,
-        ))
-    }
+/// The drag out of the surface is over.
+pub fn ended(id: u32, operation: usize) {
+    log::debug!("surface {id}: the drag out ended with operation {operation}");
+    OUT.with(|out| out.set(false));
+    tell(
+        id,
+        DragEvent::Ended {
+            outcome: outcome_of(operation),
+        },
+    );
+}
 
-    /// Begin a drag of `drag` out of the surface, by the mouse event that
-    /// moved with the button held. Whether it began.
-    pub fn begin(&self, drag: &DragStart, event: &NSEvent) -> bool {
-        let items = self.items(drag, event);
-        if items.is_empty() {
-            return false;
+/// Where the drag is, in the surface's points (from its top).
+fn at(view: &NSView, info: &AnyObject) -> egui::Pos2 {
+    // SAFETY: the dragging info's place, in the window's coordinates.
+    let point: NSPoint = unsafe { msg_send![info, draggingLocation] };
+    let height = view.bounds().size.height;
+    egui::pos2(point.x as f32, (height - point.y) as f32)
+}
+
+/// What the drag over the surface would come to now.
+fn operation(id: u32) -> usize {
+    let (offered, answer) = with_slot(id, |slot| (slot.offered, slot.answer));
+    mask_of_action(dnd::negotiate(
+        offered,
+        held_of(NSEvent::modifierFlags_class()),
+        answer,
+    ))
+}
+
+/// Begin a drag of `drag` out of the surface, by the mouse event that
+/// moved with the button held; the view is its source. Whether it began.
+pub fn begin(view: &NSView, id: u32, drag: &DragStart, event: &NSEvent) -> bool {
+    let items = items(drag, event);
+    if items.is_empty() {
+        return false;
+    }
+    with_slot(id, |slot| slot.out = drag.payload.allowed);
+    let items = NSArray::from_retained_slice(&items);
+    // SAFETY: dragging items, the event of the drag, and this view as
+    // its source (it answers the source's two questions).
+    let session: Option<Retained<AnyObject>> = unsafe {
+        msg_send![view, beginDraggingSessionWithItems: &*items, event: event, source: view]
+    };
+    OUT.with(|out| out.set(session.is_some()));
+    session.is_some()
+}
+
+/// One item for each file, address and text, the picture (if any) under
+/// the pointer on the first.
+fn items(drag: &DragStart, event: &NSEvent) -> Vec<Retained<AnyObject>> {
+    let point = event.locationInWindow();
+    let picture = drag
+        .image
+        .as_ref()
+        .filter(|image| image.is_sound())
+        .and_then(image_of);
+    let (width, tall, hotspot) = match &drag.image {
+        Some(image) if picture.is_some() => {
+            let (width, tall) = image.logical_size();
+            (f64::from(width), f64::from(tall), image.logical_hotspot())
         }
-        with_slot(self.ivars().get(), |slot| slot.out = drag.payload.allowed);
-        let items = NSArray::from_retained_slice(&items);
-        // SAFETY: dragging items, the event of the drag, and this view as
-        // its source (it answers the source's two questions).
-        let session: Option<Retained<AnyObject>> = unsafe {
-            msg_send![self, beginDraggingSessionWithItems: &*items, event: event, source: self]
-        };
-        OUT.with(|out| out.set(session.is_some()));
-        session.is_some()
-    }
-
-    /// One item for each file, address and text, the picture (if any)
-    /// under the pointer on the first.
-    fn items(&self, drag: &DragStart, event: &NSEvent) -> Vec<Retained<AnyObject>> {
-        let point = event.locationInWindow();
-        let picture = drag
-            .image
-            .as_ref()
-            .filter(|image| image.is_sound())
-            .and_then(image_of);
-        let (width, tall, hotspot) = match &drag.image {
-            Some(image) if picture.is_some() => {
-                let (width, tall) = image.logical_size();
-                (f64::from(width), f64::from(tall), image.logical_hotspot())
-            }
-            _ => (32.0, 32.0, (16, 16)),
-        };
-        // (The view is measured from its bottom; the hotspot from the
-        // picture's top.)
-        let frame = NSRect::new(
-            NSPoint::new(
-                point.x - f64::from(hotspot.0),
-                point.y - (tall - f64::from(hotspot.1)),
-            ),
-            NSSize::new(width, tall),
-        );
-        let mut writers: Vec<Retained<AnyObject>> = Vec::new();
-        // SAFETY: NSURL and NSString are pasteboard writers.
-        unsafe {
-            for path in &drag.payload.paths {
-                let path = NSString::from_str(path);
-                let url: Option<Retained<AnyObject>> =
-                    msg_send![class!(NSURL), fileURLWithPath: &*path];
-                writers.extend(url);
-            }
-            for address in &drag.payload.uris {
-                let address = NSString::from_str(address);
-                let url: Option<Retained<AnyObject>> =
-                    msg_send![class!(NSURL), URLWithString: &*address];
-                writers.extend(url);
-            }
-            if let Some(text) = &drag.payload.text {
-                writers.push(Retained::cast_unchecked(NSString::from_str(text)));
-            }
+        _ => (32.0, 32.0, (16, 16)),
+    };
+    // (The view is measured from its bottom; the hotspot from the
+    // picture's top.)
+    let frame = NSRect::new(
+        NSPoint::new(
+            point.x - f64::from(hotspot.0),
+            point.y - (tall - f64::from(hotspot.1)),
+        ),
+        NSSize::new(width, tall),
+    );
+    let mut writers: Vec<Retained<AnyObject>> = Vec::new();
+    // SAFETY: NSURL and NSString are pasteboard writers.
+    unsafe {
+        for path in &drag.payload.paths {
+            let path = NSString::from_str(path);
+            let url: Option<Retained<AnyObject>> =
+                msg_send![class!(NSURL), fileURLWithPath: &*path];
+            writers.extend(url);
         }
-        writers
+        for address in &drag.payload.uris {
+            let address = NSString::from_str(address);
+            let url: Option<Retained<AnyObject>> =
+                msg_send![class!(NSURL), URLWithString: &*address];
+            writers.extend(url);
+        }
+        if let Some(text) = &drag.payload.text {
+            writers.push(Retained::cast_unchecked(NSString::from_str(text)));
+        }
+    }
+    writers
             .into_iter()
             .enumerate()
             .filter_map(|(index, writer)| {
@@ -446,7 +423,6 @@ impl SurfaceView {
                 }
             })
             .collect()
-    }
 }
 
 /// A picture AppKit shows under the pointer: an NSImage of the pixels, at

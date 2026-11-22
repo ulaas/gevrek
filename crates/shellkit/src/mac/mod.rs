@@ -37,11 +37,17 @@
 //! Drags are dropped on a surface and begin out of it as anywhere on a Mac
 //! (`drag`): Option copies, Command moves.
 //!
-//! Not here yet: screen readers, input methods (composed text arrives once
-//! it is committed), the clipboard.
+//! Command-C, X and V copy, cut and paste text through the pasteboard.
+//!
+//! Keys are handed to the system's input system, so text is composed as in
+//! any Mac program: dead keys, and input methods with their list of
+//! choices by the text cursor (`view`).
+//!
+//! Not here yet: screen readers.
 
 mod drag;
 pub mod input;
+mod view;
 
 use crate::dnd::{DragEvent, DragStart, DropAnswer};
 use crate::look::BlurRegion;
@@ -491,7 +497,7 @@ fn make_panel(
     id: SurfaceId,
     level: Level,
     popped: Option<Popped>,
-) -> (Retained<NSWindow>, Retained<NSView>) {
+) -> (Retained<NSWindow>, Retained<view::SurfaceView>, Retained<NSView>) {
     let rect = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(10.0, 10.0));
     let style = NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel;
     // SAFETY: the panel class's own initializer, with plain arguments.
@@ -524,7 +530,7 @@ fn make_panel(
     window.setIgnoresMouseEvents(matches!(popped, Some(Popped::Hint { .. })));
     let size = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(10.0, 10.0));
     // (The container is where drags are dropped and begin.)
-    let container = drag::SurfaceView::new(mtm, size, id.0);
+    let container = view::SurfaceView::new(mtm, size, id.0);
     container.setWantsLayer(true);
     window.setContentView(Some(&container));
     let drawing = NSView::initWithFrame(mtm.alloc(), container.bounds());
@@ -552,7 +558,7 @@ fn make_panel(
         };
         view.addTrackingArea(&area);
     }
-    (window, drawing)
+    (window, container, drawing)
 }
 
 /// The parts of a surface behind which the desktop is shown soft: views
@@ -670,6 +676,8 @@ struct Surface {
     /// The size the graphics surface was made for, in pixels.
     configured: (u32, u32),
     window: Retained<NSWindow>,
+    /// The window's content: drags and typed text go through it.
+    content: Retained<view::SurfaceView>,
     /// The view egui is drawn into (over the soft parts).
     drawing: Retained<NSView>,
     /// The parts shown soft, as last asked for, and their views.
@@ -875,15 +883,11 @@ impl Host {
             return;
         };
         let surface = &mut self.surfaces[index];
-        let (Some(event), Some(view)) = (surface.last_mouse.clone(), surface.window.contentView())
-        else {
+        let Some(event) = surface.last_mouse.clone() else {
             log::debug!("surface {id:?}: no press to begin a drag by");
             return;
         };
-        // SAFETY: the content view of every surface is a `SurfaceView`
-        // (`make_panel`).
-        let view: Retained<drag::SurfaceView> = unsafe { Retained::cast_unchecked(view) };
-        if view.begin(started, &event) {
+        if drag::begin(&surface.content, id.0, started, &event) {
             // The drag has the pointer from here on: the surface lets go.
             let pos = surface.events.iter().rev().find_map(|event| match event {
                 egui::Event::PointerMoved(pos) => Some(*pos),
@@ -941,7 +945,7 @@ impl Host {
         popped: Option<(SurfaceId, egui::Rect, Popped)>,
         draw: Draw,
     ) -> anyhow::Result<Surface> {
-        let (window, view) = make_panel(
+        let (window, content, view) = make_panel(
             self.mtm,
             id,
             place.level,
@@ -1018,6 +1022,7 @@ impl Host {
             alpha,
             configured: (0, 0),
             window,
+            content,
             drawing: view,
             soft: (Vec::new(), Vec::new()),
             id,
@@ -1337,6 +1342,17 @@ impl Host {
             }
             NSEventType::KeyDown | NSEventType::KeyUp => {
                 let pressed = kind == NSEventType::KeyDown;
+                // While an input method composes, its keys are its own
+                // (Return takes its choice, not egui's text field).
+                let composing = surface.content.composing();
+                if pressed && !(modifiers.command || modifiers.ctrl) {
+                    let typed = surface.content.typed(event);
+                    surface.events.extend(typed);
+                }
+                if composing || surface.content.composing() {
+                    surface.redraw = true;
+                    return true;
+                }
                 if let Some(key) = input::key_of(event.keyCode()) {
                     // Command and a key: what egui knows as copy, cut and
                     // paste are its own events.
@@ -1344,6 +1360,10 @@ impl Host {
                         surface.events.push(egui::Event::Copy);
                     } else if pressed && modifiers.command && key == egui::Key::X {
                         surface.events.push(egui::Event::Cut);
+                    } else if pressed && modifiers.command && key == egui::Key::V {
+                        if let Some(text) = input::pasted() {
+                            surface.events.push(egui::Event::Paste(text));
+                        }
                     }
                     surface.events.push(egui::Event::Key {
                         key,
@@ -1352,14 +1372,6 @@ impl Host {
                         repeat: pressed && event.isARepeat(),
                         modifiers,
                     });
-                }
-                if pressed {
-                    if let Some(text) = event
-                        .characters()
-                        .and_then(|characters| input::text_of(&characters.to_string(), modifiers))
-                    {
-                        surface.events.push(egui::Event::Text(text));
-                    }
                 }
             }
             NSEventType::FlagsChanged => {}
@@ -1450,6 +1462,14 @@ impl Host {
             let id = surface.id;
             self.control.close(id);
             return;
+        }
+        if let Some(ime) = &output.platform_output.ime {
+            surface.content.set_caret(ime.cursor_rect);
+        }
+        for command in &output.platform_output.commands {
+            if let egui::OutputCommand::CopyText(text) = command {
+                input::copy(text);
+            }
         }
         let wanted = output.platform_output.cursor_icon;
         if wanted != surface.cursor {

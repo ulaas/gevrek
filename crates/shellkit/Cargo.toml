@@ -52,8 +52,8 @@ accesskit_windows = "0.35"
 # macOS: panels without a frame (AppKit), drawn on with Metal.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSDate", "NSEnumerator", "NSGeometry", "NSObject", "NSRunLoop", "NSString"] }
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSColor", "NSCursor", "NSEvent", "NSGraphics", "NSPanel", "NSResponder", "NSRunningApplication", "NSScreen", "NSTrackingArea", "NSView", "NSVisualEffectView", "NSWindow", "objc2-core-foundation", "objc2-quartz-core"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSAttributedString", "NSDate", "NSEnumerator", "NSGeometry", "NSObjCRuntime", "NSObject", "NSRange", "NSRunLoop", "NSString"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSColor", "NSCursor", "NSEvent", "NSGraphics", "NSPanel", "NSPasteboard", "NSResponder", "NSRunningApplication", "NSScreen", "NSTextInputClient", "NSTrackingArea", "NSView", "NSVisualEffectView", "NSWindow", "objc2-core-foundation", "objc2-quartz-core"] }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["std", "CALayer", "objc2-core-foundation"] }
 raw-window-handle = "0.6"
 

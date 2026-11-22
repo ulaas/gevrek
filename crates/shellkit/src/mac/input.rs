@@ -1,7 +1,8 @@
 //! What AppKit says of the keyboard and the mouse, as egui hears it.
 
 use objc2::rc::Retained;
-use objc2_app_kit::{NSCursor, NSEventModifierFlags};
+use objc2_app_kit::{NSCursor, NSEventModifierFlags, NSPasteboard, NSPasteboardTypeString};
+use objc2_foundation::NSString;
 
 /// The egui key at a place on a Mac keyboard (`kVK_*` of Carbon's
 /// Events.h): named by the place on a US keyboard, as gevrek's bindings
@@ -99,18 +100,24 @@ pub fn modifiers_of(flags: NSEventModifierFlags) -> egui::Modifiers {
     }
 }
 
-/// The text a key writes, as egui takes it: none for a key that writes
-/// nothing (the arrows and the function keys write characters of the
-/// private range), nor for one held with Command or Control (a shortcut).
-pub fn text_of(characters: &str, modifiers: egui::Modifiers) -> Option<String> {
-    if modifiers.command || modifiers.ctrl {
-        return None;
-    }
-    let text: String = characters
-        .chars()
-        .filter(|character| !character.is_control() && !('\u{F700}'..='\u{F8FF}').contains(character))
-        .collect();
-    (!text.is_empty()).then_some(text)
+/// The text on the pasteboard, to paste.
+pub fn pasted() -> Option<String> {
+    let pasteboard = NSPasteboard::generalPasteboard();
+    // SAFETY: the system's constant.
+    let kind = unsafe { NSPasteboardTypeString };
+    pasteboard
+        .stringForType(kind)
+        .map(|text| text.to_string())
+        .filter(|text| !text.is_empty())
+}
+
+/// Put text on the pasteboard, as copied.
+pub fn copy(text: &str) {
+    let pasteboard = NSPasteboard::generalPasteboard();
+    pasteboard.clearContents();
+    // SAFETY: the system's constant.
+    let kind = unsafe { NSPasteboardTypeString };
+    pasteboard.setString_forType(&NSString::from_str(text), kind);
 }
 
 /// The egui button of a mouse button, by AppKit's number of it.
@@ -157,20 +164,5 @@ mod tests {
         assert_eq!(key_of(0x35), Some(egui::Key::Escape));
         assert_eq!(key_of(0x7D), Some(egui::Key::ArrowDown));
         assert_eq!(key_of(0x3A), None);
-    }
-
-    #[test]
-    fn a_key_held_with_command_writes_nothing_and_an_arrow_never_does() {
-        let plain = egui::Modifiers::default();
-        assert_eq!(text_of("a", plain).as_deref(), Some("a"));
-        assert_eq!(text_of("ç", plain).as_deref(), Some("ç"));
-        assert_eq!(text_of("\u{F702}", plain), None);
-        assert_eq!(text_of("\r", plain), None);
-        let command = egui::Modifiers {
-            command: true,
-            mac_cmd: true,
-            ..Default::default()
-        };
-        assert_eq!(text_of("c", command), None);
     }
 }
