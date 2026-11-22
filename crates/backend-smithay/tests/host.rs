@@ -5,6 +5,8 @@
 
 mod common;
 
+use gevrek_host::wm::reload::Reload as _;
+use gevrek_host::wm::commands::Commands as _;
 use common::{Harness, SCREEN};
 use gevrek_engine::layouts::LayoutType;
 use gevrek_engine::WindowQueries;
@@ -99,7 +101,7 @@ fn bindings_follow_the_active_submap_and_rest_while_paused() {
 
     // Alt+F9 enters the submap; paused, its binding does not run.
     harness.chord(&[KEY_LEFTALT, KEY_F9]);
-    assert_eq!(harness.state.active_submap, "resize");
+    assert_eq!(harness.state.host.active_submap, "resize");
     harness.state.paused = true;
     harness.chord(&[KEY_LEFTALT, KEY_F10]);
     assert!(!closed(&harness));
@@ -112,7 +114,7 @@ fn bindings_follow_the_active_submap_and_rest_while_paused() {
         .state
         .run_command(DispatchCommand::ResetBindingSubmap)
         .expect("reset");
-    assert_eq!(harness.state.active_submap, "default");
+    assert_eq!(harness.state.host.active_submap, "default");
 }
 
 #[test]
@@ -407,25 +409,25 @@ fn bindings_on_mouse_buttons_the_wheel_long_presses_and_repeats() {
             .state
             .run_command(DispatchCommand::ResetBindingSubmap)
             .unwrap();
-        assert_eq!(harness.state.active_submap, "default");
+        assert_eq!(harness.state.host.active_submap, "default");
     };
 
     // Alt + middle button, and only with Alt.
     harness.state.pointer_button(MIDDLE, true, 0);
     harness.state.pointer_button(MIDDLE, false, 0);
-    assert_eq!(harness.state.active_submap, "default");
+    assert_eq!(harness.state.host.active_submap, "default");
     harness
         .state
         .key_event((KEY_LEFTALT + 8).into(), KeyState::Pressed, 0);
     harness.state.pointer_button(MIDDLE, true, 0);
     harness.state.pointer_button(MIDDLE, false, 0);
-    assert_eq!(harness.state.active_submap, "middle");
+    assert_eq!(harness.state.host.active_submap, "middle");
     reset(&mut harness);
 
     // Alt + wheel up is taken by its binding; wheel down is not bound.
     assert!(!harness.state.pointer_wheel(false));
     assert!(harness.state.pointer_wheel(true));
-    assert_eq!(harness.state.active_submap, "wheel");
+    assert_eq!(harness.state.host.active_submap, "wheel");
     harness
         .state
         .key_event((KEY_LEFTALT + 8).into(), KeyState::Released, 0);
@@ -437,12 +439,12 @@ fn bindings_on_mouse_buttons_the_wheel_long_presses_and_repeats() {
         .state
         .key_event((KEY_F10 + 8).into(), KeyState::Pressed, 0);
     harness.state.tick_held(start + Duration::from_millis(100));
-    assert_eq!(harness.state.active_submap, "default");
+    assert_eq!(harness.state.host.active_submap, "default");
     harness.state.tick_held(start + Duration::from_millis(400));
-    assert_eq!(harness.state.active_submap, "long");
+    assert_eq!(harness.state.host.active_submap, "long");
     reset(&mut harness);
     harness.state.tick_held(start + Duration::from_millis(900));
-    assert_eq!(harness.state.active_submap, "default", "once per press");
+    assert_eq!(harness.state.host.active_submap, "default", "once per press");
     harness
         .state
         .key_event((KEY_F10 + 8).into(), KeyState::Released, 0);
@@ -456,7 +458,7 @@ fn bindings_on_mouse_buttons_the_wheel_long_presses_and_repeats() {
     harness
         .state
         .tick_held(Instant::now() + Duration::from_secs(2));
-    assert_eq!(harness.state.active_submap, "default");
+    assert_eq!(harness.state.host.active_submap, "default");
 
     // A repeat binding runs again and again while the key stays down.
     let start = Instant::now();
@@ -465,11 +467,11 @@ fn bindings_on_mouse_buttons_the_wheel_long_presses_and_repeats() {
         .key_event((KEY_F9 + 8).into(), KeyState::Pressed, 0);
     harness.state.tick_held(start + Duration::from_millis(100));
     assert_eq!(
-        harness.state.active_submap, "default",
+        harness.state.host.active_submap, "default",
         "not before the delay"
     );
     harness.state.tick_held(start + Duration::from_millis(500));
-    assert_eq!(harness.state.active_submap, "repeat");
+    assert_eq!(harness.state.host.active_submap, "repeat");
     harness
         .state
         .key_event((KEY_F9 + 8).into(), KeyState::Released, 0);
@@ -540,7 +542,7 @@ fn a_touchpad_swipe_runs_the_command_of_its_profile() {
     assert!(!swipe(&mut harness, 3, &[(300.0, 0.0)], false));
     assert!(!swipe(&mut harness, 3, &[(-300.0, -280.0)], false));
     assert!(!swipe(&mut harness, 3, &[(-300.0, 0.0)], true));
-    assert_eq!(harness.state.active_submap, "default");
+    assert_eq!(harness.state.host.active_submap, "default");
 
     // Three fingers, left, far enough, in several steps.
     assert!(swipe(
@@ -549,7 +551,7 @@ fn a_touchpad_swipe_runs_the_command_of_its_profile() {
         &[(-90.0, 3.0), (-90.0, -2.0), (-60.0, 0.0)],
         false
     ));
-    assert_eq!(harness.state.active_submap, "swiped");
+    assert_eq!(harness.state.host.active_submap, "swiped");
     let progress = harness.state.gesture_progress.clone().expect("reported");
     assert_eq!(
         (progress.phase.as_str(), progress.fingers),
@@ -566,7 +568,7 @@ fn a_touchpad_swipe_runs_the_command_of_its_profile() {
     off.desktop.gestures.enabled = false;
     harness.state.reload_configuration(off);
     assert!(!swipe(&mut harness, 3, &[(-300.0, 0.0)], false));
-    assert_eq!(harness.state.active_submap, "default");
+    assert_eq!(harness.state.host.active_submap, "default");
 }
 
 #[test]
@@ -680,15 +682,15 @@ fn the_pointer_left_in_a_corner_runs_that_corners_command() {
     harness.state.pointer_moved((400.0, 300.0).into(), 0);
     harness.state.pointer_moved((0.0, 0.0).into(), 0);
     harness.state.tick_hot_corners(start + Duration::from_secs(2));
-    assert_eq!(harness.state.active_submap, "default");
+    assert_eq!(harness.state.host.active_submap, "default");
     assert!(!harness.state.hot_corners.waits());
     // In its corner: not at once, and the host is asked to look again.
     harness.state.pointer_moved((1919.0, 0.0).into(), 0);
-    assert_eq!(harness.state.active_submap, "default");
+    assert_eq!(harness.state.host.active_submap, "default");
     assert!(harness.state.hot_corners.waits());
     // Left there for its moment: once.
     harness.state.tick_hot_corners(Instant::now() + Duration::from_millis(600));
-    assert_eq!(harness.state.active_submap, "corner");
+    assert_eq!(harness.state.host.active_submap, "corner");
     assert!(!harness.state.hot_corners.waits());
 }
 
@@ -1236,20 +1238,20 @@ fn a_release_is_matched_in_the_submap_its_press_was_made_in() {
 
     key(&mut harness, KEY_LEFTALT, KeyState::Pressed);
     key(&mut harness, KEY_F9, KeyState::Pressed);
-    assert_eq!(harness.state.active_submap, "held");
+    assert_eq!(harness.state.host.active_submap, "held");
     // The release is the default set's (where the press was made), not
     // the one of the set that is live now.
     key(&mut harness, KEY_F9, KeyState::Released);
     key(&mut harness, KEY_LEFTALT, KeyState::Released);
-    assert_eq!(harness.state.active_submap, "default");
+    assert_eq!(harness.state.host.active_submap, "default");
 
     // A key pressed in "held" is let go in it: F10 leaves on its
     // release.
     harness.state.run_command(submap("held")).expect("the submap");
     key(&mut harness, KEY_F10, KeyState::Pressed);
-    assert_eq!(harness.state.active_submap, "held");
+    assert_eq!(harness.state.host.active_submap, "held");
     key(&mut harness, KEY_F10, KeyState::Released);
-    assert_eq!(harness.state.active_submap, "default");
+    assert_eq!(harness.state.host.active_submap, "default");
 }
 
 #[test]
@@ -1284,10 +1286,10 @@ fn a_mouse_buttons_release_is_the_release_of_what_was_pressed() {
     // was pressed in.
     key(&mut harness, KEY_LEFTALT, KeyState::Pressed);
     harness.state.pointer_button(MIDDLE, true, 0);
-    assert_eq!(harness.state.active_submap, "held");
+    assert_eq!(harness.state.host.active_submap, "held");
     key(&mut harness, KEY_LEFTALT, KeyState::Released);
     harness.state.pointer_button(MIDDLE, false, 0);
-    assert_eq!(harness.state.active_submap, "out");
+    assert_eq!(harness.state.host.active_submap, "out");
 
     // The button pressed alone and let go with Alt held was never
     // Alt+middle: nothing runs.
@@ -1299,5 +1301,5 @@ fn a_mouse_buttons_release_is_the_release_of_what_was_pressed() {
     key(&mut harness, KEY_LEFTALT, KeyState::Pressed);
     harness.state.pointer_button(MIDDLE, false, 0);
     key(&mut harness, KEY_LEFTALT, KeyState::Released);
-    assert_eq!(harness.state.active_submap, "default");
+    assert_eq!(harness.state.host.active_submap, "default");
 }

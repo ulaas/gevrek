@@ -82,7 +82,7 @@ impl Choice {
 
     /// What Windows is asked for it: there every choice is the system's
     /// (signing out ends the user's session, not only gevrek).
-    #[cfg(any(windows, test))]
+    #[cfg(any(windows, target_os = "macos", test))]
     pub fn end(self) -> gevrek_system::session::End {
         use gevrek_system::session::End;
         match self {

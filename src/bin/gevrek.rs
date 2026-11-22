@@ -1299,7 +1299,7 @@ impl Component {
     fn binary_name(&self) -> &'static str {
         match self {
             // The window manager is a different program on each system.
-            Component::Wm if cfg!(windows) => "gevrek-wm",
+            Component::Wm if cfg!(any(windows, target_os = "macos")) => "gevrek-wm",
             Component::Wm => "gevrek-wl",
             // The settings program; `editor` is the name it had before.
             Component::Editor => "gevrek-studio",
@@ -1598,10 +1598,12 @@ fn remove_pid(component: &Component) {
 }
 
 /// File name of the autostart script inside the user's Startup folder.
+#[cfg_attr(target_os = "macos", allow(dead_code))] // (Windows' autostart; macOS has its own: `macos_app`)
 const AUTOSTART_SCRIPT_NAME: &str = "gevrek-autostart.cmd";
 
 /// The user's Startup folder (`%APPDATA%\Microsoft\Windows\Start
 /// Menu\Programs\Startup` on Windows; `dirs::config_dir` is Roaming AppData).
+#[cfg_attr(target_os = "macos", allow(dead_code))] // (Windows' autostart; macOS has its own: `macos_app`)
 fn startup_folder() -> Result<PathBuf> {
     let roaming = dirs::config_dir()
         .ok_or_else(|| anyhow!("Could not determine the Roaming AppData folder"))?;
@@ -1613,6 +1615,7 @@ fn startup_folder() -> Result<PathBuf> {
         .join("Startup"))
 }
 
+#[cfg_attr(target_os = "macos", allow(dead_code))] // (Windows' autostart; macOS has its own: `macos_app`)
 fn autostart_script_path_in(startup_folder: &std::path::Path) -> PathBuf {
     startup_folder.join(AUTOSTART_SCRIPT_NAME)
 }
@@ -1623,6 +1626,7 @@ fn autostart_script_path_in(startup_folder: &std::path::Path) -> PathBuf {
 /// (`gevrek_model::paths::config_file`), but a `config.json` beside the
 /// program from before that is still used while the standard file is
 /// missing, and it is found by the working directory.
+#[cfg_attr(target_os = "macos", allow(dead_code))] // (Windows' autostart; macOS has its own: `macos_app`)
 fn autostart_script_contents(executable: &std::path::Path) -> String {
     let exe_dir = executable
         .parent()
@@ -1637,6 +1641,7 @@ fn autostart_script_contents(executable: &std::path::Path) -> String {
 
 /// The scheduled task that starts this instance at sign-in. One folder
 /// for gevrek in the task library, one task per instance.
+#[cfg_attr(target_os = "macos", allow(dead_code))] // (Windows' autostart; macOS has its own: `macos_app`)
 fn autostart_task_name(instance: &str) -> String {
     if instance == "main" {
         r"\gevrek\autostart".to_string()
@@ -1645,6 +1650,7 @@ fn autostart_task_name(instance: &str) -> String {
     }
 }
 
+#[cfg_attr(target_os = "macos", allow(dead_code))] // (Windows' autostart; macOS has its own: `macos_app`)
 fn xml_text(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -1661,6 +1667,7 @@ fn xml_text(text: &str) -> String {
 ///
 /// Another instance than the session's own is named to the program through
 /// its environment, which a task cannot set: `cmd` sets it first.
+#[cfg_attr(target_os = "macos", allow(dead_code))] // (Windows' autostart; macOS has its own: `macos_app`)
 fn autostart_task_xml(executable: &std::path::Path, user: &str, instance: &str) -> String {
     let folder = executable
         .parent()
@@ -1720,6 +1727,7 @@ fn autostart_task_xml(executable: &std::path::Path, user: &str, instance: &str) 
 }
 
 /// The person signed in, as Task Scheduler names them (`MACHINE\name`).
+#[cfg_attr(target_os = "macos", allow(dead_code))] // (Windows' autostart; macOS has its own: `macos_app`)
 fn signed_in_user() -> Result<String> {
     let name = std::env::var("USERNAME")
         .map_err(|_| anyhow!("USERNAME is not set: whose sign-in should start gevrek?"))?;
@@ -1730,6 +1738,7 @@ fn signed_in_user() -> Result<String> {
 }
 
 /// Run `schtasks` and give back what it said when it failed.
+#[cfg_attr(target_os = "macos", allow(dead_code))] // (Windows' autostart; macOS has its own: `macos_app`)
 fn schtasks(arguments: &[&str]) -> Result<String> {
     let output = Command::new("schtasks")
         .args(arguments)
@@ -1747,11 +1756,13 @@ fn schtasks(arguments: &[&str]) -> Result<String> {
     }
 }
 
+#[cfg_attr(target_os = "macos", allow(dead_code))] // (Windows' autostart; macOS has its own: `macos_app`)
 fn autostart_task_exists(task: &str) -> bool {
     schtasks(&["/Query", "/TN", task]).is_ok()
 }
 
 /// How gevrek is started at sign-in after `enable_autostart`.
+#[cfg_attr(target_os = "macos", allow(dead_code))] // (Windows' autostart; macOS has its own: `macos_app`)
 enum Autostart {
     /// By the scheduled task of this name.
     Task(String),
@@ -1764,6 +1775,7 @@ enum Autostart {
 /// that is refused (a policy can forbid tasks) by the script in the
 /// Startup folder as before. Only one of the two is left in place, or
 /// gevrek would be started twice.
+#[cfg_attr(target_os = "macos", allow(dead_code))] // (Windows' autostart; macOS has its own: `macos_app`)
 fn enable_autostart() -> Result<Autostart> {
     let executable = std::env::current_exe()?;
     let instance = gevrek_model::paths::instance();
@@ -1811,6 +1823,7 @@ fn enable_autostart() -> Result<Autostart> {
 
 /// Remove the autostart registration, whichever kind it is. Succeeds even
 /// if it was never enabled. Returns what was removed.
+#[cfg_attr(target_os = "macos", allow(dead_code))] // (Windows' autostart; macOS has its own: `macos_app`)
 fn disable_autostart() -> Result<Vec<String>> {
     let instance = gevrek_model::paths::instance();
     let task = autostart_task_name(&instance);
@@ -1831,6 +1844,7 @@ fn disable_autostart() -> Result<Vec<String>> {
 }
 
 /// Say how this instance is started at sign-in, if it is.
+#[cfg_attr(target_os = "macos", allow(dead_code))] // (Windows' autostart; macOS has its own: `macos_app`)
 fn autostart_status() -> Result<String> {
     let instance = gevrek_model::paths::instance();
     let task = autostart_task_name(&instance);
@@ -1952,7 +1966,82 @@ fn start_component(
         println!("{} started (PID: {})", component.name(), child.id());
         Ok(Some(child))
     } else {
+        // On macOS the window manager is started as its application, so
+        // that macOS holds the bundle (not the terminal that ran this)
+        // responsible for it: the Accessibility permission is the bundle's.
+        #[cfg(target_os = "macos")]
+        if *component == Component::Wm {
+            if let Some(bundle) = macos_app::bundle() {
+                let log_path = log_file(component.name());
+                std::fs::create_dir_all(pid_dir())?;
+                let component_address = address
+                    .strip_prefix("http://")
+                    .or_else(|| address.strip_prefix("https://"))
+                    .unwrap_or(address);
+                macos_app::start_wm(&bundle, component_address, &log_path)?;
+                // (`open` gives no process id: it is found once it runs.)
+                let pid = (0..50).find_map(|_| {
+                    std::thread::sleep(Duration::from_millis(100));
+                    component_pids(component).first().copied()
+                });
+                let Some(pid) = pid else {
+                    // What it said before it ended, where it said it.
+                    let said = std::fs::read_to_string(&log_path)
+                        .ok()
+                        .and_then(|log| {
+                            log.lines()
+                                .rev()
+                                .find(|line| line.starts_with("Error:"))
+                                .map(|line| line.trim_start_matches("Error:").trim().to_string())
+                        })
+                        .unwrap_or_else(|| "it said nothing".to_string());
+                    return Err(anyhow!(
+                        "the window manager did not start: {said} (its log: {})",
+                        log_path.display()
+                    ));
+                };
+                write_pid(component, pid)?;
+                println!(
+                    "{} started from {} (PID: {pid}, log: {})",
+                    component.name(),
+                    bundle.display(),
+                    log_path.display()
+                );
+                return Ok(None);
+            }
+        }
+        // On macOS the other programs are started on their own: see
+        // `macos_app::spawn_on_its_own`.
+        #[cfg(target_os = "macos")]
+        {
+            let log_path = log_file(component.name());
+            std::fs::create_dir_all(pid_dir())?;
+            // (The window manager takes its address without the scheme.)
+            let component_address = if *component == Component::Wm {
+                address
+                    .strip_prefix("http://")
+                    .or_else(|| address.strip_prefix("https://"))
+                    .unwrap_or(address)
+            } else {
+                address
+            };
+            let pid = macos_app::spawn_on_its_own(&binary_path, &["--address", component_address], &log_path)?;
+            log::debug!(
+                "{} was started on its own: {} as process {pid}, its log in {}",
+                component.name(),
+                binary_path.display(),
+                log_path.display()
+            );
+            write_pid(component, pid)?;
+            println!(
+                "{} started (PID: {pid}, log: {})",
+                component.name(),
+                log_path.display()
+            );
+            return Ok(None);
+        }
         // Run as daemon - detach from terminal
+        #[allow(unreachable_code)]
         let mut cmd = Command::new(&binary_path);
         configure_command(&mut cmd);
 
@@ -2000,6 +2089,267 @@ fn start_component(
             log_path.display()
         );
         Ok(None)
+    }
+}
+
+/// gevrek as a macOS application (`packaging/macos`): the bundle the window
+/// manager runs from, and its start at sign-in.
+#[cfg(target_os = "macos")]
+mod macos_app {
+    use anyhow::{anyhow, Result};
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    /// The bundle's id (`packaging/macos/Info.plist`).
+    pub const BUNDLE_ID: &str = "io.github.ulaas.gevrek";
+
+    /// What of this program's surroundings the window manager is given
+    /// when it is started through `open` (which gives it none of them).
+    const PASSED_ON: &[&str] = &[
+        "GEVREK_INSTANCE",
+        "GEVREK_MACOS_ONLY",
+        "GEVREK_RUNTIME_DIR",
+        "RUST_LOG",
+    ];
+
+    /// The bundle gevrek runs from: the one this program is in, or else
+    /// one installed in ~/Applications or /Applications. `None`: gevrek
+    /// runs as bare programs (built, not installed).
+    pub fn bundle() -> Option<PathBuf> {
+        let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
+        if let Some(bundle) = exe
+            .ancestors()
+            .find(|path| path.extension().is_some_and(|extension| extension == "app"))
+        {
+            return Some(bundle.to_path_buf());
+        }
+        let home = dirs::home_dir()?;
+        [
+            home.join("Applications/Gevrek.app"),
+            PathBuf::from("/Applications/Gevrek.app"),
+        ]
+        .into_iter()
+        .find(|bundle| bundle.join("Contents/MacOS/gevrek-wm").exists())
+    }
+
+    /// Start a program of the bundle in the background so that macOS holds
+    /// it, not whoever started it, responsible for what it does: the
+    /// questions it asks (the location, recording the screen, bluetooth)
+    /// are then Gevrek's, where a terminal that ran `gevrek` would
+    /// otherwise answer them, and be named in them. (The same as Chromium
+    /// and the terminals do for what they start: the spawn "disclaims"
+    /// responsibility.) What it writes to its error stream goes to `log`.
+    /// Its process id.
+    pub fn spawn_on_its_own(program: &Path, args: &[&str], log: &Path) -> Result<u32> {
+        use std::ffi::{CString, OsStr};
+        use std::os::unix::ffi::OsStrExt;
+        type Disclaim = unsafe extern "C" fn(*mut libc::posix_spawnattr_t, libc::c_int) -> libc::c_int;
+        let c = |text: &OsStr| CString::new(text.as_bytes()).map_err(|_| anyhow!("a NUL in {text:?}"));
+        let path = c(program.as_os_str())?;
+        let mut argv = vec![path.clone()];
+        for arg in args {
+            argv.push(c(OsStr::new(arg))?);
+        }
+        let mut argv_ptrs: Vec<*mut libc::c_char> = argv.iter().map(|arg| arg.as_ptr() as *mut _).collect();
+        argv_ptrs.push(std::ptr::null_mut());
+        let null = c(OsStr::new("/dev/null"))?;
+        let log = c(log.as_os_str())?;
+        extern "C" {
+            static environ: *const *mut libc::c_char;
+        }
+        // SAFETY: attributes and file actions made, used and destroyed
+        // here; the strings outlive the spawn.
+        unsafe {
+            let mut attributes: libc::posix_spawnattr_t = std::mem::zeroed();
+            let mut actions: libc::posix_spawn_file_actions_t = std::mem::zeroed();
+            libc::posix_spawnattr_init(&mut attributes);
+            libc::posix_spawn_file_actions_init(&mut actions);
+            // (Not in the SDK's headers, but in the system since 10.14.)
+            let disclaim = libc::dlsym(libc::RTLD_DEFAULT, c"responsibility_spawnattrs_setdisclaim".as_ptr());
+            if disclaim.is_null() {
+                log::debug!("no way to disclaim responsibility: started as a child");
+            } else {
+                let disclaim: Disclaim = std::mem::transmute(disclaim);
+                disclaim(&mut attributes, 1);
+            }
+            libc::posix_spawn_file_actions_addopen(&mut actions, 0, null.as_ptr(), libc::O_RDONLY, 0);
+            libc::posix_spawn_file_actions_addopen(&mut actions, 1, null.as_ptr(), libc::O_WRONLY, 0);
+            libc::posix_spawn_file_actions_addopen(
+                &mut actions,
+                2,
+                log.as_ptr(),
+                libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC,
+                0o644,
+            );
+            let mut pid: libc::pid_t = 0;
+            let status = libc::posix_spawn(
+                &mut pid,
+                path.as_ptr(),
+                &actions,
+                &attributes,
+                argv_ptrs.as_ptr(),
+                environ,
+            );
+            libc::posix_spawn_file_actions_destroy(&mut actions);
+            libc::posix_spawnattr_destroy(&mut attributes);
+            if status != 0 {
+                return Err(anyhow!(
+                    "{} could not be started: {}",
+                    program.display(),
+                    std::io::Error::from_raw_os_error(status)
+                ));
+            }
+            Ok(pid as u32)
+        }
+    }
+
+    /// Start the window manager of `bundle` in the background, its errors
+    /// written to `log`.
+    pub fn start_wm(bundle: &Path, address: &str, log: &Path) -> Result<()> {
+        let mut open = Command::new("/usr/bin/open");
+        open.args(["-g", "-n", "-a"]).arg(bundle).arg("--stderr").arg(log);
+        for name in PASSED_ON {
+            if let Ok(value) = std::env::var(name) {
+                open.arg("--env").arg(format!("{name}={value}"));
+            }
+        }
+        open.args(["--args", "--address", address]);
+        let status = open.status()?;
+        if !status.success() {
+            return Err(anyhow!("{} could not be opened ({status})", bundle.display()));
+        }
+        Ok(())
+    }
+
+    fn agent_label() -> String {
+        let instance = gevrek_model::paths::instance();
+        if instance == gevrek_model::paths::MAIN_INSTANCE {
+            BUNDLE_ID.to_string()
+        } else {
+            format!("{BUNDLE_ID}.{instance}")
+        }
+    }
+
+    fn agent_path() -> Result<PathBuf> {
+        let home = dirs::home_dir().ok_or_else(|| anyhow!("no home folder"))?;
+        Ok(home
+            .join("Library/LaunchAgents")
+            .join(format!("{}.plist", agent_label())))
+    }
+
+    /// The LaunchAgent that starts the window manager when the user signs
+    /// in: the bundle's executable, so that macOS holds the bundle
+    /// responsible for it.
+    pub fn agent_plist(executable: &Path, address: &str, log: &Path, instance: &str) -> String {
+        let escape = |text: &str| {
+            text.replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
+        };
+        let environment = if instance == gevrek_model::paths::MAIN_INSTANCE {
+            String::new()
+        } else {
+            format!(
+                "\t<key>EnvironmentVariables</key>\n\t<dict>\n\t\t<key>GEVREK_INSTANCE</key>\n\t\t<string>{}</string>\n\t</dict>\n",
+                escape(instance)
+            )
+        };
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>{label}</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{executable}</string>
+		<string>--address</string>
+		<string>{address}</string>
+	</array>
+{environment}	<key>RunAtLoad</key>
+	<true/>
+	<key>LimitLoadToSessionType</key>
+	<string>Aqua</string>
+	<key>AssociatedBundleIdentifiers</key>
+	<string>{bundle_id}</string>
+	<key>StandardErrorPath</key>
+	<string>{log}</string>
+</dict>
+</plist>
+"#,
+            label = escape(&agent_label()),
+            executable = escape(&executable.to_string_lossy()),
+            address = escape(address),
+            bundle_id = BUNDLE_ID,
+            log = escape(&log.to_string_lossy()),
+        )
+    }
+
+    /// Start gevrek when the user signs in, from the bundle it is
+    /// installed as. The agent is written, not loaded: it runs at the next
+    /// sign-in (`gevrek start wm` starts it now).
+    pub fn enable_autostart(address: &str) -> Result<PathBuf> {
+        let bundle = bundle().ok_or_else(|| {
+            anyhow!(
+                "gevrek is not installed as an application: build and install it first \
+                 (packaging/macos/build-app.sh, then install.sh)"
+            )
+        })?;
+        let path = agent_path()?;
+        if let Some(folder) = path.parent() {
+            std::fs::create_dir_all(folder)?;
+        }
+        let instance = gevrek_model::paths::instance();
+        std::fs::write(
+            &path,
+            agent_plist(
+                &bundle.join("Contents/MacOS/gevrek-wm"),
+                address,
+                &super::log_file("wm"),
+                &instance,
+            ),
+        )?;
+        Ok(path)
+    }
+
+    /// Remove the LaunchAgent; `None` where there was none.
+    pub fn disable_autostart() -> Result<Option<PathBuf>> {
+        let path = agent_path()?;
+        if !path.exists() {
+            return Ok(None);
+        }
+        std::fs::remove_file(&path)?;
+        Ok(Some(path))
+    }
+
+    pub fn autostart_status() -> String {
+        match agent_path() {
+            Ok(path) if path.exists() => format!("Autostart: the LaunchAgent {}", path.display()),
+            _ => "Autostart: off".to_string(),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn the_agent_starts_the_bundles_window_manager_at_sign_in() {
+            let plist = agent_plist(
+                Path::new("/Users/someone/Applications/Gevrek.app/Contents/MacOS/gevrek-wm"),
+                "local",
+                Path::new("/tmp/main.wm.log"),
+                gevrek_model::paths::MAIN_INSTANCE,
+            );
+            assert!(plist.contains("<string>/Users/someone/Applications/Gevrek.app/Contents/MacOS/gevrek-wm</string>"));
+            assert!(plist.contains("<key>RunAtLoad</key>\n\t<true/>"));
+            assert!(plist.contains(BUNDLE_ID));
+            assert!(!plist.contains("EnvironmentVariables"));
+            let other = agent_plist(Path::new("/a & b/gevrek-wm"), "local:dev", Path::new("/tmp/x"), "dev");
+            assert!(other.contains("<string>/a &amp; b/gevrek-wm</string>"));
+            assert!(other.contains("<key>GEVREK_INSTANCE</key>\n\t\t<string>dev</string>"));
+        }
     }
 }
 
@@ -5615,13 +5965,30 @@ async fn run() -> Result<()> {
             dispatch_command(&cli.address, request, "Adjusted container padding").await?;
         }
 
+        #[cfg(target_os = "macos")]
+        Commands::EnableAutostart => {
+            let agent = macos_app::enable_autostart(&cli.address)?;
+            println!(
+                "Autostart enabled: {} starts gevrek when you sign in",
+                agent.display()
+            );
+        }
+        #[cfg(target_os = "macos")]
+        Commands::DisableAutostart => match macos_app::disable_autostart()? {
+            Some(agent) => println!("Autostart disabled: removed {}", agent.display()),
+            None => println!("Autostart was not enabled"),
+        },
+        #[cfg(target_os = "macos")]
+        Commands::AutostartStatus => println!("{}", macos_app::autostart_status()),
+
+        #[cfg(not(target_os = "macos"))]
         Commands::EnableAutostart | Commands::DisableAutostart | Commands::AutostartStatus
             if !cfg!(windows) =>
         {
             // On Linux gevrek is the session itself: it is chosen in the
             // login manager, not started at sign-in of another desktop.
             return Err(anyhow!(
-                "Autostart at sign-in is for Windows. On Linux gevrek is a session of its own, chosen in the login manager."
+                "Autostart at sign-in is for Windows and macOS. On Linux gevrek is a session of its own, chosen in the login manager."
             ));
         }
         Commands::Update {
@@ -5651,6 +6018,7 @@ async fn run() -> Result<()> {
             }
         }
 
+        #[cfg(not(target_os = "macos"))]
         Commands::EnableAutostart => match enable_autostart()? {
             Autostart::Task(task) => {
                 println!("Autostart enabled: the scheduled task {task} starts gevrek at sign-in")
@@ -5663,6 +6031,7 @@ async fn run() -> Result<()> {
             }
         },
 
+        #[cfg(not(target_os = "macos"))]
         Commands::DisableAutostart => {
             let removed = disable_autostart()?;
             if removed.is_empty() {
@@ -5672,6 +6041,7 @@ async fn run() -> Result<()> {
             }
         }
 
+        #[cfg(not(target_os = "macos"))]
         Commands::AutostartStatus => println!("{}", autostart_status()?),
 
         Commands::Promote => {

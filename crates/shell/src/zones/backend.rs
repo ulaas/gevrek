@@ -21,7 +21,7 @@ use gevrek_zones::{DisplayId, ItemId};
 /// with it.
 // (Windows starts what an item opens through its own shell, and asks
 // nothing of this.)
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
 pub struct Starter {
     /// Gives the window manager a command, as JSON.
     pub dispatch: Box<dyn Fn(String)>,
@@ -40,7 +40,7 @@ impl Starter {
 /// and its arguments as they are, in the terminal when it asks for one
 /// (as `launcher::start_command` does for an application). Nothing for
 /// what has no program to run.
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
 pub fn exec_command(program: &str, args: &[String], terminal: Option<&str>) -> Option<serde_json::Value> {
     if program.trim().is_empty() {
         return None;
@@ -466,7 +466,7 @@ fn properties_of(properties: &gevrek_system::zones::Properties) -> Vec<(String, 
 }
 
 /// A size as a person reads it.
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
 pub fn size_in_words(bytes: u64) -> String {
     const STEPS: [&str; 4] = ["KiB", "MiB", "GiB", "TiB"];
     if bytes < 1024 {
@@ -482,7 +482,7 @@ pub fn size_in_words(bytes: u64) -> String {
 }
 
 /// A day and a time of day (in universal time) from seconds since 1970.
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
 pub fn date_in_words(seconds: u64) -> String {
     let days = (seconds / 86_400) as i64;
     let of_day = seconds % 86_400;
@@ -500,7 +500,7 @@ pub fn date_in_words(seconds: u64) -> String {
 }
 
 /// A file's rights as letters and as the number they are set by.
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
 pub fn rights_in_words(mode: u32) -> String {
     let letters: String = (0..9)
         .map(|bit| if mode & (0o400 >> bit) != 0 { ['r', 'w', 'x'][bit % 3] } else { '-' })

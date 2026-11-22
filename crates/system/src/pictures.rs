@@ -45,6 +45,187 @@ pub fn shrink(width: u32, height: u32, pixels: &[u8], side: u32) -> Option<Pictu
 
 /// The picture of a window (by its handle), no larger than `side` on its
 /// longer side. `None` for a window that is gone, minimised, or gives none.
+#[cfg(target_os = "macos")]
+pub use self::mac::{of_screen_area, of_window};
+
+/// ScreenCaptureKit: the picture of one window, alone, as it looks (a
+/// window behind others whole). macOS shows other programs' windows only
+/// to a program that may record the screen: the first picture asked for
+/// asks for that permission (the system's own question, once), and until
+/// it is given there are no pictures.
+#[cfg(target_os = "macos")]
+mod mac {
+    use super::Picture;
+    use block2::RcBlock;
+    use objc2::rc::Retained;
+    use objc2::AnyThread;
+    use objc2_core_graphics::{CGDataProvider, CGImage};
+    use objc2_foundation::NSError;
+    use objc2_screen_capture_kit::{
+        SCContentFilter, SCScreenshotManager, SCShareableContent, SCStreamConfiguration, SCWindow,
+    };
+    use std::sync::mpsc::channel;
+    use std::sync::{Mutex, Once};
+    use std::time::{Duration, Instant};
+
+    /// How long an answer of ScreenCaptureKit is waited for.
+    const WAIT: Duration = Duration::from_secs(1);
+    /// How long the list of windows is used before it is asked again (a
+    /// switcher asks for many pictures at once).
+    const LIST_KEPT: Duration = Duration::from_secs(2);
+
+    /// An object of ScreenCaptureKit carried from the queue it answers on.
+    struct Carried<T>(Retained<T>);
+    // SAFETY: ScreenCaptureKit's objects are immutable answers, used from
+    // any thread by its own examples.
+    unsafe impl<T> Send for Carried<T> {}
+
+    static CONTENT: Mutex<Option<(Instant, Carried<SCShareableContent>)>> = Mutex::new(None);
+
+    fn shareable(again: bool) -> Option<Retained<SCShareableContent>> {
+        let mut kept = CONTENT.lock().ok()?;
+        if let Some((at, content)) = kept.as_ref() {
+            if !again && at.elapsed() < LIST_KEPT {
+                return Some(content.0.clone());
+            }
+        }
+        let (sender, answer) = channel();
+        let block = RcBlock::new(move |content: *mut SCShareableContent, error: *mut NSError| {
+            // SAFETY: the answer's objects, retained to be carried.
+            let content = unsafe { Retained::retain(content) };
+            if content.is_none() && !error.is_null() {
+                let error = unsafe { &*error };
+                log::debug!("no windows to picture: {}", error.localizedDescription());
+            }
+            let _ = sender.send(content.map(Carried));
+        });
+        // SAFETY: the block is kept by ScreenCaptureKit until it answers.
+        unsafe { SCShareableContent::getShareableContentWithCompletionHandler(&block) };
+        let content = answer.recv_timeout(WAIT).ok().flatten()?.0;
+        *kept = Some((Instant::now(), Carried(content.clone())));
+        Some(content)
+    }
+
+    fn window(handle: isize) -> Option<Retained<SCWindow>> {
+        let find = |content: &SCShareableContent| {
+            // SAFETY: plain properties of the answer.
+            unsafe { content.windows() }
+                .iter()
+                .find(|window| unsafe { window.windowID() } as isize == handle)
+        };
+        // (A window newer than the list kept: the list is asked again.)
+        let kept = shareable(false)?;
+        find(&kept).or_else(|| shareable(true).and_then(|content| find(&content)))
+    }
+
+    /// Whether pictures may be taken, asking (once in the program's life)
+    /// where they may not yet.
+    fn allowed() -> bool {
+        static ASKED: Once = Once::new();
+        // (The window server's connection, which the capture needs, is
+        // opened by any question to it: in a program without windows of
+        // its own, here.)
+        objc2_core_graphics::CGMainDisplayID();
+        if objc2_core_graphics::CGPreflightScreenCaptureAccess() {
+            return true;
+        }
+        ASKED.call_once(|| {
+            log::info!("pictures of windows need the Screen Recording permission: asked for");
+            objc2_core_graphics::CGRequestScreenCaptureAccess();
+        });
+        false
+    }
+
+    pub fn of_window(handle: isize, side: u32) -> Option<Picture> {
+        if !allowed() {
+            return None;
+        }
+        let window = window(handle)?;
+        // SAFETY: a filter of the one window, a configuration of the size
+        // wanted, and the capture's answer carried back.
+        let image = unsafe {
+            let frame = window.frame();
+            let (width, height) = (frame.size.width.max(1.0), frame.size.height.max(1.0));
+            // (At most twice the points: a display's pixels.)
+            let by = (f64::from(side.max(1)) / width.max(height)).min(2.0);
+            let filter = SCContentFilter::initWithDesktopIndependentWindow(SCContentFilter::alloc(), &window);
+            let configuration = SCStreamConfiguration::new();
+            configuration.setWidth((width * by).round().max(1.0) as usize);
+            configuration.setHeight((height * by).round().max(1.0) as usize);
+            configuration.setShowsCursor(false);
+            configuration.setIgnoreShadowsSingleWindow(true);
+            captured(|block| {
+                SCScreenshotManager::captureImageWithFilter_configuration_completionHandler(
+                    &filter,
+                    &configuration,
+                    Some(block),
+                )
+            })?
+        };
+        picture_of(&image, side)
+    }
+
+    type Answer = block2::DynBlock<dyn Fn(*mut CGImage, *mut NSError)>;
+
+    /// The image a capture answers with, waited for.
+    fn captured(capture: impl FnOnce(&Answer)) -> Option<objc2_core_foundation::CFRetained<CGImage>> {
+        let (sender, answer) = channel();
+        let block = RcBlock::new(move |image: *mut CGImage, _error: *mut NSError| {
+            // SAFETY: the answer's image, retained to be carried.
+            let image = std::ptr::NonNull::new(image)
+                .map(|image| unsafe { objc2_core_foundation::CFRetained::retain(image) });
+            let _ = sender.send(image.map(CarriedImage));
+        });
+        capture(&block);
+        answer.recv_timeout(WAIT).ok().flatten().map(|image| image.0)
+    }
+
+    /// What the screen shows in a rectangle of it, in points from the top
+    /// left of the main display (the menu bar's items). A picture with
+    /// its pixels as they are; `None` until the screen may be recorded.
+    pub fn of_screen_area(x: f64, y: f64, width: f64, height: f64) -> Option<crate::icons::Picture> {
+        if !allowed() || width <= 0.0 || height <= 0.0 {
+            return None;
+        }
+        let rect = objc2_core_foundation::CGRect::new(
+            objc2_core_foundation::CGPoint::new(x, y),
+            objc2_core_foundation::CGSize::new(width, height),
+        );
+        // SAFETY: a capture of the rectangle, its answer carried back.
+        let image = captured(|block| unsafe {
+            SCScreenshotManager::captureImageInRect_completionHandler(rect, Some(block))
+        })?;
+        let picture = picture_of(&image, u32::MAX)?;
+        Some(crate::icons::Picture {
+            width: picture.width,
+            height: picture.height,
+            pixels: picture.rgba,
+        })
+    }
+
+    struct CarriedImage(objc2_core_foundation::CFRetained<CGImage>);
+    // SAFETY: a CGImage is immutable, and may be read on any thread.
+    unsafe impl Send for CarriedImage {}
+
+    /// The image's pixels (blue first, as ScreenCaptureKit gives them),
+    /// made a picture no larger than `side`.
+    fn picture_of(image: &CGImage, side: u32) -> Option<Picture> {
+        let (width, height) = (CGImage::width(Some(image)), CGImage::height(Some(image)));
+        let row = CGImage::bytes_per_row(Some(image));
+        if CGImage::bits_per_pixel(Some(image)) != 32 || width == 0 || height == 0 {
+            return None;
+        }
+        let data = CGDataProvider::data(CGImage::data_provider(Some(image)).as_deref())?;
+        let bytes = data.to_vec();
+        // Rows may be longer than their pixels: packed tightly first.
+        let mut packed = Vec::with_capacity(width * height * 4);
+        for line in bytes.chunks(row).take(height) {
+            packed.extend_from_slice(line.get(..width * 4)?);
+        }
+        super::shrink(width as u32, height as u32, &packed, side)
+    }
+}
+
 #[cfg(windows)]
 pub fn of_window(handle: isize, side: u32) -> Option<Picture> {
     use windows::Win32::Foundation::{HWND, RECT};

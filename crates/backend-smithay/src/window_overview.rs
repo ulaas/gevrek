@@ -13,6 +13,7 @@
 //! place or a window's title is another (`sync_window_overview`), not at
 //! every frame.
 
+use gevrek_host::wm::commands::Commands as _;
 use crate::state::State;
 use gevrek_engine::{Rect, WindowHandle};
 use gevrek_model::command::DispatchCommand;

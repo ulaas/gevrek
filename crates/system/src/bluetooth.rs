@@ -112,7 +112,118 @@ pub fn address_of(number: u64) -> String {
 
 /// Whether a device can be connected and let go from here (`connect`).
 pub fn can_connect() -> bool {
-    cfg!(target_os = "linux")
+    #[cfg(target_os = "macos")]
+    {
+        mac::allowed()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        cfg!(target_os = "linux")
+    }
+}
+
+/// IOBluetooth, macOS's bluetooth. macOS ends a program that touches it
+/// without saying why it would (its application's
+/// `NSBluetoothAlwaysUsageDescription`): it is touched only by a program of
+/// Gevrek.app, whose Info.plist says so, and is not there for a program run
+/// on its own.
+#[cfg(target_os = "macos")]
+mod mac {
+    use super::{Bluetooth, Device};
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+
+    #[link(name = "IOBluetooth", kind = "framework")]
+    extern "C" {
+        // (Not in IOBluetooth's headers, but what every tool that switches
+        // the radio calls, and there since macOS 10.)
+        fn IOBluetoothPreferenceGetControllerPowerState() -> i32;
+        fn IOBluetoothPreferenceSetControllerPowerState(state: i32);
+    }
+    #[link(name = "Foundation", kind = "framework")]
+    extern "C" {}
+
+    /// Whether this program's application says why it uses bluetooth.
+    pub fn allowed() -> bool {
+        // SAFETY: the main bundle and a value of its Info.plist.
+        unsafe {
+            let bundle: Option<Retained<AnyObject>> = msg_send![class!(NSBundle), mainBundle];
+            let Some(bundle) = bundle else {
+                return false;
+            };
+            let key = objc2_foundation::NSString::from_str("NSBluetoothAlwaysUsageDescription");
+            let said: Option<Retained<AnyObject>> = msg_send![&*bundle, objectForInfoDictionaryKey: &*key];
+            said.is_some()
+        }
+    }
+
+    fn text(object: Option<Retained<AnyObject>>) -> String {
+        object
+            .map(|text| {
+                // SAFETY: an NSString's own description is itself.
+                let text: Retained<objc2_foundation::NSString> = unsafe { Retained::cast_unchecked(text) };
+                text.to_string()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn read() -> Option<Bluetooth> {
+        if !allowed() {
+            log::debug!("bluetooth is shown by gevrek's application only (it says why it uses it)");
+            return None;
+        }
+        // SAFETY: the radio's state, and the paired devices' plain
+        // properties, read at once.
+        unsafe {
+            let powered = IOBluetoothPreferenceGetControllerPowerState() != 0;
+            let paired: Option<Retained<objc2_foundation::NSArray<AnyObject>>> =
+                msg_send![class!(IOBluetoothDevice), pairedDevices];
+            let mut devices: Vec<Device> = paired
+                .map(|paired| {
+                    paired
+                        .iter()
+                        .map(|device| Device {
+                            address: text(msg_send![&*device, addressString])
+                                .to_uppercase()
+                                .replace('-', ":"),
+                            name: text(msg_send![&*device, name]),
+                            connected: msg_send![&*device, isConnected],
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            devices.sort_by_key(|device| !device.connected);
+            Some(Bluetooth { powered, devices })
+        }
+    }
+
+    pub fn set_power(on: bool) {
+        if allowed() {
+            // SAFETY: a plain call.
+            unsafe { IOBluetoothPreferenceSetControllerPowerState(i32::from(on)) };
+        }
+    }
+
+    pub fn connect(address: &str, on: bool) {
+        if !allowed() {
+            return;
+        }
+        let address = objc2_foundation::NSString::from_str(&address.replace(':', "-"));
+        // SAFETY: the device of the address, opened or closed.
+        unsafe {
+            let device: Option<Retained<AnyObject>> =
+                msg_send![class!(IOBluetoothDevice), deviceWithAddressString: &*address];
+            let Some(device) = device else {
+                return;
+            };
+            let _: i32 = if on {
+                msg_send![&*device, openConnection]
+            } else {
+                msg_send![&*device, closeConnection]
+            };
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -224,6 +335,10 @@ pub fn read() -> Option<Bluetooth> {
     {
         return system::read();
     }
+    #[cfg(target_os = "macos")]
+    {
+        return mac::read();
+    }
     #[allow(unreachable_code)]
     read_elsewhere()
 }
@@ -268,7 +383,11 @@ pub fn set_power(on: bool) {
     {
         system::set_power(on);
     }
-    #[cfg(not(any(target_os = "linux", windows)))]
+    #[cfg(target_os = "macos")]
+    {
+        mac::set_power(on);
+    }
+    #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
     {
         let _ = on;
     }
@@ -290,7 +409,11 @@ pub fn connect(address: &str, on: bool) {
             if said.is_some() { "asked" } else { "not asked" }
         );
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    {
+        mac::connect(address, on);
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         let _ = on;
     }

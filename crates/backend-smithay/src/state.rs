@@ -3,6 +3,8 @@
 //! Windows, and it does not depend on how frames reach a screen (nested
 //! window, DRM, or nothing at all in tests).
 
+use gevrek_host::wm::bindings::Bindings as _;
+use gevrek_host::wm::reload::Reload as _;
 use crate::desktop::{WlDesktop, WlOutput};
 use gevrek_engine::core::WmCore;
 use gevrek_engine::events::WindowEvent;
@@ -219,15 +221,12 @@ pub struct State {
     pub start_time: std::time::Instant,
     /// The window rules, shared with the desktop and the executor.
     pub rules: Arc<Mutex<gevrek_engine::rules::RuleEngine>>,
-    /// The link to the IPC server, when there is one.
-    pub host: Option<crate::host::Host>,
-    /// The startup programs of the configuration.
-    pub startup: gevrek_host::process_manager::StartupProcessManager,
+    /// What the host owns, the same on every system (`gevrek_host::wm`):
+    /// the link to the IPC server (when there is one), the startup
+    /// programs, the live binding submap, the event stream.
+    pub host: gevrek_host::wm::HostState,
     /// The bindings that are live now, by registration id.
     pub bindings: Vec<(i32, gevrek_engine::input::Hotkey)>,
-    pub active_submap: String,
-    /// The configuration changed here since it was last published.
-    pub config_dirty: bool,
     /// Execution is paused: bindings and startup programs rest.
     pub paused: bool,
     /// Keys whose press a binding kept from the client: their release is
@@ -250,8 +249,6 @@ pub struct State {
         smithay::input::keyboard::ModifiersState,
         gevrek_model::settings::BindingTrigger,
     )>,
-    /// Workspace hooks already run in this session.
-    pub workspace_hooks_fired: std::collections::HashSet<(MonitorHandle, String)>,
     /// What the pointer looks like, as the client under it asked.
     pub cursor_status: smithay::input::pointer::CursorImageStatus,
     /// No host session draws the pointer (real hardware): gevrek draws an
@@ -289,12 +286,6 @@ pub struct State {
     /// counts): a window's own picture handed over, frames drawn here,
     /// and which the last one was.
     pub frames_shown: std::collections::HashMap<MonitorHandle, (u64, u64, bool)>,
-    /// The notices the published state told last, by their names: when
-    /// they are others, the event `notices.changed` says so.
-    pub notices_told: Vec<String>,
-    /// Something happened that the published state does not tell yet: it
-    /// is published at the host's next pass instead of at its usual time.
-    pub(crate) overlay_stale: bool,
     /// How dark the picture is as a warning that the screen is about to
     /// lock by itself: twentieths, 0 (as it is) to 20.
     /// The change between desktop and lock screen that is being drawn.
@@ -410,8 +401,6 @@ pub struct State {
     pub(crate) cursors: crate::cursor::Cursors,
     /// The clock of made-up input (`inject.rs`).
     pub(crate) injected_time: u32,
-    /// The outputs as last published, to tell subscribers what changed.
-    pub(crate) published_monitors: Vec<gevrek_engine::overlay_data::MonitorData>,
     pub gesture_progress: Option<gevrek_engine::overlay_data::GestureProgressData>,
     /// The input backend delivers touchpad swipes (libinput does; the
     /// nested window does not).
@@ -442,8 +431,6 @@ pub struct State {
     pub screenshot: Option<std::path::PathBuf>,
     /// How many windows were given a starting place.
     cascade: usize,
-    /// Where runtime events go (the event stream of the IPC server).
-    pub node_events: Option<NodeEventCallback>,
     next_output: isize,
 }
 
@@ -802,17 +789,16 @@ impl State {
             outputs: Vec::new(),
             start_time: std::time::Instant::now(),
             rules,
-            host: None,
-            startup: gevrek_host::process_manager::StartupProcessManager::new(),
+            host: gevrek_host::wm::HostState {
+                events: node_events,
+                ..Default::default()
+            },
             bindings: Vec::new(),
-            active_submap: "default".to_string(),
-            config_dirty: false,
             paused: false,
             suppressed_keys: Default::default(),
             pressed_with: Default::default(),
             buttons_pressed_with: Default::default(),
             pending_bindings: Vec::new(),
-            workspace_hooks_fired: Default::default(),
             cursor_status: smithay::input::pointer::CursorImageStatus::default_named(),
             draw_own_cursor: false,
             arrow: smithay::backend::renderer::element::memory::MemoryRenderBuffer::from_slice(
@@ -838,9 +824,7 @@ impl State {
             vrr_on: Default::default(),
             night_light_impossible: false,
             night_preview: None,
-            notices_told: Vec::new(),
             frames_shown: Default::default(),
-            overlay_stale: false,
             lock_change: None,
             veiled: false,
             vignette: crate::render::vignette(),
@@ -880,7 +864,6 @@ impl State {
             drag_icon_offset: (0, 0),
             cursors,
             injected_time: 0,
-            published_monitors: Vec::new(),
             gesture_progress: None,
             gestures_available: false,
             output_globals: Default::default(),
@@ -901,7 +884,6 @@ impl State {
             capture_card: None,
             screenshot: None,
             cascade: 0,
-            node_events,
             next_output: 0,
         }
     }
@@ -1103,7 +1085,7 @@ impl State {
             return;
         }
         self.configure_monitors();
-        self.apply_workspace_profiles(|_| true, false);
+        self.apply_workspace_profile_set(|_| true, false);
         self.core.ensure_default_workspaces();
         self.core
             .apply_workspace_appearance(&self.config.desktop.appearance);
@@ -1427,8 +1409,10 @@ impl State {
             .execute_startup(&mut self.desktop, &mut self.core.monitor_manager)?;
         self.core
             .apply_workspace_appearance(&self.config.desktop.appearance);
-        self.apply_workspace_profiles(|_| true, true);
-        self.register_bindings();
+        self.apply_workspace_profile_set(|_| true, true);
+        if let Err(error) = self.refresh_bindings() {
+            log::error!("bindings: {error}");
+        }
         self.core.ensure_default_workspaces();
         // Again, for the workspaces that were only created now.
         self.core
@@ -1438,7 +1422,7 @@ impl State {
         self.apply_numlock();
         // Programs are started from the host's tick, once clients can
         // connect to everything they need (`clients_may_start`).
-        self.startup.configure(&startup, false);
+        self.host.startup.configure(&startup, false);
         self.emit(
             gevrek_engine::executor::RuntimeEventKind::RuntimeStarted,
             None,
@@ -1465,7 +1449,7 @@ impl State {
         // state after the event, not the one of a quarter second ago.
         // (Not for every place a dragged window passes.)
         if !matches!(event, WindowEvent::Moved(..) | WindowEvent::Resized(..)) {
-            self.overlay_stale = true;
+            self.host.state_stale.set(true);
         }
     }
 

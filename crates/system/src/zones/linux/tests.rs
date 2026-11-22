@@ -321,6 +321,9 @@ fn the_menu_says_what_can_be_done_with_the_items() {
 }
 
 #[test]
+// (Linux's own: a rename is told as one by the kernel. On macOS, FSEvents
+// tells a folder changed, and the zone reads it again.)
+#[cfg_attr(target_os = "macos", ignore = "Linux's own")]
 fn file_operations_are_told_of_and_each_is_taken_back_by_its_answer() {
     let mut session = session("backend-files");
     let watch = session.backend.watch(&Location::Desktop).expect("watched");

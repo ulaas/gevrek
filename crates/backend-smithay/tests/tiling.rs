@@ -4,6 +4,7 @@
 
 mod common;
 
+use gevrek_host::wm::commands::Commands as _;
 use common::{Harness, SCREEN};
 use gevrek_engine::layouts::LayoutType;
 use gevrek_engine::{Rect, WindowQueries};

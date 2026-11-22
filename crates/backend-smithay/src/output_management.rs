@@ -13,6 +13,8 @@
 //! does not see it and cannot switch it on again; that is done in the
 //! configuration.
 
+use gevrek_host::wm::reload::Reload as _;
+use gevrek_host::wm::configuration::Configuration as _;
 use crate::state::State;
 use gevrek_model::outputs::{OutputMode, OutputProfile, OutputTransform};
 use smithay::reexports::wayland_protocols_wlr::output_management::v1::server::{

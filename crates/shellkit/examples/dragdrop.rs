@@ -10,12 +10,12 @@
 //!     cargo run -p gevrek-shellkit --example dragdrop            # until closed
 //!     cargo run -p gevrek-shellkit --example dragdrop -- 30      # thirty seconds
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 fn main() {
-    eprintln!("the surface host is there for Linux and Windows only");
+    eprintln!("the surface host is there for Linux, Windows and macOS only");
 }
 
-#[cfg(any(target_os = "linux", windows))]
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 fn main() -> anyhow::Result<()> {
     use gevrek_shellkit::dnd::{
         DragAction, DragActions, DragEvent, DragImage, DragPayload, DragStart, DropAnswer,

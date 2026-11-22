@@ -31,23 +31,24 @@ are gevrek's own and are published with it under the MIT licence.
 
 ## Every crate
 
-620 crates, as Cargo.lock has them. Not every one is in every program: some are
+627 crates, as Cargo.lock has them. Not every one is in every program: some are
 for one system only, some only build or test gevrek.
 
 | Licence | Crates |
 |---|---|
-| MIT OR Apache-2.0 | 278 |
-| MIT | 173 |
+| MIT OR Apache-2.0 | 279 |
+| MIT | 175 |
 | Apache-2.0 OR MIT | 53 |
 | Apache-2.0 | 23 |
 | MIT/Apache-2.0 | 17 |
 | Unlicense OR MIT | 11 |
-| Zlib OR Apache-2.0 OR MIT | 10 |
+| Zlib OR Apache-2.0 OR MIT | 11 |
 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | 9 |
 | MIT OR Apache-2.0 OR Zlib | 6 |
 | BSD-3-Clause | 4 |
 | Zlib | 4 |
 | Apache-2.0/MIT | 3 |
+| ISC | 3 |
 | BSL-1.0 | 2 |
 | MIT OR Zlib OR Apache-2.0 | 2 |
 | BSD-3-Clause OR Apache-2.0 | 2 |
@@ -64,8 +65,8 @@ for one system only, some only build or test gevrek.
 | (Apache-2.0 OR MIT) AND BSD-3-Clause | 1 |
 | (MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0 | 1 |
 | Apache-2.0 / MIT | 1 |
-| ISC | 1 |
 | MIT AND BSD-3-Clause | 1 |
+| CC0-1.0 | 1 |
 | MPL-2.0 | 1 |
 | Apache-2.0 OR GPL-2.0-only | 1 |
 | Apache-2.0 WITH LLVM-exception | 1 |
@@ -293,6 +294,8 @@ for one system only, some only build or test gevrek.
 | imagesize | 0.13.0 | MIT | <https://github.com/Roughsketch/imagesize> |
 | indexmap | 1.9.3 | Apache-2.0 OR MIT | <https://github.com/bluss/indexmap> |
 | indexmap | 2.14.2 | Apache-2.0 OR MIT | <https://github.com/indexmap-rs/indexmap> |
+| inotify | 0.11.5 | ISC | <https://github.com/hannobraun/inotify-rs> |
+| inotify-sys | 0.1.8 | ISC | <https://github.com/hannobraun/inotify-sys> |
 | input | 0.9.1 | MIT | <https://github.com/Drakulix/input.rs> |
 | input-sys | 1.19.0 | MIT | <https://github.com/Drakulix/input.rs/tree/master/input-sys> |
 | io-lifetimes | 1.0.11 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | <https://github.com/sunfishcode/io-lifetimes> |
@@ -315,6 +318,8 @@ for one system only, some only build or test gevrek.
 | js-sys | 0.3.107 | MIT OR Apache-2.0 | <https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys> |
 | khronos-egl | 6.0.0 | MIT/Apache-2.0 | <https://github.com/timothee-haudebourg/khronos-egl> |
 | khronos_api | 3.1.0 | Apache-2.0 | <https://github.com/brendanzab/gl-rs/> |
+| kqueue | 1.2.1 | MIT | <https://gitlab.com/rust-kqueue/rust-kqueue> |
+| kqueue-sys | 1.1.2 | MIT | <https://gitlab.com/rust-kqueue/rust-kqueue-sys> |
 | kurbo | 0.11.3 | Apache-2.0 OR MIT | <https://github.com/linebender/kurbo> |
 | kurbo | 0.13.1 | Apache-2.0 OR MIT | <https://github.com/linebender/kurbo> |
 | lazy_static | 1.5.1 | MIT OR Apache-2.0 | <https://github.com/rust-lang-nursery/lazy-static.rs> |
@@ -358,6 +363,8 @@ for one system only, some only build or test gevrek.
 | nohash-hasher | 0.2.0 | Apache-2.0 OR MIT | <https://github.com/paritytech/nohash-hasher> |
 | nom | 7.1.3 | MIT | <https://github.com/Geal/nom> |
 | nom | 8.0.0 | MIT | <https://github.com/rust-bakery/nom> |
+| notify | 8.2.2 | CC0-1.0 | <https://github.com/notify-rs/notify.git> |
+| notify-types | 2.3.1 | MIT OR Apache-2.0 | <https://github.com/notify-rs/notify.git> |
 | num-traits | 0.2.19 | MIT OR Apache-2.0 | <https://github.com/rust-num/num-traits> |
 | num_enum | 0.7.6 | BSD-3-Clause OR MIT OR Apache-2.0 | <https://github.com/illicitonion/num_enum> |
 | num_enum_derive | 0.7.6 | BSD-3-Clause OR MIT OR Apache-2.0 | <https://github.com/illicitonion/num_enum> |
@@ -373,6 +380,7 @@ for one system only, some only build or test gevrek.
 | objc2-core-graphics | 0.3.2 | Zlib OR Apache-2.0 OR MIT | <https://github.com/madsmtm/objc2> |
 | objc2-core-image | 0.2.2 | MIT | <https://github.com/madsmtm/objc2> |
 | objc2-core-location | 0.2.2 | MIT | <https://github.com/madsmtm/objc2> |
+| objc2-core-services | 0.3.2 | Zlib OR Apache-2.0 OR MIT | <https://github.com/madsmtm/objc2> |
 | objc2-encode | 4.1.0 | MIT | <https://github.com/madsmtm/objc2> |
 | objc2-foundation | 0.2.2 | MIT | <https://github.com/madsmtm/objc2> |
 | objc2-foundation | 0.3.2 | MIT | <https://github.com/madsmtm/objc2> |

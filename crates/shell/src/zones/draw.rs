@@ -1920,6 +1920,8 @@ pub(crate) mod tests {
             Item { id: ItemId::new("::computer"), kind: ItemKind::Virtual, name: "This PC".to_string(), ..Item::default() },
         );
         let (mut zones, _) = zones_on(backend, name);
+        // (What moves is timed by the test, not by how fast it draws.)
+        zones.stop_the_clock();
         let papers = zone(&mut zones, "Papers", ZoneKind::Manual, (124, 40, 430, 250));
         let downloads = zone(&mut zones, "Downloads", ZoneKind::Portal { directory: "/downloads".to_string() }, (124, 310, 430, 190));
         let pictures = zone(

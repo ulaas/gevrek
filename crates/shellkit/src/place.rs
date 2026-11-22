@@ -1,6 +1,9 @@
-//! Where a surface goes on a display, worked out without asking Windows:
-//! the rectangle a [`Place`] means, the strip an edge panel keeps free,
-//! where a popup finds room, and the names windows and displays go by.
+//! Where a surface goes on a display, worked out without asking the
+//! system: the rectangle a [`Place`] means, the strip an edge panel keeps
+//! free, where a popup finds room, and the names windows and displays go
+//! by. The hosts of the systems where the shell is a guest (Windows,
+//! macOS) share it: Windows measures in the pixels of the screen, macOS in
+//! points.
 
 use crate::{Edge, Keyboard, Level, Place};
 
@@ -620,6 +623,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn the_sides_have_the_numbers_windows_gives_them() {
         use windows::Win32::UI::Shell::{ABE_BOTTOM, ABE_LEFT, ABE_RIGHT, ABE_TOP};
         assert_eq!(Side::Left.number(), ABE_LEFT);

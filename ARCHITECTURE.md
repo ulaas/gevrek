@@ -34,11 +34,11 @@ carry that aim:
                     │  gevrek-model           │  configuration, node graph
                     ├──────── Desktop ────────┤  the contract a backend implements
           ┌─────────┴──────┬──────────────────┴──┬─────────────────┐
-          │ gevrek-win32   │ gevrek-smithay      │ (macOS backend) │
-          │ gevrek-wm      │ gevrek-wl           │ planned         │
-          │ manages the    │ is the Wayland      │                 │
-          │ windows of the │ compositor; X11     │                 │
-          │ Windows desktop│ through Xwayland    │                 │
+          │ gevrek-win32   │ gevrek-smithay      │ gevrek-macos    │
+          │ gevrek-wm      │ gevrek-wl           │ gevrek-wm       │
+          │ manages the    │ is the Wayland      │ manages the     │
+          │ windows of the │ compositor; X11     │ windows through │
+          │ Windows desktop│ through Xwayland    │ Accessibility   │
           └────────────────┴─────────────────────┴─────────────────┘
 ```
 
@@ -162,16 +162,22 @@ gevrek/
 │   │                          # contract; layouts, executor, animations,
 │   │                          # a fake desktop for tests. No system API.
 │   ├── host/                  # What every host process shares: config store
-│   │                          # and watcher, started programs, heartbeat
+│   │                          # and watcher, started programs, heartbeat;
+│   │                          # and the WM host itself (`wm`): commands,
+│   │                          # reload, bindings, published state, written
+│   │                          # once for every backend
 │   ├── protocol/              # gevrek.proto, generated code, client wrapper
 │   ├── server/                # The gRPC server, independent of the system
 │   ├── studio/                # gevrek-studio (egui): every setting, the graph,
 │   │                          # inspectors; builds on every system
 │   ├── backend-win32/         # Windows backend: Win32/DWM, hooks, drawn
 │   │                          # effects
-│   └── backend-smithay/       # Linux backend and gevrek-wl: a Smithay
-│                              # Wayland compositor (nested window or
-│                              # DRM/libinput on the hardware), Xwayland
+│   ├── backend-smithay/       # Linux backend and gevrek-wl: a Smithay
+│   │                          # Wayland compositor (nested window or
+│   │                          # DRM/libinput on the hardware), Xwayland
+│   └── backend-macos/         # macOS backend (gevrek-wm there): windows
+│                              # through the Accessibility API, keys from
+│                              # an event tap, hidden windows parked
 ├── tests/
 │   ├── desktop/               # End-to-end checks on a real Windows desktop
 │   └── wayland/               # End-to-end checks of gevrek-wl (nested, KVM)
@@ -179,8 +185,16 @@ gevrek/
 └── docs/                      # LINUX.md, capability matrix, audits, plans
 ```
 
-A new system means a new `crates/backend-*` crate that implements `Desktop`,
-plus its section under `crates/model/src/platform/`.
+A new system means a new `crates/backend-*` crate that implements `Desktop`
+and `gevrek_host::wm::WmHost`, plus its section under
+`crates/model/src/platform/`. `Desktop` is what the engine asks of the
+windows; `WmHost` lends the shared host the backend's configuration, core,
+desktop and host state, and answers the few things only that system knows
+(what follows a command, how keys are taken, what a reload changes of the
+system's own settings). Everything else the host does (the server's
+configuration requests and commands, the reload as a diff, the binding
+ids, the published state) is the same code on every system, and is tested
+on the engine's fake desktop (`crates/host/src/wm/tests.rs`).
 
 ## Building and Running
 

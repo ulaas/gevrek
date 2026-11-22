@@ -141,6 +141,34 @@ pub fn carry_out(end: End) -> Result<Outcome, String> {
     carry_out_by(end, std::env::var_os(DRY_RUN).as_deref(), ask_windows)
 }
 
+/// Carry an end out on a Mac, unless [`DRY_RUN`] is set: the system's own
+/// commands where it has them (`pmset`), else asking the login window, as
+/// the Apple menu does.
+#[cfg(target_os = "macos")]
+pub fn carry_out(end: End) -> Result<Outcome, String> {
+    if says_dry_run(std::env::var_os(DRY_RUN).as_deref()) {
+        return Ok(Outcome::DryRun);
+    }
+    let (program, arguments): (&str, Vec<&str>) = match end {
+        // The displays sleep; with "require password" (the system's
+        // default), the session is locked behind them.
+        End::Lock | End::DisplaysOff => ("/usr/bin/pmset", vec!["displaysleepnow"]),
+        End::Sleep => ("/usr/bin/pmset", vec!["sleepnow"]),
+        End::SignOut => ("/usr/bin/osascript", vec!["-e", "tell application \"loginwindow\" to «event aevtrlgo»"]),
+        End::Restart => ("/usr/bin/osascript", vec!["-e", "tell application \"loginwindow\" to «event aevtrrst»"]),
+        End::ShutDown => ("/usr/bin/osascript", vec!["-e", "tell application \"loginwindow\" to «event aevtrsdn»"]),
+    };
+    let output = std::process::Command::new(program)
+        .args(&arguments)
+        .output()
+        .map_err(|error| format!("{program} did not start: {error}"))?;
+    if output.status.success() {
+        Ok(Outcome::CarriedOut)
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
 /// How long after it was asked for the displays are switched off: the
 /// letting go of the very keys that asked would switch them on again.
 #[cfg(windows)]

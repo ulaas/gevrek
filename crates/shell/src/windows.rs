@@ -1,6 +1,11 @@
-//! The Windows half of the shell: the panel, the launcher, gevrek's own
-//! notifications with their history, the on-screen display, the power
-//! menu and the list of shortcuts.
+//! The half of the shell of the systems where gevrek is a guest (Windows,
+//! and macOS since it has a window manager too): the panel, the launcher,
+//! gevrek's own notifications with their history, the on-screen display,
+//! the power menu and the list of shortcuts. What is said of Windows below
+//! is so on macOS too, unless it says otherwise; on macOS the system's
+//! parts are `gevrek_system`'s macOS halves (some not there yet: the tray
+//! is the menu bar's, what plays is not told, the volume is asked for
+//! rather than heard of).
 //!
 //! The panel of each display is a surface of the host
 //! (`gevrek_shellkit::host`) at the rectangle the window manager gives
@@ -2821,9 +2826,12 @@ fn sync_panels(state: &Rc<RefCell<State>>, control: &mut Control) {
             sender.send(Message::Tray(icons));
         });
         if shared.tray.is_none() {
+            #[cfg(windows)]
             log::warn!(
                 "the tray's icons are not shown: Windows gave no window to hear of them with"
             );
+            #[cfg(target_os = "macos")]
+            log::info!("the tray's icons are not shown: on macOS they are the menu bar's");
         }
     } else if !with_tray && shared.tray.is_some() {
         log::debug!("the tray's icons are no longer heard of: no panel shows them");

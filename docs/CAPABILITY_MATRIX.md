@@ -6,7 +6,7 @@ workflow; a row is complete when that workflow works where the platform
 exposes the necessary capability. Concerns the platform owns are marked as
 such instead of being counted as missing.
 
-gevrek targets Windows and Linux today and macOS later, and aims to become a
+gevrek targets Windows and Linux, and macOS is new, and aims to become a
 complete desktop environment (see the [README](../README.md)). The statuses
 below were established on Windows, the first backend; what the Linux backend
 does not do yet is listed in [LINUX.md](LINUX.md). Desktop-environment parts

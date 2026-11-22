@@ -1,17 +1,157 @@
-//! gevrek-wm: the window manager for Windows with its gRPC server.
-//! On Linux the window manager is `gevrek-wl`.
+//! gevrek-wm: the window manager for Windows and macOS with its gRPC
+//! server. On Linux the window manager is `gevrek-wl`.
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn main() {
-    if cfg!(target_os = "macos") {
-        eprintln!(
-            "gevrek has no window manager for macOS yet: the model, the engine, the command \
-             line and the studio build there, a backend that arranges the windows does not exist."
-        );
-    } else {
-        eprintln!("gevrek-wm runs on Windows only; on Linux use gevrek-wl.");
-    }
+    eprintln!("gevrek-wm runs on Windows and macOS; on Linux use gevrek-wl.");
     std::process::exit(1);
+}
+
+/// On macOS the window manager runs on the main thread (AppKit's screens
+/// are read there, the Accessibility observers' events come on its run
+/// loop), and the server in a thread of its own, as `gevrek-wl` does.
+#[cfg(target_os = "macos")]
+mod macos_main {
+    use clap::Parser;
+    use gevrek_host::config_store::config_channel;
+    use gevrek_host::wm::HostLinks;
+    use gevrek_protocol::DEFAULT_WM_SOCKET;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Parser, Debug)]
+    #[command(name = "gevrek-wm")]
+    #[command(about = "gevrek window manager runtime and gRPC server")]
+    struct Args {
+        /// Where the gRPC server listens: `local` (a socket only this
+        /// user's programs can open; the default), `local:<instance>`, or
+        /// `ip:port` for TCP, which anything on the machine can connect to.
+        #[arg(long, default_value = DEFAULT_WM_SOCKET)]
+        address: String,
+
+        /// Configuration file to load and update. Without it: the standard
+        /// file (`gevrek config-path` prints it).
+        #[arg(long)]
+        config: Option<PathBuf>,
+    }
+
+    pub fn main() -> anyhow::Result<()> {
+        let args = Args::parse();
+        gevrek_logging::Logging::new("gevrek-wm", log::LevelFilter::Info)
+            .config(Some(gevrek_model::paths::resolve_config(args.config.clone()).0))
+            .init();
+        log::info!("=== Gevrek Window Manager Runtime Starting (macOS) ===");
+        gevrek_model::paths::claim_process("wm");
+
+        let address = gevrek_protocol::Endpoint::parse(&args.address);
+        gevrek_host::shortcuts::set_server_address(address.address());
+        let (config_path, legacy) = gevrek_model::paths::resolve_config(args.config);
+        if legacy {
+            log::warn!(
+                "Using config.json from the working directory. The standard place is {}; move the file there, or name it with --config",
+                gevrek_model::paths::config_file().display()
+            );
+        }
+        let (config, has_config_file, config_load_error) = gevrek_server::load_config(&config_path);
+
+        // What the server and the WM loop share.
+        let (config_sender, config_receiver) = std::sync::mpsc::channel();
+        let (command_sender, command_receiver) = std::sync::mpsc::channel();
+        let stop_flag = Arc::new(Mutex::new(false));
+        let pause_flag = Arc::new(Mutex::new(false));
+        let overlay_data = Arc::new(Mutex::new(None));
+        let (event_sender, _) = tokio::sync::broadcast::channel(1000);
+        let event_broadcaster = Arc::new(event_sender);
+        let (log_callback, node_callback) = gevrek_server::event_callbacks(&event_broadcaster);
+        let (config_publisher, config_watch) = config_channel(config.clone());
+        let healthy = Arc::new(AtomicBool::new(false));
+        let runtime_error = Arc::new(Mutex::new(None));
+
+        // The server is made inside the runtime it runs in (it starts a task
+        // there that tells editors of configuration changes).
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| anyhow::anyhow!("IPC runtime: {error}"))?;
+        let in_runtime = runtime.enter();
+        let server = gevrek_server::WMServer::new(
+            gevrek_server::ConfigSource {
+                config: config_watch,
+                config_path: config_path.clone(),
+                has_config_file,
+                config_load_error,
+            },
+            gevrek_server::RuntimeLinks {
+                runtime_config_sender: config_sender,
+                manual_command_sender: command_sender,
+                execution_paused: Arc::clone(&pause_flag),
+                stop_flag: Arc::clone(&stop_flag),
+                overlay_data: Arc::clone(&overlay_data),
+                event_broadcaster,
+                runtime_healthy: Arc::clone(&healthy),
+                runtime_error: Arc::clone(&runtime_error),
+            },
+        )
+        .with_backend(gevrek_macos::backend_info());
+        drop(in_runtime);
+        let server_stop = Arc::clone(&stop_flag);
+        let server_thread = std::thread::Builder::new()
+            .name("gevrek-ipc".to_string())
+            .spawn(move || {
+                if let Err(error) =
+                    runtime.block_on(gevrek_server::serve_on(address, server, server_stop))
+                {
+                    log::error!("IPC server stopped: {error}");
+                }
+            })?;
+        // Ctrl+C and SIGTERM stop the WM through its ordinary path: the
+        // loop ends, parked windows come back, the server goes down.
+        let signal_stop = Arc::clone(&stop_flag);
+        if let Err(error) = ctrlc::set_handler(move || {
+            *signal_stop
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+        }) {
+            log::warn!("No signal handler: {error}");
+        }
+
+        let links = HostLinks {
+            config_receiver,
+            command_receiver,
+            config_publisher,
+            config_path: Some(config_path),
+            overlay_data,
+            pause_flag,
+            stop_flag: Arc::clone(&stop_flag),
+        };
+        let ready_healthy = Arc::clone(&healthy);
+        let outcome = gevrek_macos::runtime::run(
+            config,
+            links,
+            Some(log_callback),
+            Some(node_callback),
+            move || ready_healthy.store(true, Ordering::Release),
+        );
+        healthy.store(false, Ordering::Release);
+        if let Err(error) = &outcome {
+            log::error!("Window manager runtime failed: {error}");
+            *runtime_error
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(error.to_string());
+        }
+        *stop_flag
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+        let _ = server_thread.join();
+        log::info!("WM Server shutting down");
+        outcome
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn main() -> anyhow::Result<()> {
+    macos_main::main()
 }
 
 #[cfg(windows)]

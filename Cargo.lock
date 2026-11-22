@@ -1903,6 +1903,7 @@ dependencies = [
  "gevrek-host",
  "gevrek-link",
  "gevrek-logging",
+ "gevrek-macos",
  "gevrek-model",
  "gevrek-protocol",
  "gevrek-schema",
@@ -1961,7 +1962,9 @@ name = "gevrek-host"
 version = "0.7.4"
 dependencies = [
  "anyhow",
+ "gevrek-engine",
  "gevrek-model",
+ "jiff",
  "log",
  "serde",
  "serde_json",
@@ -2011,6 +2014,25 @@ dependencies = [
  "gevrek-build",
  "gevrek-model",
  "log",
+ "serde_json",
+]
+
+[[package]]
+name = "gevrek-macos"
+version = "0.7.4"
+dependencies = [
+ "anyhow",
+ "gevrek-engine",
+ "gevrek-host",
+ "gevrek-model",
+ "log",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation 0.3.2",
+ "objc2-quartz-core 0.3.2",
+ "serde",
  "serde_json",
 ]
 
@@ -2118,6 +2140,7 @@ dependencies = [
 name = "gevrek-shellkit"
 version = "0.7.4"
 dependencies = [
+ "accesskit_macos",
  "accesskit_unix",
  "accesskit_windows",
  "anyhow",
@@ -2126,6 +2149,10 @@ dependencies = [
  "env_logger",
  "gevrek-ui",
  "log",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "objc2-quartz-core 0.3.2",
  "pollster",
  "raw-window-handle",
  "smithay-client-toolkit",
@@ -2201,6 +2228,7 @@ dependencies = [
 name = "gevrek-system"
 version = "0.7.4"
 dependencies = [
+ "block2 0.6.2",
  "dirs",
  "gevrek-model",
  "gevrek-zones",
@@ -2208,6 +2236,12 @@ dependencies = [
  "jiff",
  "log",
  "notify",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation 0.3.2",
+ "objc2-screen-capture-kit",
  "pulseaudio",
  "resvg",
  "serde",
@@ -3386,6 +3420,8 @@ dependencies = [
  "log",
  "mio",
  "notify-types",
+ "objc2-core-foundation",
+ "objc2-core-services",
  "walkdir",
  "windows-sys 0.61.2",
 ]
@@ -3480,10 +3516,12 @@ checksum = "d49e936b501e5c5bf01fda3a9452ff86dc3ea98ad5f283e1455153142d97518c"
 dependencies = [
  "bitflags 2.13.2",
  "block2 0.6.2",
+ "libc",
  "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
+ "objc2-quartz-core 0.3.2",
 ]
 
 [[package]]
@@ -3568,6 +3606,16 @@ dependencies = [
  "objc2 0.5.3",
  "objc2-contacts",
  "objc2-foundation 0.2.2",
+]
+
+[[package]]
+name = "objc2-core-services"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "583300ad934cba24ff5292aee751ecc070f7ca6b39a574cc21b7b5e588e06a0b"
+dependencies = [
+ "libc",
+ "objc2-core-foundation",
 ]
 
 [[package]]
@@ -3673,6 +3721,19 @@ dependencies = [
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
  "objc2-metal 0.3.2",
+]
+
+[[package]]
+name = "objc2-screen-capture-kit"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74b7c5390f477482f001bc354d6571a70db7e4f8d5288e860c45521fbce11394"
+dependencies = [
+ "block2 0.6.2",
+ "objc2 0.6.5",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation 0.3.2",
 ]
 
 [[package]]

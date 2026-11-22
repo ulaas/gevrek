@@ -87,6 +87,18 @@ pub fn tell(ask: Ask) -> bool {
     system::tell(ask)
 }
 
+/// macOS tells what plays only to its own (its MediaRemote is private):
+/// nothing, and the shell presses the keys of what plays instead.
+#[cfg(target_os = "macos")]
+pub fn playing(_picture: impl Fn(&str, &str) -> bool) -> Option<Playing> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+pub fn tell(_ask: Ask) -> bool {
+    false
+}
+
 #[cfg(windows)]
 mod system {
     use super::{Ask, Playing};

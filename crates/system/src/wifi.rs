@@ -235,7 +235,7 @@ pub fn rescan() -> bool {
     took
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 pub fn rescan() -> bool {
     false
 }
@@ -296,19 +296,295 @@ pub fn join(name: &str, known: bool, password: Option<&str>) -> bool {
     }
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 pub fn read() -> Option<Wifi> {
     None
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 pub fn set_enabled(_on: bool) -> bool {
     false
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 pub fn join(_name: &str, _known: bool, _password: Option<&str>) -> bool {
     false
+}
+
+#[cfg(target_os = "macos")]
+pub use mac::{join, read, rescan, set_enabled};
+
+/// CoreWLAN, macOS's wireless interface. macOS names the networks (the
+/// one in use, those in reach) only to a program that may know the
+/// machine's location: the first time they are asked for, the system is
+/// asked for that permission (its own question, once; Gevrek.app says why
+/// in its Info.plist and is signed to ask). Until it is given, the radio
+/// is switched here and the networks are left to the menu bar's own.
+#[cfg(target_os = "macos")]
+mod mac {
+    use super::{in_order, Network, Wifi};
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    use objc2_foundation::{NSArray, NSString};
+    use std::sync::Mutex;
+
+    #[link(name = "CoreWLAN", kind = "framework")]
+    extern "C" {}
+    #[link(name = "CoreLocation", kind = "framework")]
+    extern "C" {}
+    extern "C" {
+        static _dispatch_main_q: std::ffi::c_void;
+        fn dispatch_async_f(
+            queue: *const std::ffi::c_void,
+            context: *mut std::ffi::c_void,
+            work: extern "C" fn(*mut std::ffi::c_void),
+        );
+    }
+
+    /// The networks of the last look around (`rescan`).
+    static FOUND: Mutex<Option<Vec<Network>>> = Mutex::new(None);
+
+    /// The Mac's wireless interface, if it has one.
+    fn interface() -> Option<Retained<AnyObject>> {
+        // SAFETY: CoreWLAN's shared client and its default interface.
+        unsafe {
+            let client: Option<Retained<AnyObject>> = msg_send![class!(CWWiFiClient), sharedWiFiClient];
+            msg_send![&*client?, interface]
+        }
+    }
+
+    fn text(object: Option<Retained<NSString>>) -> Option<String> {
+        object.map(|text| text.to_string()).filter(|text| !text.is_empty())
+    }
+
+    /// Whether this program may know the location (and so the networks'
+    /// names), asking where it was never asked.
+    fn may_know_networks() -> bool {
+        // SAFETY: the class's own answer, on any thread.
+        let status: i32 = unsafe { msg_send![class!(CLLocationManager), authorizationStatus] };
+        match status {
+            // Always, or when in use.
+            3 | 4 => {
+                stop_asking();
+                true
+            }
+            // Never asked: asked, on the main thread (CoreLocation answers
+            // on the thread its manager was made on).
+            0 => {
+                ask_once();
+                false
+            }
+            _ => {
+                stop_asking();
+                false
+            }
+        }
+    }
+
+    /// The manager that asked (kept for the program's life: it is what
+    /// macOS answers), as a pointer, once it exists.
+    static MANAGER: std::sync::atomic::AtomicPtr<AnyObject> = std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+
+    /// The question is answered: the location that was asked for to have
+    /// it asked is not wanted (it would cost the battery).
+    fn stop_asking() {
+        static STOPPED: std::sync::Once = std::sync::Once::new();
+        if MANAGER.load(std::sync::atomic::Ordering::Acquire).is_null() {
+            return;
+        }
+        STOPPED.call_once(|| {
+            extern "C" fn stop(_: *mut std::ffi::c_void) {
+                let manager = MANAGER.load(std::sync::atomic::Ordering::Acquire);
+                // SAFETY: the manager kept since it asked, on the main
+                // thread it was made on.
+                unsafe {
+                    let _: () = msg_send![manager, stopUpdatingLocation];
+                }
+            }
+            // SAFETY: the main queue, which the shell's run loop serves.
+            unsafe { dispatch_async_f(&_dispatch_main_q, std::ptr::null_mut(), stop) };
+        });
+    }
+
+    fn ask_once() {
+        static ASKED: std::sync::Once = std::sync::Once::new();
+        ASKED.call_once(|| {
+            extern "C" fn ask(_: *mut std::ffi::c_void) {
+                // SAFETY: on the main thread; the manager is kept for the
+                // program's life (it answers the question).
+                unsafe {
+                    let manager: Retained<AnyObject> = msg_send![class!(CLLocationManager), new];
+                    let _: () = msg_send![&*manager, requestWhenInUseAuthorization];
+                    // (macOS asks only once a location is wanted.)
+                    let _: () = msg_send![&*manager, startUpdatingLocation];
+                    MANAGER.store(Retained::into_raw(manager), std::sync::atomic::Ordering::Release);
+                }
+            }
+            log::info!("the wifi's networks are named only to a program that may know the location: asked");
+            // SAFETY: the main queue, which the shell's run loop serves.
+            unsafe { dispatch_async_f(&_dispatch_main_q, std::ptr::null_mut(), ask) };
+        });
+    }
+
+    /// The names of the networks the Mac has joined before.
+    fn known(interface: &AnyObject) -> Vec<String> {
+        // SAFETY: the interface's configuration and its profiles' names.
+        unsafe {
+            let configuration: Option<Retained<AnyObject>> = msg_send![interface, configuration];
+            let Some(configuration) = configuration else {
+                return Vec::new();
+            };
+            let profiles: Option<Retained<AnyObject>> = msg_send![&*configuration, networkProfiles];
+            let Some(profiles) = profiles else {
+                return Vec::new();
+            };
+            let profiles: Retained<NSArray<AnyObject>> = msg_send![&*profiles, array];
+            profiles
+                .iter()
+                .filter_map(|profile| text(msg_send![&*profile, ssid]))
+                .collect()
+        }
+    }
+
+    /// A signal's strength as a percentage: -100 dBm and weaker is none,
+    /// -50 and stronger is full.
+    pub fn percent_of(rssi: isize) -> u8 {
+        ((rssi + 100).clamp(0, 50) * 2) as u8
+    }
+
+    /// Look around for networks (it takes a moment): what is in reach.
+    fn scan(interface: &AnyObject, name: Option<&str>) -> Vec<Retained<AnyObject>> {
+        let name = name.map(NSString::from_str);
+        // SAFETY: a scan, its error not read; its set as an array.
+        unsafe {
+            let found: Option<Retained<AnyObject>> = msg_send![
+                interface,
+                scanForNetworksWithName: name.as_deref(),
+                error: std::ptr::null_mut::<*mut AnyObject>()
+            ];
+            let Some(found) = found else {
+                return Vec::new();
+            };
+            let all: Retained<NSArray<AnyObject>> = msg_send![&*found, allObjects];
+            all.to_vec()
+        }
+    }
+
+    pub fn read() -> Option<Wifi> {
+        let interface = interface()?;
+        // SAFETY: a plain property of the interface.
+        let enabled: bool = unsafe { msg_send![&*interface, powerOn] };
+        let mut networks = Vec::new();
+        if enabled && may_know_networks() {
+            let found = FOUND.lock().ok().and_then(|found| found.clone());
+            networks = match found {
+                Some(networks) => networks,
+                None => {
+                    rescan();
+                    FOUND.lock().ok().and_then(|found| found.clone()).unwrap_or_default()
+                }
+            };
+            // SAFETY: a plain property.
+            let current = text(unsafe { msg_send![&*interface, ssid] });
+            for network in &mut networks {
+                network.in_use = current.as_deref() == Some(network.name.as_str());
+            }
+            networks = in_order(networks);
+        }
+        Some(Wifi { enabled, networks })
+    }
+
+    /// Switch the radio on, or off. Whether the system took it.
+    pub fn set_enabled(on: bool) -> bool {
+        let Some(interface) = interface() else {
+            return false;
+        };
+        // SAFETY: the interface's own setter; no error is read back.
+        unsafe { msg_send![&*interface, setPower: on, error: std::ptr::null_mut::<*mut AnyObject>()] }
+    }
+
+    /// Look around for networks again. Whether it could.
+    pub fn rescan() -> bool {
+        let Some(interface) = interface() else {
+            return false;
+        };
+        if !may_know_networks() {
+            return false;
+        }
+        let known = known(&interface);
+        let mut networks: Vec<Network> = Vec::new();
+        for network in scan(&interface, None) {
+            // SAFETY: plain properties of a network found.
+            let (name, rssi, open) = unsafe {
+                let name = text(msg_send![&*network, ssid]);
+                let rssi: isize = msg_send![&*network, rssiValue];
+                // (kCWSecurityNone.)
+                let open: bool = msg_send![&*network, supportsSecurity: 0isize];
+                (name, rssi, open)
+            };
+            let Some(name) = name else { continue };
+            // A network heard on several channels is one, at its best.
+            let signal = percent_of(rssi);
+            if let Some(seen) = networks.iter_mut().find(|seen| seen.name == name) {
+                seen.signal = seen.signal.max(signal);
+                continue;
+            }
+            networks.push(Network {
+                known: known.contains(&name),
+                name,
+                signal,
+                secured: !open,
+                in_use: false,
+            });
+        }
+        log::debug!("wifi: {} network(s) in reach", networks.len());
+        if let Ok(mut found) = FOUND.lock() {
+            *found = Some(networks);
+        }
+        true
+    }
+
+    /// Join a network by its name, with its password where it asks for
+    /// one (a known one's is the system's own). Whether it was joined.
+    pub fn join(name: &str, _known: bool, password: Option<&str>) -> bool {
+        let Some(interface) = interface() else {
+            return false;
+        };
+        if !may_know_networks() {
+            log::info!("{name} is joined from the menu bar until gevrek may know the location");
+            return false;
+        }
+        let Some(network) = scan(&interface, Some(name)).into_iter().next() else {
+            log::debug!("wifi: {name} not in reach");
+            return false;
+        };
+        let password = password.map(NSString::from_str);
+        // SAFETY: the network just found, and its password; the error not
+        // read (whether it joined is the answer).
+        let joined: bool = unsafe {
+            msg_send![
+                &*interface,
+                associateToNetwork: &*network,
+                password: password.as_deref(),
+                error: std::ptr::null_mut::<*mut AnyObject>()
+            ]
+        };
+        log::debug!("wifi: {name} {}", if joined { "joined" } else { "not joined" });
+        joined
+    }
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn a_signal_is_a_percentage_of_fifty_decibels() {
+            assert_eq!(super::percent_of(-100), 0);
+            assert_eq!(super::percent_of(-75), 50);
+            assert_eq!(super::percent_of(-50), 100);
+            assert_eq!(super::percent_of(-30), 100);
+            assert_eq!(super::percent_of(-120), 0);
+        }
+    }
 }
 
 #[cfg(windows)]

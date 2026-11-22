@@ -141,6 +141,10 @@ gevrek-win32 = { path = "crates/backend-win32" }
 gevrek-system = { path = "crates/system" }
 windows = { workspace = true }
 
+# The macOS backend: gevrek-wm on macOS.
+[target.'cfg(target_os = "macos")'.dependencies]
+gevrek-macos = { path = "crates/backend-macos" }
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

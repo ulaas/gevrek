@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The hardened runtime lets a program ask for the location only
+	     with this: macOS names the wifi's networks only to a program
+	     that may know it (the shell's control centre lists them). -->
+	<key>com.apple.security.personal-information.location</key>
+	<true/>
+</dict>
+</plist>

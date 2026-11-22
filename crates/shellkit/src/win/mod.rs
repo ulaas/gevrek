@@ -47,7 +47,8 @@
 pub mod dnd;
 pub mod input;
 pub mod look;
-pub mod place;
+/// (The arithmetic of where surfaces go, shared with the macOS host.)
+pub use crate::place;
 
 use crate::dnd::{DragActions, DragEvent, DragImage, DragOutcome, DragStart, DropAnswer};
 use crate::look::BlurRegion;

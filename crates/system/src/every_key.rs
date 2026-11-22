@@ -83,6 +83,140 @@ pub use self::windows::{
     EveryKey, OWN_MARK,
 };
 
+#[cfg(target_os = "macos")]
+pub use self::macos::{modifier_held, press, press_chord, shift_held};
+
+/// The keys the shell presses for every program on a Mac, by the virtual
+/// key codes the shell names them with (Windows' numbers, as gevrek's
+/// bindings): the keys of what plays and of the sound are the system's own
+/// events there, and taking a picture of the screen is Command-Shift-3.
+#[cfg(target_os = "macos")]
+mod macos {
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    use objc2_foundation::NSPoint;
+    use std::ffi::c_void;
+
+    #[link(name = "AppKit", kind = "framework")]
+    extern "C" {}
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGEventSourceFlagsState(state: i32) -> u64;
+        fn CGEventCreateKeyboardEvent(source: *const c_void, code: u16, down: bool) -> *const c_void;
+        fn CGEventSetFlags(event: *const c_void, flags: u64);
+        fn CGEventPost(tap: u32, event: *const c_void);
+    }
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFRelease(cf: *const c_void);
+    }
+
+    const SHIFT: u64 = 0x0002_0000;
+    const CONTROL: u64 = 0x0004_0000;
+    const OPTION: u64 = 0x0008_0000;
+    const COMMAND: u64 = 0x0010_0000;
+
+    fn held() -> u64 {
+        // SAFETY: a plain query of the combined session's modifiers.
+        unsafe { CGEventSourceFlagsState(0) }
+    }
+
+    /// Whether Control, Option or Command is held now: what a window
+    /// switcher goes by.
+    pub fn modifier_held() -> bool {
+        held() & (CONTROL | OPTION | COMMAND) != 0
+    }
+
+    pub fn shift_held() -> bool {
+        held() & SHIFT != 0
+    }
+
+    /// A key with modifiers, pressed and let go.
+    fn stroke(code: u16, flags: u64) {
+        for down in [true, false] {
+            // SAFETY: an event made, given its flags, posted and released.
+            unsafe {
+                let event = CGEventCreateKeyboardEvent(std::ptr::null(), code, down);
+                if event.is_null() {
+                    return;
+                }
+                CGEventSetFlags(event, flags);
+                CGEventPost(0, event);
+                CFRelease(event);
+            }
+        }
+    }
+
+    /// One of the keys of the system (`NX_KEYTYPE_*`): what plays, the
+    /// sound. They are no keys of the keyboard's but events of their own,
+    /// which only AppKit makes.
+    fn system_key(key: isize) {
+        for down in [true, false] {
+            let state: isize = if down { 0xA } else { 0xB };
+            let data1 = (key << 16) | (state << 8);
+            // SAFETY: AppKit's class method with plain values (a system
+            // event of the kind 8, "aux control button"), and its event's
+            // Core Graphics event, posted. The event is kept until then.
+            unsafe {
+                let event: Option<Retained<AnyObject>> = msg_send![
+                    class!(NSEvent),
+                    otherEventWithType: 14usize,
+                    location: NSPoint::new(0.0, 0.0),
+                    modifierFlags: if down { 0xA00usize } else { 0xB00usize },
+                    timestamp: 0.0f64,
+                    windowNumber: 0isize,
+                    context: std::ptr::null::<AnyObject>(),
+                    subtype: 8i16,
+                    data1: data1,
+                    data2: -1isize
+                ];
+                let Some(event) = event else {
+                    return;
+                };
+                let cg: *const c_void = msg_send![&event, CGEvent];
+                if !cg.is_null() {
+                    CGEventPost(0, cg);
+                }
+            }
+        }
+    }
+
+    /// Press and let go a key the shell names by its Windows number.
+    pub fn press(key: u16) {
+        match key {
+            // What plays.
+            0xB3 => system_key(16),
+            0xB0 => system_key(17),
+            0xB1 => system_key(18),
+            // (macOS has no key to stop: play and pause pauses.)
+            0xB2 => system_key(16),
+            // The sound.
+            0xAF => system_key(0),
+            0xAE => system_key(1),
+            0xAD => system_key(7),
+            // A picture of the whole screen.
+            0x2C => stroke(0x14, COMMAND | SHIFT),
+            other => log::debug!("the key {other:#x} is not pressed on macOS"),
+        }
+    }
+
+    /// Press keys together. What the shell presses so is a picture of one
+    /// window (Alt and Print Screen on Windows): Command-Shift-4 and the
+    /// space bar, after which a click chooses the window.
+    pub fn press_chord(keys: &[u16]) {
+        match keys {
+            [0x12, 0x2C] => {
+                stroke(0x15, COMMAND | SHIFT);
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                stroke(0x31, 0);
+            }
+            other => log::debug!("the keys {other:x?} are not pressed together on macOS"),
+        }
+    }
+}
+
 #[cfg(windows)]
 mod windows {
     use super::{Heard, Held};
