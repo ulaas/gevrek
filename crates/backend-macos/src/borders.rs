@@ -33,9 +33,11 @@ use objc2_quartz_core::{CALayer, CAShapeLayer};
 use std::collections::HashMap;
 
 /// The corner of a macOS window, in points, which a rounded border
-/// follows. (Windows of macOS 26 and later have rounder corners than
-/// before; a toolbar makes them rounder still. This is a middle.)
-const WINDOW_CORNER: f64 = 12.0;
+/// follows (around it, so its own corner is this and its reach). Measured
+/// on macOS 27.2 in captures of windows with and without a toolbar, with
+/// a sidebar, and of gevrek's own: the same for all of them, a radius of
+/// 34 pixels at twice the scale.
+const WINDOW_CORNER: f64 = 17.0;
 
 /// One border.
 struct Border {

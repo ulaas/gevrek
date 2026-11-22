@@ -1061,8 +1061,11 @@ wanted, strike it when it is not.
       243980d): two thin rings; dashes along the band, laid anew when the
       window's size changes. Glow, shadow and gradient are refused by the
       configuration on every system, so there is nothing to draw.
-- [ ] The corner of each window as it is (it differs with a toolbar): a
-      rounded border follows a middle corner of 12 points now.
+- [x] The corner a rounded border follows (2026-11-22): measured in
+      captures of Calculator, Dictionary and Activity Monitor and of
+      windows of gevrek's own with no toolbar, a toolbar and a compact
+      one: every one has the same corner on macOS 27.2, 17 points (it was
+      taken as 12). To be measured again when macOS changes its windows.
 - [x] Stackbars (2026-11-22, `stackbars.rs`): a panel over a group's
       shown window, its titles drawn by Core Animation, the shown tab
       marked; a click on a tab shows that window without gevrek taking the
