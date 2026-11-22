@@ -32,6 +32,12 @@
 	     saying. -->
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>gevrek's control centre shows bluetooth's devices, connects them and switches the radio.</string>
+	<!-- macOS names the wifi's networks only to a program that may know
+	     the location: gevrek uses it for nothing else. -->
+	<key>NSLocationUsageDescription</key>
+	<string>macOS names the wifi networks in reach only to a program that may know the location. gevrek uses it for that alone: its control centre lists the networks and joins them.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>macOS names the wifi networks in reach only to a program that may know the location. gevrek uses it for that alone: its control centre lists the networks and joins them.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>MIT licence</string>
 </dict>

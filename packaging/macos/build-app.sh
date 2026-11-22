@@ -26,7 +26,9 @@ out="target/macos"
 app="$out/Gevrek.app"
 
 echo "Building gevrek $version (release)..."
-cargo build --release --bin gevrek-wm --bin gevrek --bin gevrek-studio --bin gevrek-shell
+cargo build --release --bin gevrek-wm --bin gevrek --bin gevrek-studio
+# (The shell is a package of its own.)
+cargo build --release -p gevrek-shell
 
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
@@ -52,12 +54,16 @@ fi
 echo "Signing with: $identity"
 # The programs inside first, then the bundle (whose executable is the
 # window manager). The hardened runtime is what notarization asks for;
-# gevrek needs no exception from it.
+# gevrek needs no exception from it, only leave to ask for the location
+# (entitlements.plist: the wifi's networks are named only then).
+entitlements="$(dirname "$0")/entitlements.plist"
 for program in gevrek gevrek-studio gevrek-shell; do
     codesign --force --options runtime --timestamp=none --sign "$identity" \
+        --entitlements "$entitlements" \
         --identifier "io.github.ulaas.gevrek.$program" "$app/Contents/MacOS/$program"
 done
-codesign --force --options runtime --timestamp=none --sign "$identity" "$app"
+codesign --force --options runtime --timestamp=none --sign "$identity" \
+    --entitlements "$entitlements" "$app"
 codesign --verify --strict --deep "$app"
 
 echo "Built $app"

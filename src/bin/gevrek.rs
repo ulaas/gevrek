@@ -2010,7 +2010,38 @@ fn start_component(
                 return Ok(None);
             }
         }
+        // On macOS the other programs are started on their own: see
+        // `macos_app::spawn_on_its_own`.
+        #[cfg(target_os = "macos")]
+        {
+            let log_path = log_file(component.name());
+            std::fs::create_dir_all(pid_dir())?;
+            // (The window manager takes its address without the scheme.)
+            let component_address = if *component == Component::Wm {
+                address
+                    .strip_prefix("http://")
+                    .or_else(|| address.strip_prefix("https://"))
+                    .unwrap_or(address)
+            } else {
+                address
+            };
+            let pid = macos_app::spawn_on_its_own(&binary_path, &["--address", component_address], &log_path)?;
+            log::debug!(
+                "{} was started on its own: {} as process {pid}, its log in {}",
+                component.name(),
+                binary_path.display(),
+                log_path.display()
+            );
+            write_pid(component, pid)?;
+            println!(
+                "{} started (PID: {pid}, log: {})",
+                component.name(),
+                log_path.display()
+            );
+            return Ok(None);
+        }
         // Run as daemon - detach from terminal
+        #[allow(unreachable_code)]
         let mut cmd = Command::new(&binary_path);
         configure_command(&mut cmd);
 
@@ -2099,6 +2130,77 @@ mod macos_app {
         ]
         .into_iter()
         .find(|bundle| bundle.join("Contents/MacOS/gevrek-wm").exists())
+    }
+
+    /// Start a program of the bundle in the background so that macOS holds
+    /// it, not whoever started it, responsible for what it does: the
+    /// questions it asks (the location, recording the screen, bluetooth)
+    /// are then Gevrek's, where a terminal that ran `gevrek` would
+    /// otherwise answer them, and be named in them. (The same as Chromium
+    /// and the terminals do for what they start: the spawn "disclaims"
+    /// responsibility.) What it writes to its error stream goes to `log`.
+    /// Its process id.
+    pub fn spawn_on_its_own(program: &Path, args: &[&str], log: &Path) -> Result<u32> {
+        use std::ffi::{CString, OsStr};
+        use std::os::unix::ffi::OsStrExt;
+        type Disclaim = unsafe extern "C" fn(*mut libc::posix_spawnattr_t, libc::c_int) -> libc::c_int;
+        let c = |text: &OsStr| CString::new(text.as_bytes()).map_err(|_| anyhow!("a NUL in {text:?}"));
+        let path = c(program.as_os_str())?;
+        let mut argv = vec![path.clone()];
+        for arg in args {
+            argv.push(c(OsStr::new(arg))?);
+        }
+        let mut argv_ptrs: Vec<*mut libc::c_char> = argv.iter().map(|arg| arg.as_ptr() as *mut _).collect();
+        argv_ptrs.push(std::ptr::null_mut());
+        let null = c(OsStr::new("/dev/null"))?;
+        let log = c(log.as_os_str())?;
+        extern "C" {
+            static environ: *const *mut libc::c_char;
+        }
+        // SAFETY: attributes and file actions made, used and destroyed
+        // here; the strings outlive the spawn.
+        unsafe {
+            let mut attributes: libc::posix_spawnattr_t = std::mem::zeroed();
+            let mut actions: libc::posix_spawn_file_actions_t = std::mem::zeroed();
+            libc::posix_spawnattr_init(&mut attributes);
+            libc::posix_spawn_file_actions_init(&mut actions);
+            // (Not in the SDK's headers, but in the system since 10.14.)
+            let disclaim = libc::dlsym(libc::RTLD_DEFAULT, c"responsibility_spawnattrs_setdisclaim".as_ptr());
+            if disclaim.is_null() {
+                log::debug!("no way to disclaim responsibility: started as a child");
+            } else {
+                let disclaim: Disclaim = std::mem::transmute(disclaim);
+                disclaim(&mut attributes, 1);
+            }
+            libc::posix_spawn_file_actions_addopen(&mut actions, 0, null.as_ptr(), libc::O_RDONLY, 0);
+            libc::posix_spawn_file_actions_addopen(&mut actions, 1, null.as_ptr(), libc::O_WRONLY, 0);
+            libc::posix_spawn_file_actions_addopen(
+                &mut actions,
+                2,
+                log.as_ptr(),
+                libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC,
+                0o644,
+            );
+            let mut pid: libc::pid_t = 0;
+            let status = libc::posix_spawn(
+                &mut pid,
+                path.as_ptr(),
+                &actions,
+                &attributes,
+                argv_ptrs.as_ptr(),
+                environ,
+            );
+            libc::posix_spawn_file_actions_destroy(&mut actions);
+            libc::posix_spawnattr_destroy(&mut attributes);
+            if status != 0 {
+                return Err(anyhow!(
+                    "{} could not be started: {}",
+                    program.display(),
+                    std::io::Error::from_raw_os_error(status)
+                ));
+            }
+            Ok(pid as u32)
+        }
     }
 
     /// Start the window manager of `bundle` in the background, its errors
