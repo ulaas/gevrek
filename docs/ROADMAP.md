@@ -1155,10 +1155,14 @@ wanted, strike it when it is not.
 
 ## Found on the way
 
-- [ ] **any** CI: the Linux test
-      `zones::draw::...everything_of_the_desktop_is_painted...` failed
-      once on a push of the macOS branch (2026-11-22) and passed when run
-      again; `draw.rs` was not touched. A test that fails now and then.
+- [x] **any** CI: the test
+      `zones::draw::...everything_of_the_desktop_is_painted...` failed now
+      and then, on Linux and on Windows (2026-11-22). The zones' clock ran
+      by itself in tests: the hiding fade (0.18 s) was over before a slow
+      runner had drawn the test's three frames. A test now stops the clock
+      (`Zones::stop_the_clock`; only `later` moves it). With a sleep of
+      300 ms in each frame it failed at the same line with the clock
+      running and passes stopped (2026-11-22).
 
 - [x] **any** `gevrek-system` did not build for macOS, and with it
       `gevrek-shell` (the zones take the Linux half there, whose `notify`

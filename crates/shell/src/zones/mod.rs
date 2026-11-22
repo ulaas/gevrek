@@ -389,6 +389,9 @@ pub struct Zones {
     began: Instant,
     /// How far the clock is put forward (a test's way to let time pass).
     ahead: f64,
+    /// The clock stopped where a test stopped it: time passes only as the
+    /// test says (`later`), however long its frames take to draw.
+    stopped: Option<f64>,
     /// What the core was last told the pointer is over, and whether
     /// something was carried.
     over: Option<(Option<ZoneId>, bool)>,
@@ -571,6 +574,7 @@ impl Zones {
             motion: motion::Motion::default(),
             began: Instant::now(),
             ahead: 0.0,
+            stopped: None,
             over: None,
             tick_due: None,
             rules_due: None,
@@ -797,7 +801,9 @@ impl Zones {
 
     /// The seconds since the zones started, for everything that moves.
     pub fn seconds(&self) -> f64 {
-        self.began.elapsed().as_secs_f64() + self.ahead
+        self.stopped
+            .unwrap_or_else(|| self.began.elapsed().as_secs_f64())
+            + self.ahead
     }
 
     /// The same in thousandths, as the core is told the time.
@@ -809,6 +815,14 @@ impl Zones {
     #[cfg(test)]
     pub fn later(&mut self, seconds: f64) {
         self.ahead += seconds;
+    }
+
+    /// Stop the clock where it is: from now on time passes only by
+    /// `later`. (A fade of a fifth of a second is over before a slow
+    /// machine has drawn a test's three frames.)
+    #[cfg(test)]
+    pub fn stop_the_clock(&mut self) {
+        self.stopped = Some(self.began.elapsed().as_secs_f64());
     }
 
     /// The core waits for a time (a rolled-up zone is to open, or to
