@@ -1,5 +1,11 @@
 //! The picture of a window, as the window switcher asks for it, saved as
 //! a PPM file: `cargo run -p gevrek-system --example picture -- <window> [side] [file]`.
+#[cfg(not(any(windows, target_os = "macos")))]
+fn main() {
+    eprintln!("pictures of windows are taken on Windows and macOS (on Linux the shell asks the compositor)");
+}
+
+#[cfg(any(windows, target_os = "macos"))]
 fn main() {
     let handle: isize = std::env::args().nth(1).and_then(|text| text.parse().ok()).expect("a window's number");
     let side: u32 = std::env::args().nth(2).and_then(|text| text.parse().ok()).unwrap_or(256);
