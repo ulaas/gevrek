@@ -12,8 +12,9 @@
 //! Accessibility API tells them as they happen): while a window is
 //! dragged, the border trails it a little.
 //!
-//! Only the plain ring is drawn so far, square or rounded: the glow, the
-//! shadow, the dashed, double and gradient styles are drawn as it.
+//! The styles the configuration takes are drawn as on Windows: square,
+//! rounded, double (two thin rings) and dashed. (The glow, the shadow and
+//! the gradient are refused by the configuration on every system.)
 
 use crate::space;
 use gevrek_engine::workspace::BorderLook;
@@ -25,8 +26,10 @@ use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSScreen, NSWindow, NSWindowCollectionBehavior,
     NSWindowOrderingMode, NSWindowStyleMask,
 };
-use objc2_core_graphics::CGColor;
-use objc2_foundation::{NSPoint, NSRect, NSSize};
+use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+use objc2_core_graphics::{CGColor, CGPath};
+use objc2_foundation::{NSArray, NSNumber, NSPoint, NSRect, NSSize};
+use objc2_quartz_core::{CALayer, CAShapeLayer};
 use std::collections::HashMap;
 
 /// The corner of a macOS window, in points, which a rounded border
@@ -44,6 +47,9 @@ struct Border {
     visible: bool,
     /// Where its window is.
     around: Rect,
+    /// What a style draws beside the plain ring: the inner ring of a
+    /// double border, the dashes of a dashed one.
+    extra: Option<Retained<CALayer>>,
 }
 
 /// The borders, by the window each goes around.
@@ -84,6 +90,7 @@ impl Borders {
                     focused,
                     visible: true,
                     around,
+                    extra: None,
                 },
             );
         }
@@ -105,8 +112,13 @@ impl Borders {
         if border.around == around {
             return;
         }
+        let resized = (border.around.width, border.around.height) != (around.width, around.height);
         border.around = around;
         place(mtm, border);
+        // (A dashed border's dashes are laid along its size.)
+        if resized && border.extra.is_some() {
+            paint(border);
+        }
         self.order(id);
     }
 
@@ -244,11 +256,16 @@ fn place(mtm: MainThreadMarker, border: &Border) {
 }
 
 /// Draw the ring: its colour (the focused or the other), its width, its
-/// corners.
-fn paint(border: &Border) {
+/// corners, its style. A double border is two thin rings with a gap
+/// between, a dashed one dashes four times as long as the band is wide
+/// with gaps half that, both square: as Windows draws them.
+fn paint(border: &mut Border) {
     let Some(layer) = border.window.contentView().and_then(|view| view.layer()) else {
         return;
     };
+    if let Some(extra) = border.extra.take() {
+        extra.removeFromSuperlayer();
+    }
     let look = &border.look;
     let ((red, green, blue), alpha) = if border.focused {
         (look.active_color, look.active_alpha)
@@ -261,11 +278,97 @@ fn paint(border: &Border) {
         f64::from(blue) / 255.0,
         f64::from(alpha) / 255.0,
     );
-    layer.setBorderColor(Some(&color));
-    layer.setBorderWidth(f64::from(look.width.max(1)));
-    let corner = match look.style {
-        BorderStyle::Square => 0.0,
-        _ => WINDOW_CORNER + f64::from(reach(look)),
-    };
-    layer.setCornerRadius(corner);
+    let width = f64::from(look.width.max(1));
+    let size = frame_of_size(border.around, look);
+    match look.style {
+        BorderStyle::Double => {
+            let (ring, gap) = double_rings(look.width.max(1));
+            layer.setBorderColor(Some(&color));
+            layer.setBorderWidth(ring);
+            layer.setCornerRadius(0.0);
+            let inner = CALayer::layer();
+            let inset = ring + gap;
+            inner.setFrame(CGRect::new(
+                CGPoint::new(inset, inset),
+                CGSize::new((size.0 - 2.0 * inset).max(0.0), (size.1 - 2.0 * inset).max(0.0)),
+            ));
+            inner.setBorderColor(Some(&color));
+            inner.setBorderWidth(ring);
+            layer.addSublayer(&inner);
+            border.extra = Some(inner);
+        }
+        BorderStyle::Dashed => {
+            layer.setBorderWidth(0.0);
+            layer.setCornerRadius(0.0);
+            let dashes = CAShapeLayer::layer();
+            dashes.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(size.0, size.1)));
+            // (A stroke lies on both sides of its path: the path runs down
+            // the middle of the band.)
+            let half = width / 2.0;
+            let rect = CGRect::new(
+                CGPoint::new(half, half),
+                CGSize::new((size.0 - width).max(0.0), (size.1 - width).max(0.0)),
+            );
+            // SAFETY: a rectangle's path, without a transform.
+            let path = unsafe { CGPath::with_rect(rect, std::ptr::null()) };
+            dashes.setPath(Some(&path));
+            dashes.setFillColor(None);
+            dashes.setStrokeColor(Some(&color));
+            dashes.setLineWidth(width);
+            let (dash, gap) = dash_lengths(look.width.max(1));
+            let pattern = NSArray::from_retained_slice(&[NSNumber::new_f64(dash), NSNumber::new_f64(gap)]);
+            dashes.setLineDashPattern(Some(&pattern));
+            layer.addSublayer(&dashes);
+            border.extra = Some(Retained::into_super(dashes));
+        }
+        _ => {
+            layer.setBorderColor(Some(&color));
+            layer.setBorderWidth(width);
+            let corner = match look.style {
+                BorderStyle::Square => 0.0,
+                _ => WINDOW_CORNER + f64::from(reach(look)),
+            };
+            layer.setCornerRadius(corner);
+        }
+    }
+}
+
+/// The size of a border's window, in points.
+fn frame_of_size(around: Rect, look: &BorderLook) -> (f64, f64) {
+    let reach = reach(look);
+    (
+        f64::from(around.width + 2 * reach),
+        f64::from(around.height + 2 * reach),
+    )
+}
+
+/// A double border's rings and the gap between them, in a band `width`
+/// wide: each a third of it (at least one point), the gap the rest.
+fn double_rings(width: i32) -> (f64, f64) {
+    let ring = (width / 3).max(1);
+    let gap = (width - 2 * ring).max(1);
+    (f64::from(ring), f64::from(gap))
+}
+
+/// A dashed border's dashes and gaps along a band `width` wide.
+fn dash_lengths(width: i32) -> (f64, f64) {
+    (f64::from((width * 4).max(8)), f64::from((width * 2).max(4)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_double_border_is_two_rings_with_a_gap() {
+        assert_eq!(double_rings(6), (2.0, 2.0));
+        assert_eq!(double_rings(2), (1.0, 1.0));
+        assert_eq!(double_rings(1), (1.0, 1.0));
+    }
+
+    #[test]
+    fn dashes_grow_with_the_band() {
+        assert_eq!(dash_lengths(1), (8.0, 4.0));
+        assert_eq!(dash_lengths(3), (12.0, 6.0));
+    }
 }
