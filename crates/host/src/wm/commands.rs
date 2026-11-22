@@ -75,10 +75,12 @@ pub trait Commands: WmHost {
                     commands,
                     stop_on_error,
                 } => {
+                    // (Laid out once, after the last: not once for each.)
                     let results = run_dispatch_batch(commands, *stop_on_error, |dispatch| {
-                        self.run_command(dispatch.clone())
+                        self.run_command_then(dispatch.clone(), false)
                             .map_err(|error| error.to_string())
                     });
+                    self.settle();
                     Ok(RuntimeCommandResult::Batch(results))
                 }
                 RuntimeCommand::InjectInput(steps) => self
@@ -99,11 +101,19 @@ pub trait Commands: WmHost {
     /// Carry out a command from a binding, the CLI, gRPC or the editor, and
     /// tell the event stream how it went.
     fn run_command(&mut self, command: DispatchCommand) -> anyhow::Result<()> {
+        self.run_command_then(command, true)
+    }
+
+    /// As [`Commands::run_command`]; `settle`: lay out after it (a batch
+    /// lays out once, after its last command).
+    fn run_command_then(&mut self, command: DispatchCommand, settle: bool) -> anyhow::Result<()> {
         self.host().state_stale.set(true);
         let name = command.display_name().to_string();
         let payload = serde_json::to_string(&command).unwrap_or_else(|_| name.clone());
         let result = self.run_command_unsettled(command);
-        self.settle();
+        if settle {
+            self.settle();
+        }
         let mut fields = vec![
             ("command".to_string(), name),
             ("payload".to_string(), payload),

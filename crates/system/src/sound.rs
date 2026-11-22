@@ -389,9 +389,6 @@ fn toggle_stream_mute_by(id: u32) -> bool {
     ask(&["set-mute", &id.to_string(), "toggle"]).is_some()
 }
 
-/// On Windows: the devices to play on and to record from as the system
-/// lists them, and the programs that play now on the device that is
-/// heard, each known by the number of its process.
 #[cfg(target_os = "macos")]
 pub use self::core_audio::{change, level, toggle_mute, watch};
 
@@ -652,6 +649,9 @@ mod core_audio {
     }
 }
 
+/// On Windows: the devices to play on and to record from as the system
+/// lists them, and the programs that play now on the device that is
+/// heard, each known by the number of its process.
 #[cfg(windows)]
 pub fn mixer() -> Mixer {
     let mixer = Mixer {

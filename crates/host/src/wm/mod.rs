@@ -85,7 +85,7 @@ pub struct HostState {
     /// The outputs as last published, to tell subscribers what changed.
     pub published_monitors: Vec<MonitorData>,
     /// The notices last told of, to tell when they are others.
-    pub notices_told: Vec<String>,
+    pub notices_told: Vec<gevrek_engine::overlay_data::Notice>,
     /// Something was told, or done, since the state was last published:
     /// it is published again at the end of the pass (who hears of a change
     /// asks for the state at once, and is to get the state after it).
@@ -160,8 +160,9 @@ impl HostState {
     }
 
     /// Tell the subscribers of the event stream what happened. Anything
-    /// but a window moved or resized (told many times a second while it is
-    /// dragged) makes the published state stale.
+    /// but what is told many times a second (a window moved or resized
+    /// while it is dragged, a gesture going on as the fingers move) makes
+    /// the published state stale.
     pub fn emit(
         &self,
         kind: RuntimeEventKind,
@@ -170,7 +171,9 @@ impl HostState {
     ) {
         if !matches!(
             kind,
-            RuntimeEventKind::WindowMoved | RuntimeEventKind::WindowResized
+            RuntimeEventKind::WindowMoved
+                | RuntimeEventKind::WindowResized
+                | RuntimeEventKind::GestureUpdated
         ) {
             self.state_stale.set(true);
         }

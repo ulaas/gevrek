@@ -51,6 +51,9 @@ pub trait Published: WmHost {
         for (kind, fields) in changes {
             self.host().emit(kind, None, fields);
         }
+        // (What was just told is in what is published now: not a reason to
+        // publish again.)
+        self.host().state_stale.set(false);
         let system = self.system_state();
         let rule_states = self
             .rules()
@@ -118,7 +121,8 @@ pub trait Published: WmHost {
             keyboard_layout: system.keyboard_layout,
             frames: system.frames,
         };
-        let notices: Vec<String> = data.notices.iter().map(|notice| notice.id.clone()).collect();
+        // (The whole of each: a notice whose text changes is news too.)
+        let notices = data.notices.clone();
         if let Some(overlay) = &parts.host.overlay {
             *overlay.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(data);
         }

@@ -207,32 +207,37 @@ pub trait Bindings: WmHost {
                 log::error!("Binding failed: {error}");
             }
         }
-        if !ids.iter().any(|id| *id < 0) {
-            return;
-        }
+        let graph = ids.iter().any(|id| *id < 0);
         let parts = self.parts();
-        if let Err(error) = parts.core.executor.execute_hotkey(
-            parts.desktop,
-            &mut parts.core.monitor_manager,
-            &mut parts.core.focus_manager,
-            event,
-        ) {
-            log::error!("Key node failed: {error}");
+        if graph {
+            if let Err(error) = parts.core.executor.execute_hotkey(
+                parts.desktop,
+                &mut parts.core.monitor_manager,
+                &mut parts.core.focus_manager,
+                event,
+            ) {
+                log::error!("Key node failed: {error}");
+            }
         }
-        // Focus cycling asked for by a node.
+        // Focus cycling asked for by a node: this key's, or one an event ran
+        // before it (taken with every key, as it always was).
+        let mut focused = false;
         if let Some(operation) = parts.core.executor.take_pending_focus_op() {
             let target = match operation {
                 PendingFocusOp::CycleNext => parts.core.focus_manager.cycle_next(),
                 PendingFocusOp::CyclePrevious => parts.core.focus_manager.cycle_previous(),
             };
             if let Some(id) = target {
+                focused = true;
                 if let Err(error) = gevrek_engine::Desktop::apply(parts.desktop, &Effect::Focus(Some(id)))
                 {
                     log::error!("focus {id:?}: {error}");
                 }
             }
         }
-        self.settle();
+        if graph || focused {
+            self.settle();
+        }
     }
 
     /// A touchpad gesture went on (as a recognizer saw it): told to

@@ -2354,8 +2354,12 @@ impl WmHost for Runtime {
     }
 
     fn settle(&mut self) {
-        if let Err(error) = self.core.flush_pending_layouts(&mut self.window_manager) {
-            log::warn!("layout: {error}");
+        // While paused the layout waits (the loop lays out what is pending
+        // once it resumes), as commands and reloads always left it.
+        if !self.host.paused() {
+            if let Err(error) = self.core.flush_pending_layouts(&mut self.window_manager) {
+                log::warn!("layout: {error}");
+            }
         }
         self.apply_focus_effects();
     }

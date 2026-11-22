@@ -408,3 +408,41 @@ fn every_command_settles_the_desktop() {
     let _ = host.run_command(DispatchCommand::PickWindow);
     assert_eq!(host.settled, before + 2);
 }
+
+#[test]
+fn a_notice_whose_text_changes_is_told_again() {
+    let mut host = TestHost::new(Config::new());
+    let notice = |text: &str| gevrek_engine::overlay_data::Notice {
+        id: "display".to_string(),
+        title: "A display".to_string(),
+        text: text.to_string(),
+    };
+    host.notices = vec![notice("is not as asked")];
+    host.publish_state(None);
+    host.notices = vec![notice("was refused: its mode is not there")];
+    host.publish_state(None);
+    assert_eq!(host.told(RuntimeEventKind::NoticesChanged), 2);
+}
+
+#[test]
+fn a_batch_of_commands_settles_once_after_the_last() {
+    let mut host = TestHost::new(Config::new());
+    let (sender, receiver) = std::sync::mpsc::channel();
+    host.host.command_receiver = Some(receiver);
+    let (response, answer) = tokio::sync::oneshot::channel();
+    sender
+        .send(crate::command::ManualCommand {
+            command: crate::command::RuntimeCommand::DispatchBatch {
+                commands: vec![DispatchCommand::ToggleStackbar, DispatchCommand::ToggleStackbar],
+                stop_on_error: false,
+            },
+            response,
+        })
+        .unwrap();
+    let before = host.settled;
+    assert!(host.run_queued_commands());
+    assert_eq!(host.settled, before + 1);
+    assert_eq!(host.told(RuntimeEventKind::DispatchSucceeded), 2);
+    drop(answer);
+}
+
