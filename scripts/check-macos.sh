@@ -2,8 +2,10 @@
 # Type-check for macOS from Linux: everything that is not one system's own
 # (the model, the engine, the server, the command line, the studio, the
 # shell's shared parts) for the aarch64-apple-darwin target. No linker is
-# needed for a check. Nothing is run: gevrek has no macOS backend yet, and
-# this keeps what a backend will stand on from growing Linux- or
+# needed for a check. Nothing is run. The macOS backend
+# (`crates/backend-macos`) is checked with the rest; on a Mac, its probe
+# (`cargo run -p gevrek-macos --example probe`) tries it on the desktop.
+# This keeps what the backend stands on from growing Linux- or
 # Windows-only without anyone noticing.
 #
 #     rustup target add aarch64-apple-darwin    # once
