@@ -381,7 +381,7 @@ pub enum Density {
 }
 
 /// Appearance preferences.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct Settings {
     pub preset: Preset,
     pub accent: Accent,
@@ -397,6 +397,8 @@ pub struct Settings {
     /// (the desktop's `animations.reduce_motion`, which the program that
     /// knows it sets here; it is not kept in the preferences' file).
     pub reduce_motion: bool,
+    /// The fonts chosen, for the interface and for each area of the desktop.
+    pub fonts: crate::fonts::Fonts,
 }
 
 impl Default for Settings {
@@ -409,6 +411,7 @@ impl Default for Settings {
             system_font: true,
             custom_titlebar: true,
             reduce_motion: false,
+            fonts: Default::default(),
         }
     }
 }
@@ -452,7 +455,9 @@ impl Settings {
                 "radius" => s.radius = v.parse().unwrap_or(s.radius).min(14),
                 "system-font" => s.system_font = v != "false",
                 "titlebar" => s.custom_titlebar = v != "system",
-                _ => {}
+                key => {
+                    s.fonts.read(key, v);
+                }
             }
         }
         s
@@ -469,11 +474,12 @@ impl Settings {
             Density::Compact => "compact",
         };
         let text = format!(
-            "# gevrek appearance\ntheme = {}\naccent = {accent}\ndensity = {density}\nradius = {}\nsystem-font = {}\ntitlebar = {}\n",
+            "# gevrek appearance\ntheme = {}\naccent = {accent}\ndensity = {density}\nradius = {}\nsystem-font = {}\ntitlebar = {}\n{}",
             self.preset.key(),
             self.radius,
             self.system_font,
             if self.custom_titlebar { "app" } else { "system" },
+            self.fonts.lines(),
         );
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
@@ -666,124 +672,21 @@ fn style(p: &Palette, s: &Settings) -> egui::Style {
     style
 }
 
-/// Installs fonts: the desktop's UI and monospace fonts when wanted (looked up with
-/// fontconfig), egui's built-in fonts as fallback, and the Phosphor icon font.
+/// Installs the interface's fonts as gevrek chooses them by default (the
+/// desktop's when `system_font`), with nothing of the user's: for pictures
+/// and tests. A surface of the desktop installs those of its area with
+/// [`crate::fonts::install`].
 pub fn install_fonts(ctx: &egui::Context, system_font: bool) {
-    let mut fonts = egui::FontDefinitions::default();
-    if system_font {
-        for (family, query) in [
-            (FontFamily::Proportional, "sans-serif:style=Regular"),
-            (FontFamily::Monospace, "monospace:style=Regular"),
-        ] {
-            let found = fc_match(query);
-            if found.is_none() {
-                log::debug!("no font of the system's for {query}: egui's own is used");
-            }
-            if let Some(bytes) = found {
-                let name = format!("system-{family:?}");
-                fonts
-                    .font_data
-                    .insert(name.clone(), egui::FontData::from_owned(bytes).into());
-                fonts.families.entry(family).or_default().insert(0, name);
-            }
-        }
-    }
-    // The icon font, second among the proportional fonts so that icons can
-    // sit inside ordinary text without shadowing the text's own font.
-    fonts.font_data.insert(
-        "phosphor".to_owned(),
-        egui::FontData::from_static(egui_phosphor::Variant::Regular.font_bytes()).into(),
-    );
-    let proportional = fonts
-        .families
-        .entry(egui::FontFamily::Proportional)
-        .or_default();
-    let at = proportional.len().min(1);
-    proportional.insert(at, "phosphor".to_owned());
-    // The system's symbol font, last of all: it only draws what no font
-    // before it has (⏻, ⌘, ★ in a window's title), so letters and emoji
-    // keep their look. (Whatever the system-font setting: it is no look.)
-    if let Some(bytes) = symbol_font() {
-        fonts.font_data.insert(
-            "system-symbols".to_owned(),
-            egui::FontData::from_static(bytes).into(),
-        );
-        for family in [FontFamily::Proportional, FontFamily::Monospace] {
-            fonts
-                .families
-                .entry(family)
-                .or_default()
-                .push("system-symbols".to_owned());
-        }
-    }
-    ctx.set_fonts(fonts);
+    let settings = Settings {
+        system_font,
+        ..Settings::default()
+    };
+    crate::fonts::install(ctx, &settings, None);
 }
 
-/// Signs that the fonts egui brings lack, and a symbol font has: the
-/// power signs, the command key, a star, a check.
-const SYMBOLS: &str = "23fb 23fc 23fd 2b58 2318 2605 2714";
-
-/// The system's font for symbols, read once: Segoe UI Symbol on Windows,
-/// Apple Symbols on macOS, and on Linux the first font fontconfig knows
-/// that has [`SYMBOLS`].
-fn symbol_font() -> Option<&'static [u8]> {
-    static FONT: std::sync::OnceLock<Option<Vec<u8>>> = std::sync::OnceLock::new();
-    FONT.get_or_init(|| {
-        let path = if cfg!(windows) {
-            let windows = std::env::var_os("WINDIR").unwrap_or_else(|| "C:\\Windows".into());
-            Some(std::path::Path::new(&windows).join("Fonts").join("seguisym.ttf"))
-        } else if cfg!(target_os = "macos") {
-            Some("/System/Library/Fonts/Apple Symbols.ttf".into())
-        } else {
-            fc_list_first(&format!(":charset={SYMBOLS}")).map(Into::into)
-        };
-        let bytes = path.and_then(|path| {
-            std::fs::read(&path)
-                .map_err(|error| log::debug!("no symbol font at {}: {error}", path.display()))
-                .ok()
-        });
-        if bytes.is_none() {
-            log::debug!("no symbol font of the system's: signs egui lacks stay boxes");
-        }
-        bytes
-    })
-    .as_deref()
-}
-
-/// The first TrueType/OpenType file fontconfig lists for `pattern`.
-fn fc_list_first(pattern: &str) -> Option<String> {
-    let out = std::process::Command::new("fc-list")
-        .args(["-f", "%{file}\n", pattern])
-        .output()
-        .map_err(|error| log::debug!("fc-list did not start: {error}"))
-        .ok()?;
-    let mut files: Vec<String> = String::from_utf8(out.stdout)
-        .ok()?
-        .lines()
-        .filter(|path| {
-            let lower = path.to_lowercase();
-            lower.ends_with(".ttf") || lower.ends_with(".otf")
-        })
-        .map(str::to_owned)
-        .collect();
-    // (fc-list's order is no order: the same font each run, by its name.)
-    files.sort();
-    files.into_iter().next()
-}
-
-/// The font file fontconfig picks for `pattern`, if it's a TrueType/OpenType file.
-fn fc_match(pattern: &str) -> Option<Vec<u8>> {
-    let out = std::process::Command::new("fc-match")
-        .args(["-f", "%{file}", pattern])
-        .output()
-        .map_err(|error| log::debug!("fc-match did not start: {error}"))
-        .ok()?;
-    let path = String::from_utf8(out.stdout).ok()?;
-    let lower = path.to_lowercase();
-    if !(lower.ends_with(".ttf") || lower.ends_with(".otf")) {
-        return None;
-    }
-    std::fs::read(path).ok()
+/// Installs the fonts `settings` chose for `area` (see [`crate::fonts`]).
+pub fn install_fonts_for(ctx: &egui::Context, settings: &Settings, area: crate::fonts::Area) {
+    crate::fonts::install(ctx, settings, Some(area));
 }
 
 // ---- color math ----
@@ -848,7 +751,7 @@ mod tests {
 
     #[test]
     fn where_the_system_has_a_symbol_font_the_power_sign_is_drawn() {
-        if symbol_font().is_none() {
+        if crate::fonts::symbol_font().is_none() {
             return;
         }
         let context = egui::Context::default();

@@ -1378,7 +1378,7 @@ mod linux {
         let context = ui.ctx().clone();
         let state = shared.borrow();
         if !*fonts {
-            theme::install_fonts(&context, state.settings.system_font);
+            theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Panel);
             *fonts = true;
         }
         // (As it is on this display.)
@@ -1450,11 +1450,11 @@ mod linux {
                         let look = bar.clone();
                         let said = words.clone();
                         let mut fonts = false;
-                        let system_font = state.settings.system_font;
+                        let settings = state.settings.clone();
                         let beside = bar.edge.is_upright();
                         let surface = control.hint(*panel, anchor, size, beside, move |ui, _| {
                             if !fonts {
-                                theme::install_fonts(ui.ctx(), system_font);
+                                theme::install_fonts_for(ui.ctx(), &settings, gevrek_ui::fonts::Area::Panel);
                                 fonts = true;
                             }
                             crate::panel::draw_hint(ui, &look, &said);
@@ -1730,7 +1730,7 @@ mod linux {
             let mut shared = state.borrow_mut();
             let shared = &mut *shared;
             if !fonts {
-                theme::install_fonts(&context, shared.settings.system_font);
+                theme::install_fonts_for(&context, &shared.settings, gevrek_ui::fonts::Area::Panel);
                 fonts = true;
             }
             let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
@@ -1865,7 +1865,7 @@ mod linux {
             let context = ui.ctx().clone();
             let shared = state.borrow();
             if !fonts {
-                theme::install_fonts(&context, shared.settings.system_font);
+                theme::install_fonts_for(&context, &shared.settings, gevrek_ui::fonts::Area::Panel);
                 fonts = true;
             }
             let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
@@ -1920,7 +1920,7 @@ mod linux {
             let context = ui.ctx().clone();
             let shared = state.borrow();
             if !fonts {
-                theme::install_fonts(&context, shared.settings.system_font);
+                theme::install_fonts_for(&context, &shared.settings, gevrek_ui::fonts::Area::Panel);
                 fonts = true;
             }
             let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
@@ -1953,7 +1953,7 @@ mod linux {
             let context = ui.ctx().clone();
             let shared = state.borrow();
             if !fonts {
-                theme::install_fonts(&context, shared.settings.system_font);
+                theme::install_fonts_for(&context, &shared.settings, gevrek_ui::fonts::Area::Panel);
                 fonts = true;
             }
             let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
@@ -1993,7 +1993,7 @@ mod linux {
             let context = ui.ctx().clone();
             let shared = state.borrow();
             if !fonts {
-                theme::install_fonts(&context, shared.settings.system_font);
+                theme::install_fonts_for(&context, &shared.settings, gevrek_ui::fonts::Area::Panel);
                 fonts = true;
             }
             let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
@@ -2032,7 +2032,7 @@ mod linux {
             let context = ui.ctx().clone();
             let shared = state.borrow();
             if !fonts {
-                theme::install_fonts(&context, shared.settings.system_font);
+                theme::install_fonts_for(&context, &shared.settings, gevrek_ui::fonts::Area::Panel);
                 fonts = true;
             }
             let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
@@ -2074,7 +2074,7 @@ mod linux {
             let context = ui.ctx().clone();
             let shared = state.borrow();
             if !fonts {
-                theme::install_fonts(&context, shared.settings.system_font);
+                theme::install_fonts_for(&context, &shared.settings, gevrek_ui::fonts::Area::Panel);
                 fonts = true;
             }
             let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
@@ -2300,7 +2300,7 @@ mod linux {
         let context = ui.ctx().clone();
         let mut state = shared.borrow_mut();
         if !*fonts {
-            theme::install_fonts(&context, state.settings.system_font);
+            theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Dialogs);
             *fonts = true;
         }
         let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -2636,7 +2636,7 @@ mod linux {
         let context = ui.ctx().clone();
         let mut state = shared.borrow_mut();
         if !*fonts {
-            theme::install_fonts(&context, state.settings.system_font);
+            theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Dialogs);
             *fonts = true;
         }
         let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -2759,7 +2759,7 @@ mod linux {
         let context = ui.ctx().clone();
         let mut state = shared.borrow_mut();
         if !*fonts {
-            theme::install_fonts(&context, state.settings.system_font);
+            theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Dialogs);
             *fonts = true;
         }
         let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -3056,7 +3056,7 @@ mod linux {
         let context = ui.ctx().clone();
         let mut state = shared.borrow_mut();
         if !*fonts {
-            theme::install_fonts(&context, state.settings.system_font);
+            theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Dialogs);
             *fonts = true;
         }
         let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -3786,7 +3786,7 @@ mod linux {
             let context = ui.ctx().clone();
             let mut state = shared.borrow_mut();
             if !fonts {
-                theme::install_fonts(&context, state.settings.system_font);
+                theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Notifications);
                 fonts = true;
             }
             let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -3875,7 +3875,7 @@ mod linux {
                 let mut state = shared.borrow_mut();
                 let state = &mut *state;
                 if !fonts {
-                    theme::install_fonts(&context, state.settings.system_font);
+                    theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::ControlCentre);
                     fonts = true;
                 }
                 let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -4182,12 +4182,12 @@ mod linux {
                     let state = look.borrow();
                     let context = ui.ctx();
                     if !*fonts {
-                        theme::install_fonts(context, state.settings.system_font);
+                        theme::install_fonts_for(context, &state.settings, gevrek_ui::fonts::Area::Zones);
                         *fonts = true;
                     }
                     let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
                     theme::apply(context, &palette, &state.settings);
-                    (palette, state.settings)
+                    (palette, state.settings.clone())
                 })
             },
             // What an item opens is started by the window manager, as
@@ -4252,7 +4252,7 @@ mod linux {
             let context = ui.ctx().clone();
             let mut state = shared.borrow_mut();
             if !fonts {
-                theme::install_fonts(&context, state.settings.system_font);
+                theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::ControlCentre);
                 fonts = true;
             }
             let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -4358,7 +4358,7 @@ mod linux {
             let mut state = shared.borrow_mut();
             let state = &mut *state;
             if !fonts {
-                theme::install_fonts(&context, state.settings.system_font);
+                theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Panel);
                 fonts = true;
             }
             let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -4488,7 +4488,7 @@ mod linux {
         let context = ui.ctx().clone();
         let mut state = shared.borrow_mut();
         if !*fonts {
-            theme::install_fonts(&context, state.settings.system_font);
+            theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Osd);
             *fonts = true;
         }
         let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -4757,7 +4757,7 @@ mod linux {
         let context = ui.ctx().clone();
         let mut state = shared.borrow_mut();
         if !*fonts {
-            theme::install_fonts(&context, state.settings.system_font);
+            theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Notifications);
             *fonts = true;
         }
         let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -4859,7 +4859,7 @@ mod linux {
             let context = ui.ctx().clone();
             let mut state = shared.borrow_mut();
             if !fonts {
-                theme::install_fonts(&context, state.settings.system_font);
+                theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Switcher);
                 fonts = true;
             }
             let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -4952,7 +4952,7 @@ mod linux {
             let mut state = shared.borrow_mut();
             let state = &mut *state;
             if !fonts {
-                theme::install_fonts(&context, state.settings.system_font);
+                theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Dialogs);
                 fonts = true;
             }
             let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -5095,7 +5095,7 @@ mod linux {
             let context = ui.ctx().clone();
             let mut state = shared.borrow_mut();
             if !fonts {
-                theme::install_fonts(&context, state.settings.system_font);
+                theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Launcher);
                 fonts = true;
             }
             let palette = state.settings.resolve(egui::Theme::Dark, state.accent);

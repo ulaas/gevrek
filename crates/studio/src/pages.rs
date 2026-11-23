@@ -308,7 +308,8 @@ impl Page {
             card(
                 "Stack bar",
                 "/desktop/appearance/stackbar",
-                Show::AllBut(&[]),
+                // (Its font is chosen in the card of fonts.)
+                Show::Rest(&["font"]),
             ),
             card(
                 "For eyes that need it",

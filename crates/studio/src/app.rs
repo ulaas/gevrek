@@ -224,6 +224,8 @@ pub struct Studio {
     #[cfg(windows)]
     every_key_refused: bool,
     appearance_preview: crate::preview::AppearancePreview,
+    /// The fonts of the interface, of each area, and of the stack bar.
+    fonts_card: crate::fonts_card::FontsCard,
     layout_preview: crate::preview::LayoutPreview,
     /// The workspaces of each display.
     workspaces: crate::workspaces::Page,
@@ -362,6 +364,7 @@ impl Studio {
             #[cfg(windows)]
             every_key_refused: false,
             appearance_preview: Default::default(),
+            fonts_card: Default::default(),
             layout_preview: Default::default(),
             workspaces: Default::default(),
             snap_zones_edit: Default::default(),
@@ -877,7 +880,7 @@ impl Studio {
 
     fn palette(&mut self, context: &egui::Context) -> Palette {
         if !self.fonts_ready {
-            theme::install_fonts(context, self.appearance.system_font);
+            theme::install_fonts_for(context, &self.appearance, gevrek_ui::fonts::Area::Studio);
             self.fonts_ready = true;
         }
         let system = context.system_theme().unwrap_or(egui::Theme::Dark);
@@ -903,7 +906,7 @@ impl Studio {
         // toolkit says of such a theme that it is a light one, whatever
         // it is: seen with "High Contrast Black", 2026-11-15.)
         #[cfg_attr(not(windows), allow(unused_mut))]
-        let mut chosen = self.appearance;
+        let mut chosen = self.appearance.clone();
         #[cfg(windows)]
         if !chosen.preset.is_high_contrast() && gevrek_system::look::high_contrast() {
             chosen.preset = theme::Preset::HighContrastDark;
@@ -1502,6 +1505,21 @@ impl Studio {
                         widgets::card(ui, "As it will look", |ui| {
                             self.appearance_preview.show(ui, &appearance);
                         });
+                    }
+                    let changed = widgets::card(ui, "Fonts", |ui| {
+                        self.fonts_card.show(
+                            ui,
+                            &mut self.appearance,
+                            &mut self.document,
+                            highlight.as_deref(),
+                        )
+                    });
+                    if changed {
+                        if let Err(error) = self.appearance.save(&self.appearance_path) {
+                            log::warn!("the fonts were not saved: {error}");
+                        }
+                        // This window is written in its new fonts at once.
+                        self.fonts_ready = false;
                     }
                 }
                 if page == Page::Displays {
@@ -2636,7 +2654,7 @@ impl Studio {
             return;
         }
         let mut open = true;
-        let before = self.appearance;
+        let before = self.appearance.clone();
         egui::Window::new("How this window looks")
             .open(&mut open)
             .collapsible(false)

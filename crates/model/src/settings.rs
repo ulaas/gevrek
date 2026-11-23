@@ -2865,6 +2865,10 @@ pub struct StackbarProfile {
     pub active_text_color: (u8, u8, u8),
     /// Text color of unfocused tabs.
     pub inactive_text_color: (u8, u8, u8),
+    /// The family of the font the titles are written in, as "Segoe UI" or
+    /// "Inter". Empty: the system's own (Segoe UI on Windows, fontconfig's
+    /// sans-serif on Linux).
+    pub font: String,
     /// Keys this version does not know: kept, and written back as they
     /// were, so a file from a newer gevrek survives being edited here.
     #[serde(flatten)]
@@ -2884,6 +2888,7 @@ impl Default for StackbarProfile {
             background_color: (22, 22, 28),
             active_text_color: (64, 224, 208),
             inactive_text_color: (170, 172, 184),
+            font: String::new(),
         }
     }
 }
@@ -4757,6 +4762,7 @@ mod tests {
                     background_color: (10, 20, 30),
                     active_text_color: (200, 210, 220),
                     inactive_text_color: (90, 95, 100),
+                    font: "Inter".to_string(),
                 },
                 ..AppearanceProfile::default()
             },
@@ -4776,6 +4782,7 @@ mod tests {
             decoded.appearance.stackbar.inactive_text_color,
             (90, 95, 100)
         );
+        assert_eq!(decoded.appearance.stackbar.font, "Inter");
     }
 
     #[test]

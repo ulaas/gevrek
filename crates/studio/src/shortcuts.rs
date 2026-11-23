@@ -63,7 +63,7 @@ impl eframe::App for ShortcutsWindow {
         let context = ui.ctx().clone();
         self.take_in();
         if !self.fonts_ready {
-            theme::install_fonts(&context, self.appearance.system_font);
+            theme::install_fonts_for(&context, &self.appearance, gevrek_ui::fonts::Area::Studio);
             self.fonts_ready = true;
         }
         let system = context.system_theme().unwrap_or(egui::Theme::Dark);

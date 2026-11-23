@@ -15,6 +15,7 @@ pub mod app;
 pub mod bindings;
 pub mod displays;
 pub mod document;
+pub mod fonts_card;
 pub mod form;
 pub mod gesture_live;
 pub mod graph;

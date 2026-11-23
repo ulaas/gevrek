@@ -781,6 +781,8 @@ struct StackbarWndData {
     bar_height: i32,
     font: HFONT,
     font_height: i32,
+    /// The family `font` was made of (empty: Segoe UI).
+    font_family: String,
     key: WindowHandle,
     click_queue: Arc<Mutex<Vec<(WindowHandle, usize)>>>,
 }
@@ -789,8 +791,21 @@ fn stackbar_color((r, g, b): (u8, u8, u8)) -> COLORREF {
     COLORREF((b as u32) << 16 | (g as u32) << 8 | (r as u32))
 }
 
-unsafe fn stackbar_create_font(bar_height: i32) -> HFONT {
+/// The titles' font: of `family`, or Segoe UI where none is named. (A
+/// family Windows does not have is given another by Windows itself.)
+unsafe fn stackbar_create_font(bar_height: i32, family: &str) -> HFONT {
     let font_height = (bar_height - 16).clamp(10, 20);
+    let family = if family.trim().is_empty() {
+        "Segoe UI"
+    } else {
+        family.trim()
+    };
+    // (LOGFONT's face holds 31 letters and the end.)
+    let face: Vec<u16> = family
+        .encode_utf16()
+        .take(31)
+        .chain(std::iter::once(0))
+        .collect();
     CreateFontW(
         -font_height,
         0,
@@ -805,7 +820,7 @@ unsafe fn stackbar_create_font(bar_height: i32) -> HFONT {
         CLIP_DEFAULT_PRECIS.0 as u32,
         CLEARTYPE_QUALITY.0 as u32,
         (DEFAULT_PITCH.0 | FF_SWISS.0) as u32,
-        windows::core::w!("Segoe UI"),
+        windows::core::PCWSTR(face.as_ptr()),
     )
 }
 
@@ -6275,8 +6290,9 @@ impl WindowManager {
                 inactive_text: stackbar_color(config.inactive_text_color),
                 mark: self.stackbar_mark(state.key, config),
                 bar_height: config.height,
-                font: stackbar_create_font(config.height),
+                font: stackbar_create_font(config.height, &config.font),
                 font_height: config.height,
+                font_family: config.font.clone(),
                 key: state.key,
                 click_queue: Arc::clone(&self.stackbar_click_queue),
             });
@@ -6354,7 +6370,8 @@ impl WindowManager {
                 || data.active_text != stackbar_color(config.active_text_color)
                 || data.inactive_text != stackbar_color(config.inactive_text_color)
                 || data.mark != mark
-                || data.font_height != config.height;
+                || data.font_height != config.height
+                || data.font_family != config.font;
             data.mark = mark;
             data.bar_height = config.height;
             data.titles = titles.to_vec();
@@ -6362,12 +6379,13 @@ impl WindowManager {
             data.background = stackbar_color(config.background_color);
             data.active_text = stackbar_color(config.active_text_color);
             data.inactive_text = stackbar_color(config.inactive_text_color);
-            if data.font_height != config.height {
-                let new_font = stackbar_create_font(config.height);
+            if data.font_height != config.height || data.font_family != config.font {
+                let new_font = stackbar_create_font(config.height, &config.font);
                 if !new_font.is_invalid() {
                     let _ = DeleteObject(data.font);
                     data.font = new_font;
                     data.font_height = config.height;
+                    data.font_family = config.font.clone();
                 }
             }
             if changed {

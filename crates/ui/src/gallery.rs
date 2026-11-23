@@ -389,6 +389,14 @@ mod tests {
     fn preferences_survive_being_saved_and_read() {
         let folder = std::env::temp_dir().join(format!("gevrek-ui-{}", std::process::id()));
         let path = folder.join("studio.conf");
+        use crate::fonts::{Area, Choice};
+        let mut fonts = crate::fonts::Fonts {
+            text: Choice::File("C:\\Windows\\Fonts\\Segoe UI.ttf".into()),
+            mono: Choice::Builtin,
+            ..Default::default()
+        };
+        fonts.set_area(Area::Panel, Choice::File("/usr/share/fonts/a b/Inter.otf".into()));
+        fonts.set_area(Area::LockScreen, Choice::Builtin);
         let saved = Settings {
             preset: Preset::TokyoNight,
             accent: crate::Accent::Custom(egui::Color32::from_rgb(255, 128, 0)),
@@ -397,6 +405,7 @@ mod tests {
             system_font: false,
             custom_titlebar: false,
             reduce_motion: false,
+            fonts,
         };
         saved.save(&path).unwrap();
         assert_eq!(Settings::load(&path), saved);

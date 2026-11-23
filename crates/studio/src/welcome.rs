@@ -807,7 +807,7 @@ impl eframe::App for Window {
             }
         }
         if !self.fonts {
-            theme::install_fonts(&context, self.settings.system_font);
+            theme::install_fonts_for(&context, &self.settings, gevrek_ui::fonts::Area::Studio);
             self.fonts = true;
         }
         let system = context.system_theme().unwrap_or(egui::Theme::Dark);

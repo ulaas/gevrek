@@ -13,6 +13,7 @@ pub mod brand_icons;
 pub mod color;
 pub mod browser;
 pub mod controls;
+pub mod fonts;
 pub mod gallery;
 #[cfg(feature = "picture")]
 pub mod picture;

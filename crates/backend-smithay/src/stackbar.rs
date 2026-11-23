@@ -110,10 +110,50 @@ pub fn title_font() -> Option<&'static ab_glyph::FontVec> {
     .as_ref()
 }
 
+/// The font of the titles where the stackbar's settings name a family:
+/// that family's regular face, as fontconfig finds it (read once for each
+/// family). Where none is named, or fontconfig has no such family,
+/// [`title_font`].
+pub fn font_of(family: &str) -> Option<&'static ab_glyph::FontVec> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    type Found = Mutex<HashMap<String, Option<&'static ab_glyph::FontVec>>>;
+    static FOUND: OnceLock<Found> = OnceLock::new();
+    let family = family.trim();
+    if family.is_empty() {
+        return title_font();
+    }
+    let Ok(mut found) = FOUND.get_or_init(Default::default).lock() else {
+        return title_font();
+    };
+    let font = *found.entry(family.to_owned()).or_insert_with(|| {
+        let output = std::process::Command::new("fc-match")
+            .args(["-f", "%{family}\t%{file}", &format!("{family}:style=Regular")])
+            .output()
+            .ok()?;
+        let said = String::from_utf8_lossy(&output.stdout).into_owned();
+        let (families, path) = said.split_once('\t')?;
+        // fontconfig gives another family where it has not this one.
+        if !families
+            .split(',')
+            .any(|one| one.trim().eq_ignore_ascii_case(family))
+        {
+            log::warn!("No font of the family {family:?} for the stackbar titles: the system's is used");
+            return None;
+        }
+        let font = std::fs::read(path)
+            .ok()
+            .and_then(|bytes| ab_glyph::FontVec::try_from_vec(bytes).ok())?;
+        log::info!("Stackbar titles are written in {path}");
+        Some(&*Box::leak(Box::new(font)))
+    });
+    font.or_else(title_font)
+}
+
 /// Paint a bar of `width` x `height` logical pixels for an output at
 /// `scale`: the picture is `scale` times as large each way, four bytes a
 /// pixel in the order blue, green, red, alpha (the renderer's `Argb8888`).
-/// The titles are written in the system's font.
+/// The titles are written in the font the profile names, or the system's.
 pub fn paint(
     width: i32,
     height: i32,
@@ -129,7 +169,7 @@ pub fn paint(
         focused_tab,
         profile,
         scale,
-        title_font(),
+        font_of(&profile.font),
     )
 }
 
@@ -311,6 +351,7 @@ mod tests {
             background_color: (32, 32, 32),
             active_text_color: (0, 170, 255),
             inactive_text_color: (180, 180, 180),
+            font: String::new(),
         }
     }
 

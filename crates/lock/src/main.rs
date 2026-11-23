@@ -722,7 +722,7 @@ mod linux {
     fn draw(state: &mut State, ui: &mut egui::Ui, fonts: &mut bool, layout_in_use: u32) {
         let context = ui.ctx().clone();
         if !*fonts {
-            theme::install_fonts(&context, state.settings.system_font);
+            theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::LockScreen);
             *fonts = true;
         }
         let palette = state.settings.resolve(egui::Theme::Dark, state.accent);

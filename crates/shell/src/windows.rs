@@ -652,10 +652,15 @@ fn surface_name(base: &str) -> String {
 }
 
 /// The colours and fonts of a surface's frame.
-fn themed(state: &State, ui: &egui::Ui, fonts: &mut bool) -> theme::Palette {
+fn themed(
+    state: &State,
+    ui: &egui::Ui,
+    fonts: &mut bool,
+    area: gevrek_ui::fonts::Area,
+) -> theme::Palette {
     let context = ui.ctx();
     if !*fonts {
-        theme::install_fonts(context, state.settings.system_font);
+        theme::install_fonts_for(context, &state.settings, area);
         *fonts = true;
     }
     let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -810,7 +815,7 @@ fn draw_notes(
     let context = ui.ctx().clone();
     let mut state = shared.borrow_mut();
     let state = &mut *state;
-    let palette = themed(state, ui, fonts);
+    let palette = themed(state, ui, fonts, gevrek_ui::fonts::Area::Notifications);
     let now = Instant::now();
     let before = state.notes.shown().len();
     // Those whose time is over go by themselves.
@@ -905,7 +910,7 @@ fn toggle_centre(state: &Rc<RefCell<State>>, control: &mut Control) {
         let context = ui.ctx().clone();
         let mut state = shared.borrow_mut();
         let state = &mut *state;
-        let palette = themed(state, ui, &mut fonts);
+        let palette = themed(state, ui, &mut fonts, gevrek_ui::fonts::Area::Notifications);
         let escape =
             context.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
         let asked = notifications::draw_centre(
@@ -1030,7 +1035,7 @@ fn ask_workspace_name(
         let context = ui.ctx().clone();
         let mut state = shared.borrow_mut();
         let state = &mut *state;
-        let palette = themed(state, ui, &mut fonts);
+        let palette = themed(state, ui, &mut fonts, gevrek_ui::fonts::Area::Panel);
         let Some((_, old, mut name, mut problem)) = state.rename.clone() else {
             return Flow::Close;
         };
@@ -1110,7 +1115,7 @@ fn zones_configured(state: &Rc<RefCell<State>>, control: &mut Control) {
         move || {
             Rc::new(move |ui: &egui::Ui, fonts: &mut bool| {
                 let state = look.borrow();
-                (themed(&state, ui, fonts), state.settings)
+                (themed(&state, ui, fonts, gevrek_ui::fonts::Area::Zones), state.settings.clone())
             })
         },
         // (Windows opens an item through its own shell; what the zones
@@ -1179,7 +1184,7 @@ fn toggle_power(state: &Rc<RefCell<State>>, control: &mut Control) {
         let context = ui.ctx().clone();
         let mut state = shared.borrow_mut();
         let state = &mut *state;
-        let palette = themed(state, ui, &mut fonts);
+        let palette = themed(state, ui, &mut fonts, gevrek_ui::fonts::Area::ControlCentre);
         let Some((_, armed, problem)) = state.power.clone() else {
             return Flow::Close;
         };
@@ -1266,7 +1271,7 @@ fn show_osd(state: &Rc<RefCell<State>>, osd: Osd, control: &mut Control) {
                 let context = ui.ctx().clone();
                 let mut state = shared.borrow_mut();
                 let state = &mut *state;
-                let palette = themed(state, ui, &mut fonts);
+                let palette = themed(state, ui, &mut fonts, gevrek_ui::fonts::Area::Osd);
                 let Some((_, osd, until)) = state.osd.clone() else {
                     return Flow::Close;
                 };
@@ -1398,7 +1403,7 @@ fn toggle_shortcuts(state: &Rc<RefCell<State>>, control: &mut Control) {
         let context = ui.ctx().clone();
         let mut state = shared.borrow_mut();
         let state = &mut *state;
-        let palette = themed(state, ui, &mut fonts);
+        let palette = themed(state, ui, &mut fonts, gevrek_ui::fonts::Area::Dialogs);
         let escape =
             context.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
         shortcuts::draw(ui, &palette, state.keys.as_deref(), &mut typed);
@@ -1645,7 +1650,7 @@ fn toggle_control(state: &Rc<RefCell<State>>, control: &mut Control) {
         let asked = {
             let mut state = shared.borrow_mut();
             let state = &mut *state;
-            let palette = themed(state, ui, &mut fonts);
+            let palette = themed(state, ui, &mut fonts, gevrek_ui::fonts::Area::ControlCentre);
             let escape = context
                 .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
             let mixer = state
@@ -1919,7 +1924,7 @@ fn tutorial_start(state: &Rc<RefCell<State>>, lesson: Option<&str>, control: &mu
         use crate::tutoring::Shown;
         let mut state = shared.borrow_mut();
         let state = &mut *state;
-        let palette = themed(state, ui, &mut fonts);
+        let palette = themed(state, ui, &mut fonts, gevrek_ui::fonts::Area::Dialogs);
         let now = Instant::now();
         // The desktop as it stands, with the shell's own surfaces that
         // are up (they come and go without a word from the window
@@ -2160,7 +2165,7 @@ fn toggle_switcher(state: &Rc<RefCell<State>>, control: &mut Control) {
         let context = ui.ctx().clone();
         let mut state = shared.borrow_mut();
         let state = &mut *state;
-        let palette = themed(state, ui, &mut fonts);
+        let palette = themed(state, ui, &mut fonts, gevrek_ui::fonts::Area::Switcher);
         let Some((_, switcher)) = state.switcher.as_mut() else {
             return Flow::Close;
         };
@@ -2314,7 +2319,7 @@ fn toggle_overview(state: &Rc<RefCell<State>>, control: &mut Control) {
         let context = ui.ctx().clone();
         let mut state = shared.borrow_mut();
         let state = &mut *state;
-        let palette = themed(state, ui, &mut fonts);
+        let palette = themed(state, ui, &mut fonts, gevrek_ui::fonts::Area::Switcher);
         let Some((_, overview)) = state.overview.as_mut() else {
             return Flow::Close;
         };
@@ -2404,7 +2409,7 @@ fn toggle_launcher(state: &Rc<RefCell<State>>, control: &mut Control) {
         // notification once the launcher is put away.
         let mut problem: Option<String> = None;
         if !fonts {
-            theme::install_fonts(&context, state.settings.system_font);
+            theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Launcher);
             fonts = true;
         }
         let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -2910,7 +2915,7 @@ fn draw_panel(
     let context = ui.ctx().clone();
     let state = shared.borrow();
     if !*fonts {
-        theme::install_fonts(&context, state.settings.system_font);
+        theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Panel);
         *fonts = true;
     }
     let (Some(bar), Some(one)) = (state.bar.as_ref(), state.panels.get(display)) else {
@@ -2962,7 +2967,7 @@ fn draw_panel(
                     let look = bar.clone();
                     let said = words.clone();
                     let mut fonts = false;
-                    let system_font = state.settings.system_font;
+                    let settings = state.settings.clone();
                     let beside = bar.edge.is_upright();
                     // The hint lies outside the panel, however small what
                     // it is about is: its rectangle is as deep as the panel
@@ -2976,7 +2981,7 @@ fn draw_panel(
                     log::debug!("the panel of {display} shows the hint {words:?}");
                     let hint = control.hint(surface, anchor, size, beside, move |ui, _| {
                         if !fonts {
-                            theme::install_fonts(ui.ctx(), system_font);
+                            theme::install_fonts_for(ui.ctx(), &settings, gevrek_ui::fonts::Area::Panel);
                             fonts = true;
                         }
                         panel::draw_hint(ui, &look, &said);
@@ -3102,7 +3107,7 @@ fn draw_panel(
         let context = ui.ctx().clone();
         let shared = state.borrow();
         if !*fonts {
-            theme::install_fonts(&context, shared.settings.system_font);
+            theme::install_fonts_for(&context, &shared.settings, gevrek_ui::fonts::Area::Panel);
             *fonts = true;
         }
         let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
