@@ -501,8 +501,16 @@ mod real {
             .unwrap_or_default()
     }
 
-    impl Explorer for ShellDesktop {
-        fn read(&mut self) -> Result<DesktopView, BackendError> {
+    /// How often, and how far apart, the desktop is read before its
+    /// refusal is believed. Just after its icons were shown again (an
+    /// earlier run's put back at the start), Explorer's view answers
+    /// "Element not found" for a moment, while it lists them anew; the
+    /// zones were then not shown for the whole run.
+    const READ_TRIES: u32 = 10;
+    const READ_PAUSE: std::time::Duration = std::time::Duration::from_millis(100);
+
+    impl ShellDesktop {
+        fn read_once(&mut self) -> Result<DesktopView, BackendError> {
             let _com = Com::new();
             // SAFETY: Explorer's objects are used on this thread alone.
             unsafe {
@@ -532,6 +540,28 @@ mod real {
                     },
                     icons,
                 })
+            }
+        }
+    }
+
+    impl Explorer for ShellDesktop {
+        fn read(&mut self) -> Result<DesktopView, BackendError> {
+            let mut tried = 1;
+            loop {
+                match self.read_once() {
+                    Ok(desktop) => {
+                        if tried > 1 {
+                            log::debug!("zones: Explorer's desktop was read at the {tried}. try");
+                        }
+                        return Ok(desktop);
+                    }
+                    Err(error) if tried >= READ_TRIES => return Err(error),
+                    Err(error) => {
+                        log::debug!("zones: Explorer's desktop was not read ({error}); it is read again");
+                        tried += 1;
+                        std::thread::sleep(READ_PAUSE);
+                    }
+                }
             }
         }
 
