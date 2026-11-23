@@ -700,7 +700,75 @@ pub fn install_fonts(ctx: &egui::Context, system_font: bool) {
         .or_default();
     let at = proportional.len().min(1);
     proportional.insert(at, "phosphor".to_owned());
+    // The system's symbol font, last of all: it only draws what no font
+    // before it has (⏻, ⌘, ★ in a window's title), so letters and emoji
+    // keep their look. (Whatever the system-font setting: it is no look.)
+    if let Some(bytes) = symbol_font() {
+        fonts.font_data.insert(
+            "system-symbols".to_owned(),
+            egui::FontData::from_static(bytes).into(),
+        );
+        for family in [FontFamily::Proportional, FontFamily::Monospace] {
+            fonts
+                .families
+                .entry(family)
+                .or_default()
+                .push("system-symbols".to_owned());
+        }
+    }
     ctx.set_fonts(fonts);
+}
+
+/// Signs that the fonts egui brings lack, and a symbol font has: the
+/// power signs, the command key, a star, a check.
+const SYMBOLS: &str = "23fb 23fc 23fd 2b58 2318 2605 2714";
+
+/// The system's font for symbols, read once: Segoe UI Symbol on Windows,
+/// Apple Symbols on macOS, and on Linux the first font fontconfig knows
+/// that has [`SYMBOLS`].
+fn symbol_font() -> Option<&'static [u8]> {
+    static FONT: std::sync::OnceLock<Option<Vec<u8>>> = std::sync::OnceLock::new();
+    FONT.get_or_init(|| {
+        let path = if cfg!(windows) {
+            let windows = std::env::var_os("WINDIR").unwrap_or_else(|| "C:\\Windows".into());
+            Some(std::path::Path::new(&windows).join("Fonts").join("seguisym.ttf"))
+        } else if cfg!(target_os = "macos") {
+            Some("/System/Library/Fonts/Apple Symbols.ttf".into())
+        } else {
+            fc_list_first(&format!(":charset={SYMBOLS}")).map(Into::into)
+        };
+        let bytes = path.and_then(|path| {
+            std::fs::read(&path)
+                .map_err(|error| log::debug!("no symbol font at {}: {error}", path.display()))
+                .ok()
+        });
+        if bytes.is_none() {
+            log::debug!("no symbol font of the system's: signs egui lacks stay boxes");
+        }
+        bytes
+    })
+    .as_deref()
+}
+
+/// The first TrueType/OpenType file fontconfig lists for `pattern`.
+fn fc_list_first(pattern: &str) -> Option<String> {
+    let out = std::process::Command::new("fc-list")
+        .args(["-f", "%{file}\n", pattern])
+        .output()
+        .map_err(|error| log::debug!("fc-list did not start: {error}"))
+        .ok()?;
+    let mut files: Vec<String> = String::from_utf8(out.stdout)
+        .ok()?
+        .lines()
+        .filter(|path| {
+            let lower = path.to_lowercase();
+            lower.ends_with(".ttf") || lower.ends_with(".otf")
+        })
+        .map(str::to_owned)
+        .collect();
+    // (fc-list's order is no order: the same font each run, by its name.)
+    files.sort();
+    files.into_iter().next()
 }
 
 /// The font file fontconfig picks for `pattern`, if it's a TrueType/OpenType file.
@@ -777,6 +845,25 @@ pub mod icons {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn where_the_system_has_a_symbol_font_the_power_sign_is_drawn() {
+        if symbol_font().is_none() {
+            return;
+        }
+        let context = egui::Context::default();
+        install_fonts(&context, false);
+        // (Fonts are made at a frame's start.)
+        let mut output = context.run_ui(Default::default(), |_| {});
+        for font in [FontId::proportional(12.5), FontId::monospace(13.0)] {
+            assert!(
+                context.fonts_mut(|fonts| fonts.has_glyphs(&font, "⏻⏼⭘⌘★")),
+                "{font:?} lacks a sign"
+            );
+        }
+        // (No renderer takes the font texture in this test.)
+        output.textures_delta.clear();
+    }
 
     #[test]
     fn in_the_high_contrast_palettes_everything_written_stands_out_seven_to_one() {
