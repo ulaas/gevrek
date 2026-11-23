@@ -1296,10 +1296,17 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
         momentary: false,
     };
 
-    let mut context_guard = hook_context()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some(context) = context_guard.as_mut() {
+    // (The lock is let go before the input goes on: `CallNextHookEx` and
+    // `SendInput` can have Windows call this thread's other hook, which
+    // takes the same lock, and a thread waiting for itself waits for good.)
+    let consume = {
+        let mut context_guard = hook_context()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(context) = context_guard.as_mut() else {
+            drop(context_guard);
+            return CallNextHookEx(HHOOK::default(), code, wparam, lparam);
+        };
         let identity = (raw.device, raw.key.clone());
         let configured_consume = should_consume(&context.registrations, &raw);
         // A key pressed with the Windows key is gevrek's whether it is
@@ -1328,13 +1335,14 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
             // that saw a key go down and never come up has it held for good.)
             context.consumed_inputs.remove(&identity)
         };
-        if consume && down {
-            mask_modifier_release(&raw);
-        }
-        let _ = context.raw_sender.send(raw);
-        if consume {
-            return LRESULT(1);
-        }
+        let _ = context.raw_sender.send(raw.clone());
+        consume
+    };
+    if consume && down {
+        mask_modifier_release(&raw);
+    }
+    if consume {
+        return LRESULT(1);
     }
     CallNextHookEx(HHOOK::default(), code, wparam, lparam)
 }
@@ -1462,10 +1470,16 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPA
         momentary,
     };
 
-    let mut context_guard = hook_context()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some(context) = context_guard.as_mut() {
+    // (The lock is let go before the input goes on, as in the keyboard's
+    // hook.)
+    let consume = {
+        let mut context_guard = hook_context()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(context) = context_guard.as_mut() else {
+            drop(context_guard);
+            return CallNextHookEx(HHOOK::default(), code, wparam, lparam);
+        };
         let identity = (raw.device, raw.key.clone());
         let configured_consume = should_consume(&context.registrations, &raw);
         let consume = if raw.momentary {
@@ -1482,13 +1496,14 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPA
             // that saw a key go down and never come up has it held for good.)
             context.consumed_inputs.remove(&identity)
         };
-        if consume && down {
-            mask_modifier_release(&raw);
-        }
-        let _ = context.raw_sender.send(raw);
-        if consume {
-            return LRESULT(1);
-        }
+        let _ = context.raw_sender.send(raw.clone());
+        consume
+    };
+    if consume && down {
+        mask_modifier_release(&raw);
+    }
+    if consume {
+        return LRESULT(1);
     }
     CallNextHookEx(HHOOK::default(), code, wparam, lparam)
 }
