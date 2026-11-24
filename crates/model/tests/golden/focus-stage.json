@@ -19,7 +19,7 @@
     "appearance": {
       "border_enabled": true,
       "border_width": 2,
-      "border_offset": 0,
+      "border_offset": -1,
       "border_style": "Rounded",
       "active_border_color": [
         236,
@@ -119,7 +119,7 @@
         "separate": true,
         "border_enabled": true,
         "border_width": 1,
-        "border_offset": 0,
+        "border_offset": -1,
         "active_border_color": null,
         "inactive_border_color": null,
         "active_border_alpha": null,

@@ -779,7 +779,6 @@ fn example_aurora() -> BuiltInExample {
     config.desktop.animations.workspace_style = crate::settings::WorkspaceTransitionStyle::Fade;
     let appearance = &mut config.desktop.appearance;
     appearance.border_width = 3;
-    appearance.border_offset = 0;
     appearance.active_border_color = (181, 0, 125);
     appearance.inactive_border_color = (57, 44, 72);
     appearance.inactive_border_alpha = 200;
@@ -855,7 +854,6 @@ fn example_focus_stage() -> BuiltInExample {
     }
     let appearance = &mut config.desktop.appearance;
     appearance.border_width = 2;
-    appearance.border_offset = 0;
     appearance.active_border_color = (236, 240, 248);
     appearance.inactive_border_color = (60, 66, 82);
     appearance.inactive_border_alpha = 120;
@@ -897,7 +895,6 @@ fn example_neon_grid() -> BuiltInExample {
     config.desktop.animations.window_exit_style = WindowTransitionStyle::Scale;
     let appearance = &mut config.desktop.appearance;
     appearance.border_width = 3;
-    appearance.border_offset = 0;
     appearance.active_border_color = (255, 46, 136);
     appearance.inactive_border_color = (52, 34, 86);
     appearance.inactive_border_alpha = 255;
@@ -936,7 +933,6 @@ fn example_paper() -> BuiltInExample {
     config.desktop.animations.window_exit_style = WindowTransitionStyle::Fade;
     let appearance = &mut config.desktop.appearance;
     appearance.border_width = 1;
-    appearance.border_offset = 0;
     appearance.active_border_color = (120, 132, 150);
     appearance.inactive_border_color = (200, 205, 214);
     appearance.inactive_border_alpha = 255;
@@ -2573,6 +2569,11 @@ mod tests {
             );
             assert!(config.desktop.shell.panel.enabled, "{id} has no bar");
             assert!(config.desktop.animations.enabled, "{id} does not animate");
+            // The border sits where gevrek puts it by default.
+            assert_eq!(
+                config.desktop.appearance.border_offset, -1,
+                "{id} moves the border"
+            );
             // New windows are tiled, and the overview and the list of
             // shortcuts have keys.
             let shortcuts = crate::shortcuts::shortcuts_of(config);
