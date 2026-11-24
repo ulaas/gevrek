@@ -303,10 +303,13 @@ impl ClientApp {
         height: i32,
     ) -> wl_buffer::WlBuffer {
         self.buffers += 1;
+        // (Numbered across the process: the tests run side by side, and
+        // two of them must not open the same file.)
+        static FILES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let path = format!(
             "/dev/shm/gevrek-test-{}-{}",
             std::process::id(),
-            self.buffers
+            FILES.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         );
         let file = std::fs::OpenOptions::new()
             .read(true)
