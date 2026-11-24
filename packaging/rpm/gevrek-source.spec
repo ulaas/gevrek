@@ -14,7 +14,7 @@
 %global gevrek_short %(echo %{gevrek_commit} | cut -c1-9)
 
 Name:           gevrek
-Version:        0.7.5
+Version:        0.7.6
 Release:        1.%{gevrek_short}%{?dist}
 Summary:        A tiling window manager and desktop for Wayland
 License:        MIT
