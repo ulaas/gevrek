@@ -1508,16 +1508,10 @@ mod linux {
     /// a panel shows it, beside the shell; started anew when the panels
     /// want something else of it, and not at all while they want nothing.
     fn watch_extras(state: &mut State) {
-        let wanted = crate::extras::Wanted::of(&state.bars);
-        if state
-            .extras_watch
-            .as_ref()
-            .map(|watch| watch.wanted())
-            .unwrap_or(&crate::extras::Wanted::default())
-            == &wanted
-        {
+        let Some(wanted) = crate::panel::extras_to_watch(&state.bars, state.extras_watch.as_ref())
+        else {
             return;
-        }
+        };
         state
             .custom
             .retain(|panel, _| wanted.custom.iter().any(|(id, _)| id == panel));
@@ -1775,23 +1769,9 @@ mod linux {
         );
         // What is playing was pressed; the panel's own words were; the
         // middle button on a window's button closes the window.
-        if let Some(ask) = asked.media {
-            let what = match ask {
-                crate::panel::MediaAsk::PlayPause => crate::media::Ask::PlayPause,
-                crate::panel::MediaAsk::Next => crate::media::Ask::Next,
-            };
-            std::thread::spawn(move || {
-                crate::media::tell(what);
-            });
-        }
-        if asked.custom_pressed {
-            crate::extras::start(&bar.custom.on_press);
-        }
-        if let Some(window) = asked.close_window {
-            state
-                .link
-                .send(Request::Dispatch(crate::panel::close_window(window)));
-        }
+        crate::panel::carry_out(&asked, &bar, |command| {
+            state.link.send(Request::Dispatch(command));
+        });
         // The parts of the surface that are the panel: the pointer
         // reaches those, and what is under the rest gets its clicks.
         if !asked.reach.is_empty() && asked.reach != *reach {
@@ -1803,17 +1783,7 @@ mod linux {
         // What is behind the panel is shown soft, where it is to be and
         // the compositor can do it (told when it is other parts).
         if let Some(panel) = state.panels.get(panel_key) {
-            let wanted: Vec<gevrek_shellkit::look::BlurRegion> =
-                if bar.blur && bar.opacity < 255 && control.blur_available() {
-                    let radius = bar.corner_radius.min(100) as f32;
-                    asked
-                        .reach
-                        .iter()
-                        .map(|part| gevrek_shellkit::look::BlurRegion::new(*part, radius))
-                        .collect()
-                } else {
-                    Vec::new()
-                };
+            let wanted = crate::panel::soft_parts(&bar, &asked.reach, control.blur_available());
             if wanted != *soft {
                 control.set_blur_regions(*panel, &wanted);
                 *soft = wanted;
@@ -2057,15 +2027,7 @@ mod linux {
         if let Some((moved, onto)) = asked.task_moved {
             let mut state = shared.borrow_mut();
             let shown: Vec<u64> = view.tasks.iter().map(|task| task.id).collect();
-            let mut order = crate::panel::reordered(&shown, moved, onto);
-            order.extend(
-                state
-                    .task_order
-                    .iter()
-                    .copied()
-                    .filter(|window| !shown.contains(window)),
-            );
-            state.task_order = order;
+            state.task_order = crate::panel::order_after(&state.task_order, &shown, moved, onto);
             for id in state.panels.values() {
                 control.redraw(*id);
             }

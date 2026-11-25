@@ -1157,6 +1157,78 @@ pub fn covered(state: &Value, display: &str, at: Rect) -> bool {
         })
 }
 
+/// The parts of a panel's surface behind which the desktop is shown
+/// soft: what the panel is drawn on, where the panel says so, is not
+/// solid, and whoever draws it can (`can`). None otherwise.
+pub fn soft_parts(
+    bar: &PanelProfile,
+    reach: &[egui::Rect],
+    can: bool,
+) -> Vec<gevrek_shellkit::look::BlurRegion> {
+    if !(bar.blur && bar.opacity < 255 && can) {
+        return Vec::new();
+    }
+    let radius = bar.corner_radius.min(100) as f32;
+    reach
+        .iter()
+        .map(|part| gevrek_shellkit::look::BlurRegion::new(*part, radius))
+        .collect()
+}
+
+/// What a panel was asked that is carried out the same wherever the
+/// panel is drawn: what is playing paused, let go on or passed over (on
+/// a thread of its own: the player may take its time), the panel's own
+/// program started, and a window closed (`dispatch` sends the window
+/// manager a command).
+pub fn carry_out(asked: &Asked, bar: &PanelProfile, dispatch: impl FnOnce(String)) {
+    if let Some(ask) = asked.media {
+        let what = match ask {
+            MediaAsk::PlayPause => crate::media::Ask::PlayPause,
+            MediaAsk::Next => crate::media::Ask::Next,
+        };
+        let _ = std::thread::Builder::new()
+            .name("gevrek-panel-media".to_string())
+            .spawn(move || {
+                crate::media::tell(what);
+            });
+    }
+    if asked.custom_pressed {
+        crate::extras::start(&bar.custom.on_press);
+    }
+    if let Some(window) = asked.close_window {
+        dispatch(close_window(window));
+    }
+}
+
+/// The order of the taskbar's buttons after one of them was put down on
+/// another's place: those of the panel it happened on (`shown`), in
+/// their new order, and after them what the order had of other panels.
+pub fn order_after(order: &[u64], shown: &[u64], moved: u64, onto: u64) -> Vec<u64> {
+    let mut after = reordered(shown, moved, onto);
+    after.extend(
+        order
+            .iter()
+            .copied()
+            .filter(|window| !shown.contains(window)),
+    );
+    after
+}
+
+/// What is wanted of the thread that looks at the panels' later modules,
+/// where it is another than what the thread that runs was started for
+/// (`None`: it is the same, and the thread goes on).
+pub fn extras_to_watch(
+    bars: &[PanelProfile],
+    running: Option<&crate::extras::Watch>,
+) -> Option<crate::extras::Wanted> {
+    let wanted = crate::extras::Wanted::of(bars);
+    let same = match running {
+        Some(running) => running.wanted() == &wanted,
+        None => wanted.is_nothing(),
+    };
+    (!same).then_some(wanted)
+}
+
 /// Nothing at all on a panel's surface: the panel is out of sight.
 pub fn draw_nothing(ui: &mut egui::Ui) {
     egui::CentralPanel::default()
@@ -1776,9 +1848,8 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
     let padding = bar.padding.min(60) as f32;
     let spacing = bar.spacing.min(40) as f32;
     let radius = bar.corner_radius.min(100) as u8;
-    // As wide as what it shows: by how wide that was the last time.
+    // As wide as what it shows.
     let fitted = bar.width == 0 && bar.fit == PanelFit::Content;
-    let natural_id = egui::Id::unique(("panel-natural", shown.output));
     egui::CentralPanel::default()
         .frame(egui::Frame::NONE)
         .show(ui, |ui| {
@@ -1813,41 +1884,6 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                     egui::vec2(long, across)
                 }
             };
-            let natural: Option<f32> = context.data(|data| data.get_temp(natural_id));
-            let length = if bar.width > 0 {
-                bar.width as f32
-            } else if fitted {
-                natural.unwrap_or(long(whole))
-            } else {
-                long(whole)
-            }
-            .min(long(whole))
-            .max(1.0);
-            let strip = strip_of(whole, length, bar.align, upright);
-            if bar.style == PanelStyle::Bar {
-                ui.painter().rect_filled(strip, radius, background);
-            }
-            // The panel itself, under what stands on it: the other button
-            // on it, where nothing stands, asks for the panel's own menu.
-            // (Before the modules: each of them is over it, and hears its
-            // own presses.)
-            let ground = ui.interact(
-                strip,
-                egui::Id::unique(("panel-ground", shown.output)),
-                egui::Sense::click(),
-            );
-            if ground.secondary_clicked() {
-                let at = ground
-                    .interact_pointer_pos()
-                    .unwrap_or_else(|| strip.center());
-                asked.panel_menu = Some(egui::Rect::from_center_size(at, egui::vec2(2.0, 2.0)));
-            }
-            // The pieces of an island panel are painted behind what
-            // stands on them, once that has its place.
-            let islands: Vec<egui::layers::ShapeIdx> = (0..3)
-                .map(|_| ui.painter().add(egui::Shape::Noop))
-                .collect();
-            let inner = strip.shrink2(along(padding.min(long(strip) / 2.0), 0.0));
             let forward = if upright {
                 egui::Layout::top_down(egui::Align::Center)
             } else {
@@ -1858,8 +1894,6 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
             } else {
                 egui::Layout::right_to_left(egui::Align::Center)
             };
-            // Where the three groups ended up.
-            let mut groups: [Option<egui::Rect>; 3] = [None; 3];
             let group = |ui: &mut egui::Ui,
                          modules: &[PanelModule],
                          marks: bool,
@@ -1894,15 +1928,20 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                     .rect;
                 (long(rect) > 0.5).then_some(rect)
             };
-            // What stands in a group beside its taskbar is as long as it
-            // was the last time: the taskbar has the rest of the room
-            // its group may take, and no more of it.
+            // What stands in a group beside its taskbar: the taskbar has
+            // the rest of the room its group may take, and no more of it.
             let beside_id =
                 |slot: usize| egui::Id::unique(("panel-beside-tasks", shown.output, slot));
-            let with_room = |slot: usize, most: f32| {
-                let beside: f32 = context
-                    .data(|data| data.get_temp(beside_id(slot)))
-                    .unwrap_or(0.0);
+            // The colours of a group, with the room it may take: a
+            // taskbar's group less what stands beside the taskbar.
+            let ink_of = |slot: usize, most: f32, tasks: bool| {
+                let beside: f32 = if tasks {
+                    context
+                        .data(|data| data.get_temp(beside_id(slot)))
+                        .unwrap_or(0.0)
+                } else {
+                    0.0
+                };
                 Ink {
                     room: (most - beside).max(0.0),
                     ..ink
@@ -1924,18 +1963,177 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                     context.request_repaint();
                 }
             };
-            if fitted {
-                // One run: the left, the middle, the right, with room
-                // between the groups; how long it came to be is how long
-                // the panel is from the next frame on.
-                let between = if bar.style == PanelStyle::Islands {
-                    padding * 2.0 + spacing
-                } else {
-                    spacing * 2.0
-                };
+            // How long a group comes to be (and its taskbar, where it has
+            // one): found in this very frame, by laying it out where
+            // nothing of it is seen or reached, before it is drawn in its
+            // place. (The groups used to be placed by how long they were
+            // in the frame before, and a panel took a frame or two to
+            // settle after anything on it changed.)
+            let across_whole = if upright {
+                whole.width()
+            } else {
+                whole.height()
+            };
+            let measure = |ui: &mut egui::Ui,
+                           slot: usize,
+                           modules: &[PanelModule],
+                           marks: bool,
+                           ink: &Ink|
+             -> (f32, Option<f32>) {
+                if modules.is_empty() && !marks {
+                    return (0.0, None);
+                }
+                let place = egui::Rect::from_min_size(
+                    egui::pos2(-40_000.0, -40_000.0 - 400.0 * slot as f32),
+                    along(20_000.0, across_whole),
+                );
+                let mut apart = ui.new_child(
+                    egui::UiBuilder::new()
+                        .id_salt(("panel-measure", slot))
+                        .max_rect(place)
+                        .layout(forward)
+                        .invisible(),
+                );
+                apart.spacing_mut().item_spacing = egui::Vec2::ZERO;
+                // (What it would ask is asked by the one that is drawn.)
+                let mut nothing = Asked::default();
+                let rect = group(&mut apart, modules, marks, false, ink, &mut nothing);
+                let tasks = context.data_mut(|data| data.remove_temp::<f32>(task_long_id()));
+                (rect.map_or(0.0, long), tasks)
+            };
+            // A taskbar's group in the room it may take. What stands
+            // beside the taskbar is found in the same go: where that is
+            // another than was known, the group is laid out once more
+            // with it.
+            let measure_tasks = |ui: &mut egui::Ui,
+                                 slot: usize,
+                                 modules: &[PanelModule],
+                                 marks: bool,
+                                 most: f32|
+             -> f32 {
+                let mut length = 0.0;
+                for _ in 0..2 {
+                    let (all, tasks) = measure(ui, slot, modules, marks, &ink_of(slot, most, true));
+                    length = all;
+                    let Some(tasks) = tasks else {
+                        break;
+                    };
+                    let beside = (all - tasks).max(0.0);
+                    let before: f32 = context
+                        .data(|data| data.get_temp(beside_id(slot)))
+                        .unwrap_or(0.0);
+                    if (beside - before).abs() <= 0.5 {
+                        break;
+                    }
+                    context.data_mut(|data| data.insert_temp(beside_id(slot), beside));
+                }
+                length
+            };
+            let has_tasks = |modules: &[PanelModule]| modules.contains(&PanelModule::Taskbar);
+            let between = if bar.style == PanelStyle::Islands {
+                padding * 2.0 + spacing
+            } else {
+                spacing * 2.0
+            };
+            // As wide as what it shows: how long the run of its groups
+            // comes to be, with the room between them.
+            let natural: Option<f32> = fitted.then(|| {
                 // (The run is not longer than the display: a taskbar in
                 // it has what the rest of the run leaves of that.)
-                let ink = with_room(3, long(whole) - padding * 2.0);
+                let most = long(whole) - padding * 2.0;
+                let tasks_there =
+                    has_tasks(&bar.left) || has_tasks(&bar.centre) || has_tasks(&bar.right);
+                let mut run = 0.0;
+                for _ in 0..2 {
+                    let ink = ink_of(3, most, tasks_there);
+                    let mut tasks = None;
+                    let mut lengths = [0.0f32; 3];
+                    for (slot, (modules, marks)) in
+                        [(&bar.left, false), (&bar.centre, false), (&bar.right, true)]
+                            .into_iter()
+                            .enumerate()
+                    {
+                        let (length, its_tasks) = measure(ui, slot, modules, marks, &ink);
+                        lengths[slot] = length;
+                        tasks = tasks.or(its_tasks);
+                    }
+                    // From where the first group begins to where the last
+                    // one ends, as they are laid out one after the other.
+                    let mut cursor = 0.0;
+                    let mut ends: Option<(f32, f32)> = None;
+                    let mut stands = |from: f32, long: f32| {
+                        if long > 0.5 {
+                            ends = Some((ends.map_or(from, |(start, _)| start), from + long));
+                        }
+                    };
+                    stands(cursor, lengths[0]);
+                    cursor += lengths[0];
+                    if lengths[0] > 0.5 && !bar.centre.is_empty() {
+                        cursor += between;
+                    }
+                    stands(cursor, lengths[1]);
+                    cursor += lengths[1];
+                    if lengths[0] > 0.5 || lengths[1] > 0.5 {
+                        cursor += between;
+                    }
+                    stands(cursor, lengths[2]);
+                    run = ends.map_or(0.0, |(start, end)| end - start);
+                    let Some(tasks) = tasks else {
+                        break;
+                    };
+                    let beside = (run - tasks).max(0.0);
+                    let before: f32 = context
+                        .data(|data| data.get_temp(beside_id(3)))
+                        .unwrap_or(0.0);
+                    if (beside - before).abs() <= 0.5 {
+                        break;
+                    }
+                    context.data_mut(|data| data.insert_temp(beside_id(3), beside));
+                }
+                run + padding * 2.0
+            });
+            let length = if bar.width > 0 {
+                bar.width as f32
+            } else if fitted {
+                natural.unwrap_or(long(whole))
+            } else {
+                long(whole)
+            }
+            .min(long(whole))
+            .max(1.0);
+            let strip = strip_of(whole, length, bar.align, upright);
+            if bar.style == PanelStyle::Bar {
+                ui.painter().rect_filled(strip, radius, background);
+            }
+            // The panel itself, under what stands on it: the other button
+            // on it, where nothing stands, asks for the panel's own menu.
+            // (Before the modules: each of them is over it, and hears its
+            // own presses.)
+            let ground = ui.interact(
+                strip,
+                egui::Id::unique(("panel-ground", shown.output)),
+                egui::Sense::click(),
+            );
+            if ground.secondary_clicked() {
+                let at = ground
+                    .interact_pointer_pos()
+                    .unwrap_or_else(|| strip.center());
+                asked.panel_menu = Some(egui::Rect::from_center_size(at, egui::vec2(2.0, 2.0)));
+            }
+            // The pieces of an island panel are painted behind what
+            // stands on them, once that has its place.
+            let islands: Vec<egui::layers::ShapeIdx> = (0..3)
+                .map(|_| ui.painter().add(egui::Shape::Noop))
+                .collect();
+            let inner = strip.shrink2(along(padding.min(long(strip) / 2.0), 0.0));
+            // Where the three groups ended up.
+            let mut groups: [Option<egui::Rect>; 3] = [None; 3];
+            if fitted {
+                // One run: the left, the middle, the right, with room
+                // between the groups.
+                let tasks_there =
+                    has_tasks(&bar.left) || has_tasks(&bar.centre) || has_tasks(&bar.right);
+                let ink = ink_of(3, long(whole) - padding * 2.0, tasks_there);
                 let builder = egui::UiBuilder::new().max_rect(inner).layout(forward);
                 ui.scope_builder(builder, |ui| {
                     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
@@ -1957,40 +2155,10 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                     })
                     .map_or(0.0, long);
                 note_tasks(3, run);
-                let used = run + padding * 2.0;
-                if natural.is_none_or(|natural| (used - natural).abs() > 0.5) {
-                    context.data_mut(|data| data.insert_temp(natural_id, used));
-                    context.request_repaint();
-                }
             } else {
-                // The three groups are as long as they were the last
-                // time: each may reach up to where its neighbours stand
-                // (the middle one stays in the middle), and no further.
-                let end_id = egui::Id::unique(("panel-end", shown.output));
-                let end_before: f32 = context.data(|data| data.get_temp(end_id)).unwrap_or(0.0);
-                let centre_id = egui::Id::unique(("panel-centre", shown.output));
-                let centre_before: f32 = if bar.centre.is_empty() {
-                    0.0
-                } else {
-                    context.data(|data| data.get_temp(centre_id)).unwrap_or(0.0)
-                };
-                // (How long the start is matters to a taskbar that
-                // stands elsewhere, and is kept only for one.)
-                let start_id = egui::Id::unique(("panel-start", shown.output));
-                let tasks_elsewhere = bar
-                    .centre
-                    .iter()
-                    .chain(&bar.right)
-                    .any(|module| *module == PanelModule::Taskbar);
-                // (And to a title that runs down a side in the middle,
-                // which is as long as the room the ends leave it.)
-                let start_matters =
-                    tasks_elsewhere || (upright && bar.centre.contains(&PanelModule::Title));
-                let start_before: f32 = if start_matters {
-                    context.data(|data| data.get_temp(start_id)).unwrap_or(0.0)
-                } else {
-                    0.0
-                };
+                // The three groups, each as long as it comes to be: each
+                // may reach up to where its neighbours stand (the middle
+                // one stays in the middle), and no further.
                 let (first, middle, last) = if upright {
                     (inner.top(), strip.center().y, inner.bottom())
                 } else {
@@ -1998,21 +2166,56 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                 };
                 // (A group, with the room between it and the next.)
                 let kept = |long: f32| if long > 0.0 { long + spacing } else { 0.0 };
-                let half = kept(centre_before / 2.0);
-                let start_most = (last - kept(end_before) - first).min(if half > 0.0 {
-                    middle - half - first
-                } else {
-                    f32::INFINITY
-                });
-                let end_most = (last - first - kept(start_before)).min(if half > 0.0 {
-                    last - middle - half
-                } else {
-                    f32::INFINITY
-                });
-                let centre_most = 2.0
-                    * (middle - first - kept(start_before)).min(last - kept(end_before) - middle);
-                let start_ink = with_room(0, start_most);
-                let end_ink = with_room(2, end_most);
+                // The room a group may take, by how long the others are.
+                let most_of = |slot: usize, lengths: &[f32; 3]| -> f32 {
+                    let half = kept(lengths[1] / 2.0);
+                    match slot {
+                        0 => (last - kept(lengths[2]) - first).min(if half > 0.0 {
+                            middle - half - first
+                        } else {
+                            f32::INFINITY
+                        }),
+                        2 => (last - first - kept(lengths[0])).min(if half > 0.0 {
+                            last - middle - half
+                        } else {
+                            f32::INFINITY
+                        }),
+                        _ => {
+                            2.0 * (middle - first - kept(lengths[0]))
+                                .min(last - kept(lengths[2]) - middle)
+                        }
+                    }
+                };
+                let sides: [(&[PanelModule], bool); 3] =
+                    [(&bar.left, false), (&bar.centre, false), (&bar.right, true)];
+                // Those without a taskbar first: they are as long as they
+                // are. One that is longer than its room then (a title that
+                // runs down a side is as long as it may be) once more, in
+                // its room. Then a taskbar's group, in the room the others
+                // leave it.
+                let mut lengths = [0.0f32; 3];
+                for (slot, (modules, marks)) in sides.iter().enumerate() {
+                    if !has_tasks(modules) {
+                        lengths[slot] = measure(ui, slot, modules, *marks, &ink).0;
+                    }
+                }
+                for (slot, (modules, marks)) in sides.iter().enumerate() {
+                    let most = most_of(slot, &lengths);
+                    if !has_tasks(modules) && lengths[slot] > most + 0.5 {
+                        lengths[slot] =
+                            measure(ui, slot, modules, *marks, &ink_of(slot, most, false)).0;
+                    }
+                }
+                for (slot, (modules, marks)) in sides.iter().enumerate() {
+                    if has_tasks(modules) {
+                        lengths[slot] =
+                            measure_tasks(ui, slot, modules, *marks, most_of(slot, &lengths));
+                    }
+                }
+                let [_, centre_long, end_long] = lengths;
+                let start_ink = ink_of(0, most_of(0, &lengths), has_tasks(&bar.left));
+                let centre_ink = ink_of(1, most_of(1, &lengths), has_tasks(&bar.centre));
+                let end_ink = ink_of(2, most_of(2, &lengths), has_tasks(&bar.right));
                 let builder = egui::UiBuilder::new().max_rect(inner).layout(forward);
                 ui.scope_builder(builder, |ui| {
                     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
@@ -2025,18 +2228,13 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                         });
                     }
                 });
-                let start_now = groups[0].map_or(0.0, long);
-                if start_matters && (start_now - start_before).abs() > 0.5 {
-                    context.data_mut(|data| data.insert_temp(start_id, start_now));
-                    context.request_repaint();
-                }
                 if upright {
                     // Down a side it is laid out from the top as the rest
                     // is (from the bottom up, what a module shows under
                     // each other came out the wrong way round), and put
-                    // at the end by how long it was the last time.
+                    // at the end by how long it is.
                     let place = egui::Rect::from_min_max(
-                        egui::pos2(inner.left(), inner.bottom() - end_before.max(1.0)),
+                        egui::pos2(inner.left(), inner.bottom() - end_long.max(1.0)),
                         inner.right_bottom(),
                     );
                     let builder = egui::UiBuilder::new().max_rect(place).layout(forward);
@@ -2046,16 +2244,9 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                         note_tasks(2, groups[2].map_or(0.0, long));
                     });
                 }
-                let end_now = groups[2].map_or(0.0, long);
-                if (end_now - end_before).abs() > 0.5 {
-                    context.data_mut(|data| data.insert_temp(end_id, end_now));
-                    context.request_repaint();
-                }
                 if !bar.centre.is_empty() {
                     // In the middle of the panel whatever stands at its
-                    // ends: placed by how long it was the last time.
-                    let (id, before) = (centre_id, centre_before);
-                    let centre_ink = with_room(1, centre_most);
+                    // ends: placed by how long it is.
                     let across = if upright {
                         strip.width()
                     } else {
@@ -2063,18 +2254,13 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                     };
                     let place = egui::Rect::from_center_size(
                         strip.center(),
-                        along(before.max(1.0), across),
+                        along(centre_long.max(1.0), across),
                     );
                     let builder = egui::UiBuilder::new().max_rect(place).layout(forward);
                     ui.scope_builder(builder, |ui| {
                         groups[1] = group(ui, &bar.centre, false, false, &centre_ink, &mut asked);
                         note_tasks(1, groups[1].map_or(0.0, long));
                     });
-                    let used = groups[1].map_or(0.0, long);
-                    if (used - before).abs() > 0.5 {
-                        context.data_mut(|data| data.insert_temp(id, used));
-                        context.request_repaint();
-                    }
                 }
             }
             // What the pointer reaches: the strip, or the pieces.
@@ -6345,6 +6531,109 @@ mod tests {
             "Monitor B",
             bar
         ));
+    }
+
+    #[test]
+    fn a_panel_stands_as_it_will_from_its_first_frame() {
+        use gevrek_model::settings::{PanelEdge, PanelFit, PanelStyle};
+        let mut view = view(&windows_state(), "Monitor ACM2702 (1)").expect("the display");
+        view.title = "a window with a title of some length".to_string();
+        view.tasks = many_tasks(9);
+        // (Each group on a piece of its own, so that where each stands
+        // is told.)
+        let panel = |edge: PanelEdge, fit: PanelFit, tasks_in: usize| {
+            let mut sides = [
+                vec![PanelModule::Launcher, PanelModule::Workspaces],
+                vec![PanelModule::Title],
+                vec![PanelModule::Sound, PanelModule::Clock],
+            ];
+            if tasks_in < 3 {
+                sides[tasks_in].push(PanelModule::Taskbar);
+            }
+            let [left, centre, right] = sides;
+            PanelProfile {
+                edge,
+                fit,
+                style: PanelStyle::Islands,
+                height: 40,
+                left,
+                centre,
+                right,
+                ..Default::default()
+            }
+        };
+        for edge in [PanelEdge::Top, PanelEdge::Left] {
+            let size = if edge.is_upright() {
+                egui::vec2(40.0, 1400.0)
+            } else {
+                egui::vec2(1800.0, 40.0)
+            };
+            for fit in [PanelFit::Full, PanelFit::Content] {
+                // (A taskbar at the left, in the middle, at the right,
+                // and none.)
+                for tasks_in in 0..4 {
+                    let bar = panel(edge, fit, tasks_in);
+                    let first = panel_drawn(&bar, &view, size, 1, None).reach;
+                    let settled = panel_drawn(&bar, &view, size, 6, None).reach;
+                    assert!(!first.is_empty(), "{edge:?} {fit:?} {tasks_in}");
+                    assert_eq!(first.len(), settled.len(), "{edge:?} {fit:?} {tasks_in}");
+                    for (one, other) in first.iter().zip(&settled) {
+                        assert!(
+                            (one.min - other.min).length() < 0.6
+                                && (one.max - other.max).length() < 0.6,
+                            "{edge:?} {fit:?}, the taskbar in {tasks_in}: {first:?} in the first frame, {settled:?} in the sixth"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn what_both_systems_do_for_a_panel_is_decided_in_one_place() {
+        // What is soft behind a panel: only where it says so, is not
+        // solid, and it can be done.
+        let reach = [egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(800.0, 36.0),
+        )];
+        let mut bar = PanelProfile::default();
+        assert!(soft_parts(&bar, &reach, true).is_empty());
+        bar.blur = true;
+        assert_eq!(soft_parts(&bar, &reach, true).len(), 1);
+        assert_eq!(soft_parts(&bar, &reach, true)[0].radius, 10.0);
+        assert!(soft_parts(&bar, &reach, false).is_empty());
+        bar.opacity = 255;
+        assert!(soft_parts(&bar, &reach, true).is_empty());
+        // The order after a button was put down: this panel's, then
+        // what the order had of the others.
+        assert_eq!(
+            order_after(&[9, 1, 8, 2], &[1, 2, 3], 3, 1),
+            [3, 1, 2, 9, 8]
+        );
+        // A window closed is a command; nothing asked is nothing done.
+        let mut sent = Vec::new();
+        carry_out(&Asked::default(), &bar, |command| sent.push(command));
+        assert!(sent.is_empty());
+        let asked = Asked {
+            close_window: Some(7),
+            ..Asked::default()
+        };
+        carry_out(&asked, &bar, |command| sent.push(command));
+        assert_eq!(sent, [close_window(7)]);
+        // The thread for the later modules: started for what the panels
+        // show, left alone while they show the same.
+        assert_eq!(extras_to_watch(std::slice::from_ref(&bar), None), None);
+        bar.right.push(PanelModule::Load);
+        let wanted = extras_to_watch(std::slice::from_ref(&bar), None).expect("to be started");
+        assert!(wanted.load);
+        let running = crate::extras::watch(wanted, |_| {}).expect("started");
+        assert_eq!(
+            extras_to_watch(std::slice::from_ref(&bar), Some(&running)),
+            None
+        );
+        bar.right.clear();
+        assert!(extras_to_watch(&[bar], Some(&running)).is_some_and(|wanted| wanted.is_nothing()));
     }
 
     #[test]

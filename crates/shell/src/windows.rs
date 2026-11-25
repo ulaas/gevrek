@@ -1407,16 +1407,9 @@ fn follow_look(state: &mut State) -> bool {
 /// shows it, beside the shell; started anew when the panels want
 /// something else of it, and not at all while they want nothing.
 fn watch_extras(state: &mut State) {
-    let wanted = crate::extras::Wanted::of(&state.bars);
-    if state
-        .extras_watch
-        .as_ref()
-        .map(|watch| watch.wanted())
-        .unwrap_or(&crate::extras::Wanted::default())
-        == &wanted
-    {
+    let Some(wanted) = panel::extras_to_watch(&state.bars, state.extras_watch.as_ref()) else {
         return;
-    }
+    };
     // (What no panel's program writes any more is not shown any more.)
     state
         .custom
@@ -3237,37 +3230,13 @@ fn draw_panel(
     );
     // What is playing was pressed; the panel's own words were; the middle
     // button on a window's button closes the window.
-    if let Some(ask) = asked.media {
-        let what = match ask {
-            panel::MediaAsk::PlayPause => crate::media::Ask::PlayPause,
-            panel::MediaAsk::Next => crate::media::Ask::Next,
-        };
-        std::thread::spawn(move || {
-            crate::media::tell(what);
-        });
-    }
-    if asked.custom_pressed {
-        crate::extras::start(&bar.custom.on_press);
-    }
-    if let Some(window) = asked.close_window {
-        state
-            .link
-            .send(Request::Dispatch(panel::close_window(window)));
-    }
+    panel::carry_out(&asked, bar, |command| {
+        state.link.send(Request::Dispatch(command));
+    });
     // What is behind the panel is shown soft, where it is to be and the
     // system can do it (told when it is other parts than before).
     {
-        let wanted: Vec<gevrek_shellkit::look::BlurRegion> =
-            if bar.blur && bar.opacity < 255 && control.blur_available() {
-                let radius = bar.corner_radius.min(100) as f32;
-                asked
-                    .reach
-                    .iter()
-                    .map(|part| gevrek_shellkit::look::BlurRegion::new(*part, radius))
-                    .collect()
-            } else {
-                Vec::new()
-            };
+        let wanted = panel::soft_parts(bar, &asked.reach, control.blur_available());
         if wanted != *soft {
             control.set_blur_regions(surface, &wanted);
             *soft = wanted;
@@ -3434,15 +3403,7 @@ fn draw_panel(
         let mut state = shared.borrow_mut();
         let state = &mut *state;
         let shown: Vec<u64> = view.tasks.iter().map(|task| task.id).collect();
-        let mut order = panel::reordered(&shown, moved, onto);
-        order.extend(
-            state
-                .task_order
-                .iter()
-                .copied()
-                .filter(|window| !shown.contains(window)),
-        );
-        state.task_order = order;
+        state.task_order = panel::order_after(&state.task_order, &shown, moved, onto);
         for one in state.panels.values_mut() {
             one.view.tasks =
                 panel::in_order(std::mem::take(&mut one.view.tasks), &state.task_order);
