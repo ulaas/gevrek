@@ -69,6 +69,9 @@ mod polkit;
 mod portal;
 #[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 mod power;
+// The menus a panel opens next to itself, the same on every system.
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
+mod panel_menus;
 // What the panel's later modules show, looked at beside the shell.
 #[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 mod extras;
@@ -2130,54 +2133,42 @@ mod linux {
             }
         }
         let alive = Rc::new(());
-        let menu = match which {
-            Menu::Layouts => {
+        // The menus that are the same on every system (`panel_menus`).
+        let kind = match which {
+            Menu::Layouts => crate::panel_menus::Menu::Layouts {
+                current: view.layout.clone(),
                 // Where the display shows another workspace than the one
                 // with the keyboard, the choice is for the one shown here.
                 // That one gets the keyboard first, asked for by the
                 // display and its place there (see the tabs above).
-                let first = (!view.focused)
+                first: (!view.focused)
                     .then(|| view.tabs.iter().position(|tab| tab.shown))
                     .flatten()
-                    .and_then(|index| crate::panel::show_tab(&view, index));
-                open_layout_menu(
-                    shared,
-                    panel,
-                    anchor,
-                    view.layout.clone(),
-                    first,
-                    Rc::clone(&alive),
-                    control,
-                )
-            }
-            Menu::Notices => {
-                open_notices(shared, panel, anchor, notices, Rc::clone(&alive), control)
-            }
-            Menu::Sound => open_sound_menu(shared, panel, anchor, Rc::clone(&alive), control),
-            Menu::Panel => open_panel_menu(shared, panel, anchor, &bar, Rc::clone(&alive), control),
-            Menu::Calendar => open_calendar(shared, panel, anchor, Rc::clone(&alive), control),
+                    .and_then(|index| crate::panel::show_tab(&view, index)),
+            },
+            Menu::Notices => crate::panel_menus::Menu::Notices(notices),
+            Menu::Sound => crate::panel_menus::Menu::Sound,
+            Menu::Panel => crate::panel_menus::Menu::Panel(Box::new(bar.clone())),
+            Menu::Calendar => crate::panel_menus::Menu::Calendar,
             Menu::Windows(_) => {
                 if listed.is_empty() {
                     return Flow::Continue;
                 }
-                open_task_menu(shared, panel, anchor, listed, Rc::clone(&alive), control)
+                crate::panel_menus::Menu::Windows(listed)
             }
             Menu::TaskActions(_) => {
                 let Some((task, commands)) = acted else {
                     return Flow::Continue;
                 };
-                open_task_actions(
-                    shared,
-                    panel,
-                    anchor,
-                    task,
-                    commands,
-                    Rc::clone(&alive),
-                    control,
-                )
+                crate::panel_menus::Menu::TaskActions(task, commands)
             }
             // Opened when its program has answered, not from here.
             Menu::Tray | Menu::TrayList => return Flow::Continue,
+        };
+        let Some(menu) =
+            crate::panel_menus::open(shared, panel, anchor, kind, Rc::clone(&alive), control)
+        else {
+            return Flow::Continue;
         };
         shared.borrow_mut().menu = Some((menu, which, Rc::downgrade(&alive)));
         Flow::Continue
@@ -2391,301 +2382,65 @@ mod linux {
         state.tray_menu = Some((opened, kept));
     }
 
-    /// What the window manager has to tell, in full, under its mark on a
-    /// panel: there until a press elsewhere or on the mark again.
-    fn open_notices(
-        shared: &Rc<RefCell<State>>,
-        panel: SurfaceId,
-        anchor: egui::Rect,
-        notices: Rc<Vec<crate::panel::Notice>>,
-        alive: Rc<()>,
-        control: &mut Control,
-    ) -> SurfaceId {
-        let size = crate::panel::notices_size(&notices);
-        let state = Rc::clone(shared);
-        let mut fonts = false;
-        control.popup(panel, anchor, size, move |ui, _| {
-            let _held = &alive;
-            let context = ui.ctx().clone();
-            let shared = state.borrow();
-            if !fonts {
-                theme::install_fonts_for(&context, &shared.settings, gevrek_ui::fonts::Area::Panel);
-                fonts = true;
-            }
-            let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
-            theme::apply(&context, &palette, &shared.settings);
-            // (Escape puts a menu away, as a press elsewhere does.)
-            if crate::panel::menu_escape(&context) {
-                return Flow::Close;
-            }
-            crate::panel::notices_list(ui, &palette, &notices);
-            Flow::Continue
-        })
-    }
+    // What a panel's menus need of this shell (`panel_menus`).
+    impl crate::panel_menus::PanelShell for State {
+        fn settings(&self) -> &gevrek_ui::Settings {
+            &self.settings
+        }
 
-    /// The menu under a panel's sound: the devices to play on; a press
-    /// on one makes it the one in use and puts the menu away.
-    fn open_sound_menu(
-        shared: &Rc<RefCell<State>>,
-        panel: SurfaceId,
-        anchor: egui::Rect,
-        alive: Rc<()>,
-        control: &mut Control,
-    ) -> SurfaceId {
-        // (Asked of the sound server as the menu opens.)
-        let outputs = gevrek_system::sound::outputs();
-        let size = crate::panel::sound_menu_size(outputs.len());
-        let state = Rc::clone(shared);
-        let mut fonts = false;
-        control.popup(panel, anchor, size, move |ui, _| {
-            let _held = &alive;
-            let context = ui.ctx().clone();
-            let shared = state.borrow();
-            if !fonts {
-                theme::install_fonts_for(&context, &shared.settings, gevrek_ui::fonts::Area::Panel);
-                fonts = true;
-            }
-            let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
-            theme::apply(&context, &palette, &shared.settings);
-            // (Escape puts a menu away, as a press elsewhere does.)
-            if crate::panel::menu_escape(&context) {
-                return Flow::Close;
-            }
-            let Some(id) = crate::panel::sound_menu(ui, &palette, &outputs) else {
-                return Flow::Continue;
-            };
-            if let Some(sender) = shared.verdicts.clone() {
-                std::thread::spawn(move || {
-                    gevrek_system::sound::choose_output(id);
-                    sender.send(Message::System(crate::panel::SystemView::read()));
-                });
-            }
-            Flow::Close
-        })
-    }
+        fn accent(&self) -> egui::Color32 {
+            self.accent
+        }
 
-    /// The list under a button of the taskbar that stands for several
-    /// windows: a press on one goes to it and puts the list away.
-    fn open_task_menu(
-        shared: &Rc<RefCell<State>>,
-        panel: SurfaceId,
-        anchor: egui::Rect,
-        tasks: Vec<crate::panel::Task>,
-        alive: Rc<()>,
-        control: &mut Control,
-    ) -> SurfaceId {
-        let size = crate::panel::task_menu_size(tasks.len());
-        let state = Rc::clone(shared);
-        let mut fonts = false;
-        control.popup(panel, anchor, size, move |ui, _| {
-            let _held = &alive;
-            let context = ui.ctx().clone();
-            let shared = state.borrow();
-            if !fonts {
-                theme::install_fonts_for(&context, &shared.settings, gevrek_ui::fonts::Area::Panel);
-                fonts = true;
-            }
-            let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
-            theme::apply(&context, &palette, &shared.settings);
-            // (Escape puts a menu away, as a press elsewhere does.)
-            if crate::panel::menu_escape(&context) {
-                return Flow::Close;
-            }
-            let Some(window) = crate::panel::task_menu(ui, &palette, &tasks) else {
-                return Flow::Continue;
-            };
-            shared
-                .link
-                .send(Request::Dispatch(crate::panel::go_to_window(window)));
-            Flow::Close
-        })
-    }
+        fn dispatch(&self, command: String) {
+            self.link.send(Request::Dispatch(command));
+        }
 
-    /// The menu of a window of the taskbar (the other button on its
-    /// button): a press on a line sends its command and puts the menu
-    /// away.
-    fn open_task_actions(
-        shared: &Rc<RefCell<State>>,
-        panel: SurfaceId,
-        anchor: egui::Rect,
-        task: crate::panel::Task,
-        commands: [(crate::panel::TaskAction, Option<String>); 2],
-        alive: Rc<()>,
-        control: &mut Control,
-    ) -> SurfaceId {
-        let size = crate::panel::task_actions_size();
-        let state = Rc::clone(shared);
-        let mut fonts = false;
-        control.popup(panel, anchor, size, move |ui, _| {
-            let _held = &alive;
-            let context = ui.ctx().clone();
-            let shared = state.borrow();
-            if !fonts {
-                theme::install_fonts_for(&context, &shared.settings, gevrek_ui::fonts::Area::Panel);
-                fonts = true;
-            }
-            let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
-            theme::apply(&context, &palette, &shared.settings);
-            // (Escape puts a menu away, as a press elsewhere does.)
-            if crate::panel::menu_escape(&context) {
-                return Flow::Close;
-            }
-            let Some(action) = crate::panel::task_actions(ui, &palette, &task) else {
-                return Flow::Continue;
-            };
-            let command = commands
-                .iter()
-                .find(|(each, _)| *each == action)
-                .and_then(|(_, command)| command.clone());
-            if let Some(command) = command {
-                shared.link.send(Request::Dispatch(command));
-            }
-            Flow::Close
-        })
-    }
+        fn bars(&self) -> &[gevrek_model::settings::PanelProfile] {
+            &self.bars
+        }
 
-    /// The month's calendar under a panel's clock: to be looked at, and
-    /// put away by a press elsewhere, Escape, or the clock again.
-    fn open_calendar(
-        shared: &Rc<RefCell<State>>,
-        panel: SurfaceId,
-        anchor: egui::Rect,
-        alive: Rc<()>,
-        control: &mut Control,
-    ) -> SurfaceId {
-        let state = Rc::clone(shared);
-        let mut fonts = false;
-        let today = jiff::Zoned::now().date();
-        let mut month = (today.year(), today.month());
-        control.popup(
-            panel,
-            anchor,
-            crate::panel::calendar_size(),
-            move |ui, _| {
-                let _held = &alive;
-                let context = ui.ctx().clone();
-                let shared = state.borrow();
-                if !fonts {
-                    theme::install_fonts_for(
-                        &context,
-                        &shared.settings,
-                        gevrek_ui::fonts::Area::Panel,
-                    );
-                    fonts = true;
-                }
-                let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
-                theme::apply(&context, &palette, &shared.settings);
-                if crate::panel::menu_escape(&context) {
-                    return Flow::Close;
-                }
-                // (Today as it is now: left open over midnight, it is right.)
-                crate::panel::calendar(ui, &palette, jiff::Zoned::now().date(), &mut month);
-                Flow::Continue
-            },
-        )
-    }
+        fn arranging(&self) -> Option<&str> {
+            self.arranging.as_deref()
+        }
 
-    /// A panel's own menu: its settings, another edge, out of sight or
-    /// not, a panel more, and this one taken away. What changes the
-    /// panels is kept in the configuration.
-    fn open_panel_menu(
-        shared: &Rc<RefCell<State>>,
-        panel: SurfaceId,
-        anchor: egui::Rect,
-        bar: &gevrek_model::settings::PanelProfile,
-        alive: Rc<()>,
-        control: &mut Control,
-    ) -> SurfaceId {
-        let count = shared.borrow().bars.len();
-        let size = crate::panel::panel_menu_size(bar, count);
-        let state = Rc::clone(shared);
-        let own = bar.clone();
-        let mut fonts = false;
-        control.popup(panel, anchor, size, move |ui, control| {
-            let _held = &alive;
-            let context = ui.ctx().clone();
-            let shared = state.borrow();
-            if !fonts {
-                theme::install_fonts_for(&context, &shared.settings, gevrek_ui::fonts::Area::Panel);
-                fonts = true;
+        fn set_arranging(&mut self, panel: Option<String>) {
+            self.arranging = panel;
+        }
+
+        fn redraw_panels(&self, control: &mut Control) {
+            for id in self.panels.values() {
+                control.redraw(*id);
             }
-            let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
-            theme::apply(&context, &palette, &shared.settings);
-            // (Escape puts a menu away, as a press elsewhere does.)
-            if crate::panel::menu_escape(&context) {
-                return Flow::Close;
-            }
-            let arranging = shared.arranging.as_deref() == Some(own.id.as_str());
-            let Some(ask) = crate::panel::panel_menu(ui, &palette, &own, count, arranging) else {
-                return Flow::Continue;
-            };
-            if ask == crate::panel::PanelAsk::Settings {
-                crate::control::open_studio("bar");
-                return Flow::Close;
-            }
-            if let crate::panel::PanelAsk::Arrange(on) = ask {
-                drop(shared);
-                let mut shared = state.borrow_mut();
-                shared.arranging = on.then(|| own.id.clone());
-                for id in shared.panels.values() {
-                    control.redraw(*id);
-                }
-                return Flow::Close;
-            }
-            if let Some((config, revision)) = shared.running.clone() {
+        }
+
+        fn change_configuration(
+            &mut self,
+            change: &mut dyn FnMut(&mut gevrek_model::config::Config) -> bool,
+        ) {
+            if let Some((config, revision)) = self.running.clone() {
                 let mut changed = config;
-                if crate::panel::panel_asked(&mut changed, &own.id, ask) {
-                    log::info!("the panel {:?} is asked: {ask:?}", own.id);
-                    shared.link.send(Request::Apply {
+                if change(&mut changed) {
+                    self.link.send(Request::Apply {
                         config: Box::new(changed),
                         base_revision: revision,
                         client_id: "gevrek-shell".to_string(),
                     });
                 }
             }
-            Flow::Close
-        })
-    }
+        }
 
-    /// The menu under a panel's layout: every layout, the one in use
-    /// marked; a press on one sets it and puts the menu away.
-    fn open_layout_menu(
-        shared: &Rc<RefCell<State>>,
-        panel: SurfaceId,
-        anchor: egui::Rect,
-        current: String,
-        first: Option<String>,
-        alive: Rc<()>,
-        control: &mut Control,
-    ) -> SurfaceId {
-        let size = crate::panel::layout_menu_size();
-        let state = Rc::clone(shared);
-        let mut fonts = false;
-        control.popup(panel, anchor, size, move |ui, _| {
-            let _held = &alive;
-            let context = ui.ctx().clone();
-            let shared = state.borrow();
-            if !fonts {
-                theme::install_fonts_for(&context, &shared.settings, gevrek_ui::fonts::Area::Panel);
-                fonts = true;
-            }
-            let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
-            theme::apply(&context, &palette, &shared.settings);
-            // (Escape puts a menu away, as a press elsewhere does.)
-            if crate::panel::menu_escape(&context) {
-                return Flow::Close;
-            }
-            let Some(layout) = crate::panel::layout_menu(ui, &palette, &current) else {
-                return Flow::Continue;
+        // (Beside the shell: the sound server takes its moment. What the
+        // sound is afterwards comes back as the others' news does.)
+        fn output_chosen(&self, choose: Box<dyn FnOnce() -> bool + Send>) {
+            let Some(sender) = self.verdicts.clone() else {
+                return;
             };
-            if let Some(first) = &first {
-                shared.link.send(Request::Dispatch(first.clone()));
-            }
-            shared
-                .link
-                .send(Request::Dispatch(crate::panel::set_layout(layout)));
-            Flow::Close
-        })
+            std::thread::spawn(move || {
+                choose();
+                sender.send(Message::System(crate::panel::SystemView::read()));
+            });
+        }
     }
 
     /// Everything that is shared ends (the mark on the panel was

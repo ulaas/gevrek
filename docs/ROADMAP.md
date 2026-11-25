@@ -986,8 +986,14 @@ done without a desktop to measure on)
       opened. To tick: menus and hints open and look as before, one
       after the other and a submenu beside its menu; the first
       overview shows the windows in sight, later ones the others too.
-- [ ] **any** Left: the device for drawing made while the line
-      connects; the check that fails where a bench grows by a tenth.
+- [ ] **any** What the shell draws with is made beside it from its
+      start, and the first surface takes it. To tick: the panel is on
+      the screen no later than before, on a machine with one graphics
+      card and on one with two (there the one made ahead may not draw
+      on the surface, and the surface asks for its own).
+- [x] **any** `cargo xtask bench --keep` keeps the benches' times for
+      this machine; `cargo xtask bench` fails where a case takes more
+      than a tenth longer.
 
 **Panels**
 
@@ -1028,9 +1034,22 @@ done without a desktop to measure on)
       decided in one place (`panel::soft_parts`, `carry_out`,
       `order_after`, `extras_to_watch`, `Hiding`). To be seen: that a
       panel does not flicker when what it shows changes.
-- [ ] **any** Left: modules moved on the panel itself (not asked for);
-      the loop, the menus and the surfaces of the panel are still each
-      system's own code around the shared drawing.
+- [ ] **any** "Move what stands on it", in a panel's own menu: each
+      module is a piece that is taken and put down elsewhere on the
+      panel, kept in the configuration. To tick, on both systems: a
+      piece moved within its side, to another side, and to an empty
+      one; nothing else is pressed meanwhile; the same line ends it.
+- [x] **any** The panel's menus (layouts, notices, the devices to play
+      on, the windows of a button, what can be done with one, the
+      month, the panel's own) are opened by one piece of code for both
+      systems (`panel_menus.rs`; a shell says what it lends them by
+      `PanelShell`). To be seen: each of them opens and does what it
+      did, on both.
+- [ ] **any** Left: where a panel's surface is put, and the tray's own
+      menu, are each system's (a layer surface that asks for its room
+      on Linux, a window at the place the window manager keeps on
+      Windows; the programs' own menus on Linux, a list of icons on
+      Windows): they are different things, not the same thing twice.
 
 ## 3. The tutorial
 

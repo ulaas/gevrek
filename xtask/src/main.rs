@@ -1288,6 +1288,23 @@ fn bench(arguments: &[String]) -> Result<()> {
     )
 }
 
+fn main() -> Result<()> {
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    match arguments.first().map(String::as_str) {
+        Some("check") => check(),
+        Some("bench") => bench(&arguments[1..]),
+        Some("package") => package(&arguments[1..]),
+        Some("install") => install(&arguments[1..]),
+        Some("uninstall") => uninstall(&arguments[1..]),
+        Some("rpm") => rpm(&arguments[1..]),
+        Some("dist") => dist(&arguments[1..]),
+        _ => {
+            println!("cargo xtask check | bench [--keep] | install [--prefix <dir>] [--debug] | uninstall [--prefix <dir>] | rpm [--debug] | package [--debug] | dist [zip|setup|tar|deb|rpm ...] [--debug]");
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 mod bench_tests {
     use super::*;
@@ -1310,22 +1327,5 @@ mod bench_tests {
             [("state/copied".to_string(), 7500, 8300)]
         );
         assert!(bench_grown(&kept, &kept).is_empty());
-    }
-}
-
-fn main() -> Result<()> {
-    let arguments: Vec<String> = std::env::args().skip(1).collect();
-    match arguments.first().map(String::as_str) {
-        Some("check") => check(),
-        Some("bench") => bench(&arguments[1..]),
-        Some("package") => package(&arguments[1..]),
-        Some("install") => install(&arguments[1..]),
-        Some("uninstall") => uninstall(&arguments[1..]),
-        Some("rpm") => rpm(&arguments[1..]),
-        Some("dist") => dist(&arguments[1..]),
-        _ => {
-            println!("cargo xtask check | bench [--keep] | install [--prefix <dir>] [--debug] | uninstall [--prefix <dir>] | rpm [--debug] | package [--debug] | dist [zip|setup|tar|deb|rpm ...] [--debug]");
-            Ok(())
-        }
     }
 }

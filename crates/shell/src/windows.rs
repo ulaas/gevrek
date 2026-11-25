@@ -1437,6 +1437,52 @@ fn watch_extras(state: &mut State) {
     });
 }
 
+impl crate::panel_menus::PanelShell for State {
+    fn settings(&self) -> &gevrek_ui::Settings {
+        &self.settings
+    }
+
+    fn accent(&self) -> egui::Color32 {
+        self.accent
+    }
+
+    fn dispatch(&self, command: String) {
+        self.link.send(Request::Dispatch(command));
+    }
+
+    fn bars(&self) -> &[PanelProfile] {
+        &self.bars
+    }
+
+    fn arranging(&self) -> Option<&str> {
+        self.arranging.as_deref()
+    }
+
+    fn set_arranging(&mut self, panel: Option<String>) {
+        self.arranging = panel;
+    }
+
+    fn redraw_panels(&self, control: &mut Control) {
+        redraw_panels(self, control);
+    }
+
+    fn change_configuration(
+        &mut self,
+        change: &mut dyn FnMut(&mut gevrek_model::config::Config) -> bool,
+    ) {
+        if let Some(mut changed) = self.config.clone() {
+            if change(&mut changed) {
+                apply_configuration(self, changed);
+            }
+        }
+    }
+
+    // (Asked here: the system tells how loud the new device is, `watch`.)
+    fn output_chosen(&self, choose: Box<dyn FnOnce() -> bool + Send>) {
+        choose();
+    }
+}
+
 /// The control centre, where it is open, is drawn again: something it
 /// shows is another. (It does not draw itself by the clock.)
 fn redraw_control_centre(state: &State, control: &mut Control) {
@@ -3517,167 +3563,72 @@ fn draw_panel(
         palette
     };
     let menu = match which {
-        Menu::Layouts => {
-            let current = if view.floating {
-                String::new()
-            } else {
-                view.layout.clone()
-            };
-            // Where the display shows another workspace than the one with
-            // the keyboard, the choice is for the one shown here: that one
-            // gets the keyboard first.
-            let first = (!view.focused)
-                .then(|| view.tabs.iter().position(|tab| tab.shown))
-                .flatten()
-                .and_then(|index| panel::show_tab(&view, index));
-            let line = Rc::clone(shared);
-            control.popup(surface, anchor, panel::layout_menu_size(), move |ui, _| {
-                let _held = &held;
-                let palette = themed(ui, &mut fonts);
-                let Some(layout) = panel::layout_menu(ui, &palette, &current) else {
-                    return Flow::Continue;
-                };
-                let shared = line.borrow();
-                if let Some(first) = &first {
-                    shared.link.send(Request::Dispatch(first.clone()));
-                }
-                shared
-                    .link
-                    .send(Request::Dispatch(panel::set_layout(layout)));
-                Flow::Close
-            })
-        }
-        Menu::Notices => {
-            let size = panel::notices_size(&notices);
-            control.popup(surface, anchor, size, move |ui, _| {
-                let _held = &held;
-                let palette = themed(ui, &mut fonts);
-                panel::notices_list(ui, &palette, &notices);
-                Flow::Continue
-            })
-        }
-        Menu::Sound => {
-            // (Asked of the system as the menu opens.)
-            let outputs = gevrek_system::sound::outputs();
-            if outputs.is_empty() {
-                return Flow::Continue;
-            }
-            let size = panel::sound_menu_size(outputs.len());
-            control.popup(surface, anchor, size, move |ui, _| {
-                let _held = &held;
-                let palette = themed(ui, &mut fonts);
-                let Some(id) = panel::sound_menu(ui, &palette, &outputs) else {
-                    return Flow::Continue;
-                };
-                // The system tells how loud the new device is (`watch`).
-                if !gevrek_system::sound::choose_output(id) {
-                    log::warn!("the device to play on was not changed");
-                }
-                Flow::Close
-            })
-        }
-        Menu::Windows(_) => {
-            // The windows as they are now; a press on one goes to it.
-            let listed = asked
-                .task_menu
-                .as_ref()
-                .map(|(_, windows)| windows.as_slice());
-            let tasks = panel::tasks_of_ids(&view, listed.unwrap_or_default());
-            if tasks.is_empty() {
-                return Flow::Continue;
-            }
-            let size = panel::task_menu_size(tasks.len());
-            let line = Rc::clone(shared);
-            control.popup(surface, anchor, size, move |ui, _| {
-                let _held = &held;
-                let palette = themed(ui, &mut fonts);
-                let Some(window) = panel::task_menu(ui, &palette, &tasks) else {
-                    return Flow::Continue;
-                };
-                line.borrow()
-                    .link
-                    .send(Request::Dispatch(panel::go_to_window(window)));
-                Flow::Close
-            })
-        }
-        Menu::TaskActions(window) => {
-            // The window as it is now, and what each line sends.
-            let Some(task) = panel::tasks_of_ids(&view, &[window]).into_iter().next() else {
-                return Flow::Continue;
-            };
-            let commands =
-                panel::TaskAction::ALL.map(|action| (action, action.command(&view, &task)));
-            let line = Rc::clone(shared);
-            control.popup(surface, anchor, panel::task_actions_size(), move |ui, _| {
-                let _held = &held;
-                let palette = themed(ui, &mut fonts);
-                let Some(action) = panel::task_actions(ui, &palette, &task) else {
-                    return Flow::Continue;
-                };
-                let command = commands
-                    .iter()
-                    .find(|(each, _)| *each == action)
-                    .and_then(|(_, command)| command.clone());
-                if let Some(command) = command {
-                    line.borrow().link.send(Request::Dispatch(command));
-                }
-                Flow::Close
-            })
-        }
-        Menu::Calendar => {
-            let today = jiff::Zoned::now().date();
-            let mut month = (today.year(), today.month());
-            control.popup(surface, anchor, panel::calendar_size(), move |ui, _| {
-                let _held = &held;
-                let palette = themed(ui, &mut fonts);
-                // (Today as it is now: left open over midnight, it is right.)
-                panel::calendar(ui, &palette, jiff::Zoned::now().date(), &mut month);
-                Flow::Continue
-            })
-        }
-        Menu::Panel => {
-            // This panel as it is now, and how many there are.
-            let (own, count) = {
-                let state = shared.borrow();
-                (
-                    state.bars.iter().find(|bar| bar.is(&panel_id)).cloned(),
-                    state.bars.len(),
-                )
-            };
-            let Some(own) = own else {
-                return Flow::Continue;
-            };
-            let line = Rc::clone(shared);
-            let size = panel::panel_menu_size(&own, count);
-            control.popup(surface, anchor, size, move |ui, control| {
-                let _held = &held;
-                let palette = themed(ui, &mut fonts);
-                let arranging = line.borrow().arranging.as_deref() == Some(own.id.as_str());
-                let Some(ask) = panel::panel_menu(ui, &palette, &own, count, arranging) else {
-                    return Flow::Continue;
-                };
-                if ask == panel::PanelAsk::Settings {
-                    crate::control::open_studio("bar");
-                    return Flow::Close;
-                }
-                if let panel::PanelAsk::Arrange(on) = ask {
-                    let mut state = line.borrow_mut();
-                    state.arranging = on.then(|| own.id.clone());
-                    redraw_panels(&state, control);
-                    return Flow::Close;
-                }
-                // Kept in the configuration: the window manager keeps
-                // the panels' room by it, and tells where each is.
-                let mut state = line.borrow_mut();
-                let state = &mut *state;
-                if let Some(mut changed) = state.config.clone() {
-                    if panel::panel_asked(&mut changed, &own.id, ask) {
-                        log::info!("the panel {:?} is asked: {ask:?}", own.id);
-                        apply_configuration(state, changed);
+        // The menus that are the same on every system (`panel_menus`).
+        Menu::Layouts
+        | Menu::Notices
+        | Menu::Sound
+        | Menu::Windows(_)
+        | Menu::TaskActions(_)
+        | Menu::Calendar
+        | Menu::Panel => {
+            let kind = match which {
+                Menu::Layouts => crate::panel_menus::Menu::Layouts {
+                    current: if view.floating {
+                        String::new()
+                    } else {
+                        view.layout.clone()
+                    },
+                    // Where the display shows another workspace than the
+                    // one with the keyboard, the choice is for the one
+                    // shown here: that one gets the keyboard first.
+                    first: (!view.focused)
+                        .then(|| view.tabs.iter().position(|tab| tab.shown))
+                        .flatten()
+                        .and_then(|index| panel::show_tab(&view, index)),
+                },
+                Menu::Notices => crate::panel_menus::Menu::Notices(notices),
+                Menu::Sound => crate::panel_menus::Menu::Sound,
+                Menu::Windows(_) => {
+                    // The windows as they are now; a press on one goes to it.
+                    let listed = asked
+                        .task_menu
+                        .as_ref()
+                        .map(|(_, windows)| windows.as_slice());
+                    let tasks = panel::tasks_of_ids(&view, listed.unwrap_or_default());
+                    if tasks.is_empty() {
+                        return Flow::Continue;
                     }
+                    crate::panel_menus::Menu::Windows(tasks)
                 }
-                Flow::Close
-            })
+                Menu::TaskActions(window) => {
+                    // The window as it is now, and what each line sends.
+                    let Some(task) = panel::tasks_of_ids(&view, &[window]).into_iter().next()
+                    else {
+                        return Flow::Continue;
+                    };
+                    let commands =
+                        panel::TaskAction::ALL.map(|action| (action, action.command(&view, &task)));
+                    crate::panel_menus::Menu::TaskActions(task, commands)
+                }
+                Menu::Calendar => crate::panel_menus::Menu::Calendar,
+                // (This panel as it is now.)
+                Menu::Panel | Menu::Tray => {
+                    let own = shared
+                        .borrow()
+                        .bars
+                        .iter()
+                        .find(|bar| bar.is(&panel_id))
+                        .cloned();
+                    let Some(own) = own else {
+                        return Flow::Continue;
+                    };
+                    crate::panel_menus::Menu::Panel(Box::new(own))
+                }
+            };
+            match crate::panel_menus::open(shared, surface, anchor, kind, held, control) {
+                Some(menu) => menu,
+                None => return Flow::Continue,
+            }
         }
         Menu::Tray => {
             let count = shared.borrow().tray_all.len();
