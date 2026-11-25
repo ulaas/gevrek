@@ -34,8 +34,14 @@ use std::process::{Command, Stdio};
 /// Where a person reads about the newest release and gets it by hand.
 pub const RELEASES_PAGE: &str = "https://github.com/ulaas/gevrek/releases/latest";
 /// The package an installed gevrek on Windows is updated from: a zip that
-/// holds one folder of the same name (`cargo xtask dist` makes it).
+/// holds one folder of the same name (`cargo xtask dist` makes it). Of
+/// the processor this gevrek was built for: one built for ARM is not
+/// "updated" to the programs of another processor (it was), and where a
+/// release has no package for it, it says so and stays as it is.
+#[cfg(not(target_arch = "aarch64"))]
 pub const WINDOWS_PACKAGE: &str = "gevrek-windows-x64";
+#[cfg(target_arch = "aarch64")]
+pub const WINDOWS_PACKAGE: &str = "gevrek-windows-arm64";
 const SUMS: &str = "SHA256SUMS.txt";
 /// The programs of the Windows package.
 pub const WINDOWS_PROGRAMS: &[&str] = &[

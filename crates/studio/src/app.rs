@@ -258,6 +258,14 @@ pub struct Studio {
     /// fetched: what is shown is gevrek's defaults, and nothing can be
     /// applied.
     fetch_problem: Option<String>,
+    /// The window manager answered again and what it runs could not be
+    /// read since: which revision a change would be laid on is not
+    /// known, and nothing is applied until it is.
+    revision_unknown: bool,
+    /// A trial is going back: the configuration from before, until the
+    /// window manager says it runs it. Refused, it is handed over once
+    /// more, whatever runs by then.
+    going_back: Option<Config>,
 }
 
 /// Where the schema describes a command.
@@ -312,6 +320,8 @@ impl Studio {
             file_mark: file.as_deref().and_then(file_mark),
             file_problem,
             fetch_problem: None,
+            revision_unknown: false,
+            going_back: None,
             link,
             file,
             address,
@@ -507,6 +517,7 @@ impl Studio {
                 Event::Applied(revision) => {
                     log::debug!("the window manager applied revision {revision}");
                     self.applying = false;
+                    self.going_back = None;
                     if let Some(session) = &mut self.session {
                         session.applied(revision);
                     }
@@ -514,6 +525,25 @@ impl Studio {
                     self.seen_generation = self.sent_generation;
                     if !self.live {
                         self.toast(Tone::Good, format!("Applied (revision {revision})"));
+                    }
+                }
+                Event::ApplyFailed(message) | Event::Conflict(message)
+                    if self.going_back.is_some() =>
+                {
+                    // The way back from a trial was refused: it is the
+                    // one thing that is sent again, and as what asks
+                    // nothing of what runs. (It was told as back, and
+                    // what was tried went on running.)
+                    log::debug!(
+                        "the way back from a trial was refused ({message}): sent once more"
+                    );
+                    self.applying = true;
+                    if let Some(before) = self.going_back.take() {
+                        self.link.send(Request::Apply {
+                            config: Box::new(before),
+                            base_revision: 0,
+                            client_id: self.client_id.clone(),
+                        });
                     }
                 }
                 Event::Conflict(message) => {
@@ -535,6 +565,26 @@ impl Studio {
                 } if message.starts_with(gevrek_link::FETCH_FAILED) && self.session.is_none() => {
                     log::debug!("the configuration was not fetched: {message}");
                     self.fetch_problem = Some(message.clone());
+                }
+                // The same with a configuration already shown, after the
+                // window manager came back: the revision that was known
+                // means nothing any more, and none is known in its place.
+                // (An Apply then went out as one that asks nothing, and
+                // replaced whatever someone else had changed meanwhile.)
+                Event::Log {
+                    level: gevrek_link::Level::Error,
+                    ref message,
+                    ..
+                } if message.starts_with(gevrek_link::FETCH_FAILED)
+                    && self
+                        .session
+                        .as_ref()
+                        .is_some_and(|session| session.base_revision() == 0) =>
+                {
+                    log::debug!(
+                        "the configuration was not fetched after the line came back: {message}"
+                    );
+                    self.revision_unknown = true;
                 }
                 Event::ApplyFailed(message) => {
                     log::debug!("the window manager did not apply the change: {message}");
@@ -676,6 +726,7 @@ impl Studio {
     }
 
     fn remote_configuration(&mut self, config: Config, revision: u64) {
+        self.revision_unknown = false;
         match &mut self.session {
             // The first word of what runs. What was changed here before
             // it came (the studio was opened with no window manager, and
@@ -828,6 +879,17 @@ impl Studio {
             }
             return;
         }
+        // Not while it is not known what runs (see `revision_unknown`),
+        // but for the way back from a trial, which is to run whatever
+        // else does.
+        if self.revision_unknown && self.going_back.is_none() {
+            self.link.send(Request::Fetch);
+            self.toast(
+                Tone::Warn,
+                "What the window manager runs is not known yet: it is asked again. Apply once more in a moment.",
+            );
+            return;
+        }
         let Some(request) = self.session.as_ref().and_then(Session::begin_apply) else {
             self.sent_generation = self.document.generation();
             return;
@@ -892,6 +954,7 @@ impl Studio {
             return;
         }
         let before = trial.before().clone();
+        let before_again = before.clone();
         self.document.load(&before);
         if let Some(session) = &mut self.session {
             if serde_json::to_value(session.base()).ok().as_ref() == Some(self.document.value()) {
@@ -901,7 +964,13 @@ impl Studio {
             }
         }
         self.seen_generation = self.document.generation();
+        self.going_back = Some(before_again);
         self.apply();
+        // (Nothing went out, where what runs is what was there before:
+        // then nothing is waited for either.)
+        if !self.applying {
+            self.going_back = None;
+        }
         self.toast(
             Tone::Note,
             "The configuration from before is back. Undo shows what you tried again, as a draft.",

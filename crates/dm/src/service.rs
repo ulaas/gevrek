@@ -122,15 +122,50 @@ fn session_command() -> String {
     )
 }
 
+/// Start a program from the one thread that starts them all and lives
+/// as long as the service does. A worker asks to be ended when its
+/// parent goes (`PR_SET_PDEATHSIG`), and its parent, to the system, is
+/// the thread that started it: started from the thread of one
+/// connection, which ends when it has answered, a worker could be told
+/// to end, and its session with it, a moment after the login.
+fn started_by_the_keeper(command: Command) -> std::io::Result<Child> {
+    type Asked = (Command, std::sync::mpsc::Sender<std::io::Result<Child>>);
+    static KEEPER: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Sender<Asked>>> =
+        std::sync::OnceLock::new();
+    let keeper = KEEPER.get_or_init(|| {
+        let (ask, asked) = std::sync::mpsc::channel::<Asked>();
+        let started = std::thread::Builder::new()
+            .name("gevrek-dm-keeper".to_string())
+            .spawn(move || {
+                for (mut command, answer) in asked {
+                    let _ = answer.send(command.spawn());
+                }
+            });
+        if let Err(error) = started {
+            log::error!("the thread that starts the workers was not started: {error}");
+        }
+        std::sync::Mutex::new(ask)
+    });
+    let (answer, answered) = std::sync::mpsc::channel();
+    let gone = || std::io::Error::other("the thread that starts the workers is gone");
+    keeper
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .send((command, answer))
+        .map_err(|_| gone())?;
+    answered.recv().map_err(|_| gone())?
+}
+
 /// Start a worker with its order; its first line says whether the
 /// session was opened. (What is written to it afterwards is the word
 /// that the session may start.)
 fn start_worker(order: &Order) -> anyhow::Result<(Child, Answer, std::process::ChildStdin)> {
-    let mut child = Command::new(std::env::current_exe()?)
+    let mut command = Command::new(std::env::current_exe()?);
+    command
         .arg("--worker")
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()?;
+        .stdout(Stdio::piped());
+    let mut child = started_by_the_keeper(command)?;
     log::debug!(
         "a worker (process {}) for the {:?} session of {}",
         child.id(),

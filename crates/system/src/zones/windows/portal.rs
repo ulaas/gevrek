@@ -77,6 +77,9 @@ struct State {
     opening: bool,
     /// Something happened meanwhile: go once more when it is back.
     again: bool,
+    /// It was gone to once more for being there after all, and was not
+    /// read then either: not a third time by itself.
+    looked_again: bool,
 }
 
 struct Inner {
@@ -125,6 +128,7 @@ impl Portal {
                 reach: Reach::Opening,
                 opening: false,
                 again: false,
+                looked_again: false,
             }),
         });
         attempt(&inner);
@@ -270,6 +274,7 @@ impl Inner {
                 let mut state = self.state();
                 state.folder = Some(folder);
                 state.reach = Reach::There;
+                state.looked_again = false;
             }
             Err(error) => self.away(&error.to_string()),
         }
@@ -280,7 +285,10 @@ impl Inner {
         let there = (self.how.reach)(&self.path);
         let mut state = self.state();
         state.sentinel = sentinel;
-        if there == state.reach.is_away() {
+        // (Once: a folder that is there and cannot be read, one the person
+        // may not list, is there each time it is looked at and away each
+        // time it is gone to, and was gone to again without an end.)
+        if there == state.reach.is_away() && !std::mem::replace(&mut state.looked_again, true) {
             state.again = true;
         }
     }
@@ -340,6 +348,8 @@ impl Inner {
 /// Go to the folder again, if the portal is still there.
 fn again(inner: &Weak<Inner>) {
     if let Some(inner) = inner.upgrade() {
+        // (Something was heard of it: it may be looked at again.)
+        inner.state().looked_again = false;
         attempt(&inner);
     }
 }

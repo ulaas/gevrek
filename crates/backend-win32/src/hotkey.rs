@@ -194,6 +194,29 @@ impl Drop for HotkeyManager {
 /// this long was let go where no hook heard of it.
 const HELD_KEY_SILENCE: Duration = Duration::from_secs(2);
 
+/// Whether a button of the mouse is down now, by its name in a binding.
+/// None for a name that is no button (the wheel).
+fn mouse_button_is_down(name: &str) -> Option<bool> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON, VK_XBUTTON1, VK_XBUTTON2,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_SWAPBUTTON};
+    // (The state is the physical button's: with the buttons swapped, the
+    // left one a binding names is the right one of the device.)
+    // SAFETY: plain queries.
+    let swapped = unsafe { GetSystemMetrics(SM_SWAPBUTTON) } != 0;
+    let key = match (name.to_ascii_uppercase().as_str(), swapped) {
+        ("LEFT", false) | ("RIGHT", true) => VK_LBUTTON,
+        ("RIGHT", false) | ("LEFT", true) => VK_RBUTTON,
+        ("MIDDLE", _) => VK_MBUTTON,
+        ("X1", _) => VK_XBUTTON1,
+        ("X2", _) => VK_XBUTTON2,
+        _ => return None,
+    };
+    // SAFETY: a plain query.
+    Some(unsafe { GetAsyncKeyState(key.0 as i32) } < 0)
+}
+
 /// How often the hooks are put in anew. Windows takes a hook away, and
 /// says nothing, when its answer once took too long (the machine stood
 /// still for a moment): all of gevrek's keys were then dead until it was
@@ -1106,8 +1129,19 @@ fn run_input_loop(
 
         // A key that has been silent for long is not held any more: no
         // long press comes of it.
-        pressed.retain(|(device, _), state| {
-            *device != BindingDevice::Keyboard || state.last_heard.elapsed() < HELD_KEY_SILENCE
+        pressed.retain(|(device, _), state| match device {
+            BindingDevice::Keyboard => state.last_heard.elapsed() < HELD_KEY_SILENCE,
+            // A button of the mouse says nothing while it is held, so it
+            // is asked: one that is up is not held, whoever heard it come
+            // up. (Let go over a window of a program with more rights, its
+            // release reached nobody here, and it was held for good: its
+            // long press came with the button up.)
+            // (Not in its first moments: a press that was made up, and
+            // not by a button, is let go by whoever made it up.)
+            BindingDevice::Mouse => {
+                state.started.elapsed() < HELD_KEY_SILENCE
+                    || mouse_button_is_down(&state.raw.key).unwrap_or(true)
+            }
         });
         for state in pressed.values_mut() {
             let held_ms = elapsed_ms(state.started);

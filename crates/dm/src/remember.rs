@@ -183,6 +183,19 @@ pub fn keep(reader: &Reader, home: &Path, greeter_home: &Path, owner: (u32, u32)
         );
         return;
     }
+    // The folder itself is to be a folder, and no link to one: it lies in
+    // the greeter's account's home, and what is written into it is written
+    // as root. (Only the files' own names were looked at: a link put where
+    // the folder is would have had root make the greeter's files wherever
+    // it pointed.)
+    if !std::fs::symlink_metadata(&folder).is_ok_and(|folder| folder.is_dir()) {
+        log::warn!(
+            "the login keeps nothing of {}: {} is no folder of its own",
+            reader.name,
+            folder.display()
+        );
+        return;
+    }
     let put = |name: &str, bytes: &[u8]| {
         let file = folder.join(name);
         // (Written beside and moved over: the greeter never reads half a file.)

@@ -979,7 +979,46 @@ pub mod client {
     }
 
     /// Tell the helper what its hooks go by (where one answers).
+    /// Tell the helper the table as it is now, from a thread of its own.
+    /// (It was told from whichever thread changed the table, and that is
+    /// the thread that hears the keys when bindings are taken or let go:
+    /// a helper that was slow to answer, held up by a window that does
+    /// not answer, held every key and the pointer of the whole system up
+    /// with it.) Several changes in a row are told as one: the table that
+    /// is told is the one there is when its turn comes.
+    #[cfg(not(test))]
     fn tell_table() {
+        static TELLER: std::sync::OnceLock<Option<std::sync::mpsc::SyncSender<()>>> =
+            std::sync::OnceLock::new();
+        let teller = TELLER.get_or_init(|| {
+            // (Room for one that waits: more than one would tell the same.)
+            let (wake, woken) = std::sync::mpsc::sync_channel::<()>(1);
+            std::thread::Builder::new()
+                .name("gevrek-helper-table".to_string())
+                .spawn(move || {
+                    for () in woken {
+                        tell_table_now();
+                    }
+                })
+                .ok()
+                .map(|_| wake)
+        });
+        match teller {
+            // (Full: one is waiting already, and will tell this table.)
+            Some(wake) => {
+                let _ = wake.try_send(());
+            }
+            None => tell_table_now(),
+        }
+    }
+
+    /// (In the tests the table is told at once, on the thread that asks.)
+    #[cfg(test)]
+    fn tell_table() {
+        tell_table_now();
+    }
+
+    fn tell_table_now() {
         let ask = {
             let table = table();
             Ask::Input {

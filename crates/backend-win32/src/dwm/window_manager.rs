@@ -1860,6 +1860,24 @@ impl WindowManager {
             unsafe { GetWindowRect(hwnd, &mut rect).ok()? };
             Some((rect.left, rect.top, rect.right, rect.bottom))
         };
+        // The rectangle around the shape a window has now; none for a
+        // window that has no shape.
+        let shape_box = |hwnd: HWND| -> Option<(i32, i32, i32, i32)> {
+            use windows::Win32::Graphics::Gdi::{GetRgnBox, GetWindowRgn, RGN_ERROR};
+            // SAFETY: a region of ours, filled with a copy of the
+            // window's and let go of below.
+            unsafe {
+                let region = CreateRectRgn(0, 0, 0, 0);
+                if region.is_invalid() {
+                    return None;
+                }
+                let mut around = RECT::default();
+                let has = GetWindowRgn(hwnd, region) != RGN_ERROR
+                    && GetRgnBox(region, &mut around) != RGN_ERROR;
+                let _ = DeleteObject(region);
+                has.then_some((around.left, around.top, around.right, around.bottom))
+            }
+        };
         // Those that are no longer to be cut are whole again.
         let gone: Vec<WindowHandle> = cut
             .keys()
@@ -1882,6 +1900,21 @@ impl WindowManager {
                 continue;
             };
             if cut.get(window) == Some(&(place, *display)) {
+                // The window is cut as it should be. Its border may not
+                // be any more: whenever a border is placed or coloured
+                // anew it is given its ring again, whole. (It stayed so,
+                // and was seen on the display beside until the window
+                // next moved.) Looked at, and cut again where it is whole.
+                if let Some(border) = self.border_windows.get(window) {
+                    let border = border.border_hwnd.to_hwnd();
+                    let wanted =
+                        rect_of(border).and_then(|around| part_on_display(around, *display));
+                    if let Some(wanted) = wanted {
+                        if shape_box(border) != Some(wanted) {
+                            shape(border, Some(wanted));
+                        }
+                    }
+                }
                 continue;
             }
             let part = part_on_display(place, *display);

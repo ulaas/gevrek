@@ -167,8 +167,27 @@ Written on 2026-11-25, tested without a desktop, to be seen once:
 - [ ] **person, M** macOS: a window that opened after gevrek started,
       whose program then hangs, does not hold the keys up for seconds;
       a parked window whose program is slow comes back at the next try.
-- [ ] **person, any** The web page in a browser, wide and narrow
-      (`site/index.html`), before it is published.
+- [ ] **person, W** The elevated helper after the later rounds: it is
+      found and spoken to (the window manager now asks who serves the
+      pipe: the copy in Program Files, or the one beside it), bindings
+      still reach it (they are told from a thread of their own), it
+      comes back after it was ended, and `gevrek elevated install`
+      still registers its task (the XML lies beside the helper now).
+- [ ] **person, W** A column of the scrolling layout cut at a
+      display's edge keeps its border cut after the keyboard goes to
+      another window. A mouse binding with a long press does not come
+      with the button up.
+- [ ] **person, L** A lock screen that is ended (`pkill gevrek-lock`)
+      while locked comes again at the next key. Screen sharing of one
+      window goes on after the window is given another size. Login
+      through gevrek-dm with SELinux on, from the RPM.
+- [ ] **person, any** The studio: opened before the window manager,
+      something changed, the window manager started: the change is
+      kept as a draft. A trial left to run out with the window manager
+      stopped and started again meanwhile goes back.
+- [ ] **person, any** The web page in a browser (`site/index.html`),
+      before it is published. (Drawn by a headless browser at 1400 and
+      at 390 pixels wide on 2026-11-25, and looked at: as it should be.)
 - [ ] **person** The workflows on GitHub: the actions were brought to
       their current major versions without a run (checkout 7,
       upload-artifact 7, download-artifact 8, the Pages actions).
@@ -1313,28 +1332,33 @@ A second round the same day took most of what the first had left:
   is asked again; a program that does not answer is not asked six
   times over; a frame is read only from a value that is one.
 
-Found and left: each wants a desktop to be written against, not only to
-be seen on.
+A third round took the rest, so that nothing the pass found is left
+without a change (the ones marked * have no test: they are written by
+the code alone, and are in the list of section 2 to be seen):
 
-- [ ] **L** ext-image-copy-capture sessions do not say a new size when
-      what they show changes it.
-- [ ] **L** The display manager's worker dies with the thread that
-      started it (`PR_SET_PDEATHSIG`); what it remembers of a person is
-      written through a folder the greeter's account could make a link.
-- [ ] **W** The elevated helper: the table of keys is written to its
-      pipe from the thread that hears the keys, and the helper changes
-      a window that does not answer without a time limit; its task's
-      XML lies in `%TEMP%` on its way to `schtasks`; a release that
-      lands over an elevated window is never told, and a mouse button
-      held then stays held.
-- [ ] **W** A border cut at a display's edge is whole again after its
-      next update (the scrolling layout, the classic border).
-- [ ] **W** A folder that cannot be listed may be gone to again and
-      again (the Windows half of the portal; not confirmed).
-- [ ] **any** Studio: after a reconnect whose fetch failed, the next
-      Apply can be unconditional; a trial's going back is not tried
-      again when it is refused.
-- [ ] **W** The updater knows only x64.
+- **Linux.** A capture session says the new size when what it shows
+  has another*. The display manager starts its workers from one thread
+  that lives as long as it does, so that none is told to end with the
+  thread of a connection*, and writes nothing for the greeter through a
+  folder that is a link*.
+- **Windows.** The table of keys is told to the elevated helper from a
+  thread of its own, not from the one that hears the keys*. The task's
+  XML is written beside the helper, where only an administrator
+  writes, and that folder is the one the system names*. A mouse button
+  that is up is not held, whoever heard it come up*. A border that was
+  made whole again is cut again*. A folder that cannot be listed is
+  gone to once more, not without end.
+- **Studio.** With the revision unknown after the line came back,
+  nothing is applied until it is known*; a trial's way back that is
+  refused is sent once more*.
+- **Updates.** The package is the one of the processor gevrek was
+  built for.
+
+What the pass could not do on this machine, and is the person's:
+
+- [ ] **person, M** Run anything on macOS. Everything of macOS in this
+      pass is type-checked and linted for its target, and no more.
+- [ ] **person** Run the workflows: they need a push.
 
 - [x] **any** CI: the test
       `zones::draw::...everything_of_the_desktop_is_painted...` failed now

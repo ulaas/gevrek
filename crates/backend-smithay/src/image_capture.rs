@@ -102,6 +102,30 @@ pub struct Session {
     /// The pointer's picture it was last given, by its hash: the next
     /// frame of the pointer waits for another picture.
     shown: AtomicU64,
+    /// The session as its program has it, and the size of buffer it was
+    /// last told to bring.
+    told: Mutex<Option<(ExtImageCopyCaptureSessionV1, (i32, i32))>>,
+}
+
+impl Session {
+    /// The program is told, once, how large a buffer to bring from now
+    /// on. (It was told when the session began and never again: a
+    /// window that was given another size, a display another mode, and
+    /// every frame after that failed for its buffer's size, for good.)
+    fn say_size(&self, size: (i32, i32)) {
+        use smithay::reexports::wayland_server::Resource;
+        let mut told = self
+            .told
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((session, last)) = told.as_mut() {
+            if *last != size && session.is_alive() {
+                session.buffer_size(size.0.max(1) as u32, size.1.max(1) as u32);
+                session.done();
+                *last = size;
+            }
+        }
+    }
 }
 
 /// A frame: its session, and the buffer it was handed.
@@ -447,7 +471,9 @@ impl State {
             });
             if !copied {
                 // A buffer of another size than the picture: the program
-                // made it for what the picture was before.
+                // made it for what the picture was before. It is told the
+                // size there is now, and brings such a buffer next.
+                capture.session.say_size((size.0, size.1));
                 capture.frame.failed(FailureReason::BufferConstraints);
                 continue;
             }
@@ -626,16 +652,22 @@ impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for State {
                         crate::state::named_client(client)
                     ),
                 }
-                let session = init.init(
-                    session,
-                    Arc::new(Session {
-                        source: source.filter(|_| size.is_some()),
-                        with_pointer,
-                        frames: AtomicU32::new(0),
-                        seen: AtomicU64::new(0),
-                        shown: AtomicU64::new(0),
-                    }),
-                );
+                let kept = Arc::new(Session {
+                    source: source.filter(|_| size.is_some()),
+                    with_pointer,
+                    frames: AtomicU32::new(0),
+                    seen: AtomicU64::new(0),
+                    shown: AtomicU64::new(0),
+                    told: Mutex::new(None),
+                });
+                let session = init.init(session, Arc::clone(&kept));
+                if let Some(size) = size {
+                    *kept
+                        .told
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                        Some((session.clone(), size));
+                }
                 match size {
                     Some((width, height)) => {
                         session.buffer_size(width as u32, height as u32);
@@ -799,16 +831,22 @@ impl Dispatch<ExtImageCopyCaptureCursorSessionV1, Option<Source>> for State {
                 .and_then(|source| state.output_of_source(source))
                 .map(Source::Pointer);
             let size = of.and_then(|of| state.image_size(of));
-            let session = init.init(
-                session,
-                Arc::new(Session {
-                    source: of.filter(|_| size.is_some()),
-                    with_pointer: true,
-                    frames: AtomicU32::new(0),
-                    seen: AtomicU64::new(0),
-                    shown: AtomicU64::new(0),
-                }),
-            );
+            let kept = Arc::new(Session {
+                source: of.filter(|_| size.is_some()),
+                with_pointer: true,
+                frames: AtomicU32::new(0),
+                seen: AtomicU64::new(0),
+                shown: AtomicU64::new(0),
+                told: Mutex::new(None),
+            });
+            let session = init.init(session, Arc::clone(&kept));
+            if let Some(size) = size {
+                *kept
+                    .told
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                    Some((session.clone(), size));
+            }
             match size {
                 Some((width, height)) => {
                     session.buffer_size(width as u32, height as u32);

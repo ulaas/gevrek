@@ -84,15 +84,40 @@ pub fn helper_task_name(instance: &str) -> String {
     format!("gevrek elevated helper ({plain})")
 }
 
+/// The folder of the machine's programs, as the system itself names it.
+fn programs_folder() -> Option<std::path::PathBuf> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{
+        FOLDERID_ProgramFiles, SHGetKnownFolderPath, KNOWN_FOLDER_FLAG,
+    };
+    // SAFETY: the text is the system's until it is freed below, and is
+    // copied before that.
+    unsafe {
+        let named =
+            SHGetKnownFolderPath(&FOLDERID_ProgramFiles, KNOWN_FOLDER_FLAG(0), None).ok()?;
+        let folder = named.to_string().ok();
+        CoTaskMemFree(Some(named.0 as *const core::ffi::c_void));
+        folder
+            .filter(|folder| !folder.is_empty())
+            .map(std::path::PathBuf::from)
+    }
+}
+
 /// Where the helper lies that the task starts: a folder only an
 /// administrator can write to. (gevrek itself is installed for one person,
 /// in a folder that person's programs can write to: a task that started a
 /// file from there as an administrator, without asking, would let any of
 /// those programs put another file in its place and run as one.)
 pub fn kept_helper() -> std::path::PathBuf {
-    let programs = std::env::var_os("ProgramW6432")
-        .or_else(|| std::env::var_os("ProgramFiles"))
-        .map(std::path::PathBuf::from)
+    // Where the system says its programs are, and not where a variable
+    // says so: whoever starts this program sets its variables, and the
+    // folder "only an administrator can write to" was wherever they said.
+    let programs = programs_folder()
+        .or_else(|| {
+            std::env::var_os("ProgramW6432")
+                .or_else(|| std::env::var_os("ProgramFiles"))
+                .map(std::path::PathBuf::from)
+        })
         .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Program Files"));
     programs.join("gevrek").join("gevrek-elevated.exe")
 }
@@ -200,8 +225,11 @@ pub fn install_helper_task(
     // (As Windows' own tools write it: two bytes a letter, marked.)
     let mut bytes = vec![0xFF, 0xFE];
     bytes.extend(written.encode_utf16().flat_map(u16::to_le_bytes));
-    let file =
-        std::env::temp_dir().join(format!("gevrek-elevated-task-{}.xml", std::process::id()));
+    // Beside the helper, where only an administrator can write: Windows'
+    // tool reads the file a moment after it was written, and in the
+    // person's own temporary folder any of their programs could put
+    // another task in its place meanwhile.
+    let file = kept.with_file_name(format!("gevrek-elevated-task-{}.xml", std::process::id()));
     std::fs::write(&file, bytes)?;
     let made = task_tool(&[
         "/create",
