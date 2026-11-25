@@ -603,6 +603,10 @@ impl Clone for OverviewShown {
 /// A rectangle of the desktop: its left, its top, how wide, how high.
 pub type Place = (i32, i32, i32, i32);
 
+/// The frame Windows keeps unseen around a window: at its left, its top,
+/// its right and its bottom.
+type FrameInsets = (i32, i32, i32, i32);
+
 /// How long the frame around a window is kept for the frames of a
 /// motion before Windows is asked again.
 const INSETS_KEPT_FOR: std::time::Duration = std::time::Duration::from_secs(1);
@@ -664,7 +668,7 @@ pub struct WindowManager {
     /// The frames around the windows of the motion that is going on, as
     /// Windows gave them at its start (`frame_offsets_in_motion`), and
     /// whether a frame of a motion is being placed just now.
-    insets_kept: RefCell<HashMap<isize, ((i32, i32, i32, i32), Instant)>>,
+    insets_kept: RefCell<HashMap<isize, (FrameInsets, Instant)>>,
     insets_in_motion: std::cell::Cell<bool>,
     /// Stackbar windows keyed by the container's focused window handle.
     stackbar_windows: HashMap<WindowHandle, StackbarInfo>,

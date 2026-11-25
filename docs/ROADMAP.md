@@ -919,6 +919,95 @@ this was after them, and CI is green. Then 0.7.0 (section 5).
 
 ---
 
+## 2e. Speed and the panels (2026-11-25, branch `perf-and-panels`)
+
+Written in one go on Windows, with the Linux side built and tested in
+WSL and the macOS side type-checked. **None of it was seen on a
+desktop, and no still desktop or motion was measured**: every item
+below is to be ticked by running it.
+
+**Speed** (what section 2d's step 2 asked for, as far as it could be
+done without a desktop to measure on)
+
+- [ ] **W** A still desktop wakes less. The input thread sleeps while
+      nothing is held (it woke 250 times a second); the state is put
+      together when something changed, when what only looking finds is
+      another, and every ten seconds at the latest (it was every
+      second); the idle loop passes four times a second (ten); pause,
+      resume and stop wake it. To tick: `RUST_LOG=info,gevrek::passes=debug`
+      on a desktop left alone says a few passes a second and the state
+      put together about six times in a half minute; keys, long
+      presses and touchpad swipes answer as before.
+- [ ] **any** The shell at rest. The stall watch sleeps while nothing
+      goes on; on Windows the control centre does not draw by the
+      clock; on Linux the network is asked when NetworkManager says
+      something happened (`nmcli monitor`). To tick:
+      `RUST_LOG=info,gevrek::frames=debug` says no frame drawn in a
+      half minute with nothing happening; the control centre still
+      follows the sound, the network and what is playing.
+- [ ] **W** For each event and key: the state once in a pass and the
+      windows asked for once; no rules held against every window where
+      no rule says how a window looks; a key held against the bindings
+      on that key; nothing made of events nobody listens to; a
+      control's place and name inside a window let go in the hook.
+      To tick: a menu opened in a program with many windows open does
+      not stutter; a binding still fires by either name of its key.
+- [ ] **W** A frame of a motion asks for a window's frame once in the
+      motion, and places the windows of elevated programs with one
+      question to the helper (its version is 3). To tick: a change of
+      workspace with elevated windows open; a window maximized in the
+      middle of a motion stands right after it.
+- [x] **any** The state is handed out shared, not copied for each
+      question (the bench: 13 µs to put it together for 9 workspaces
+      and 30 windows without a windowing system).
+- [ ] **any** The thread that draws: fonts asked of the system once;
+      applications started beside the shell on Windows; icons from the
+      shared cache on Linux; the half second of standing still at the
+      window manager's start is gone. To tick: the launcher comes up
+      with letters first and icons after; a program started as an
+      administrator does not freeze the panel while Windows asks.
+- [ ] **any** Left: an index for `find_window` and a window's rules
+      remembered from pass to pass (neither has a number that asks for
+      it; the second is not safe without one); the borders of moved
+      windows in the batch; a pool of surfaces for menus and hints;
+      window pictures taken only when the overview opens; the device
+      for drawing made while the line connects; the check that fails
+      where a bench grows by a tenth.
+
+**Panels**
+
+- [ ] **any** Several panels (`desktop.shell.panels`, schema 27, the
+      old `panel` brought over): each with an id, its displays, its
+      edge and look; two at one edge side by side; room kept for each
+      that is always in sight; the state tells each one's place. To
+      tick: a bar at the top and a rail down the left on one display,
+      another panel on the second display only; windows keep clear of
+      all of them; a display unplugged and plugged in again has its
+      panels back.
+- [ ] **any** Words down a side: turned a quarter and read from the
+      top down (`side_text: rotated`), short and upright (`stacked`),
+      or left out (`signs`); the title has a place there. Looked at in
+      pictures. To tick: sharp at 100 % and at 150 %.
+- [ ] **any** The studio's Panels page: the chosen one shown, the
+      others on a press; add from a model, copy, remove. The panel's
+      own menu (the other button where nothing stands) and
+      `gevrek panel list|add|remove|move|hide` do the same.
+- [ ] **any** Out of sight (`hide: always`, `covered`) and blur. To
+      tick, on both systems: the panel goes a moment after the pointer
+      left it and comes back at the display's edge; clicks reach what
+      is under it while it is gone; with `covered` it goes when a
+      window is moved onto it.
+- [ ] **any** The modules `load`, `media`, `custom`, `separator`; the
+      month under the clock; the middle button on a window's button
+      closes the window. To tick: each seen; a `custom` whose program
+      does not exist shows its own words and says so in the log.
+- [ ] **any** Left: a panel sliding in and out; a window's picture
+      under the pointer on the taskbar; its buttons put in another
+      order by dragging; modules moved on the panel itself; the groups
+      of a panel laid out in one frame (they are still placed by how
+      long they were the frame before); one host for the panel on both
+      systems (each still has its own glue around the shared drawing).
+
 ## 3. The tutorial
 
 The designs are in the archive under "The welcome and the tutorial". The
@@ -1426,3 +1515,4 @@ What the pass could not do on this machine, and is the person's:
 | 2026-11-22, late morning | macOS 27.2 | The shell on macOS (asked for: on with the plan). The Windows half of the shell is the half of both guests' systems; `gevrek_system` got macOS halves (applications, volume, media and screenshot keys, modifiers, the ends of the session; the rest says it is not there); the macOS host got `reach` and `is_open` as on Windows; the window manager keeps the panel's room (`set_bar`); Gevrek.app carries gevrek-shell | Every check passes; the shell's 232 tests and gevrek-system's 139 pass on macOS; Windows and Linux check. Seen with the window manager on Dictionary: the panel in the room kept for it (36 points under the menu bar, Dictionary below it); `gevrek shell launcher` opened the launcher, typed keys narrowed it (Calendar, then Calculator), Return started Calculator from /System/Applications. Not seen: the panel's look, its buttons, notifications, the power menu. Not committed at the time of writing |
 | 2026-11-22, evening | macOS 27.2 (Windows and Linux type-checked) | Everything open for macOS but the release workflow (asked for). `gevrek_system`: Core Audio's volume and its changes, the clipboard, network, battery, wifi's radio, bluetooth, brightness (483d4d4). The macOS surface host: the desktop soft behind a surface, drag and drop both ways with the shell's pass made inside AppKit's drag loop (b943d78); input methods and the clipboard (4def974); screen readers (ff2fe68). Double and dashed borders (243980d). Letters by the keyboard's layout, for bindings and the panels (63279bf). Touchpad gestures through MultitouchSupport, and the handling of a recognised gesture moved into the shared host, which Windows uses too (4a1c077). What macOS keeps from the shell written down with its reasons | Every check passes; Windows and Linux check. Tried: the system's numbers printed; a volume change heard once; soft parts made; the example's file dragged onto itself as a move, a copy and with Option a copy; a, Option-E E, s, Backspace, d typed "aéd"; copied and pasted twice "xyzxyz" (the pasteboard put back); the label and the field seen by the AX tree; each border style captured; German, French, Turkish F layouts read. Not tried: a swipe (nobody at the trackpad), bluetooth (only from the bundle), a real input method's list. Committed and pushed |
 | 2026-11-22, night | macOS 27.2 (Windows and Linux type-checked) | Asked for: what is left of macOS, and every shell feature technically possible; Spaces left independent (decided). Windows in macOS's own full screen leave the layout and come back, and a border once hidden comes back (6305865); the border's corner measured, 17 points for every kind of window (e9ffa64); the zones' flaky test found and fixed (70ab792). Pictures of windows (923de54), the tray from the menu bar's items (e90daeb), the wifi's networks once the location may be known, and programs started as their own responsible process; build-app.sh fixed (c91529a). What plays not done: the only way is to get past Apple's check, left to the person | Every check passes; CI green to e9ffa64. Tried: full screen in and out with Dictionary; corners measured in captures; a Calculator window pictured; four menu bar items found, pictured, one pressed (its menu opened and was closed); the location question posted for Gevrek (locationd), not answered; the shell responsible for itself. The touchpad tried by the person: 399 frames, five fingers. Committed and pushed |
+| 2026-11-25, night | Windows 11 and WSL (Fedora 44) | Speed and the panels, on the branch `perf-and-panels` (section 2e says what, item by item). Speed: a still desktop wakes less (input thread, state, idle loop, the shell's watch), the state once in a pass and handed out shared, keys by their key, a motion's frames asking for less, the thread that draws kept free of fonts, starts and icons. Panels: a list of them with their own displays, edges and looks (schema 27), words turned down a side, the studio's Panels page, the panel's own menu and `gevrek panel`, out of sight and blur, the modules `load`, `media`, `custom`, `separator`, the month under the clock | The whole workspace's tests pass on Windows and, without the Windows backend, in WSL; clippy says nothing on either; the macOS target type-checks. Panels down a side and the studio's page were drawn into pictures and looked at. **Nothing was seen on a desktop and nothing of a still desktop or a motion was measured.** Committed on the branch, not pushed |

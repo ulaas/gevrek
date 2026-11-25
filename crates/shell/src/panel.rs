@@ -1067,11 +1067,11 @@ pub fn hidden_place(at: Rect, edge: PanelEdge, strip: i32) -> Rect {
 /// display shows, that is there to be seen, over the rectangle `at` (the
 /// pixels of the screen).
 pub fn covered(state: &Value, display: &str, at: Rect) -> bool {
-    let Some((_, monitor)) = displays(state)
+    let Some(monitor) = displays(state)
         .into_iter()
         .find(|(name, _)| name == display)
-        .map(|(name, monitor)| (name, monitor))
-        .or_else(|| monitor_of(state, display).map(|(_, monitor)| (display.to_string(), monitor)))
+        .map(|(_, monitor)| monitor)
+        .or_else(|| monitor_of(state, display).map(|(_, monitor)| monitor))
     else {
         return false;
     };
@@ -1509,6 +1509,9 @@ pub struct Asked {
     /// The other button was pressed on the panel itself, where nothing
     /// stands: the panel's own menu, at this place.
     pub panel_menu: Option<egui::Rect>,
+    /// The clock was pressed: open, or put away, the month's calendar
+    /// next to this rectangle.
+    pub calendar: Option<egui::Rect>,
     /// What is playing was pressed: pause or go on, or the next piece.
     pub media: Option<MediaAsk>,
     /// The panel's own words were pressed (its `custom`, which has a
@@ -1827,12 +1830,8 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                     .any(|module| *module == PanelModule::Taskbar);
                 // (And to a title that runs down a side in the middle,
                 // which is as long as the room the ends leave it.)
-                let start_matters = tasks_elsewhere
-                    || (upright
-                        && bar
-                            .centre
-                            .iter()
-                            .any(|module| *module == PanelModule::Title));
+                let start_matters =
+                    tasks_elsewhere || (upright && bar.centre.contains(&PanelModule::Title));
                 let start_before: f32 = if start_matters {
                     context.data(|data| data.get_temp(start_id)).unwrap_or(0.0)
                 } else {
@@ -2982,9 +2981,21 @@ fn draw_module(
                 bar.clock_format.as_str()
             };
             let said = clock_text(format, &now);
+            let month = "A press shows the month.";
             if ink.turned() {
                 // One line, turned, as along the top.
-                cell(ui, ink, &says(Sign::None, Some(said.trim()), text));
+                let pressed = cell(
+                    ui,
+                    ink,
+                    &Cell {
+                        pressed: true,
+                        ..says(Sign::None, Some(said.trim()), text)
+                    },
+                )
+                .hint(month);
+                if pressed.clicked() {
+                    asked.calendar = Some(pressed.rect);
+                }
             } else if upright {
                 // Its parts under each other, in their order; the time
                 // itself (the part with a colon) larger, its hours over
@@ -3016,8 +3027,15 @@ fn draw_module(
                     })
                     .collect();
                 let high: f32 = laid.iter().map(|(line, _)| line.size().y).sum::<f32>() + 8.0;
-                let (rect, _) =
-                    ui.allocate_exact_size(egui::vec2(across, high), egui::Sense::hover());
+                let (rect, pressed) =
+                    ui.allocate_exact_size(egui::vec2(across, high), egui::Sense::click());
+                if pressed.hovered() {
+                    ui.painter()
+                        .rect_filled(rect, 8.0, text.gamma_multiply(0.10));
+                }
+                if pressed.hint(month).clicked() {
+                    asked.calendar = Some(rect);
+                }
                 let mut y = rect.top() + 4.0;
                 for (line, colour) in laid {
                     let x = rect.center().x - line.size().x / 2.0;
@@ -3026,7 +3044,18 @@ fn draw_module(
                     y += down;
                 }
             } else {
-                cell(ui, ink, &says(Sign::None, Some(&said), text));
+                let pressed = cell(
+                    ui,
+                    ink,
+                    &Cell {
+                        pressed: true,
+                        ..says(Sign::None, Some(&said), text)
+                    },
+                )
+                .hint(month);
+                if pressed.clicked() {
+                    asked.calendar = Some(pressed.rect);
+                }
             }
             // Drawn again when the time it shows changes.
             let wait = if format.contains("%S") || format.contains("%T") {
@@ -4188,6 +4217,169 @@ pub fn task_actions(
             }
         });
     chosen
+}
+
+/// How large the month's calendar under a panel's clock is, in points.
+pub fn calendar_size() -> egui::Vec2 {
+    egui::vec2(268.0, 262.0)
+}
+
+/// The days of a month as a calendar lays them out: weeks from Monday
+/// to Sunday, each place a day of the month or nothing.
+pub fn month_grid(year: i16, month: i8) -> Vec<[Option<i8>; 7]> {
+    let Ok(first) = jiff::civil::Date::new(year, month, 1) else {
+        return Vec::new();
+    };
+    let lead = first.weekday().to_monday_zero_offset() as usize;
+    let days = first.days_in_month() as usize;
+    let mut weeks = Vec::new();
+    let mut week = [None; 7];
+    for day in 0..days {
+        let place = (lead + day) % 7;
+        week[place] = Some(day as i8 + 1);
+        if place == 6 || day + 1 == days {
+            weeks.push(week);
+            week = [None; 7];
+        }
+    }
+    weeks
+}
+
+/// The month before or after one (`by`: -1 or 1).
+pub fn month_by(year: i16, month: i8, by: i8) -> (i16, i8) {
+    let months = i32::from(year) * 12 + i32::from(month) - 1 + i32::from(by);
+    (
+        months.div_euclid(12) as i16,
+        months.rem_euclid(12) as i8 + 1,
+    )
+}
+
+/// The calendar under a panel's clock: the month `shown` (a year and a
+/// month, which its arrows change), a week in a row from Monday on,
+/// today marked. It is to be looked at: nothing in it is chosen.
+pub fn calendar(
+    ui: &mut egui::Ui,
+    palette: &theme::Palette,
+    today: jiff::civil::Date,
+    shown: &mut (i16, i8),
+) {
+    const MONTHS: [&str; 12] = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+    egui::CentralPanel::default()
+        .frame(
+            egui::Frame::new()
+                .fill(palette.surface)
+                .inner_margin(egui::Margin::same(10)),
+        )
+        .show(ui, |ui| {
+            let (year, month) = *shown;
+            let wide = ui.available_width();
+            // The month and its year, with an arrow at each side; a
+            // press on the name is back at today's.
+            let (line, _) = ui.allocate_exact_size(egui::vec2(wide, 28.0), egui::Sense::hover());
+            let arrow = |ui: &mut egui::Ui, at: egui::Rect, sign: &str| -> bool {
+                let response = ui.interact(at, ui.scope_id().with(sign), egui::Sense::click());
+                if response.hovered() {
+                    ui.painter()
+                        .rect_filled(at, 6, palette.text.gamma_multiply(0.10));
+                }
+                ui.painter().text(
+                    at.center(),
+                    egui::Align2::CENTER_CENTER,
+                    sign,
+                    egui::FontId::proportional(14.0),
+                    palette.text,
+                );
+                response.clicked()
+            };
+            let side = egui::vec2(28.0, 28.0);
+            if arrow(
+                ui,
+                egui::Rect::from_min_size(line.min, side),
+                icons::CARET_LEFT,
+            ) {
+                *shown = month_by(year, month, -1);
+            }
+            if arrow(
+                ui,
+                egui::Rect::from_min_size(egui::pos2(line.right() - 28.0, line.top()), side),
+                icons::CARET_RIGHT,
+            ) {
+                *shown = month_by(year, month, 1);
+            }
+            let name = egui::Rect::from_min_max(
+                egui::pos2(line.left() + 32.0, line.top()),
+                egui::pos2(line.right() - 32.0, line.bottom()),
+            );
+            let back = ui.interact(name, ui.scope_id().with("month"), egui::Sense::click());
+            if back.clicked() {
+                *shown = (today.year(), today.month());
+            }
+            ui.painter().text(
+                name.center(),
+                egui::Align2::CENTER_CENTER,
+                format!("{} {year}", MONTHS[(month.clamp(1, 12) - 1) as usize]),
+                egui::FontId::proportional(14.0),
+                palette.text,
+            );
+            ui.add_space(4.0);
+            let cell = egui::vec2(wide / 7.0, 28.0);
+            // The days of the week, Monday first.
+            let (row, _) = ui.allocate_exact_size(egui::vec2(wide, 22.0), egui::Sense::hover());
+            for (place, day) in ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+                .iter()
+                .enumerate()
+            {
+                ui.painter().text(
+                    egui::pos2(row.left() + cell.x * (place as f32 + 0.5), row.center().y),
+                    egui::Align2::CENTER_CENTER,
+                    *day,
+                    egui::FontId::proportional(11.5),
+                    palette.muted,
+                );
+            }
+            for week in month_grid(year, month) {
+                let (row, _) =
+                    ui.allocate_exact_size(egui::vec2(wide, cell.y), egui::Sense::hover());
+                for (place, day) in week.iter().enumerate() {
+                    let Some(day) = day else {
+                        continue;
+                    };
+                    let centre =
+                        egui::pos2(row.left() + cell.x * (place as f32 + 0.5), row.center().y);
+                    let is_today =
+                        (today.year(), today.month(), today.day()) == (year, month, *day);
+                    if is_today {
+                        ui.painter().circle_filled(centre, 12.0, palette.accent);
+                    }
+                    ui.painter().text(
+                        centre,
+                        egui::Align2::CENTER_CENTER,
+                        day.to_string(),
+                        egui::FontId::proportional(13.0),
+                        if is_today {
+                            theme::readable(egui::Color32::BLACK, palette.accent, 4.5)
+                        } else if place >= 5 {
+                            palette.muted
+                        } else {
+                            palette.text
+                        },
+                    );
+                }
+            }
+        });
 }
 
 /// What a panel's own menu can be asked.
@@ -5949,6 +6141,33 @@ mod tests {
         let (pieces, asked) = drawn(&bar, &extras);
         assert_eq!(pieces, 3);
         assert!(asked.media.is_none() && !asked.custom_pressed);
+    }
+
+    #[test]
+    fn a_month_is_laid_out_in_weeks_from_monday_on() {
+        // November 2026 begins on a Sunday and has thirty days.
+        let november = month_grid(2026, 11);
+        assert_eq!(november.len(), 6);
+        assert_eq!(november[0], [None, None, None, None, None, None, Some(1)]);
+        assert_eq!(november[1][0], Some(2));
+        assert_eq!(november[5], [Some(30), None, None, None, None, None, None]);
+        // February of a leap year that begins on a Thursday.
+        let february = month_grid(2024, 2);
+        assert_eq!(
+            february[0],
+            [None, None, None, Some(1), Some(2), Some(3), Some(4)]
+        );
+        assert_eq!(february.last().unwrap()[3], Some(29));
+        let days: usize = february.iter().flatten().flatten().count();
+        assert_eq!(days, 29);
+        // A month that fills its weeks exactly: February 2021.
+        assert_eq!(month_grid(2021, 2).len(), 4);
+        // No such month: nothing.
+        assert!(month_grid(2026, 13).is_empty());
+        // The month before and after, across a year's end.
+        assert_eq!(month_by(2026, 11, 1), (2026, 12));
+        assert_eq!(month_by(2026, 12, 1), (2027, 1));
+        assert_eq!(month_by(2026, 1, -1), (2025, 12));
     }
 
     #[test]

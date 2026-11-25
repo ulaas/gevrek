@@ -292,15 +292,56 @@ Windows and on Linux.
 A turning gradient costs a few percent of one processor core while it turns;
 the rest costs nothing while nothing changes.
 
-**The panel** (`desktop.shell.panel`, the studio's "Panel" page; drawn by
-`gevrek-shell` on Linux and on Windows, by the same code). One strip on
-every monitor. What stands on it is the configuration's: three lists,
-`left`, `centre` and `right`, of `launcher`, `workspaces`, `layout`,
-`title`, `clock`, `stats`, `notifications`, `power` and `spacer`. A file
-written for `desktop.bar` is read as the panel. A click on a workspace
-switches to it; a click on the layout opens the menu of layouts. A click
-on the panel never takes the keyboard away from the window in use. The
-mouse wheel over the panel goes through the workspaces, a notch for each.
+**The panels** (`desktop.shell.panels`, the studio's "Panels" page; drawn
+by `gevrek-shell` on Linux and on Windows, by the same code). A list: one
+strip along the top of every monitor where nothing else is set, and as
+many more as you add. Each panel has:
+
+- an `id` it is known by (`main`), and a `name` to read;
+- the displays it is on: `on: all` (but those `not_on` names), `primary`,
+  or `only` (those `only_on` names);
+- its `edge` (`top`, `bottom`, `left`, `right`), its thickness (`height`),
+  the room around it, its look (`style`, colours, corners, `blur`);
+- what stands on it: three lists, `left`, `centre` and `right`, of
+  `launcher`, `workspaces`, `layout`, `title`, `taskbar`, `tray`, `clock`,
+  `stats`, `notifications`, `power`, `sound`, `brightness`, `battery`,
+  `network`, `keyboard`, `control_centre`, `media` (what is playing),
+  `load` (processor and memory), `custom` (words of your own, or the
+  first line a program of yours writes: the panel's `custom`), `spacer`
+  and `separator`;
+- `hide`: `never`, `always` (out of sight until the pointer comes to its
+  edge of the display) or `covered` (out of sight while a window lies
+  where it stands). A panel that hides stands at the display's very edge
+  and keeps no room;
+- `side_text`, for a panel down a side: `rotated` (words turned a
+  quarter and read from the top down, each as long as it is), `stacked`
+  (upright and short under each sign) or `signs` (no words).
+
+Two panels at one edge of a display lie side by side, the first of them
+at the edge. A file written for `desktop.shell.panel` (one panel, with
+what was otherwise on single displays) or for `desktop.bar` is read as
+the panels.
+
+On the studio's page the panel that is being set is shown and the others
+come on a press; "Add a panel" makes one from a model (a bar along the
+top, a dock at the bottom, a rail down the left side), and a panel can be
+copied or removed. On the panel itself, the other mouse button where
+nothing stands opens the panel's menu: its settings, another edge, hide,
+add, remove. From the command line:
+
+  ```
+  gevrek panel list
+  gevrek panel add rail
+  gevrek panel move main bottom
+  gevrek panel hide dock on        # or: covered, off
+  gevrek panel remove rail
+  ```
+
+A click on a workspace switches to it; a click on the layout opens the
+menu of layouts; a click on the clock shows the month; the middle button
+on a window's button of the taskbar closes the window. A click on the
+panel never takes the keyboard away from the window in use. The mouse
+wheel over the panel goes through the workspaces, a notch for each.
 What the window manager has to tell (its notices, `gevrek health`) is a
 yellow mark on the panel for as long as there is something; a click lists
 it. On Linux the icons of programs that run in the background stand

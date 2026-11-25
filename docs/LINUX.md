@@ -361,7 +361,7 @@ the same code as on Windows (a picture around each window), and the
 focused window's gradient turns as there. One thing is still Windows-only:
 a window's own content is not cut to the rounded corners of its border
 (that comes with the shader pipeline). The panel is `gevrek-shell`'s, a layer surface that asks for its own room
-where `desktop.shell.panel` says.
+where `desktop.shell.panels` says (one for each panel on each display).
 
 ## The automated checks
 

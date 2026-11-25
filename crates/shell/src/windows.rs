@@ -174,6 +174,8 @@ enum Menu {
     /// The panel's own menu (the other button on the panel, where nothing
     /// stands): its settings, another edge, a panel more, this one gone.
     Panel,
+    /// The month's calendar, under the clock.
+    Calendar,
 }
 
 /// What the surfaces share.
@@ -3094,6 +3096,7 @@ fn sync_panels(state: &Rc<RefCell<State>>, control: &mut Control) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_panel(
     shared: &Rc<RefCell<State>>,
     key: &str,
@@ -3376,7 +3379,8 @@ fn draw_panel(
         .or(asked
             .task_actions
             .map(|(anchor, window)| (Menu::TaskActions(window), anchor)))
-        .or(asked.panel_menu.map(|anchor| (Menu::Panel, anchor)));
+        .or(asked.panel_menu.map(|anchor| (Menu::Panel, anchor)))
+        .or(asked.calendar.map(|anchor| (Menu::Calendar, anchor)));
     // Another workspace is asked for: the menu was for this one.
     if let (Some((id, _)), true, None) = (open, asked.show.is_some(), wanted) {
         control.close(id);
@@ -3514,6 +3518,17 @@ fn draw_panel(
                     line.borrow().link.send(Request::Dispatch(command));
                 }
                 Flow::Close
+            })
+        }
+        Menu::Calendar => {
+            let today = jiff::Zoned::now().date();
+            let mut month = (today.year(), today.month());
+            control.popup(surface, anchor, panel::calendar_size(), move |ui, _| {
+                let _held = &held;
+                let palette = themed(ui, &mut fonts);
+                // (Today as it is now: left open over midnight, it is right.)
+                panel::calendar(ui, &palette, jiff::Zoned::now().date(), &mut month);
+                Flow::Continue
             })
         }
         Menu::Panel => {

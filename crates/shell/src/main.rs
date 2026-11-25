@@ -302,6 +302,8 @@ mod linux {
         /// nothing stands): its settings, another edge, a panel more,
         /// this one gone.
         Panel,
+        /// The month's calendar, under the clock.
+        Calendar,
     }
 
     /// What the surfaces share.
@@ -1907,7 +1909,8 @@ mod linux {
             .or(asked
                 .task_actions
                 .map(|(anchor, window)| (Menu::TaskActions(window), anchor)))
-            .or(asked.panel_menu.map(|anchor| (Menu::Panel, anchor)));
+            .or(asked.panel_menu.map(|anchor| (Menu::Panel, anchor)))
+            .or(asked.calendar.map(|anchor| (Menu::Calendar, anchor)));
         // (The windows a button of the taskbar lists, as they are now.)
         let listed = asked
             .task_menu
@@ -2049,6 +2052,7 @@ mod linux {
             }
             Menu::Sound => open_sound_menu(shared, panel, anchor, Rc::clone(&alive), control),
             Menu::Panel => open_panel_menu(shared, panel, anchor, &bar, Rc::clone(&alive), control),
+            Menu::Calendar => open_calendar(shared, panel, anchor, Rc::clone(&alive), control),
             Menu::Windows(_) => {
                 if listed.is_empty() {
                     return Flow::Continue;
@@ -2435,6 +2439,47 @@ mod linux {
             }
             Flow::Close
         })
+    }
+
+    /// The month's calendar under a panel's clock: to be looked at, and
+    /// put away by a press elsewhere, Escape, or the clock again.
+    fn open_calendar(
+        shared: &Rc<RefCell<State>>,
+        panel: SurfaceId,
+        anchor: egui::Rect,
+        alive: Rc<()>,
+        control: &mut Control,
+    ) -> SurfaceId {
+        let state = Rc::clone(shared);
+        let mut fonts = false;
+        let today = jiff::Zoned::now().date();
+        let mut month = (today.year(), today.month());
+        control.popup(
+            panel,
+            anchor,
+            crate::panel::calendar_size(),
+            move |ui, _| {
+                let _held = &alive;
+                let context = ui.ctx().clone();
+                let shared = state.borrow();
+                if !fonts {
+                    theme::install_fonts_for(
+                        &context,
+                        &shared.settings,
+                        gevrek_ui::fonts::Area::Panel,
+                    );
+                    fonts = true;
+                }
+                let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
+                theme::apply(&context, &palette, &shared.settings);
+                if crate::panel::menu_escape(&context) {
+                    return Flow::Close;
+                }
+                // (Today as it is now: left open over midnight, it is right.)
+                crate::panel::calendar(ui, &palette, jiff::Zoned::now().date(), &mut month);
+                Flow::Continue
+            },
+        )
     }
 
     /// A panel's own menu: its settings, another edge, out of sight or

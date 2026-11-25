@@ -365,6 +365,14 @@ enum Commands {
         step: InputStep,
     },
 
+    /// The panels: list them, add one, take one away, put one at
+    /// another edge, or hide one until the pointer comes to its edge.
+    /// What is changed is kept in the configuration.
+    Panel {
+        #[command(subcommand)]
+        action: PanelAction,
+    },
+
     /// Run one command given as the JSON a binding holds for it:
     /// `gevrek dispatch '{"command":"exec","program":"kitty"}'`.
     /// Every command of the configuration can be sent this way.
@@ -3188,6 +3196,142 @@ fn validate_complete_config(config: &gevrek_model::Config) -> Result<()> {
     }
 }
 
+/// What `gevrek panel` does.
+#[derive(Subcommand, Debug, Clone, PartialEq)]
+enum PanelAction {
+    /// The panels: each one's id, its edge, the displays it is on.
+    List {
+        /// As JSON, as the configuration has them
+        #[arg(long)]
+        json: bool,
+    },
+    /// Another panel, made as a model: `bar`, `dock` or `rail`
+    Add {
+        model: String,
+        /// The id it is to have (made one no other panel has)
+        #[arg(long)]
+        id: Option<String>,
+    },
+    /// Take the panel of this id away
+    Remove { id: String },
+    /// Put the panel of this id at another edge: `top`, `bottom`,
+    /// `left` or `right`
+    Move { id: String, edge: String },
+    /// The panel of this id out of sight until the pointer comes to its
+    /// edge (`on`), while a window lies on it (`covered`), or always
+    /// there (`off`)
+    Hide { id: String, when: String },
+}
+
+/// Carry out what `gevrek panel` was asked on a configuration (not
+/// `list`, which changes nothing): what to say of it, or why not.
+fn change_panels(config: &mut gevrek_model::Config, action: &PanelAction) -> Result<String> {
+    use gevrek_model::settings::{PanelEdge, PanelHide, PanelModel};
+    let shell = &mut config.desktop.shell;
+    let no_such = |id: &str, shell: &gevrek_model::settings::ShellConfig| {
+        anyhow!(
+            "There is no panel {id:?} (there are: {})",
+            shell
+                .panels
+                .iter()
+                .map(|panel| panel.id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    match action {
+        PanelAction::List { .. } => Err(anyhow!("listing changes nothing")),
+        PanelAction::Add { model, id } => {
+            let model = match model.trim().to_lowercase().as_str() {
+                "bar" => PanelModel::Bar,
+                "dock" => PanelModel::Dock,
+                "rail" => PanelModel::Rail,
+                other => return Err(anyhow!("panel add {other}: bar, dock or rail")),
+            };
+            let mut panel = model.panel();
+            if let Some(id) = id {
+                panel.id = id.clone();
+            }
+            let id = shell.add_panel(panel);
+            Ok(format!("Added the panel {id:?}"))
+        }
+        PanelAction::Remove { id } => {
+            if shell.remove_panel(id) {
+                Ok(format!("Removed the panel {id:?}"))
+            } else {
+                Err(no_such(id, shell))
+            }
+        }
+        PanelAction::Move { id, edge } => {
+            let edge = match edge.trim().to_lowercase().as_str() {
+                "top" => PanelEdge::Top,
+                "bottom" => PanelEdge::Bottom,
+                "left" => PanelEdge::Left,
+                "right" => PanelEdge::Right,
+                other => return Err(anyhow!("panel move {other}: top, bottom, left or right")),
+            };
+            match shell.panel_of_mut(id) {
+                Some(panel) => {
+                    panel.edge = edge;
+                    Ok(format!("The panel {:?} is at the {edge:?} edge", panel.id).to_lowercase())
+                }
+                None => Err(no_such(id, shell)),
+            }
+        }
+        PanelAction::Hide { id, when } => {
+            let hide = match when.trim().to_lowercase().as_str() {
+                "on" | "always" => PanelHide::Always,
+                "covered" => PanelHide::Covered,
+                "off" | "never" => PanelHide::Never,
+                other => return Err(anyhow!("panel hide {other}: on, covered or off")),
+            };
+            match shell.panel_of_mut(id) {
+                Some(panel) => {
+                    panel.hide = hide;
+                    Ok(match hide {
+                        PanelHide::Always => {
+                            format!(
+                                "The panel {:?} hides until the pointer comes to its edge",
+                                panel.id
+                            )
+                        }
+                        PanelHide::Covered => {
+                            format!("The panel {:?} hides while a window lies on it", panel.id)
+                        }
+                        PanelHide::Never => format!("The panel {:?} is always there", panel.id),
+                    })
+                }
+                None => Err(no_such(id, shell)),
+            }
+        }
+    }
+}
+
+/// One panel in a line of `gevrek panel list`.
+fn panel_line(panel: &gevrek_model::settings::PanelProfile) -> String {
+    use gevrek_model::settings::{PanelHide, PanelOn};
+    let on = match panel.on {
+        PanelOn::All if panel.not_on.is_empty() => "every display".to_string(),
+        PanelOn::All => format!("every display but {}", panel.not_on.join(", ")),
+        PanelOn::Primary => "the primary display".to_string(),
+        PanelOn::Only => panel.only_on.join(", "),
+    };
+    let mut line = format!(
+        "{} · {} · {on}",
+        panel.id,
+        format!("{:?}", panel.edge).to_lowercase()
+    );
+    if !panel.enabled {
+        line.push_str(" · off");
+    }
+    match panel.hide {
+        PanelHide::Never => {}
+        PanelHide::Always => line.push_str(" · hides"),
+        PanelHide::Covered => line.push_str(" · hides while covered"),
+    }
+    line
+}
+
 async fn fetch_live_config(address: &str) -> Result<(WMClient, gevrek_model::Config)> {
     let mut client = WMClient::connect(address.to_string()).await?;
     let document = client.get_configuration().await?;
@@ -4817,6 +4961,29 @@ async fn run() -> Result<()> {
             } else if out.is_none() {
                 println!("{}", serde_json::to_string_pretty(&example.config)?);
             }
+        }
+
+        Commands::Panel {
+            action: PanelAction::List { json },
+        } => {
+            let (_client, config) = fetch_live_config(&cli.address).await?;
+            let panels = &config.desktop.shell.panels;
+            if json {
+                println!("{}", serde_json::to_string_pretty(panels)?);
+            } else if panels.is_empty() {
+                println!("There is no panel");
+            } else {
+                for panel in panels {
+                    println!("{}", panel_line(panel));
+                }
+            }
+        }
+
+        Commands::Panel { action } => {
+            let (mut client, mut config) = fetch_live_config(&cli.address).await?;
+            let said = change_panels(&mut config, &action)?;
+            apply_live_config(&mut client, &config).await?;
+            println!("{said}");
         }
 
         Commands::RuleList { json } => {
@@ -6929,6 +7096,107 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
         assert!(!path.exists());
         let _ = std::fs::remove_dir(&folder);
+    }
+
+    #[test]
+    fn the_panels_are_changed_as_the_command_line_asks() {
+        use crate::{change_panels, panel_line, PanelAction};
+        use gevrek_model::settings::{PanelEdge, PanelHide};
+        let mut config = gevrek_model::Config::default();
+        let ask =
+            |config: &mut gevrek_model::Config, action: PanelAction| change_panels(config, &action);
+        // A panel more, by its model, with the id asked for or its own.
+        assert_eq!(
+            ask(
+                &mut config,
+                PanelAction::Add {
+                    model: "Dock".to_string(),
+                    id: None
+                }
+            )
+            .unwrap(),
+            "Added the panel \"dock\""
+        );
+        ask(
+            &mut config,
+            PanelAction::Add {
+                model: "rail".to_string(),
+                id: Some("Left Side".to_string()),
+            },
+        )
+        .unwrap();
+        let ids: Vec<&str> = config
+            .desktop
+            .shell
+            .panels
+            .iter()
+            .map(|panel| panel.id.as_str())
+            .collect();
+        assert_eq!(ids, ["main", "dock", "left-side"]);
+        // Another edge, and out of sight.
+        ask(
+            &mut config,
+            PanelAction::Move {
+                id: "MAIN".to_string(),
+                edge: "Bottom".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(config.desktop.shell.panels[0].edge, PanelEdge::Bottom);
+        ask(
+            &mut config,
+            PanelAction::Hide {
+                id: "dock".to_string(),
+                when: "covered".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(config.desktop.shell.panels[1].hide, PanelHide::Covered);
+        assert!(config.validate().is_empty(), "{:?}", config.validate());
+        // The lines of the list say each of it.
+        assert_eq!(
+            panel_line(&config.desktop.shell.panels[0]),
+            "main · bottom · every display"
+        );
+        assert_eq!(
+            panel_line(&config.desktop.shell.panels[1]),
+            "dock · bottom · every display · hides while covered"
+        );
+        // Taken away; and what is not there, or is no model, edge or
+        // time to hide, is said and changes nothing.
+        ask(
+            &mut config,
+            PanelAction::Remove {
+                id: "left-side".to_string(),
+            },
+        )
+        .unwrap();
+        let before = config.desktop.shell.panels.clone();
+        for wrong in [
+            PanelAction::Remove {
+                id: "left-side".to_string(),
+            },
+            PanelAction::Add {
+                model: "shelf".to_string(),
+                id: None,
+            },
+            PanelAction::Move {
+                id: "main".to_string(),
+                edge: "middle".to_string(),
+            },
+            PanelAction::Move {
+                id: "nowhere".to_string(),
+                edge: "top".to_string(),
+            },
+            PanelAction::Hide {
+                id: "main".to_string(),
+                when: "sometimes".to_string(),
+            },
+            PanelAction::List { json: false },
+        ] {
+            assert!(ask(&mut config, wrong.clone()).is_err(), "{wrong:?}");
+            assert_eq!(config.desktop.shell.panels, before, "{wrong:?}");
+        }
     }
 
     #[test]

@@ -2645,6 +2645,20 @@ impl WmHost for Runtime {
     }
 }
 
+impl Runtime {
+    /// What the published state has that no event tells of, as one
+    /// number: another number, another state. (Not the passes a second:
+    /// they are never the same twice, and no reason to tell anybody.)
+    fn looked_at(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut system = gevrek_host::wm::WmHost::system_state(self);
+        system.event_loop_fps = 0.0;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        format!("{system:?}{:?}", self.host.startup.states()).hash(&mut hasher);
+        hasher.finish()
+    }
+}
+
 #[cfg(test)]
 mod appearance_tests {
     use super::{effective_window_alpha, run_dispatch_batch, RuntimeEventKind};
@@ -2729,19 +2743,5 @@ mod appearance_tests {
             .collect::<std::collections::HashSet<_>>();
         assert_eq!(names.len(), kinds.len());
         assert!(names.iter().all(|name| name.contains('.')));
-    }
-}
-
-impl Runtime {
-    /// What the published state has that no event tells of, as one
-    /// number: another number, another state. (Not the passes a second:
-    /// they are never the same twice, and no reason to tell anybody.)
-    fn looked_at(&self) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut system = gevrek_host::wm::WmHost::system_state(self);
-        system.event_loop_fps = 0.0;
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        format!("{system:?}{:?}", self.host.startup.states()).hash(&mut hasher);
-        hasher.finish()
     }
 }
