@@ -235,6 +235,12 @@ struct State {
     /// The window manager's notices that were told as notifications (by
     /// what it knows them by): each is told once for as long as it holds.
     told: HashSet<String>,
+    /// The order the person put the taskbar's buttons in, by window
+    /// (kept while the shell runs).
+    task_order: Vec<u64>,
+    /// The hint of a window's button that is open, to be drawn again when
+    /// the window's picture has been taken.
+    task_hint: std::cell::Cell<Option<SurfaceId>>,
     /// The overview of the workspaces was opened at least once since the
     /// shell started: pictures of windows are taken as they get and lose
     /// the keyboard from then on, and not before.
@@ -404,6 +410,8 @@ pub fn run() -> anyhow::Result<()> {
         notes_corner: Default::default(),
         notes_surface: None,
         told: HashSet::new(),
+        task_order: Vec::new(),
+        task_hint: std::cell::Cell::new(None),
         overview_used: false,
         covered: HashSet::new(),
         load: None,
@@ -668,6 +676,14 @@ pub fn run() -> anyhow::Result<()> {
         Message::Pictured(window, picture) => {
             let mut state = state.borrow_mut();
             state.pictures.keep(window, picture);
+            // (The hint of a window's button shows it too.)
+            if let Some(hint) = state.task_hint.get() {
+                if control.is_open(hint) {
+                    control.redraw(hint);
+                } else {
+                    state.task_hint.set(None);
+                }
+            }
             if let Some((id, _)) = &state.overview {
                 control.redraw(*id);
             }
@@ -2877,11 +2893,17 @@ fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
                     if let Some((surface, _)) = &state.overview {
                         control.redraw(*surface);
                     }
+                    // (What closed is not in the person's order of the
+                    // taskbar's buttons any more.)
+                    let there = state.windows.clone();
+                    state.task_order.retain(|window| there.contains(window));
                     state.views = panel::displays(&wm)
                         .into_iter()
                         .enumerate()
                         .map(|(index, (name, monitor))| {
-                            (name, panel::view_at(monitor, Some(index)))
+                            let mut view = panel::view_at(monitor, Some(index));
+                            view.tasks = panel::in_order(view.tasks, &state.task_order);
+                            (name, view)
                         })
                         .collect();
                     // What every panel shows.
@@ -3158,6 +3180,7 @@ fn draw_panel(
             bar.hide,
             state.covered.contains(key),
             held,
+            state.settings.reduce_motion,
             std::time::Instant::now(),
         );
         if let Some(again) = again {
@@ -3208,6 +3231,7 @@ fn draw_panel(
                 &state.custom,
                 &panel_id,
             ),
+            slide: hiding.slide(std::time::Instant::now()),
         },
         Some(wheel),
     );
@@ -3264,7 +3288,31 @@ fn draw_panel(
                     control.close(hint);
                 }
                 if let Some((anchor, words)) = asked.hint.clone() {
-                    let size = panel::hint_size(ui, &words);
+                    // The hint of a window's button has the window's
+                    // picture over its title: taken now, beside the
+                    // shell, and shown when it is there.
+                    let of_window = asked
+                        .over_task
+                        .filter(|(button, _)| *button == anchor)
+                        .map(|(_, window)| window);
+                    if let Some(window) = of_window {
+                        let sender = state.sender.clone();
+                        let _ = std::thread::Builder::new()
+                            .name("gevrek-shell-pictures".to_string())
+                            .spawn(move || {
+                                if let Some(picture) =
+                                    gevrek_system::pictures::of_window(window as isize, 420)
+                                {
+                                    sender.send(Message::Pictured(window, picture));
+                                }
+                            });
+                    }
+                    let size = match of_window {
+                        Some(_) => panel::task_hint_size(ui, &words),
+                        None => panel::hint_size(ui, &words),
+                    };
+                    let pictured = Rc::clone(shared);
+                    let mut shown_picture: Option<(u64, egui::TextureHandle)> = None;
                     let look = bar.clone();
                     let said = words.clone();
                     let mut fonts = false;
@@ -3289,9 +3337,41 @@ fn draw_panel(
                             );
                             fonts = true;
                         }
-                        panel::draw_hint(ui, &look, &said);
+                        let Some(window) = of_window else {
+                            panel::draw_hint(ui, &look, &said);
+                            return Flow::Continue;
+                        };
+                        // (The picture as it is remembered now: made into
+                        // one to draw when it is another than before.)
+                        if let Ok(state) = pictured.try_borrow() {
+                            if let Some((picture, stamp)) = state.pictures.of(window) {
+                                if shown_picture.as_ref().map(|(known, _)| *known) != Some(*stamp) {
+                                    let image = egui::ColorImage::from_rgba_unmultiplied(
+                                        [picture.width as usize, picture.height as usize],
+                                        &picture.rgba,
+                                    );
+                                    shown_picture = Some((
+                                        *stamp,
+                                        ui.ctx().load_texture(
+                                            format!("task-{window}"),
+                                            image,
+                                            egui::TextureOptions::LINEAR,
+                                        ),
+                                    ));
+                                }
+                            }
+                        }
+                        panel::draw_task_hint(
+                            ui,
+                            &look,
+                            &said,
+                            shown_picture.as_ref().map(|(_, picture)| picture),
+                        );
                         Flow::Continue
                     });
+                    if of_window.is_some() {
+                        state.task_hint.set(Some(hint));
+                    }
                     hints.shown = Some((hint, words));
                 }
             }
@@ -3347,6 +3427,30 @@ fn draw_panel(
             apply_configuration(state, changed);
         }
         redraw_panels(state, control);
+    }
+    // A button of the taskbar was put down on another's place: the order
+    // is the person's from here on, on every panel.
+    if let Some((moved, onto)) = asked.task_moved {
+        let mut state = shared.borrow_mut();
+        let state = &mut *state;
+        let shown: Vec<u64> = view.tasks.iter().map(|task| task.id).collect();
+        let mut order = panel::reordered(&shown, moved, onto);
+        order.extend(
+            state
+                .task_order
+                .iter()
+                .copied()
+                .filter(|window| !shown.contains(window)),
+        );
+        state.task_order = order;
+        for one in state.panels.values_mut() {
+            one.view.tasks =
+                panel::in_order(std::mem::take(&mut one.view.tasks), &state.task_order);
+            control.redraw(one.surface);
+        }
+        for view in state.views.values_mut() {
+            view.tasks = panel::in_order(std::mem::take(&mut view.tasks), &state.task_order);
+        }
     }
     // A right-click on a workspace's tab: its new name is asked for.
     if let Some(tab) = asked.rename.and_then(|index| view.tabs.get(index)) {

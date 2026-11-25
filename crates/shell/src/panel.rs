@@ -981,6 +981,12 @@ pub const HIDE_AFTER: std::time::Duration = std::time::Duration::from_millis(700
 /// edge for the pointer to come to, in points.
 pub const HIDDEN_STRIP: f32 = 3.0;
 
+/// How long a panel takes to slide out of sight, or back.
+pub const SLIDE: std::time::Duration = std::time::Duration::from_millis(160);
+
+/// While a panel slides it is drawn again this often.
+const SLIDE_FRAME: std::time::Duration = std::time::Duration::from_millis(16);
+
 /// Whether a panel that is out of sight at times is in sight now.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Hiding {
@@ -988,17 +994,22 @@ pub struct Hiding {
     away_since: Option<std::time::Instant>,
     /// It is out of sight.
     pub hidden: bool,
+    /// It slides: since when, and whether out of sight (else back).
+    sliding: Option<(std::time::Instant, bool)>,
 }
 
 impl Hiding {
-    /// One look: whether the panel is in sight, and when to look again
-    /// where that depends on the clock. `covered`: a window lies where it
-    /// stands. `held`: the pointer is over it, or a menu of its is open.
+    /// One look: whether the panel is in sight (also while it slides),
+    /// and when to look again where that depends on the clock. `covered`:
+    /// a window lies where it stands. `held`: the pointer is over it, or
+    /// a menu of its is open. `still`: nothing is to move (the person
+    /// asked for less motion): it is there or not.
     pub fn step(
         &mut self,
         hide: gevrek_model::settings::PanelHide,
         covered: bool,
         held: bool,
+        still: bool,
         now: std::time::Instant,
     ) -> (bool, Option<std::time::Duration>) {
         use gevrek_model::settings::PanelHide;
@@ -1009,21 +1020,79 @@ impl Hiding {
         };
         if !to_hide || held {
             self.away_since = None;
-            self.hidden = false;
-            return (true, None);
+            // Back from out of sight, or turned round on its way out:
+            // from where it is.
+            let out = self.slide(now);
+            let was_hidden = std::mem::replace(&mut self.hidden, false);
+            match self.sliding {
+                _ if still || hide == PanelHide::Never && !was_hidden && out == 0.0 => {
+                    self.sliding = None;
+                }
+                Some((_, false)) => {}
+                _ if out > 0.0 => {
+                    self.sliding = Some((now - SLIDE.mul_f32(1.0 - out), false));
+                }
+                _ => self.sliding = None,
+            }
+            if let Some((since, false)) = self.sliding {
+                if now.saturating_duration_since(since) >= SLIDE {
+                    self.sliding = None;
+                }
+            }
+            return (true, self.sliding.map(|_| SLIDE_FRAME));
         }
         if self.hidden {
             return (false, None);
         }
+        // On its way out: until it is.
+        if let Some((since, true)) = self.sliding {
+            if now.saturating_duration_since(since) >= SLIDE {
+                self.sliding = None;
+                self.hidden = true;
+                return (false, None);
+            }
+            return (true, Some(SLIDE_FRAME));
+        }
         let since = *self.away_since.get_or_insert(now);
         let gone = now.saturating_duration_since(since);
-        if gone >= HIDE_AFTER {
+        if gone < HIDE_AFTER {
+            return (true, Some(HIDE_AFTER - gone));
+        }
+        if still {
+            self.sliding = None;
             self.hidden = true;
-            (false, None)
-        } else {
-            (true, Some(HIDE_AFTER - gone))
+            return (false, None);
+        }
+        // (From where it is, where it was on its way back.)
+        let out = self.slide(now);
+        self.sliding = Some((now - SLIDE.mul_f32(out), true));
+        (true, Some(SLIDE_FRAME))
+    }
+
+    /// How far out of sight the panel is now: 0 in its place, 1 all the
+    /// way out, and between the two while it slides.
+    pub fn slide(&self, now: std::time::Instant) -> f32 {
+        match self.sliding {
+            Some((since, out)) => {
+                let gone = (now.saturating_duration_since(since).as_secs_f32()
+                    / SLIDE.as_secs_f32())
+                .clamp(0.0, 1.0);
+                if out {
+                    gone
+                } else {
+                    1.0 - gone
+                }
+            }
+            None if self.hidden => 1.0,
+            None => 0.0,
         }
     }
+}
+
+/// A slide as it is seen: slow at its ends.
+pub fn eased(slide: f32) -> f32 {
+    let slide = slide.clamp(0.0, 1.0);
+    slide * slide * (3.0 - 2.0 * slide)
 }
 
 /// The part of a hidden panel's surface that stays for the pointer to
@@ -1128,6 +1197,71 @@ pub fn draw_hint(ui: &mut egui::Ui, bar: &PanelProfile, text: &str) {
                 .inner_margin(egui::Margin::symmetric(10, 6)),
         )
         .show(ui, |ui| {
+            ui.add(
+                egui::Label::new(egui::RichText::new(text).size(13.0).color(ink))
+                    .wrap_mode(egui::TextWrapMode::Wrap)
+                    .selectable(false),
+            );
+        });
+}
+
+/// The room a window's picture has in the hint of its button on the
+/// taskbar, in points.
+pub const TASK_PICTURE_ROOM: egui::Vec2 = egui::vec2(240.0, 150.0);
+
+/// How large the hint of a window's button is: its words, and over them
+/// room for the window's picture.
+pub fn task_hint_size(ui: &egui::Ui, text: &str) -> egui::Vec2 {
+    let words = hint_size(ui, text);
+    egui::vec2(
+        words.x.max(TASK_PICTURE_ROOM.x + 20.0),
+        words.y + TASK_PICTURE_ROOM.y + 8.0,
+    )
+}
+
+/// The hint of a window's button on the taskbar: the window's picture
+/// (where one was taken; until then its place is empty) and its title.
+pub fn draw_task_hint(
+    ui: &mut egui::Ui,
+    bar: &PanelProfile,
+    text: &str,
+    picture: Option<&egui::TextureHandle>,
+) {
+    let (red, green, blue) = bar.background;
+    let (text_red, text_green, text_blue) = bar.text;
+    let ink = egui::Color32::from_rgb(text_red, text_green, text_blue);
+    egui::CentralPanel::default()
+        .frame(
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgb(red, green, blue))
+                .stroke(egui::Stroke::new(1.0, ink.gamma_multiply(0.25)))
+                .corner_radius(8)
+                .inner_margin(egui::Margin::symmetric(10, 6)),
+        )
+        .show(ui, |ui| {
+            let (room, _) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), TASK_PICTURE_ROOM.y),
+                egui::Sense::hover(),
+            );
+            match picture {
+                Some(picture) => {
+                    // As large as its room lets it be, in its own shape.
+                    let size = picture.size_vec2();
+                    let by = (room.width() / size.x.max(1.0)).min(room.height() / size.y.max(1.0));
+                    let place = egui::Rect::from_center_size(room.center(), size * by);
+                    ui.painter().image(
+                        picture.id(),
+                        place,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                }
+                None => {
+                    ui.painter()
+                        .rect_filled(room.shrink(2.0), 6.0, ink.gamma_multiply(0.06));
+                }
+            }
+            ui.add_space(2.0);
             ui.add(
                 egui::Label::new(egui::RichText::new(text).size(13.0).color(ink))
                     .wrap_mode(egui::TextWrapMode::Wrap)
@@ -1356,6 +1490,9 @@ pub struct Shown<'a> {
     /// What the later modules show (the machine's load, what is playing,
     /// the panel's own words), as far as it is known.
     pub extras: &'a Extras,
+    /// How far the panel has slid out of sight: 0 in its place, 1 all
+    /// the way out towards its edge of the display.
+    pub slide: f32,
 }
 
 /// What a panel's later modules show. Each is `None` where there is
@@ -1520,6 +1657,12 @@ pub struct Asked {
     /// The middle button was pressed on a window's button of the
     /// taskbar: that window is to be closed.
     pub close_window: Option<u64>,
+    /// A window's button of the taskbar was dragged and let go on
+    /// another's: the first is to stand where the second does.
+    pub task_moved: Option<(u64, u64)>,
+    /// The pointer rests on a window's button of the taskbar: the button
+    /// and its window (for the window's picture beside it).
+    pub over_task: Option<(egui::Rect, u64)>,
     /// The parts of the panel's surface that are the panel: what the
     /// pointer reaches (the rest lets clicks through to what is under).
     pub reach: Vec<egui::Rect>,
@@ -1642,8 +1785,19 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
             // The surface reaches from side to side (down a side: from
             // top to bottom); the panel is the part of it that is drawn
             // (and that the pointer reaches).
-            let whole = ui.max_rect();
             let upright = bar.edge.is_upright();
+            // (Slid towards its edge by as much of its thickness as it is
+            // out of sight: what stands on it goes with it.)
+            let whole = {
+                let rect = ui.max_rect();
+                let by = eased(shown.slide) * if upright { rect.width() } else { rect.height() };
+                rect.translate(match bar.edge {
+                    PanelEdge::Top => egui::vec2(0.0, -by),
+                    PanelEdge::Bottom => egui::vec2(0.0, by),
+                    PanelEdge::Left => egui::vec2(-by, 0.0),
+                    PanelEdge::Right => egui::vec2(by, 0.0),
+                })
+            };
             let long = |rect: egui::Rect| {
                 if upright {
                     rect.height()
@@ -3572,6 +3726,41 @@ pub fn go_to_window(id: u64) -> String {
         .to_string()
 }
 
+/// The windows of a taskbar in the order the person put their buttons
+/// in: those `order` names first, in its order; the others after them,
+/// as they came.
+pub fn in_order(mut tasks: Vec<Task>, order: &[u64]) -> Vec<Task> {
+    if order.is_empty() {
+        return tasks;
+    }
+    let place = |task: &Task| {
+        order
+            .iter()
+            .position(|window| *window == task.id)
+            .unwrap_or(usize::MAX)
+    };
+    // (Stable: what is not named keeps its order among itself.)
+    tasks.sort_by_key(place);
+    tasks
+}
+
+/// The order after the button of `moved` was put down on the button of
+/// `onto`: `moved` stands where `onto` stood, and what was between them
+/// moves one place towards where `moved` came from. `shown` is the order
+/// the buttons stand in now. (A window that is not among them: as it is.)
+pub fn reordered(shown: &[u64], moved: u64, onto: u64) -> Vec<u64> {
+    let mut order = shown.to_vec();
+    let (Some(from), Some(to)) = (
+        order.iter().position(|window| *window == moved),
+        order.iter().position(|window| *window == onto),
+    ) else {
+        return order;
+    };
+    let window = order.remove(from);
+    order.insert(to, window);
+    order
+}
+
 /// The command that closes a window (the middle button on its button of
 /// the taskbar).
 pub fn close_window(id: u64) -> String {
@@ -3747,6 +3936,10 @@ fn draw_tasks(ui: &mut egui::Ui, shown: &Shown, ink: &Ink, asked: &mut Asked) {
     }
     let mut reached: Option<egui::Rect> = None;
     let whole = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+    // Where each window's button stands, and the one that was dragged
+    // and let go in this frame (and where): put in another place below.
+    let mut stands: Vec<(u64, egui::Rect)> = Vec::new();
+    let mut let_go: Option<(u64, egui::Pos2)> = None;
     for piece in pieces {
         let place = match piece {
             Piece::Own => {
@@ -3804,8 +3997,30 @@ fn draw_tasks(ui: &mut egui::Ui, shown: &Shown, ink: &Ink, asked: &mut Asked) {
                     );
                 }
                 let words = ui.fonts_mut(|fonts| fonts.layout_job(job));
-                let (place, response) =
-                    ui.allocate_exact_size(along(button.long), egui::Sense::click());
+                // (Pressed, or taken and put down at another button's
+                // place; a button for several windows is only pressed.)
+                let (place, response) = ui.allocate_exact_size(
+                    along(button.long),
+                    if many {
+                        egui::Sense::click()
+                    } else {
+                        egui::Sense::click_and_drag()
+                    },
+                );
+                if !many {
+                    stands.push((button.chosen.id, place));
+                    if response.dragged() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    }
+                    if response.drag_stopped() {
+                        if let Some(at) = ui.ctx().pointer_interact_pos() {
+                            let_go = Some((button.chosen.id, at));
+                        }
+                    }
+                    if response.hovered() && !response.dragged() {
+                        asked.over_task = Some((place, button.chosen.id));
+                    }
+                }
                 let look = task_look(
                     ink.text,
                     accent,
@@ -3998,6 +4213,16 @@ fn draw_tasks(ui: &mut egui::Ui, shown: &Shown, ink: &Ink, asked: &mut Asked) {
             }
         };
         reached = Some(reached.map_or(place, |reached| reached.union(place)));
+    }
+    // A button that was let go on another's place stands there from the
+    // next frame on.
+    if let Some((moved, at)) = let_go {
+        if let Some((onto, _)) = stands
+            .iter()
+            .find(|(window, place)| *window != moved && place.contains(at))
+        {
+            asked.task_moved = Some((moved, *onto));
+        }
     }
     // How long it came to be: its group gives the rest of its room to
     // what else stands in it.
@@ -5865,6 +6090,7 @@ mod tests {
                         system: &system,
                         keyboard: None,
                         extras: &Extras::default(),
+                        slide: 0.0,
                     },
                     Some(&mut wheel),
                 );
@@ -5934,55 +6160,116 @@ mod tests {
         use gevrek_model::settings::PanelHide;
         let start = std::time::Instant::now();
         let after = |millis: u64| start + std::time::Duration::from_millis(millis);
-        // Never: always in sight, whatever lies on it.
+        // (Nothing moves here: it is there or not. Its slide is below.)
         let mut never = Hiding::default();
         assert_eq!(
-            never.step(PanelHide::Never, true, false, start),
+            never.step(PanelHide::Never, true, false, true, start),
             (true, None)
         );
         // Always: in sight for a while, then gone, and back while the
         // pointer is on it or a menu of its is open.
         let mut hiding = Hiding::default();
-        let (shown, again) = hiding.step(PanelHide::Always, false, false, start);
+        let (shown, again) = hiding.step(PanelHide::Always, false, false, true, start);
         assert!(shown);
         assert_eq!(again, Some(HIDE_AFTER));
-        let (shown, again) = hiding.step(PanelHide::Always, false, false, after(300));
+        let (shown, again) = hiding.step(PanelHide::Always, false, false, true, after(300));
         assert!(shown && again == Some(HIDE_AFTER - std::time::Duration::from_millis(300)));
         assert_eq!(
-            hiding.step(PanelHide::Always, false, false, after(700)),
+            hiding.step(PanelHide::Always, false, false, true, after(700)),
             (false, None)
         );
         assert!(hiding.hidden);
+        assert_eq!(hiding.slide(after(700)), 1.0);
         assert_eq!(
-            hiding.step(PanelHide::Always, false, true, after(900)),
+            hiding.step(PanelHide::Always, false, true, true, after(900)),
             (true, None)
         );
         assert!(!hiding.hidden);
+        assert_eq!(hiding.slide(after(900)), 0.0);
         // (The while begins anew when it is let go.)
-        let (shown, _) = hiding.step(PanelHide::Always, false, false, after(1000));
+        let (shown, _) = hiding.step(PanelHide::Always, false, false, true, after(1000));
         assert!(shown);
-        let (shown, _) = hiding.step(PanelHide::Always, false, false, after(1600));
+        let (shown, _) = hiding.step(PanelHide::Always, false, false, true, after(1600));
         assert!(shown);
         assert_eq!(
-            hiding.step(PanelHide::Always, false, false, after(1700)),
+            hiding.step(PanelHide::Always, false, false, true, after(1700)),
             (false, None)
         );
         // While covered only: in sight when nothing lies on it.
         let mut covered_only = Hiding::default();
         assert_eq!(
-            covered_only.step(PanelHide::Covered, false, false, start),
+            covered_only.step(PanelHide::Covered, false, false, true, start),
             (true, None)
         );
-        let (shown, again) = covered_only.step(PanelHide::Covered, true, false, after(10));
+        let (shown, again) = covered_only.step(PanelHide::Covered, true, false, true, after(10));
         assert!(shown && again.is_some());
         assert_eq!(
-            covered_only.step(PanelHide::Covered, true, false, after(800)),
+            covered_only.step(PanelHide::Covered, true, false, true, after(800)),
             (false, None)
         );
         assert_eq!(
-            covered_only.step(PanelHide::Covered, false, false, after(900)),
+            covered_only.step(PanelHide::Covered, false, false, true, after(900)),
             (true, None)
         );
+    }
+
+    #[test]
+    fn a_panel_slides_out_of_sight_and_back_from_where_it_is() {
+        use gevrek_model::settings::PanelHide;
+        let start = std::time::Instant::now();
+        let after = |millis: u64| start + std::time::Duration::from_millis(millis);
+        let mut hiding = Hiding::default();
+        // In its place while it waits to go.
+        assert!(hiding.step(PanelHide::Always, false, false, false, start).0);
+        assert_eq!(hiding.slide(after(300)), 0.0);
+        // The wait is over: it slides, in sight until it is out.
+        let (shown, again) = hiding.step(PanelHide::Always, false, false, false, after(700));
+        assert!(shown && again.is_some());
+        assert_eq!(hiding.slide(after(700)), 0.0);
+        let half = hiding.slide(after(780));
+        assert!((half - 0.5).abs() < 0.01, "{half}");
+        assert!(
+            hiding
+                .step(PanelHide::Always, false, false, false, after(780))
+                .0
+        );
+        assert!(!hiding.hidden);
+        assert_eq!(
+            hiding.step(PanelHide::Always, false, false, false, after(860)),
+            (false, None)
+        );
+        assert!(hiding.hidden);
+        assert_eq!(hiding.slide(after(900)), 1.0);
+        // The pointer comes: it slides back, from all the way out.
+        let (shown, again) = hiding.step(PanelHide::Always, false, true, false, after(1000));
+        assert!(shown && again.is_some() && !hiding.hidden);
+        assert_eq!(hiding.slide(after(1000)), 1.0);
+        let half = hiding.slide(after(1080));
+        assert!((half - 0.5).abs() < 0.01, "{half}");
+        // Back in its place: nothing more to look at by the clock.
+        assert_eq!(
+            hiding.step(PanelHide::Always, false, true, false, after(1160)),
+            (true, None)
+        );
+        assert_eq!(hiding.slide(after(1200)), 0.0);
+        // Turned round half way out: back from there, not from the end.
+        hiding.step(PanelHide::Always, false, false, false, after(2000));
+        hiding.step(PanelHide::Always, false, false, false, after(2700));
+        assert!(
+            hiding
+                .step(PanelHide::Always, false, false, false, after(2740))
+                .0
+        );
+        let out = hiding.slide(after(2740));
+        assert!((out - 0.25).abs() < 0.01, "{out}");
+        hiding.step(PanelHide::Always, false, true, false, after(2740));
+        let back = hiding.slide(after(2740));
+        assert!((back - 0.25).abs() < 0.01, "{back}");
+        assert!(hiding.slide(after(2760)) < back);
+        // A slide is slow at its ends, and ends where it ends.
+        assert_eq!(eased(0.0), 0.0);
+        assert_eq!(eased(1.0), 1.0);
+        assert!(eased(0.1) < 0.1 && eased(0.9) > 0.9);
     }
 
     #[test]
@@ -6061,6 +6348,33 @@ mod tests {
     }
 
     #[test]
+    fn the_buttons_of_the_taskbar_stand_in_the_order_they_were_put_in() {
+        let tasks = || many_tasks(5);
+        let ids = |tasks: &[Task]| tasks.iter().map(|task| task.id).collect::<Vec<_>>();
+        let came = ids(&tasks());
+        // No order of the person's: as they came.
+        assert_eq!(ids(&in_order(tasks(), &[])), came);
+        // The fourth put down on the second: it stands there, and the
+        // second and third move one place on.
+        let order = reordered(&came, came[3], came[1]);
+        assert_eq!(order, [came[0], came[3], came[1], came[2], came[4]]);
+        assert_eq!(ids(&in_order(tasks(), &order)), order);
+        // The first put down on the last: it stands last.
+        let order = reordered(&came, came[0], came[4]);
+        assert_eq!(order, [came[1], came[2], came[3], came[4], came[0]]);
+        // A window that is not there moves nothing.
+        assert_eq!(reordered(&came, 999, came[1]), came);
+        assert_eq!(reordered(&came, came[1], 999), came);
+        // A window that opened after the order was made stands after
+        // those the order names; one that closed is no gap.
+        let old = [came[2], 777, came[0]];
+        assert_eq!(
+            ids(&in_order(tasks(), &old)),
+            [came[2], came[0], came[1], came[3], came[4]]
+        );
+    }
+
+    #[test]
     fn the_command_that_closes_a_window_is_one_the_model_reads() {
         use gevrek_model::command::{DispatchCommand, WindowSelector};
         let command: DispatchCommand = serde_json::from_str(&close_window(42)).expect("a command");
@@ -6106,6 +6420,7 @@ mod tests {
                             system: &system,
                             keyboard: None,
                             extras,
+                            slide: 0.0,
                         },
                         None,
                     );
@@ -6284,6 +6599,7 @@ mod tests {
                             system: &system,
                             keyboard: None,
                             extras: &Extras::default(),
+                            slide: 0.0,
                         },
                         None,
                     );
@@ -6447,6 +6763,7 @@ mod tests {
                         system: &system,
                         keyboard: None,
                         extras: &Extras::default(),
+                        slide: 0.0,
                     },
                     None,
                 )
@@ -6609,6 +6926,7 @@ mod tests {
                         system: &system,
                         keyboard: None,
                         extras: &Extras::default(),
+                        slide: 0.0,
                     },
                     None,
                 );
@@ -7101,6 +7419,7 @@ mod tests {
                         system: &system,
                         keyboard: Some(&keyboard),
                         extras: &extras,
+                        slide: 0.0,
                     },
                     None,
                 );

@@ -203,6 +203,9 @@ mod linux {
         /// What is playing, as a panel shows it: one line of it, and
         /// whether it plays now.
         PanelPlaying(Option<(String, bool)>),
+        /// A picture of a window was taken for the hint of its button on
+        /// the taskbar.
+        Preview(u64, crate::thumbs::Thumb),
         Wifi(Option<gevrek_system::wifi::Wifi>),
         /// The system is being asked for the wireless networks in reach
         /// (or no longer is).
@@ -339,6 +342,15 @@ mod linux {
         /// state: one that is out of sight while it is covered goes by
         /// this.
         covered: std::collections::HashSet<String>,
+        /// The order the person put the taskbar's buttons in, by window
+        /// (kept while the shell runs).
+        task_order: Vec<u64>,
+        /// The pictures taken of windows for the hints of their buttons,
+        /// each with a number that is another for another picture; and
+        /// the hint that is open, to be drawn again when its picture came.
+        previews: std::collections::HashMap<u64, (u64, crate::thumbs::Thumb)>,
+        previews_taken: u64,
+        task_hint: std::cell::Cell<Option<SurfaceId>>,
         /// What the panels' later modules show: how busy the machine is,
         /// what is playing (for a panel), what each panel's own program
         /// wrote (by the panel's id), and the thread that looks at them
@@ -558,6 +570,10 @@ mod linux {
             bars: Vec::new(),
             panel_views: Default::default(),
             covered: Default::default(),
+            task_order: Vec::new(),
+            previews: Default::default(),
+            previews_taken: 0,
+            task_hint: std::cell::Cell::new(None),
             load: None,
             panel_playing: None,
             custom: Default::default(),
@@ -899,6 +915,19 @@ mod linux {
                         }
                         for id in state.panels.values() {
                             control.redraw(*id);
+                        }
+                    }
+                    Message::Preview(window, picture) => {
+                        let mut state = listening.borrow_mut();
+                        state.previews_taken += 1;
+                        let stamp = state.previews_taken;
+                        // (A few of them: what the pointer passed lately.)
+                        if state.previews.len() >= 16 {
+                            state.previews.clear();
+                        }
+                        state.previews.insert(window, (stamp, picture));
+                        if let Some(hint) = state.task_hint.get() {
+                            control.redraw(hint);
                         }
                     }
                     Message::PanelPlaying(playing) => {
@@ -1311,6 +1340,10 @@ mod linux {
                             control.redraw(*surface);
                         }
                         state.windows = crate::panel::windows(&wm);
+                        // (What closed is not in the person's order of
+                        // the taskbar's buttons any more.)
+                        let there = state.windows.clone();
+                        state.task_order.retain(|window| there.contains(window));
                         let notices = crate::panel::notices(&wm);
                         // A notice that has arisen is told as a
                         // notification too; its mark on the panel stays
@@ -1684,6 +1717,7 @@ mod linux {
                 bar.hide,
                 state.covered.contains(panel_key),
                 held,
+                state.settings.reduce_motion,
                 std::time::Instant::now(),
             );
             if let Some(again) = again {
@@ -1706,11 +1740,13 @@ mod linux {
                 return Flow::Continue;
             }
         }
-        let view = state
+        let mut view = state
             .wm
             .as_ref()
             .and_then(|wm| crate::panel::view(wm, output))
             .unwrap_or_default();
+        // (The taskbar's buttons in the order the person put them in.)
+        view.tasks = crate::panel::in_order(std::mem::take(&mut view.tasks), &state.task_order);
         let keyboard = state.wm.as_ref().and_then(crate::panel::keyboard_layout);
         let asked = crate::panel::draw(
             ui,
@@ -1733,6 +1769,7 @@ mod linux {
                     &state.custom,
                     &bar.id,
                 ),
+                slide: hiding.slide(std::time::Instant::now()),
             },
             Some(wheel),
         );
@@ -1809,7 +1846,39 @@ mod linux {
                     if let (Some((anchor, words)), Some(panel)) =
                         (asked.hint.clone(), state.panels.get(panel_key))
                     {
-                        let size = crate::panel::hint_size(ui, &words);
+                        // The hint of a window's button has the window's
+                        // picture over its title: taken now, beside the
+                        // shell (the compositor is asked for the pictures
+                        // of the windows, and the one with this title is
+                        // its), and shown when it is there.
+                        let of_window = asked
+                            .over_task
+                            .filter(|(button, _)| *button == anchor)
+                            .map(|(_, window)| window);
+                        if let (Some(window), Some(sender)) = (of_window, state.verdicts.clone()) {
+                            let title = view
+                                .tasks
+                                .iter()
+                                .find(|task| task.id == window)
+                                .map(|task| task.title.clone())
+                                .unwrap_or_default();
+                            let _ = std::thread::Builder::new()
+                                .name("gevrek-thumbs".to_string())
+                                .spawn(move || {
+                                    let found = crate::thumbs::take_all(420)
+                                        .into_iter()
+                                        .find(|thumb| thumb.title == title && thumb.width > 0);
+                                    if let Some(picture) = found {
+                                        sender.send(Message::Preview(window, picture));
+                                    }
+                                });
+                        }
+                        let size = match of_window {
+                            Some(_) => crate::panel::task_hint_size(ui, &words),
+                            None => crate::panel::hint_size(ui, &words),
+                        };
+                        let pictured = Rc::clone(shared);
+                        let mut shown_picture: Option<(u64, egui::TextureHandle)> = None;
                         let look = bar.clone();
                         let said = words.clone();
                         let mut fonts = false;
@@ -1824,9 +1893,39 @@ mod linux {
                                 );
                                 fonts = true;
                             }
-                            crate::panel::draw_hint(ui, &look, &said);
+                            let Some(window) = of_window else {
+                                crate::panel::draw_hint(ui, &look, &said);
+                                return Flow::Continue;
+                            };
+                            if let Ok(state) = pictured.try_borrow() {
+                                if let Some((stamp, picture)) = state.previews.get(&window) {
+                                    if shown_picture.as_ref().map(|(known, _)| *known)
+                                        != Some(*stamp)
+                                    {
+                                        let image = egui::ColorImage::from_rgba_unmultiplied(
+                                            [picture.width as usize, picture.height as usize],
+                                            &picture.rgba,
+                                        );
+                                        shown_picture = Some((
+                                            *stamp,
+                                            ui.ctx().load_texture(
+                                                format!("task-{window}"),
+                                                image,
+                                                egui::TextureOptions::LINEAR,
+                                            ),
+                                        ));
+                                    }
+                                }
+                            }
+                            crate::panel::draw_task_hint(
+                                ui,
+                                &look,
+                                &said,
+                                shown_picture.as_ref().map(|(_, picture)| picture),
+                            );
                             Flow::Continue
                         });
+                        state.task_hint.set(of_window.map(|_| surface));
                         hints.shown = Some((surface, words));
                     }
                 }
@@ -1953,6 +2052,24 @@ mod linux {
             .filter(|(_, _, alive)| alive.strong_count() > 0)
             .map(|(id, which, _)| (*id, *which));
         drop(state);
+        // A button of the taskbar was put down on another's place: the
+        // order is the person's from here on, on every panel.
+        if let Some((moved, onto)) = asked.task_moved {
+            let mut state = shared.borrow_mut();
+            let shown: Vec<u64> = view.tasks.iter().map(|task| task.id).collect();
+            let mut order = crate::panel::reordered(&shown, moved, onto);
+            order.extend(
+                state
+                    .task_order
+                    .iter()
+                    .copied()
+                    .filter(|window| !shown.contains(window)),
+            );
+            state.task_order = order;
+            for id in state.panels.values() {
+                control.redraw(*id);
+            }
+        }
         if end_recording {
             toggle_recording(shared, false, control);
         }
