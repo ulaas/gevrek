@@ -334,7 +334,9 @@ impl RuleEngine {
         window: &WindowInfo,
         include: impl Fn(&WindowRuleProfile) -> bool,
     ) -> RuleResolution {
-        let mut effective_window = window.clone();
+        // (The window with the tags the rules before gave it: a copy of
+        // its own only once a rule changes them.)
+        let mut effective_window = std::borrow::Cow::Borrowed(window);
         let mut resolution = RuleResolution {
             tags: window.tags.clone(),
             ..RuleResolution::default()
@@ -434,19 +436,38 @@ impl RuleEngine {
                     RuleEffect::AddTag(tag) => {
                         let tag = normalize_tag(tag);
                         if !tag.is_empty() {
-                            effective_window.tags.insert(tag.clone());
+                            effective_window.to_mut().tags.insert(tag.clone());
                             resolution.tags.insert(tag);
                         }
                     }
                     RuleEffect::RemoveTag(tag) => {
                         let tag = normalize_tag(tag);
-                        effective_window.tags.remove(&tag);
+                        if effective_window.tags.contains(&tag) {
+                            effective_window.to_mut().tags.remove(&tag);
+                        }
                         resolution.tags.remove(&tag);
                     }
                 }
             }
         }
         resolution
+    }
+
+    /// Whether any rule that counts says how a window looks by itself
+    /// (its opacity, whether it is dimmed without the keyboard, its
+    /// shadow). Where none does, nobody has to hold the rules against a
+    /// window to know its look: it is the appearance's.
+    pub fn sets_the_look(&self) -> bool {
+        self.declarative_rules
+            .iter()
+            .filter(|rule| rule.enabled)
+            .flat_map(|rule| &rule.effects)
+            .any(|effect| {
+                matches!(
+                    effect,
+                    RuleEffect::Opacity(_) | RuleEffect::DimInactive(_) | RuleEffect::Shadow(_)
+                )
+            })
     }
 
     pub fn set_rule_enabled(&mut self, name: &str, enabled: bool) -> Result<bool, String> {
@@ -690,16 +711,43 @@ impl RuleEngine {
                 .is_some_and(|regex| regex.is_match(actual));
         }
 
-        let (actual, expected) = if case_sensitive {
-            (actual.to_string(), expected.to_string())
-        } else {
-            (actual.to_lowercase(), expected.to_lowercase())
-        };
+        // As they are, or (nearly always: names of programs and classes)
+        // both in plain letters: compared where they stand. Only a text
+        // with other letters is written out in small ones first. (Every
+        // comparison used to write both out anew.)
+        if case_sensitive {
+            return Self::strategy_matches(actual, expected, strategy);
+        }
+        if actual.is_ascii() && expected.is_ascii() {
+            let (actual, expected) = (actual.as_bytes(), expected.as_bytes());
+            return match strategy {
+                MatchStrategy::Equals => actual.eq_ignore_ascii_case(expected),
+                MatchStrategy::Contains => {
+                    expected.is_empty()
+                        || actual
+                            .windows(expected.len())
+                            .any(|part| part.eq_ignore_ascii_case(expected))
+                }
+                MatchStrategy::StartsWith => {
+                    actual.len() >= expected.len()
+                        && actual[..expected.len()].eq_ignore_ascii_case(expected)
+                }
+                MatchStrategy::EndsWith => {
+                    actual.len() >= expected.len()
+                        && actual[actual.len() - expected.len()..].eq_ignore_ascii_case(expected)
+                }
+                MatchStrategy::Regex => unreachable!(),
+            };
+        }
+        Self::strategy_matches(&actual.to_lowercase(), &expected.to_lowercase(), strategy)
+    }
+
+    fn strategy_matches(actual: &str, expected: &str, strategy: &MatchStrategy) -> bool {
         match strategy {
             MatchStrategy::Equals => actual == expected,
-            MatchStrategy::Contains => actual.contains(&expected),
-            MatchStrategy::StartsWith => actual.starts_with(&expected),
-            MatchStrategy::EndsWith => actual.ends_with(&expected),
+            MatchStrategy::Contains => actual.contains(expected),
+            MatchStrategy::StartsWith => actual.starts_with(expected),
+            MatchStrategy::EndsWith => actual.ends_with(expected),
             MatchStrategy::Regex => unreachable!(),
         }
     }
@@ -1169,6 +1217,80 @@ pub fn normalize_tag(tag: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn texts_are_held_against_each_other_as_before_without_being_written_out() {
+        // The answer of every way of matching, with and without regard
+        // to case, for plain letters and for others, is what writing both
+        // out in small letters and comparing gave.
+        let before = |actual: &str, expected: &str, strategy: &MatchStrategy, case: bool| {
+            let (actual, expected) = if case {
+                (actual.to_string(), expected.to_string())
+            } else {
+                (actual.to_lowercase(), expected.to_lowercase())
+            };
+            match strategy {
+                MatchStrategy::Equals => actual == expected,
+                MatchStrategy::Contains => actual.contains(&expected),
+                MatchStrategy::StartsWith => actual.starts_with(&expected),
+                MatchStrategy::EndsWith => actual.ends_with(&expected),
+                MatchStrategy::Regex => unreachable!(),
+            }
+        };
+        let texts = [
+            "",
+            "a",
+            "Chrome.exe",
+            "chrome.EXE",
+            "Visual Studio Code",
+            "studio",
+            "CODE",
+            "Çalışma Masası",
+            "çalışma",
+            "MASASI",
+            "İstanbul",
+            "x",
+        ];
+        for strategy in [
+            MatchStrategy::Equals,
+            MatchStrategy::Contains,
+            MatchStrategy::StartsWith,
+            MatchStrategy::EndsWith,
+        ] {
+            for case in [true, false] {
+                for actual in texts {
+                    for expected in texts {
+                        assert_eq!(
+                            RuleEngine::string_matches(actual, expected, &strategy, case),
+                            before(actual, expected, &strategy, case),
+                            "{actual:?} against {expected:?}, {strategy:?}, case {case}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_rule_says_how_a_window_looks_only_where_one_that_counts_does() {
+        let rule = |enabled: bool, effects: Vec<RuleEffect>| WindowRuleProfile {
+            enabled,
+            effects,
+            ..WindowRuleProfile::default()
+        };
+        let mut engine = RuleEngine::new();
+        assert!(!engine.sets_the_look());
+        engine.set_declarative_rules(vec![
+            rule(true, vec![RuleEffect::Float]),
+            rule(false, vec![RuleEffect::Opacity(200)]),
+        ]);
+        assert!(!engine.sets_the_look(), "a rule that is off says nothing");
+        engine.set_declarative_rules(vec![rule(
+            true,
+            vec![RuleEffect::Float, RuleEffect::Shadow(false)],
+        )]);
+        assert!(engine.sets_the_look());
+    }
 
     #[test]
     fn a_rules_yes_or_no_is_read_as_a_predicates_is() {

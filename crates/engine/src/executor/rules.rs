@@ -658,6 +658,14 @@ impl Executor {
         Ok(())
     }
 
+    /// Whether any rule says how a window looks by itself
+    /// (`RuleEngine::sets_the_look`).
+    pub fn rules_set_the_look(&self) -> bool {
+        self.rule_engine
+            .lock()
+            .map_or(true, |engine| engine.sets_the_look())
+    }
+
     /// Resolve the rules for a window against its tags, which the executor
     /// holds.
     pub fn resolve_rules(

@@ -4,7 +4,9 @@ pub use gesture::{
     GestureEvent, GesturePhase, GestureRecognizer, GestureRegistration, TouchpadContact,
     TouchpadFrame,
 };
-use gevrek_engine::input::{matching_registration_snapshot, should_consume, RawInputEvent};
+#[cfg(test)]
+use gevrek_engine::input::{matching_registration_snapshot, should_consume};
+use gevrek_engine::input::{ByKey, RawInputEvent};
 pub use gevrek_engine::input::{Hotkey, HotkeyEvent};
 pub use gevrek_model::keys::key_name_to_vk;
 use gevrek_model::keys::vk_to_key_name;
@@ -288,10 +290,7 @@ fn input_wait(more: bool, held: bool, until_renewal: Duration) -> u32 {
     } else if held {
         INPUT_LOOK_WHILE_HELD.as_millis() as u32
     } else {
-        until_renewal
-            .min(INPUT_LOOK_AT_REST)
-            .as_millis()
-            .max(1) as u32
+        until_renewal.min(INPUT_LOOK_AT_REST).as_millis().max(1) as u32
     }
 }
 
@@ -316,6 +315,8 @@ struct PressedInput {
 struct HookContext {
     raw_sender: Sender<RawInputEvent>,
     registrations: HashMap<i32, Hotkey>,
+    /// The same, by the key each is on.
+    by_key: ByKey,
     consumed_inputs: HashSet<(BindingDevice, String)>,
 }
 
@@ -455,6 +456,7 @@ pub fn run_helper_hooks(heard: impl Fn(RawInputEvent) + Send + 'static) -> Resul
         *context = Some(HookContext {
             raw_sender,
             registrations: HashMap::new(),
+            by_key: ByKey::default(),
             consumed_inputs: HashSet::new(),
         });
     }
@@ -958,6 +960,8 @@ fn run_input_loop(
     let (raw_sender, raw_receiver) = channel();
     let (touchpad_frame_sender, touchpad_frame_receiver) = channel();
     let mut registrations = HashMap::<i32, Hotkey>::new();
+    // The same, by the key each is on.
+    let mut by_key = ByKey::default();
     let mut pressed = HashMap::<(BindingDevice, String), PressedInput>::new();
     let mut gesture_recognizer = GestureRecognizer::default();
     let gesture_clock = Instant::now();
@@ -969,6 +973,7 @@ fn run_input_loop(
         *context = Some(HookContext {
             raw_sender,
             registrations: registrations.clone(),
+            by_key: ByKey::of(&registrations),
             consumed_inputs: HashSet::new(),
         });
     }
@@ -1099,6 +1104,7 @@ fn run_input_loop(
             match message {
                 ControlMessage::Register(hotkey, id) => {
                     registrations.insert(id, hotkey);
+                    by_key = ByKey::of(&registrations);
                     sync_hook_registrations(&registrations);
                 }
                 ControlMessage::Unregister(id) => {
@@ -1107,6 +1113,7 @@ fn run_input_loop(
                         state.registrations.remove(&id);
                         state.long_press_emitted.remove(&id);
                     }
+                    by_key = ByKey::of(&registrations);
                     sync_hook_registrations(&registrations);
                 }
                 ControlMessage::ConfigureGestures {
@@ -1128,7 +1135,7 @@ fn run_input_loop(
             if raw.momentary {
                 emit_matching(
                     &event_sender,
-                    &registrations,
+                    &by_key.snapshot(&registrations, &raw),
                     &raw,
                     BindingTrigger::Press,
                     0,
@@ -1159,8 +1166,7 @@ fn run_input_loop(
                         None,
                     );
                 } else {
-                    let registration_snapshot =
-                        matching_registration_snapshot(&registrations, &raw);
+                    let registration_snapshot = by_key.snapshot(&registrations, &raw);
                     emit_matching(
                         &event_sender,
                         &registration_snapshot,
@@ -1307,6 +1313,7 @@ fn sync_hook_registrations(registrations: &HashMap<i32, Hotkey>) {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(context) = context.as_mut() {
         context.registrations = registrations.clone();
+        context.by_key = ByKey::of(registrations);
     }
     drop(context);
     // (The helper's hooks go by the same bindings: `elevated_helper`.)
@@ -1426,7 +1433,7 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
             return CallNextHookEx(HHOOK::default(), code, wparam, lparam);
         };
         let identity = (raw.device, raw.key.clone());
-        let configured_consume = should_consume(&context.registrations, &raw);
+        let configured_consume = context.by_key.should_consume(&context.registrations, &raw);
         // A key pressed with the Windows key is gevrek's whether it is
         // bound or not, where the key is gevrek's: Windows' own shortcuts
         // on it are not carried out. (Only as it goes down: a key that
@@ -1600,7 +1607,7 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPA
             return CallNextHookEx(HHOOK::default(), code, wparam, lparam);
         };
         let identity = (raw.device, raw.key.clone());
-        let configured_consume = should_consume(&context.registrations, &raw);
+        let configured_consume = context.by_key.should_consume(&context.registrations, &raw);
         let consume = if raw.momentary {
             configured_consume
         } else if down {

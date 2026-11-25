@@ -11,6 +11,15 @@ use crate::WindowHandle;
 use gevrek_model::settings::ShadowPolicy;
 use std::collections::HashMap;
 
+/// The windows of the desktop, each by its handle.
+fn known_windows(desktop: &dyn Desktop) -> HashMap<WindowHandle, gevrek_model::window::WindowInfo> {
+    desktop
+        .windows()
+        .into_iter()
+        .map(|window| (window.handle, window))
+        .collect()
+}
+
 /// The opacity a window gets: its base opacity, or the inactive opacity if
 /// it is dimmed for not having the focus.
 pub fn effective_window_alpha(
@@ -133,6 +142,9 @@ impl WmCore {
     ) {
         let appearance = &config.appearance;
         let active = desktop.active_window();
+        // (Where no rule says how a window looks, the rules are not held
+        // against every window to find that out.)
+        let by_rules = self.executor.rules_set_the_look();
         let handles: Vec<WindowHandle> = desktop
             .windows()
             .iter()
@@ -143,14 +155,18 @@ impl WmCore {
             .collect();
 
         for handle in handles {
-            let (workspace_name, workspace_index) = self.workspace_of(handle);
-            let resolution = self.executor.resolve_rules(
-                desktop,
-                handle,
-                workspace_name,
-                workspace_index,
-                RuleResolutionScope::All,
-            );
+            let resolution = if by_rules {
+                let (workspace_name, workspace_index) = self.workspace_of(handle);
+                self.executor.resolve_rules(
+                    desktop,
+                    handle,
+                    workspace_name,
+                    workspace_index,
+                    RuleResolutionScope::All,
+                )
+            } else {
+                Default::default()
+            };
             let base_alpha = resolution.opacity.unwrap_or(appearance.window_opacity);
             let allow_dim = resolution.dim_inactive.unwrap_or(true);
             let effective_alpha = effective_window_alpha(
@@ -207,15 +223,42 @@ impl WmCore {
         workspace_name: &str,
         workspace_index: usize,
     ) -> (u8, bool, String) {
-        let appearance = &config.appearance;
-        let resolution = self.executor.resolve_rules(
+        self.window_effect_state_by(
             desktop,
+            config,
             id,
-            Some(workspace_name.to_string()),
-            Some(workspace_index),
-            RuleResolutionScope::All,
-        );
-        let base_alpha = resolution.opacity.unwrap_or(appearance.window_opacity);
+            workspace_name,
+            workspace_index,
+            self.executor.rules_set_the_look(),
+        )
+    }
+
+    /// As [`WmCore::window_effect_state`]; `by_rules`: some rule says how
+    /// a window looks (asked once by whoever asks for many windows).
+    fn window_effect_state_by(
+        &self,
+        desktop: &dyn Desktop,
+        config: &gevrek_model::settings::DesktopConfig,
+        id: WindowHandle,
+        workspace_name: &str,
+        workspace_index: usize,
+        by_rules: bool,
+    ) -> (u8, bool, String) {
+        let appearance = &config.appearance;
+        let opacity = by_rules
+            .then(|| {
+                self.executor
+                    .resolve_rules(
+                        desktop,
+                        id,
+                        Some(workspace_name.to_string()),
+                        Some(workspace_index),
+                        RuleResolutionScope::All,
+                    )
+                    .opacity
+            })
+            .flatten();
+        let base_alpha = opacity.unwrap_or(appearance.window_opacity);
         let effective_alpha = desktop.opacity(id);
         (
             effective_alpha,
@@ -243,6 +286,10 @@ impl WmCore {
             .or_else(|| self.monitor_manager.get_primary_monitor_handle());
         let mut monitors = Vec::new();
         let mut total_windows = 0;
+        // The windows are asked for once, for every workspace of every
+        // display. (Each workspace asked for a copy of them all.)
+        let known = known_windows(desktop);
+        let by_rules = self.executor.rules_set_the_look();
         for info in self.monitor_manager.get_all_monitors() {
             let Some(ring) = self.monitor_manager.get_workspaces(info.handle) else {
                 continue;
@@ -254,7 +301,9 @@ impl WmCore {
                 .elements()
                 .iter()
                 .enumerate()
-                .map(|(index, workspace)| self.workspace_data(desktop, config, workspace, index))
+                .map(|(index, workspace)| {
+                    self.workspace_data_of(desktop, config, workspace, index, &known, by_rules)
+                })
                 .collect::<Vec<_>>();
             let Some(active_workspace) = workspaces.get(ring.focused_idx()).cloned() else {
                 continue;
@@ -329,6 +378,28 @@ impl WmCore {
         workspace: &Workspace,
         workspace_index: usize,
     ) -> WorkspaceData {
+        self.workspace_data_of(
+            desktop,
+            config,
+            workspace,
+            workspace_index,
+            &known_windows(desktop),
+            self.executor.rules_set_the_look(),
+        )
+    }
+
+    /// As [`WmCore::workspace_data`], with the windows of the desktop and
+    /// whether a rule says how a window looks as whoever asks for many
+    /// workspaces found them once.
+    fn workspace_data_of(
+        &self,
+        desktop: &dyn Desktop,
+        config: &gevrek_model::settings::DesktopConfig,
+        workspace: &Workspace,
+        workspace_index: usize,
+        known: &HashMap<WindowHandle, gevrek_model::window::WindowInfo>,
+        by_rules: bool,
+    ) -> WorkspaceData {
         let tiled_windows = workspace
             .containers
             .iter()
@@ -353,11 +424,6 @@ impl WmCore {
                         .any(|container| container.contains_window(*active))
             })
             .or_else(|| workspace.focused_window());
-        let known: HashMap<WindowHandle, gevrek_model::window::WindowInfo> = desktop
-            .windows()
-            .into_iter()
-            .map(|window| (window.handle, window))
-            .collect();
         let mut windows = Vec::new();
         let mut detailed_windows = Vec::new();
 
@@ -378,8 +444,14 @@ impl WmCore {
             // back with its workspace (`switch_workspace_on`).
             let is_minimized = state.minimized || (window_info.is_minimized && !state.hidden_by_wm);
             windows.insert(at, window_info.clone());
-            let (effective_opacity, is_dimmed, shadow_policy) =
-                self.window_effect_state(desktop, config, handle, &workspace.name, workspace_index);
+            let (effective_opacity, is_dimmed, shadow_policy) = self.window_effect_state_by(
+                desktop,
+                config,
+                handle,
+                &workspace.name,
+                workspace_index,
+                by_rules,
+            );
             let detailed = DetailedWindowInfo {
                 handle,
                 title: window_info.title.clone(),

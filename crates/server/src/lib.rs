@@ -2622,6 +2622,12 @@ pub fn event_callbacks(
         use gevrek_engine::executor::NodeExecutionEvent as CoreEvent;
         use gevrek_protocol::proto::execution_event::Event;
 
+        // (Nobody listens: nothing is made of it. Every event of every
+        // window comes through here.)
+        if node_event_broadcaster.receiver_count() == 0 {
+            return;
+        }
+
         let event = match event {
             CoreEvent::Started {
                 node_id,

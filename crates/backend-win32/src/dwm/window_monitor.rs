@@ -387,6 +387,27 @@ unsafe fn is_own_window(hwnd: HWND) -> bool {
         || class_str == "GevrekHotkeyWindow"
 }
 
+/// Whether something is made of an event of this kind at all.
+fn is_heard(event: u32) -> bool {
+    matches!(
+        event,
+        EVENT_OBJECT_SHOW
+            | EVENT_OBJECT_HIDE
+            | EVENT_OBJECT_UNCLOAKED
+            | EVENT_OBJECT_DESTROY
+            | EVENT_SYSTEM_FOREGROUND
+            | EVENT_OBJECT_FOCUS
+            | EVENT_OBJECT_NAMECHANGE
+            | EVENT_OBJECT_LOCATIONCHANGE
+            // The start and the end of a move or a resize, and of a
+            // window being minimized.
+            | 0x000A
+            | 0x000B
+            | 0x0016
+            | 0x0017
+    )
+}
+
 unsafe extern "system" fn win_event_proc(
     _hook: HWINEVENTHOOK,
     event: u32,
@@ -405,6 +426,12 @@ unsafe extern "system" fn win_event_proc(
     if hwnd.is_invalid() {
         return;
     }
+    // What nothing is made of below (a sound, a menu, the capture of the
+    // mouse: the ranges that are listened to hold more than is used) is
+    // let go before anything is asked about its window.
+    if !is_heard(event) {
+        return;
+    }
 
     // Only window-level events matter. Non-window accessibility objects
     // (OBJID_CLIENT children, custom UIA objects like explorer's InputSite)
@@ -413,6 +440,17 @@ unsafe extern "system" fn win_event_proc(
     // SendMessageTimeout, so the queue grew faster than the loop drained it.
     if !is_window_level_event(_id_object, _id_child) {
         return;
+    }
+
+    // The place and the name of something inside a window (a control, a
+    // pane: they are windows too, and tell both as their program draws)
+    // are no news of a window on the desktop. Each of them used to wake
+    // the loop for a pass that found it knew no such window.
+    if matches!(event, EVENT_OBJECT_LOCATIONCHANGE | EVENT_OBJECT_NAMECHANGE) {
+        const WS_CHILD: i32 = 0x4000_0000;
+        if GetWindowLongW(hwnd, GWL_STYLE) & WS_CHILD != 0 {
+            return;
+        }
     }
 
     // Hardcoded transport filter for Gevrek's own implementation windows.
@@ -548,6 +586,31 @@ unsafe extern "system" fn win_event_proc(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_what_something_is_made_of_is_heard() {
+        for heard in [
+            EVENT_OBJECT_SHOW,
+            EVENT_OBJECT_HIDE,
+            EVENT_OBJECT_UNCLOAKED,
+            EVENT_OBJECT_DESTROY,
+            EVENT_SYSTEM_FOREGROUND,
+            EVENT_OBJECT_FOCUS,
+            EVENT_OBJECT_NAMECHANGE,
+            EVENT_OBJECT_LOCATIONCHANGE,
+            0x000A,
+            0x000B,
+            0x0016,
+            0x0017,
+        ] {
+            assert!(is_heard(heard), "0x{heard:04x}");
+        }
+        // A sound, a menu that opens, the capture of the mouse, the
+        // order of the windows.
+        for left in [0x0001, 0x0004, 0x0008, EVENT_OBJECT_REORDER] {
+            assert!(!is_heard(left), "0x{left:04x}");
+        }
+    }
 
     #[test]
     fn only_window_level_events_are_forwarded() {

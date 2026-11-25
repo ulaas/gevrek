@@ -608,6 +608,8 @@ impl Runtime {
         loop {
             let _loop_start = std::time::Instant::now();
             pass_times.begin(_loop_start);
+            // The event of this pass the state is told for, if any.
+            let mut state_told_for: Option<String> = None;
             // `health` reports a loop that stopped passing here.
             process_guard::beat();
             if process_guard::session_end_called_off() {
@@ -1117,7 +1119,9 @@ impl Runtime {
                 }
 
                 // Execute event with timing
-                let event_name = format!("{:?}", event);
+                // (Its name is written out only where somebody is told
+                // it: for every event it was written out for nothing.)
+                let event_kept = event.clone();
                 let start = std::time::Instant::now();
                 if let Err(e) = self
                     .core
@@ -1182,15 +1186,19 @@ impl Runtime {
                 // Log slow event processing
                 if duration.as_millis() > 100 {
                     log::warn!(
-                        "Slow event processing: {} took {}ms",
-                        event_name,
+                        "Slow event processing: {:?} took {}ms",
+                        event_kept,
                         duration.as_millis()
                     );
                 }
 
-                // Send overlay update for important events
+                // The state is told for these, once, when the pass has
+                // laid out what they changed (below, where it is stale):
+                // it was put together here for each of them, and again
+                // at the end of the pass.
                 if needs_overlay_update {
-                    self.publish_state(Some(event_name.clone()));
+                    self.host.state_stale.set(true);
+                    state_told_for = Some(format!("{event_kept:?}"));
                 }
             }
 
@@ -1361,7 +1369,7 @@ impl Runtime {
             self.publish_config_if_changed();
             // And the state, where something was told or done in it.
             if self.host.state_stale.get() {
-                self.publish_state(None);
+                self.publish_state(state_told_for.take());
             }
 
             self.window_manager.tick_effects();
