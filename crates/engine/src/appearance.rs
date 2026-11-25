@@ -343,6 +343,12 @@ impl WmCore {
                     .monitor_manager
                     .bar_rect(info.handle)
                     .map(|rect| (rect.x, rect.y, rect.width, rect.height)),
+                panels: self
+                    .monitor_manager
+                    .panel_rects(info.handle)
+                    .into_iter()
+                    .map(|(id, rect)| (id, (rect.x, rect.y, rect.width, rect.height)))
+                    .collect(),
                 scale: f64::from(info.dpi_scale),
                 detail: self
                     .monitor_manager

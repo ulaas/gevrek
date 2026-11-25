@@ -208,7 +208,7 @@ fn names_read_as_titles() {
 #[test]
 fn what_stands_on_the_panel_is_a_list_of_words_to_choose_from() {
     let item = schema()
-        .at("/desktop/shell/panel/left")
+        .at("/desktop/shell/panels/0/left")
         .and_then(|list| list.child("0"))
         .expect("the panel's left side is a list");
     let Kind::Choice(words) = item.kind() else {

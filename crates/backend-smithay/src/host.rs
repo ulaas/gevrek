@@ -406,7 +406,7 @@ impl gevrek_host::wm::WmHost for State {
         );
         self.core
             .monitor_manager
-            .set_bar(Some(self.config.desktop.shell.panel.clone()));
+            .set_panels(&self.config.desktop.shell.panels);
         // (As at the start: gevrek-shell's panel asks for its own room, so
         // none is held here in case a bar is about to come. Held, it was
         // room twice for twenty seconds after every change of the panel's

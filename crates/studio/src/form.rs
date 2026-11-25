@@ -1140,8 +1140,8 @@ mod tests {
         // Where no entry is numbered, and where the first has no place
         // written down, the hint is what it always was.
         assert_eq!(
-            hint_at("/desktop/shell/panel/height"),
-            hint("/desktop/shell/panel/height")
+            hint_at("/desktop/shell/panels/0/height"),
+            hint("/desktop/shell/panels/0/height")
         );
         assert_eq!(
             hint_at("/desktop/window_rules/3/no_such_number"),

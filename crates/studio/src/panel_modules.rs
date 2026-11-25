@@ -4,15 +4,15 @@
 //! that are not on the panel, to be dragged onto it. A piece dragged to
 //! those is taken off.
 //!
-//! These are the lists `left`, `centre`, `right` of `desktop.shell.panel`.
-//! They are set here and nowhere else: the form below leaves them out.
+//! These are the lists `left`, `centre`, `right` of one panel of
+//! `desktop.shell.panels`. They are set here and nowhere else: the form
+//! below leaves them out.
 
 use crate::document::Document;
 use egui::{RichText, Ui};
 use gevrek_ui::theme;
 use serde_json::Value;
 
-const PANEL: &str = "/desktop/shell/panel";
 /// The rows, by their names in the configuration, and what they are called.
 const SIDES: [(&str, &str); 3] = [("left", "Left"), ("centre", "Middle"), ("right", "Right")];
 
@@ -59,7 +59,7 @@ pub fn moved(rows: &[Vec<String>; 3], from: &From, to: To) -> [Vec<String>; 3] {
             index -= 1;
         }
     }
-    if module != "spacer" {
+    if !may_repeat(&module) {
         for other in rows.iter_mut() {
             other.retain(|there| *there != module);
         }
@@ -76,14 +76,20 @@ pub fn unused(rows: &[Vec<String>; 3]) -> Vec<String> {
         .iter()
         .filter_map(|module| serde_json::to_value(module).ok())
         .filter_map(|value| value.as_str().map(str::to_string))
-        .filter(|name| name == "spacer" || !rows.iter().flatten().any(|there| there == name))
+        .filter(|name| may_repeat(name) || !rows.iter().flatten().any(|there| there == name))
         .collect()
 }
 
-fn rows_of(document: &Document) -> [Vec<String>; 3] {
+/// A module a panel may have more than once (a gap, a line).
+fn may_repeat(name: &str) -> bool {
+    serde_json::from_value::<gevrek_model::settings::PanelModule>(Value::from(name))
+        .is_ok_and(|module| module.may_repeat())
+}
+
+fn rows_of(document: &Document, panel: &str) -> [Vec<String>; 3] {
     SIDES.map(|(side, _)| {
         document
-            .get(&format!("{PANEL}/{side}"))
+            .get(&format!("{panel}/{side}"))
             .and_then(Value::as_array)
             .map(|modules| {
                 modules
@@ -123,9 +129,11 @@ fn room_for(ui: &mut Ui, name: &str) {
 }
 
 /// Draw the rows and carry out what was dragged.
-pub fn show(ui: &mut Ui, document: &mut Document) {
+/// `panel`: the place of the panel in the document
+/// (`/desktop/shell/panels/0`).
+pub fn show(ui: &mut Ui, document: &mut Document, panel: &str) {
     let palette = theme::pal(ui.ctx());
-    let rows = rows_of(document);
+    let rows = rows_of(document, panel);
     let mut done: Option<(From, To)> = None;
     ui.label(
         RichText::new("Drag a module to where it is to stand; drag it down to take it off.")
@@ -209,7 +217,7 @@ pub fn show(ui: &mut Ui, document: &mut Document) {
         for ((side, _), (before, now)) in SIDES.iter().zip(rows.iter().zip(after.iter())) {
             if before != now {
                 document.set(
-                    &format!("{PANEL}/{side}"),
+                    &format!("{panel}/{side}"),
                     Value::Array(now.iter().cloned().map(Value::String).collect()),
                 );
             }

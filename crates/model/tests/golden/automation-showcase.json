@@ -1,7 +1,7 @@
 {
   "version": "0.7.6",
   "desktop": {
-    "schema_version": 26,
+    "schema_version": 27,
     "focus": {
       "history_size": 20,
       "focus_follows_mouse": false,
@@ -569,54 +569,70 @@
     },
     "window_rules": [],
     "shell": {
-      "panel": {
-        "enabled": true,
-        "edge": "top",
-        "style": "bar",
-        "fit": "full",
-        "width": 0,
-        "align": "centre",
-        "floating": false,
-        "height": 36,
-        "margin": 6,
-        "corner_radius": 10,
-        "padding": 10,
-        "spacing": 8,
-        "opacity": 235,
-        "background": [
-          17,
-          19,
-          27
-        ],
-        "text": [
-          214,
-          220,
-          232
-        ],
-        "accent": null,
-        "left": [
-          "launcher",
-          "workspaces",
-          "layout",
-          "title"
-        ],
-        "centre": [],
-        "right": [
-          "tray",
-          "network",
-          "sound",
-          "battery",
-          "control_centre",
-          "clock"
-        ],
-        "title_width": 260,
-        "task_width": 150,
-        "tasks_of_all_workspaces": false,
-        "task_grouping": "when_full",
-        "clock_format": "%a %d %b  %H:%M",
-        "older_tray_icons": true,
-        "displays": []
-      },
+      "panels": [
+        {
+          "id": "main",
+          "name": "",
+          "enabled": true,
+          "on": "all",
+          "only_on": [],
+          "not_on": [],
+          "edge": "top",
+          "style": "bar",
+          "fit": "full",
+          "width": 0,
+          "align": "centre",
+          "floating": false,
+          "hide": "never",
+          "blur": false,
+          "side_text": "rotated",
+          "height": 36,
+          "margin": 6,
+          "corner_radius": 10,
+          "padding": 10,
+          "spacing": 8,
+          "opacity": 235,
+          "background": [
+            17,
+            19,
+            27
+          ],
+          "text": [
+            214,
+            220,
+            232
+          ],
+          "accent": null,
+          "left": [
+            "launcher",
+            "workspaces",
+            "layout",
+            "title"
+          ],
+          "centre": [],
+          "right": [
+            "tray",
+            "network",
+            "sound",
+            "battery",
+            "control_centre",
+            "clock"
+          ],
+          "title_width": 260,
+          "task_width": 150,
+          "tasks_of_all_workspaces": false,
+          "task_grouping": "when_full",
+          "clock_format": "%a %d %b  %H:%M",
+          "older_tray_icons": true,
+          "tray_shown": 0,
+          "custom": {
+            "text": "",
+            "command": [],
+            "every_seconds": 0,
+            "on_press": []
+          }
+        }
+      ],
       "notifications": {
         "corner": "top_right",
         "shown": 5,

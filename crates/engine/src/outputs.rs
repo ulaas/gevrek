@@ -134,7 +134,41 @@ pub fn number_same_stable_ids(monitors: &mut [MonitorInfo]) {
     }
 }
 
+/// Take `room` off an area at one of its edges, and never all of it.
+fn take_from(area: &mut Rect, edge: gevrek_model::settings::PanelEdge, room: i32) {
+    use gevrek_model::settings::PanelEdge;
+    if edge.is_upright() {
+        let room = room.clamp(0, (area.width - 1).max(0));
+        if edge == PanelEdge::Left {
+            area.x += room;
+        }
+        area.width -= room;
+    } else {
+        let room = room.clamp(0, (area.height - 1).max(0));
+        if edge == PanelEdge::Top {
+            area.y += room;
+        }
+        area.height -= room;
+    }
+}
+
 impl MonitorInfo {
+    /// The display as a configuration can name it: by every name
+    /// [`MonitorInfo::is_called`] answers to.
+    pub fn display_ref(&self) -> gevrek_model::settings::DisplayRef {
+        let mut names = vec![self.name.trim().to_string()];
+        for name in [name_without_number(&self.name), self.device_path.trim()] {
+            if !name.is_empty() && !names.iter().any(|known| known.eq_ignore_ascii_case(name)) {
+                names.push(name.to_string());
+            }
+        }
+        gevrek_model::settings::DisplayRef {
+            names,
+            index: None,
+            primary: self.is_primary,
+        }
+    }
+
     /// Whether `wanted` (from the configuration or a command) means this
     /// display: its name, whatever the case, or the name its model has
     /// when there are several of it (which then means each of them, as it
@@ -281,8 +315,10 @@ pub struct Outputs {
     previous_workspace: HashMap<MonitorHandle, usize>,
     /// User-reserved edges applied after Windows' taskbar work area.
     reserved_areas: HashMap<MonitorHandle, ReservedArea>,
-    /// The place kept for gevrek's bar on every monitor, if it has one.
-    bar: Option<gevrek_model::settings::PanelProfile>,
+    /// The panels of the configuration that are switched on, in their
+    /// order: each has a place on the displays it is on, and room is kept
+    /// there for those that are always in sight.
+    panels: Vec<gevrek_model::settings::PanelProfile>,
     /// The displays are measured in their own pixels (Windows), not in
     /// pixels that already count the scale in (a compositor): the lengths
     /// the configuration gives as they are seen - the panel's height and
@@ -413,25 +449,15 @@ impl Outputs {
         monitor: MonitorHandle,
         desktop: &dyn crate::contract::Desktop,
     ) -> Option<(Rect, ReservedArea)> {
-        // The bar's place comes from the configuration (`set_bar`), so it is
-        // free before the bar is there.
+        // The panels' places come from the configuration (`set_panels`),
+        // so they are free before the panels are there.
         let mut work_area = self.work_area_excluding_overlays(monitor, &[])?;
-        if let Some(bar) = self.bar_on(monitor).filter(|_| self.bar_is_kept(desktop)) {
-            // (As many pixels as the panel is high on this display.)
-            let room = self.bar_pixels(monitor, bar.reserved());
-            let reserved = room.min((work_area.height - 1).max(0));
-            use gevrek_model::settings::PanelEdge;
-            if bar.edge.is_upright() {
-                let reserved = room.min((work_area.width - 1).max(0));
-                if bar.edge == PanelEdge::Left {
-                    work_area.x += reserved;
-                }
-                work_area.width -= reserved;
-            } else {
-                if bar.edge == PanelEdge::Top {
-                    work_area.y += reserved;
-                }
-                work_area.height -= reserved;
+        if self.bar_is_kept(desktop) {
+            // (Each as many pixels as it is thick on this display; one
+            // after the other, so that two at one edge lie side by side.)
+            for panel in self.panels_on(monitor) {
+                let room = self.bar_pixels(monitor, panel.reserved());
+                take_from(&mut work_area, panel.edge, room);
             }
         }
         // What the shell keeps for its zones, from the sides of what the
@@ -490,7 +516,7 @@ impl Outputs {
     /// only the window manager was started, or the bar ended - and the
     /// place is given to the windows.)
     pub fn bar_is_kept(&self, _desktop: &dyn crate::contract::Desktop) -> bool {
-        if self.bar.is_none() {
+        if self.panels.is_empty() {
             return false;
         }
         if self
@@ -520,19 +546,29 @@ impl Outputs {
         self.bar_expected_until = None;
     }
 
-    /// Keep a place for the bar on every monitor (`None`, or a bar that is
-    /// not enabled: no place). Returns whether that changed anything.
+    /// Keep a place for one panel on every display it is on (`None`, or
+    /// one that is not enabled: no place). Returns whether that changed
+    /// anything.
     pub fn set_bar(&mut self, bar: Option<gevrek_model::settings::PanelProfile>) -> bool {
-        let bar = bar.filter(|bar| bar.enabled);
-        if self.bar == bar {
+        self.set_panels(bar.as_slice())
+    }
+
+    /// Keep a place for each of these panels on the displays it is on
+    /// (not for one that is switched off). Returns whether that changed
+    /// anything.
+    pub fn set_panels(&mut self, panels: &[gevrek_model::settings::PanelProfile]) -> bool {
+        let panels: Vec<_> = panels
+            .iter()
+            .filter(|panel| panel.enabled)
+            .cloned()
+            .collect();
+        if self.panels == panels {
             return false;
         }
-        self.bar = bar;
-        // A bar that is to come gets a while to show up.
-        self.bar_expected_until = self
-            .bar
-            .as_ref()
-            .map(|_| std::time::Instant::now() + BAR_START_GRACE);
+        self.panels = panels;
+        // Panels that are to come get a while to show up.
+        self.bar_expected_until =
+            (!self.panels.is_empty()).then(|| std::time::Instant::now() + BAR_START_GRACE);
         true
     }
 
@@ -578,46 +614,74 @@ impl Outputs {
             .clamp(0.5, 8.0)
     }
 
-    fn bar_on(&self, monitor: MonitorHandle) -> Option<&gevrek_model::settings::PanelProfile> {
-        let bar = self.bar.as_ref()?;
-        let none_here = self.get_monitor(monitor).is_some_and(|display| {
-            bar.displays.iter().any(|entry| {
-                !entry.enabled && !entry.name.trim().is_empty() && display.is_called(&entry.name)
-            })
-        });
-        (!none_here).then_some(bar)
+    /// The panels that are on a display, in their order.
+    fn panels_on(&self, monitor: MonitorHandle) -> Vec<&gevrek_model::settings::PanelProfile> {
+        let Some(display) = self.get_monitor(monitor).map(MonitorInfo::display_ref) else {
+            return Vec::new();
+        };
+        self.panels
+            .iter()
+            .filter(|panel| panel.is_on(&display))
+            .collect()
     }
 
-    pub fn bar_rect(&self, monitor: MonitorHandle) -> Option<Rect> {
-        let bar = self.bar_on(monitor)?;
-        let area = self.get_configured_work_area(monitor)?;
-        let margin = self.bar_pixels(monitor, bar.margin.min(100) as i32);
-        let height = self.bar_pixels(monitor, bar.height.clamp(16, 200) as i32);
+    /// Where each panel of a display is: its id and its rectangle, inside
+    /// the area the system and the user's reservations leave. The first
+    /// lies at its edge of that area; each one after it at its edge of
+    /// what those before it left (two at one edge lie side by side, and a
+    /// panel down a side ends where one along the top begins). A panel
+    /// that keeps no room (it floats, or is out of sight at times) leaves
+    /// all of it to those after it.
+    pub fn panel_rects(&self, monitor: MonitorHandle) -> Vec<(String, Rect)> {
+        let Some(mut area) = self.get_configured_work_area(monitor) else {
+            return Vec::new();
+        };
         use gevrek_model::settings::PanelEdge;
-        // (`height` is the panel's thickness: across a panel that goes
-        // down a side.)
-        Some(match bar.edge {
-            PanelEdge::Top | PanelEdge::Bottom => Rect::new(
-                area.x + margin,
-                if bar.edge == PanelEdge::Top {
-                    area.y + margin
-                } else {
-                    area.y + area.height - margin - height
-                },
-                (area.width - margin * 2).max(1),
-                height,
-            ),
-            PanelEdge::Left | PanelEdge::Right => Rect::new(
-                if bar.edge == PanelEdge::Left {
-                    area.x + margin
-                } else {
-                    area.x + area.width - margin - height
-                },
-                area.y + margin,
-                height,
-                (area.height - margin * 2).max(1),
-            ),
-        })
+        self.panels_on(monitor)
+            .into_iter()
+            .map(|panel| {
+                let margin = self.bar_pixels(monitor, panel.gap());
+                // (Its thickness: across a panel that goes down a side.)
+                let thick = self.bar_pixels(monitor, panel.thickness());
+                let rect = match panel.edge {
+                    PanelEdge::Top | PanelEdge::Bottom => Rect::new(
+                        area.x + margin,
+                        if panel.edge == PanelEdge::Top {
+                            area.y + margin
+                        } else {
+                            area.y + area.height - margin - thick
+                        },
+                        (area.width - margin * 2).max(1),
+                        thick,
+                    ),
+                    PanelEdge::Left | PanelEdge::Right => Rect::new(
+                        if panel.edge == PanelEdge::Left {
+                            area.x + margin
+                        } else {
+                            area.x + area.width - margin - thick
+                        },
+                        area.y + margin,
+                        thick,
+                        (area.height - margin * 2).max(1),
+                    ),
+                };
+                take_from(
+                    &mut area,
+                    panel.edge,
+                    self.bar_pixels(monitor, panel.reserved()),
+                );
+                (panel.id.clone(), rect)
+            })
+            .collect()
+    }
+
+    /// Where the first panel of a display is (for whoever knows of one
+    /// panel only).
+    pub fn bar_rect(&self, monitor: MonitorHandle) -> Option<Rect> {
+        self.panel_rects(monitor)
+            .into_iter()
+            .next()
+            .map(|(_, rect)| rect)
     }
 
     /// Apply the focused workspace's layout on an output.
@@ -655,7 +719,7 @@ impl Outputs {
             previous_workspace: HashMap::new(),
             reserved_areas: HashMap::new(),
             details: HashMap::new(),
-            bar: None,
+            panels: Vec::new(),
             lengths_in_display_pixels: false,
             bar_expected_until: None,
             panel_seen: false,
@@ -1477,7 +1541,7 @@ mod tests {
 
     #[test]
     fn a_display_the_configuration_gives_no_panel_keeps_no_room_for_one() {
-        use gevrek_model::settings::{PanelOnDisplay, PanelProfile};
+        use gevrek_model::settings::PanelProfile;
         let desktop = crate::testing::FakeDesktop::new(MonitorHandle(1));
         let mut outputs = Outputs::new();
         outputs.set_monitors_only(vec![
@@ -1486,11 +1550,7 @@ mod tests {
         ]);
         let bar = PanelProfile {
             // (By the display's device, as well as by its name.)
-            displays: vec![PanelOnDisplay {
-                name: "dp-2".to_string(),
-                enabled: false,
-                ..PanelOnDisplay::default()
-            }],
+            not_on: vec!["dp-2".to_string()],
             ..PanelProfile::default()
         };
         let kept = bar.reserved();
@@ -1506,6 +1566,84 @@ mod tests {
         assert!(outputs.bar_rect(second).is_none());
         let without = outputs.get_adjusted_work_area(second, &desktop).unwrap();
         assert_eq!(without.height, 1040);
+    }
+
+    #[test]
+    fn the_panels_of_a_display_lie_side_by_side_and_each_keeps_its_room() {
+        use gevrek_model::settings::{PanelEdge, PanelHide, PanelOn, PanelProfile};
+        let desktop = crate::testing::FakeDesktop::new(MonitorHandle(1));
+        let mut outputs = Outputs::new();
+        outputs.set_monitors_only(vec![
+            named(1, "Monitor A", "DP-1", 0),
+            named(2, "Monitor B", "DP-2", 1920),
+        ]);
+        let panel = |id: &str, edge: PanelEdge| PanelProfile {
+            id: id.to_string(),
+            edge,
+            height: 30,
+            margin: 0,
+            ..PanelProfile::default()
+        };
+        outputs.set_panels(&[
+            panel("top", PanelEdge::Top),
+            // On the second display only.
+            PanelProfile {
+                on: PanelOn::Only,
+                only_on: vec!["DP-2".to_string()],
+                ..panel("rail", PanelEdge::Left)
+            },
+            panel("second-top", PanelEdge::Top),
+            // Out of sight until asked for: a place, and no room.
+            PanelProfile {
+                hide: PanelHide::Always,
+                ..panel("dock", PanelEdge::Bottom)
+            },
+            // Switched off: neither.
+            PanelProfile {
+                enabled: false,
+                ..panel("off", PanelEdge::Right)
+            },
+        ]);
+        outputs.set_panel_seen(true);
+        let (first, second) = (MonitorHandle(1), MonitorHandle(2));
+
+        let on_first = outputs.panel_rects(first);
+        let ids: Vec<&str> = on_first.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, ["top", "second-top", "dock"]);
+        assert_eq!(on_first[0].1, Rect::new(0, 0, 1920, 30));
+        assert_eq!(on_first[1].1, Rect::new(0, 30, 1920, 30), "under the first");
+        assert_eq!(on_first[2].1, Rect::new(0, 1040 - 30, 1920, 30));
+        let work = outputs.get_adjusted_work_area(first, &desktop).unwrap();
+        assert_eq!(
+            (work.y, work.height),
+            (60, 1040 - 60),
+            "the dock keeps none"
+        );
+        assert_eq!(outputs.bar_rect(first), Some(on_first[0].1));
+
+        let on_second = outputs.panel_rects(second);
+        let ids: Vec<&str> = on_second.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, ["top", "rail", "second-top", "dock"]);
+        // The rail ends where the first panel begins, and the panel after
+        // it is as wide as what the rail leaves.
+        assert_eq!(on_second[1].1, Rect::new(1920, 30, 30, 1040 - 30));
+        assert_eq!(on_second[2].1, Rect::new(1920 + 30, 30, 1920 - 30, 30));
+        let work = outputs.get_adjusted_work_area(second, &desktop).unwrap();
+        assert_eq!(
+            (work.x, work.y, work.width, work.height),
+            (1920 + 30, 60, 1920 - 30, 1040 - 60)
+        );
+
+        // No panel at all: no place, and all the room.
+        assert!(outputs.set_panels(&[]));
+        assert!(outputs.panel_rects(first).is_empty());
+        assert_eq!(
+            outputs
+                .get_adjusted_work_area(first, &desktop)
+                .unwrap()
+                .height,
+            1040
+        );
     }
 
     /// Where the displays are measured in their own pixels, the panel is

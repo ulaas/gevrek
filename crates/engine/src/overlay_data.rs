@@ -204,8 +204,11 @@ pub struct MonitorData {
     /// units. The shell reads it back: what it tells the zones of the
     /// room a display has must be without the zones' own.
     pub zones_room: gevrek_model::settings::ReservedArea,
-    /// Where the bar belongs on this monitor: x, y, width, height.
+    /// Where the first panel belongs on this monitor: x, y, width, height.
     pub bar: Option<(i32, i32, i32, i32)>,
+    /// Where each panel of this monitor belongs, by its id, in the
+    /// panels' order.
+    pub panels: Vec<(String, (i32, i32, i32, i32))>,
     /// Device pixels per logical pixel (1.0, 1.25, 2.0 ...).
     pub scale: f64,
     /// The refresh rate and the modes, where the backend knows them.
@@ -502,6 +505,7 @@ mod change_tests {
             reserved_bottom: 0,
             zones_room: Default::default(),
             bar: None,
+            panels: Vec::new(),
             scale: 1.0,
             detail: Default::default(),
         }

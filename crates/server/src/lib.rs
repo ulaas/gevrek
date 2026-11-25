@@ -318,6 +318,23 @@ pub fn overlay_response(
                 y: y as f32,
             }),
             bar_size: m.bar.map(|(_, _, width, height)| Size { width, height }),
+            panels: m
+                .panels
+                .iter()
+                .map(
+                    |(id, (x, y, width, height))| gevrek_protocol::proto::PanelPlace {
+                        id: id.clone(),
+                        position: Some(Position {
+                            x: *x as f32,
+                            y: *y as f32,
+                        }),
+                        size: Some(Size {
+                            width: *width,
+                            height: *height,
+                        }),
+                    },
+                )
+                .collect(),
             scale: m.scale,
             refresh_millihertz: m.detail.refresh_millihertz,
             modes: m
@@ -2951,6 +2968,7 @@ mod overlay_conversion_tests {
                 reserved_bottom: 40,
                 zones_room: Default::default(),
                 bar: Some((6, 6, 1908, 36)),
+                panels: vec![("main".to_string(), (6, 6, 1908, 36))],
             }],
             graph_node_count: 0,
             total_windows: 1,

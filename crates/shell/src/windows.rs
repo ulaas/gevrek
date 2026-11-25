@@ -146,7 +146,7 @@ enum Message {
 /// drawn at, for a display at twice the scale.
 const ICON: u32 = 64;
 
-/// The panel of one display.
+/// One panel on one display.
 struct One {
     surface: SurfaceId,
     /// Where the window manager keeps its room.
@@ -174,12 +174,14 @@ enum Menu {
 /// What the surfaces share.
 struct State {
     link: Link,
-    /// The panel of each display, by the window manager's name for it.
+    /// Each panel on each display, by its key (`panel::key`: the window
+    /// manager's name for the display, and the panel's id).
     panels: HashMap<String, One>,
     /// The menu of a panel that is open, which it is, and what tells that
     /// it still is (its drawing holds the other end).
     menu: Option<(SurfaceId, Menu, std::rc::Weak<()>)>,
-    bar: Option<PanelProfile>,
+    /// The panels of the configuration.
+    bars: Vec<PanelProfile>,
     /// Where the window manager keeps room for a panel, and what each
     /// display's panel shows, as of its last state.
     places: Vec<(String, panel::Rect)>,
@@ -343,7 +345,7 @@ pub fn run() -> anyhow::Result<()> {
         link,
         panels: HashMap::new(),
         menu: None,
-        bar: None,
+        bars: Vec::new(),
         places: Vec::new(),
         views: HashMap::new(),
         windows: Default::default(),
@@ -656,7 +658,12 @@ use crate::tray_choice::{
 
 /// What the panel shows of the tray (see `tray_choice::for_panel`).
 fn tray_for_panel(state: &mut State) {
-    let colour = state.bar.as_ref().map_or((214, 220, 232), |bar| bar.text);
+    let colour = state
+        .bars
+        .iter()
+        .find(|bar| bar.enabled && bar.shows(PanelModule::Tray))
+        .or(state.bars.first())
+        .map_or((214, 220, 232), |bar| bar.text);
     state.tray_items = crate::tray_choice::for_panel(&state.tray_all, &state.tray_on_panel, colour);
 }
 
@@ -1989,7 +1996,7 @@ fn tutorial_start(state: &Rc<RefCell<State>>, lesson: Option<&str>, control: &mu
         let panel = state
             .places
             .iter()
-            .find(|(name, _)| *name == facts.display)
+            .find(|(key, _)| panel::key_display(key) == facts.display)
             .or(state.places.first())
             .map(|(_, at)| *at);
         let Some((_, tutoring, _)) = state.tutorial.as_mut() else {
@@ -2677,10 +2684,10 @@ fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
                     follow_look(&mut state);
                     let tell = state.link.teller();
                     crate::tutoring::welcome_if_due(&config, &mut state.welcome_asked, tell);
-                    let bar = config.desktop.shell.panel.clone();
+                    let bars = config.desktop.shell.panels.clone();
                     // Said once for each set of them, where the user
                     // looks when something is not there: the log.
-                    let out = panel::left_out(&bar);
+                    let out = panel::left_out(&bars);
                     if out != state.said_left_out {
                         if !out.is_empty() {
                             log::warn!(
@@ -2689,7 +2696,7 @@ fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
                         }
                         state.said_left_out = out;
                     }
-                    state.bar = Some(bar);
+                    state.bars = bars;
                     state.keys = Some(gevrek_model::shortcuts::shortcuts_of(&config));
                     state.config = Some(config.clone());
                     state.night_light = config.desktop.night_light.enabled;
@@ -2787,8 +2794,12 @@ fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
                     }
                     state.mode = mode;
                     // Drawn again only where something is different.
-                    for (name, one) in &mut state.panels {
-                        let view = state.views.get(name).cloned().unwrap_or_default();
+                    for (key, one) in &mut state.panels {
+                        let view = state
+                            .views
+                            .get(panel::key_display(key))
+                            .cloned()
+                            .unwrap_or_default();
                         if all || one.view != view {
                             one.view = view;
                             control.redraw(one.surface);
@@ -2865,22 +2876,23 @@ fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
 fn sync_panels(state: &Rc<RefCell<State>>, control: &mut Control) {
     let mut shared = state.borrow_mut();
     let shared = &mut *shared;
-    let Some(bar) = shared.bar.clone() else {
-        return;
+    let bars = shared.bars.clone();
+    // The panel of a key, as the configuration has it, where it is on the
+    // key's display.
+    let bar_of = |views: &HashMap<String, View>, key: &str| -> Option<PanelProfile> {
+        let display = panel::key_display(key);
+        let place = views
+            .get(display)
+            .map(|view| view.place.clone())
+            .unwrap_or_else(|| gevrek_model::settings::DisplayRef::named(display));
+        panel::bar_on(&bars, panel::key_panel(key), display, &place).cloned()
     };
-    let wanted = if bar.enabled && shared.with_panel {
-        // (Not on a display the configuration gives no panel.)
+    let wanted: Vec<(String, panel::Rect)> = if shared.with_panel {
+        // (Not one the configuration does not put on that display.)
         shared
             .places
             .iter()
-            .filter(|(name, _)| {
-                let place = shared
-                    .views
-                    .get(name)
-                    .map(|view| view.place.clone())
-                    .unwrap_or_else(|| gevrek_model::settings::DisplayRef::named(name));
-                panel::bar_on(&bar, name, &place).is_some()
-            })
+            .filter(|(key, _)| bar_of(&shared.views, key).is_some())
             .cloned()
             .collect()
     } else {
@@ -2888,7 +2900,9 @@ fn sync_panels(state: &Rc<RefCell<State>>, control: &mut Control) {
     };
     // The icons programs give the taskbar are heard of while a panel has
     // a place for them, and no longer.
-    let with_tray = !wanted.is_empty() && bar.shows(PanelModule::Tray);
+    let with_tray = wanted
+        .iter()
+        .any(|(key, _)| bar_of(&shared.views, key).is_some_and(|bar| bar.shows(PanelModule::Tray)));
     if with_tray && shared.tray.is_none() {
         let sender = shared.sender.clone();
         shared.tray = gevrek_system::tray_host::Host::start(move |icons| {
@@ -2930,7 +2944,14 @@ fn sync_panels(state: &Rc<RefCell<State>>, control: &mut Control) {
         }
     }
     for (name, at) in plan.open {
-        log::debug!("a panel is opened on {name} at {at:?}");
+        let Some(bar) = bar_of(&shared.views, &name) else {
+            continue;
+        };
+        log::debug!(
+            "the panel {:?} is opened on {} at {at:?}",
+            bar.id,
+            panel::key_display(&name)
+        );
         // The rectangle is the window manager's; of the place only the
         // name, the level and the keyboard count (`Control::open_at`).
         let place = Place {
@@ -2962,14 +2983,18 @@ fn sync_panels(state: &Rc<RefCell<State>>, control: &mut Control) {
                 &drawn, &display, ui, &mut fonts, &mut wheel, &mut hints, control,
             )
         });
-        let view = shared.views.get(&name).cloned().unwrap_or_default();
+        let view = shared
+            .views
+            .get(panel::key_display(&name))
+            .cloned()
+            .unwrap_or_default();
         shared.panels.insert(name, One { surface, at, view });
     }
 }
 
 fn draw_panel(
     shared: &Rc<RefCell<State>>,
-    display: &str,
+    key: &str,
     ui: &mut egui::Ui,
     fonts: &mut bool,
     wheel: &mut crate::panel::Wheel,
@@ -2982,16 +3007,19 @@ fn draw_panel(
         theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Panel);
         *fonts = true;
     }
-    let (Some(bar), Some(one)) = (state.bar.as_ref(), state.panels.get(display)) else {
+    let display = panel::key_display(key);
+    let Some(one) = state.panels.get(key) else {
         return Flow::Continue;
     };
     let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
     theme::apply(&context, &palette, &state.settings);
     let (surface, view) = (one.surface, one.view.clone());
-    // What stands on this display's panel: the configuration may give a
-    // display its own, as on Linux.
-    let own = panel::bar_on(bar, display, &view.place);
-    let bar = own.as_ref().unwrap_or(bar);
+    // This panel as the configuration has it now. (Taken off this
+    // display meanwhile: its surface is closed at the next state.)
+    let Some(bar) = panel::bar_on(&state.bars, panel::key_panel(key), display, &view.place) else {
+        return Flow::Continue;
+    };
+    let panel_id = bar.id.clone();
     let asked = panel::draw(
         ui,
         &panel::Shown {
@@ -3003,7 +3031,7 @@ fn draw_panel(
             mode: &state.mode,
             recording: false,
             sharing: false,
-            output: display,
+            output: key,
             // (Empty unless the panel has a place for them: Windows has
             // its own tray, on its taskbar.)
             tray: &state.tray_items,
@@ -3099,12 +3127,14 @@ fn draw_panel(
     if let Some(all) = asked.all_tasks {
         let mut state = shared.borrow_mut();
         let state = &mut *state;
-        if let Some(bar) = state.bar.as_mut() {
+        if let Some(bar) = state.bars.iter_mut().find(|bar| bar.is(&panel_id)) {
             // (At once here; the configuration that comes back says the same.)
             bar.tasks_of_all_workspaces = all;
         }
         if let Some(mut changed) = state.config.clone() {
-            changed.desktop.shell.panel.tasks_of_all_workspaces = all;
+            if let Some(bar) = changed.desktop.shell.panel_of_mut(&panel_id) {
+                bar.tasks_of_all_workspaces = all;
+            }
             apply_configuration(state, changed);
         }
         redraw_panels(state, control);

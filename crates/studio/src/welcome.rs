@@ -109,7 +109,11 @@ impl Default for Welcome {
                 .workspaces
                 .first()
                 .map_or(LayoutType::Dwindle, |workspace| workspace.layout),
-            edge: start.shell.panel.enabled.then_some(start.shell.panel.edge),
+            edge: start
+                .shell
+                .panel()
+                .filter(|panel| panel.enabled)
+                .map(|panel| panel.edge),
             main_key: start.main_key(),
             touched: [false; 4],
             looks,
@@ -239,7 +243,7 @@ impl Welcome {
         for workspace in &mut config.desktop.workspaces {
             workspace.layout = self.layout;
         }
-        let panel = &mut config.desktop.shell.panel;
+        let panel = config.desktop.shell.panel_mut();
         match self.edge {
             Some(edge) => {
                 panel.enabled = true;
@@ -270,10 +274,12 @@ impl Welcome {
         }
         if let (true, Some(look)) = (self.touched[1], self.looks.get(self.look)) {
             config.desktop.appearance = look.config.desktop.appearance.clone();
-            config.desktop.shell.panel.background = look.config.desktop.shell.panel.background;
+            if let Some(theirs) = look.config.desktop.shell.panel() {
+                config.desktop.shell.panel_mut().background = theirs.background;
+            }
         }
         if self.touched[2] {
-            let panel = &mut config.desktop.shell.panel;
+            let panel = config.desktop.shell.panel_mut();
             match self.edge {
                 Some(edge) => {
                     panel.enabled = true;
@@ -430,7 +436,14 @@ impl Welcome {
                 let appearance = &look.config.desktop.appearance;
                 let (rect, response) =
                     ui.allocate_exact_size(egui::vec2(204.0, 100.0), egui::Sense::click());
-                let ground = colour(look.config.desktop.shell.panel.background);
+                let ground = colour(
+                    look.config
+                        .desktop
+                        .shell
+                        .panel()
+                        .map(|panel| panel.background)
+                        .unwrap_or_default(),
+                );
                 ui.painter().rect(
                     rect,
                     10.0,
@@ -1050,8 +1063,8 @@ mod tests {
             .workspaces
             .iter()
             .all(|workspace| workspace.layout == LayoutType::Columns));
-        assert!(chosen.desktop.shell.panel.enabled);
-        assert_eq!(chosen.desktop.shell.panel.edge, PanelEdge::Bottom);
+        assert!(chosen.desktop.shell.panels[0].enabled);
+        assert_eq!(chosen.desktop.shell.panels[0].edge, PanelEdge::Bottom);
         assert_eq!(
             chosen.desktop.appearance.active_border_color,
             welcome.looks[1]
@@ -1068,7 +1081,7 @@ mod tests {
             .collect();
         assert!(errors.is_empty(), "{errors:?}");
         welcome.edge = None;
-        assert!(!welcome.chosen().desktop.shell.panel.enabled);
+        assert!(!welcome.chosen().desktop.shell.panels[0].enabled);
         // Over a configuration of the person's own, only what was chosen
         // here changes.
         let mut theirs = start.clone();
@@ -1106,7 +1119,7 @@ mod tests {
             over.desktop.focus.history_size,
             theirs.desktop.focus.history_size
         );
-        assert_eq!(over.desktop.shell.panel, theirs.desktop.shell.panel);
+        assert_eq!(over.desktop.shell.panels, theirs.desktop.shell.panels);
         // Every layout offered is placed by the engine, inside the display.
         for (layout, name, _) in LAYOUTS {
             let rects = placed(layout, 4);

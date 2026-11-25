@@ -445,8 +445,8 @@ mod tests {
         let base_config = Config::default();
         let base = serde_json::to_value(&base_config).expect("JSON");
         let mut document = Document::new(&base_config);
-        document.set("/desktop/shell/panel/height", json!(44));
-        document.set("/desktop/shell/panel/margin", json!(3));
+        document.set("/desktop/shell/panels/0/height", json!(44));
+        document.set("/desktop/shell/panels/0/margin", json!(3));
         document.edit("/desktop/outputs", |outputs| {
             if let Value::Array(outputs) = outputs {
                 outputs.push(json!({"name": "DP-1"}));
@@ -456,7 +456,7 @@ mod tests {
         assert_eq!(found.len(), 3);
         let height = found
             .iter()
-            .find(|change| change.pointer == "/desktop/shell/panel/height")
+            .find(|change| change.pointer == "/desktop/shell/panels/0/height")
             .expect("height")
             .clone();
         restore(&mut document, &height, &base);
@@ -468,7 +468,7 @@ mod tests {
         restore(&mut document, &added, &base);
         let left = changes(&base, document.value());
         assert_eq!(left.len(), 1);
-        assert_eq!(left[0].pointer, "/desktop/shell/panel/margin");
+        assert_eq!(left[0].pointer, "/desktop/shell/panels/0/margin");
         assert!(document.config().is_some());
     }
 

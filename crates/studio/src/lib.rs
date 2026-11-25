@@ -28,6 +28,7 @@ pub mod night_light;
 pub use gevrek_link as link;
 pub mod pages;
 pub mod panel_modules;
+pub mod panels_page;
 #[cfg(target_os = "linux")]
 pub mod pinch;
 pub mod preview;

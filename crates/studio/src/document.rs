@@ -289,41 +289,38 @@ mod tests {
         assert!(document.config().is_some());
         assert!(!document.can_undo());
         let before = document
-            .get("/desktop/shell/panel/height")
+            .get("/desktop/shell/panels/0/height")
             .cloned()
             .expect("the bar's height");
-        assert!(!document.differs_from_default("/desktop/shell/panel/height"));
+        assert!(!document.differs_from_default("/desktop/shell/panels/0/height"));
 
-        assert!(document.set("/desktop/shell/panel/height", Value::from(48)));
+        assert!(document.set("/desktop/shell/panels/0/height", Value::from(48)));
         assert_eq!(
-            document
-                .config()
-                .expect("still valid")
-                .desktop
-                .shell
-                .panel
-                .height,
+            document.config().expect("still valid").desktop.shell.panels[0].height,
             48
         );
-        assert!(document.differs_from_default("/desktop/shell/panel/height"));
+        assert!(document.differs_from_default("/desktop/shell/panels/0/height"));
         // The same value again is no change, and no step.
-        assert!(!document.set("/desktop/shell/panel/height", Value::from(48)));
+        assert!(!document.set("/desktop/shell/panels/0/height", Value::from(48)));
 
         assert!(document.undo());
-        assert_eq!(document.get("/desktop/shell/panel/height"), Some(&before));
+        assert_eq!(
+            document.get("/desktop/shell/panels/0/height"),
+            Some(&before)
+        );
         assert!(document.redo());
         assert_eq!(
-            document.config().expect("valid").desktop.shell.panel.height,
+            document.config().expect("valid").desktop.shell.panels[0].height,
             48
         );
-        assert!(document.reset("/desktop/shell/panel/height"));
-        assert!(!document.differs_from_default("/desktop/shell/panel/height"));
+        assert!(document.reset("/desktop/shell/panels/0/height"));
+        assert!(!document.differs_from_default("/desktop/shell/panels/0/height"));
     }
 
     #[test]
     fn what_the_model_does_not_read_is_said_and_not_sent() {
         let mut document = Document::new(&Config::default());
-        assert!(document.set("/desktop/shell/panel/height", Value::from("tall")));
+        assert!(document.set("/desktop/shell/panels/0/height", Value::from("tall")));
         assert!(document.config().is_none());
         assert!(document.error().is_some_and(|error| !error.is_empty()));
         assert!(document.undo());
@@ -334,17 +331,17 @@ mod tests {
     fn dragging_a_slider_is_one_step() {
         let mut document = Document::new(&Config::default());
         for height in 30..40 {
-            document.set("/desktop/shell/panel/height", Value::from(height));
+            document.set("/desktop/shell/panels/0/height", Value::from(height));
         }
         // Another place is another step.
-        document.set("/desktop/shell/panel/margin", Value::from(3));
+        document.set("/desktop/shell/panels/0/margin", Value::from(3));
         assert!(document.undo());
         assert_eq!(
-            document.get("/desktop/shell/panel/height"),
+            document.get("/desktop/shell/panels/0/height"),
             Some(&Value::from(39))
         );
         assert!(document.undo());
-        assert!(!document.differs_from_default("/desktop/shell/panel/height"));
+        assert!(!document.differs_from_default("/desktop/shell/panels/0/height"));
         assert!(!document.can_undo());
     }
 
@@ -390,9 +387,9 @@ mod tests {
     #[test]
     fn a_configuration_from_outside_starts_a_new_history() {
         let mut document = Document::new(&Config::default());
-        document.set("/desktop/shell/panel/height", Value::from(48));
+        document.set("/desktop/shell/panels/0/height", Value::from(48));
         let mut other = Config::default();
-        other.desktop.shell.panel.height = 30;
+        other.desktop.shell.panels[0].height = 30;
         document.replace(&other);
         assert!(!document.can_undo());
         // Loaded as an edit, it can be taken back.
@@ -400,7 +397,7 @@ mod tests {
         assert!(document.can_undo());
         assert!(document.undo());
         assert_eq!(
-            document.config().expect("valid").desktop.shell.panel.height,
+            document.config().expect("valid").desktop.shell.panels[0].height,
             30
         );
     }

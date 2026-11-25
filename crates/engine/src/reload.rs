@@ -123,7 +123,7 @@ impl ConfigDiff {
             focus: !same(&before.focus, &after.focus),
             monitors: !same(&before.monitors, &after.monitors)
                 || !same(&before.work_area_offset, &after.work_area_offset)
-                || !same(&before.shell.panel, &after.shell.panel),
+                || !same(&before.shell.panels, &after.shell.panels),
             snap_zones: !same(&before.snap_zones, &after.snap_zones),
             scratchpads: !same(&before.scratchpads, &after.scratchpads),
             profiles: changed_profile_names(&before.workspaces, &after.workspaces),

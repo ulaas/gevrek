@@ -845,7 +845,7 @@ impl WmHost for MacRuntime {
         );
         self.core
             .monitor_manager
-            .set_bar(Some(self.config.desktop.shell.panel.clone()));
+            .set_panels(&self.config.desktop.shell.panels);
     }
 
     fn rules(&self) -> &Arc<Mutex<RuleEngine>> {

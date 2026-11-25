@@ -984,6 +984,18 @@ message MonitorOverlayData {
   // this very work area, in its units. The rest of the room at a side is
   // the panel's and the system's. Absent or all 0: none.
   Sides zones_room = 24;
+  // Where each panel of this monitor belongs, in the panels' order. The
+  // first of them is `bar_position` and `bar_size` too, for whoever knows
+  // of one panel only.
+  repeated PanelPlace panels = 25;
+}
+
+// Where one panel belongs on a monitor.
+message PanelPlace {
+  // The panel's id in the configuration (`desktop.shell.panels`).
+  string id = 1;
+  Position position = 2;
+  Size size = 3;
 }
 
 // One mode a display offers.

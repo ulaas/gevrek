@@ -51,7 +51,7 @@ impl State {
         if self
             .core
             .monitor_manager
-            .set_bar(Some(self.config.desktop.shell.panel.clone()))
+            .set_panels(&self.config.desktop.shell.panels)
         {
             self.mark_every_layout_dirty();
         }

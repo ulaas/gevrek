@@ -305,14 +305,23 @@ mod linux {
         icons: gevrek_system::icons::Cache,
         /// The windows in the order they last had the keyboard.
         used: crate::switcher::Used,
-        /// The panel of each display, by the display's name, and what
-        /// its place was made from.
+        /// Each panel on each display, by its key (`panel::key`: the
+        /// display's name and the panel's id), and what each one's place
+        /// was made from.
         panels: std::collections::HashMap<String, SurfaceId>,
-        panel_made: Option<(gevrek_model::settings::PanelEdge, u32, u32, bool)>,
+        panel_made:
+            std::collections::HashMap<String, (gevrek_model::settings::PanelEdge, u32, u32, bool)>,
         /// The menu of a panel that is open, which one it is, and what
         /// tells that it still is (its drawing holds the other end).
         menu: Option<(SurfaceId, Menu, std::rc::Weak<()>)>,
-        bar: Option<gevrek_model::settings::PanelProfile>,
+        /// The panels of the configuration.
+        bars: Vec<gevrek_model::settings::PanelProfile>,
+        /// What each display's panels showed as of the last state, and
+        /// what all panels show (how many notices, the keys' mode, the
+        /// keyboard's layout): a panel is drawn again when its own is
+        /// another.
+        panel_views: std::collections::HashMap<String, crate::panel::View>,
+        panel_shows: Option<(usize, String, Option<crate::panel::KeyboardLayout>)>,
         /// The tray, while the shell is it; its icons; and the icon whose
         /// menu was asked of its program and is waited for: on which
         /// display's panel, and next to which rectangle there.
@@ -517,9 +526,11 @@ mod linux {
             switcher: None,
             used: Default::default(),
             panels: Default::default(),
-            panel_made: None,
+            panel_made: Default::default(),
             menu: None,
-            bar: None,
+            bars: Vec::new(),
+            panel_views: Default::default(),
+            panel_shows: None,
             tray: None,
             tray_items: Rc::new(Vec::new()),
             tray_wait: None,
@@ -1141,11 +1152,16 @@ mod linux {
                         // (The wallpaper's colour, where the window
                         // manager says the desktop has it, comes first.)
                         state.accent = state.wallpaper_accent.unwrap_or(state.own_accent);
-                        state.bar = Some(config.desktop.shell.panel.clone());
+                        state.bars = config.desktop.shell.panels.clone();
                         // The icons of older programs, carried over to the
                         // tray or no longer, as the configuration has it now.
                         let wanted = crate::tray::older_wanted(
-                            config.desktop.shell.panel.older_tray_icons,
+                            config
+                                .desktop
+                                .shell
+                                .panels
+                                .iter()
+                                .any(|bar| bar.enabled && bar.older_tray_icons),
                             state.tray.is_some(),
                             std::env::var("DISPLAY").ok().as_deref(),
                             crate::tray::Older::found(),
@@ -1261,15 +1277,44 @@ mod linux {
                         if let Some(portal) = &state.portal {
                             portal.set_apps(crate::portal::apps_of(&wm));
                         }
-                        state.wm = Some(wm);
-                        for id in state.panels.values() {
-                            control.redraw(*id);
+                        // A panel is drawn again only where what it
+                        // shows is another: its display's view, or what
+                        // all of them show (the notices, the keys' mode,
+                        // the keyboard's layout). Every panel used to be
+                        // drawn for every state, twice for each event.
+                        let shows = (
+                            state.notices.len(),
+                            state.mode.clone(),
+                            crate::panel::keyboard_layout(&wm),
+                        );
+                        let all = state.panel_shows.as_ref() != Some(&shows);
+                        state.panel_shows = Some(shows);
+                        // (Each display's as its panels find it.)
+                        let views: std::collections::HashMap<String, crate::panel::View> = state
+                            .outputs
+                            .iter()
+                            .filter_map(|output| {
+                                Some((output.clone(), crate::panel::view(&wm, output)?))
+                            })
+                            .collect();
+                        for (key, id) in &state.panels {
+                            let display = crate::panel::key_display(key);
+                            if all || state.panel_views.get(display) != views.get(display) {
+                                control.redraw(*id);
+                            }
                         }
+                        state.panel_views = views;
+                        state.wm = Some(wm);
                         arisen
                     };
                     for notice in arisen {
                         tell(state, &notice.title, &notice.text, control);
                     }
+                    // (Which display is the primary one, and what each is
+                    // called besides its connector, is the state's to
+                    // say: a panel that is on some displays only may
+                    // belong elsewhere now. Nothing is done where not.)
+                    sync_panels(state, control);
                 }
                 // What a panel shows may have changed. (Not after every
                 // event of a window: one that is dragged tells of each
@@ -1333,67 +1378,73 @@ mod linux {
         }
     }
 
+    /// The display of this name, as a configuration can name it: with
+    /// what the window manager tells of it (its connector, whether it is
+    /// the primary one) where that is known.
+    fn display_of(state: &State, name: &str) -> gevrek_model::settings::DisplayRef {
+        let known = state.wm.as_ref().and_then(|wm| {
+            crate::panel::monitor_of(wm, name).map(|(index, monitor)| {
+                gevrek_model::settings::DisplayRef::of_state(monitor, Some(index))
+            })
+        });
+        let mut display = known.unwrap_or_default();
+        if !display.is_called(name) {
+            display.names.push(name.to_string());
+        }
+        display
+    }
+
     /// Bring the panels in line with the displays and the configuration:
-    /// one on each display while the bar is switched on, at the place the
-    /// configuration gives it.
+    /// each panel that is switched on, on each display it is on, at the
+    /// place the configuration gives it.
     fn sync_panels(state: &Rc<RefCell<State>>, control: &mut Control) {
         let mut shared = state.borrow_mut();
-        let wanted = shared
-            .bar
-            .as_ref()
-            .filter(|bar| bar.enabled && shared.with_panel)
-            .map(crate::panel::geometry);
-        // Another place, or switched off: the surfaces that are there go.
-        if shared.panel_made != wanted {
-            if !shared.panels.is_empty() {
-                log::debug!(
-                    "the panels are closed: {}",
-                    if wanted.is_some() {
-                        "they go to another place"
-                    } else {
-                        "the panel is switched off"
-                    }
-                );
+        let shared = &mut *shared;
+        // What is wanted: the key of each panel on each display, and how
+        // its surface is made.
+        let mut wanted: Vec<(String, String, gevrek_model::settings::PanelProfile)> = Vec::new();
+        if shared.with_panel {
+            for output in &shared.outputs {
+                let display = display_of(shared, output);
+                for bar in shared.bars.iter().filter(|bar| bar.is_on(&display)) {
+                    wanted.push((
+                        crate::panel::key(output, &bar.id),
+                        output.clone(),
+                        bar.clone(),
+                    ));
+                }
             }
-            for (_, id) in shared.panels.drain() {
-                control.close(id);
-            }
-            shared.panel_made = wanted;
         }
-        // A display that is gone takes its panel along.
-        let outputs = shared.outputs.clone();
+        // What is open and not wanted any more, or wanted at another
+        // place (another edge, another height): its surface goes. (One
+        // panel's, not all of them: the others stay as they are.)
         let gone: Vec<String> = shared
             .panels
             .keys()
-            .filter(|name| !outputs.contains(name))
+            .filter(|key| {
+                let made = shared.panel_made.get(*key);
+                !wanted.iter().any(|(wanted, _, bar)| {
+                    wanted == *key && made == Some(&crate::panel::geometry(bar))
+                })
+            })
             .cloned()
             .collect();
-        for name in gone {
-            if let Some(id) = shared.panels.remove(&name) {
-                log::debug!("the panel of {name} is closed: the display is gone");
+        for key in gone {
+            if let Some(id) = shared.panels.remove(&key) {
+                log::debug!(
+                    "the panel {:?} of {} is closed: it is to be elsewhere, or not there",
+                    crate::panel::key_panel(&key),
+                    crate::panel::key_display(&key)
+                );
                 control.close(id);
             }
+            shared.panel_made.remove(&key);
         }
-        let Some((edge, height, margin, floating)) = wanted else {
-            return;
-        };
-        for name in outputs {
-            // (A display may have no panel of its own:
-            // `desktop.shell.panel.displays`.)
-            let here = shared
-                .bar
-                .as_ref()
-                .is_some_and(|bar| bar.on(&name).is_some());
-            if !here {
-                if let Some(id) = shared.panels.remove(&name) {
-                    log::debug!("the panel of {name} is closed: the display is to have none");
-                    control.close(id);
-                }
+        for (key, name, bar) in wanted {
+            if shared.panels.contains_key(&key) {
                 continue;
             }
-            if shared.panels.contains_key(&name) {
-                continue;
-            }
+            let (edge, height, margin, floating) = crate::panel::geometry(&bar);
             let place = Place {
                 name: "gevrek-panel".to_string(),
                 edge: match edge {
@@ -1413,9 +1464,9 @@ mod linux {
                 margin: margin as i32,
                 output: Some(name.clone()),
             };
-            log::debug!("a panel is opened on {name}");
+            log::debug!("the panel {:?} is opened on {name}", bar.id);
             let drawn = Rc::clone(state);
-            let output = name.clone();
+            let own = key.clone();
             let mut fonts = false;
             // What the wheel has turned over this panel and not yet
             // been counted for.
@@ -1426,17 +1477,20 @@ mod linux {
             let mut reach: Vec<egui::Rect> = Vec::new();
             let id = control.open(place, move |ui, control| {
                 draw_panel(
-                    &drawn, &output, ui, &mut fonts, &mut wheel, &mut hints, &mut reach, control,
+                    &drawn, &own, ui, &mut fonts, &mut wheel, &mut hints, &mut reach, control,
                 )
             });
-            shared.panels.insert(name, id);
+            shared
+                .panel_made
+                .insert(key.clone(), crate::panel::geometry(&bar));
+            shared.panels.insert(key, id);
         }
     }
 
     #[allow(clippy::too_many_arguments)]
     fn draw_panel(
         shared: &Rc<RefCell<State>>,
-        output: &str,
+        panel_key: &str,
         ui: &mut egui::Ui,
         fonts: &mut bool,
         wheel: &mut crate::panel::Wheel,
@@ -1444,14 +1498,24 @@ mod linux {
         reach: &mut Vec<egui::Rect>,
         control: &mut Control,
     ) -> Flow {
+        // (The display's name, and this panel's id there.)
+        let output = crate::panel::key_display(panel_key);
         let context = ui.ctx().clone();
         let state = shared.borrow();
         if !*fonts {
             theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Panel);
             *fonts = true;
         }
-        // (As it is on this display.)
-        let Some(bar) = state.bar.as_ref().and_then(|bar| bar.on(output)) else {
+        // (As the configuration has it now. Taken off this display
+        // meanwhile: its surface is closed when the panels are brought
+        // in line.)
+        let Some(bar) = crate::panel::bar_on(
+            &state.bars,
+            crate::panel::key_panel(panel_key),
+            output,
+            &display_of(&state, output),
+        )
+        .cloned() else {
             return Flow::Continue;
         };
         let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -1473,7 +1537,7 @@ mod linux {
                 mode: &state.mode,
                 recording: state.recording.is_some(),
                 sharing: !state.casts.is_empty(),
-                output,
+                output: panel_key,
                 tray: &state.tray_items,
                 system: &state.system,
                 keyboard: keyboard.as_ref(),
@@ -1484,7 +1548,7 @@ mod linux {
         // reaches those, and what is under the rest gets its clicks.
         if !asked.reach.is_empty() && asked.reach != *reach {
             *reach = asked.reach.clone();
-            if let Some(panel) = state.panels.get(output) {
+            if let Some(panel) = state.panels.get(panel_key) {
                 control.reach(*panel, reach.clone());
             }
         }
@@ -1513,7 +1577,7 @@ mod linux {
                         control.close(surface);
                     }
                     if let (Some((anchor, words)), Some(panel)) =
-                        (asked.hint.clone(), state.panels.get(output))
+                        (asked.hint.clone(), state.panels.get(panel_key))
                     {
                         let size = crate::panel::hint_size(ui, &words);
                         let look = bar.clone();
@@ -1580,7 +1644,9 @@ mod linux {
         if let Some(all) = asked.all_tasks {
             if let Some((config, revision)) = state.running.clone() {
                 let mut changed = config;
-                changed.desktop.shell.panel.tasks_of_all_workspaces = all;
+                if let Some(own) = changed.desktop.shell.panel_of_mut(&bar.id) {
+                    own.tasks_of_all_workspaces = all;
+                }
                 state.link.send(Request::Apply {
                     config: Box::new(changed),
                     base_revision: revision,
@@ -1648,7 +1714,7 @@ mod linux {
         if let Some(command) = &show {
             state.link.send(Request::Dispatch(command.clone()));
         }
-        let panel = state.panels.get(output).copied();
+        let panel = state.panels.get(panel_key).copied();
         let open = state
             .menu
             .as_ref()
@@ -1690,7 +1756,7 @@ mod linux {
                     }
                 }
                 if let Some(panel) = panel {
-                    open_tray_list(shared, panel, output, anchor, control);
+                    open_tray_list(shared, panel, panel_key, anchor, control);
                 }
                 return Flow::Continue;
             }
@@ -1707,7 +1773,7 @@ mod linux {
             let ask = if menu {
                 // The menu is asked of the program; it opens when the
                 // answer is there (`from_tray`).
-                state.tray_wait = Some((output.to_string(), key.clone(), anchor));
+                state.tray_wait = Some((panel_key.to_string(), key.clone(), anchor));
                 crate::tray::Ask::Menu { key }
             } else {
                 crate::tray::Ask::Activate { key }

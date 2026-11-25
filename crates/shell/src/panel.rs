@@ -265,6 +265,13 @@ pub fn name_of(monitor: &Value) -> Option<&str> {
 /// the state that answered to either was taken: a display named as
 /// another's connector is would have had that other's panel.)
 pub fn view(state: &Value, output: &str) -> Option<View> {
+    let (index, monitor) = monitor_of(state, output)?;
+    Some(view_at(monitor, Some(index)))
+}
+
+/// The display of the state that `output` means, and its place among
+/// the displays: by its connector before any name.
+pub fn monitor_of<'a>(state: &'a Value, output: &str) -> Option<(usize, &'a Value)> {
     let monitors = state["monitors"].as_array()?;
     let by = |key: &str| {
         monitors
@@ -272,8 +279,7 @@ pub fn view(state: &Value, output: &str) -> Option<View> {
             .enumerate()
             .find(|(_, monitor)| monitor[key].as_str() == Some(output))
     };
-    let (index, monitor) = by("connector").or_else(|| by("name"))?;
-    Some(view_at(monitor, Some(index)))
+    by("connector").or_else(|| by("name"))
 }
 
 /// The keyboard layout in use, as the state tells it.
@@ -553,9 +559,72 @@ pub fn mode(state: &Value) -> &str {
 /// height.
 pub type Rect = (i32, i32, i32, i32);
 
-/// Where the window manager keeps room for a panel: each display's name
-/// and the rectangle of its panel. A display the window manager keeps no
-/// room on (no panel in its configuration) is not among them.
+/// What stands between a display's name and a panel's id in the key of
+/// a panel on a display (a sign no name has).
+const KEY_BETWEEN: char = '\u{1f}';
+
+/// What one panel on one display is known by among the open panels: the
+/// display and the panel's id. (For a panel whose id is not told, the
+/// display alone: a window manager from before there were several.)
+pub fn key(display: &str, panel: &str) -> String {
+    if panel.is_empty() {
+        display.to_string()
+    } else {
+        format!("{display}{KEY_BETWEEN}{panel}")
+    }
+}
+
+/// The display of a panel's key.
+pub fn key_display(key: &str) -> &str {
+    key.split(KEY_BETWEEN).next().unwrap_or(key)
+}
+
+/// The panel's id of a panel's key (nothing: the first there is).
+pub fn key_panel(key: &str) -> &str {
+    key.split_once(KEY_BETWEEN).map_or("", |(_, panel)| panel)
+}
+
+/// The rectangle a state gives by where it is and how large, where it
+/// gives one that is a rectangle.
+fn rect_of(at: &Value, size: &Value) -> Option<Rect> {
+    let whole = |value: &Value| value.as_f64().map(|number| number.round() as i32);
+    let rect = (
+        whole(&at["x"])?,
+        whole(&at["y"])?,
+        whole(&size["width"])?,
+        whole(&size["height"])?,
+    );
+    (rect.2 > 0 && rect.3 > 0).then_some(rect)
+}
+
+/// Where the panels of one display of the state belong: each one's id
+/// (nothing where the state tells of one panel without saying which) and
+/// its rectangle.
+fn panels_of(monitor: &Value) -> Vec<(String, Rect)> {
+    let told: Vec<(String, Rect)> = monitor["panels"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|panel| {
+            Some((
+                panel["id"].as_str().unwrap_or_default().to_string(),
+                rect_of(&panel["position"], &panel["size"])?,
+            ))
+        })
+        .collect();
+    if !told.is_empty() {
+        return told;
+    }
+    rect_of(&monitor["bar_position"], &monitor["bar_size"])
+        .map(|rect| (String::new(), rect))
+        .into_iter()
+        .collect()
+}
+
+/// Where the window manager keeps room for the panels: the key of each
+/// panel on each display ([`key`]) and its rectangle. A display the
+/// window manager keeps no room on (no panel in its configuration) has
+/// none among them.
 ///
 /// This is how the window manager's names for the displays (the model's
 /// name, `Monitor ACM2702 (2)`) and the system's (`DISPLAY1`) meet on
@@ -563,18 +632,12 @@ pub type Rect = (i32, i32, i32, i32);
 /// the window manager gives for it, and is so on the display it means,
 /// whatever either calls it.
 pub fn places(state: &Value) -> Vec<(String, Rect)> {
-    let whole = |value: &Value| value.as_f64().map(|number| number.round() as i32);
     displays(state)
         .into_iter()
-        .filter_map(|(name, monitor)| {
-            let (at, size) = (&monitor["bar_position"], &monitor["bar_size"]);
-            let rect = (
-                whole(&at["x"])?,
-                whole(&at["y"])?,
-                whole(&size["width"])?,
-                whole(&size["height"])?,
-            );
-            (rect.2 > 0 && rect.3 > 0).then_some((name, rect))
+        .flat_map(|(name, monitor)| {
+            panels_of(monitor)
+                .into_iter()
+                .map(move |(panel, rect)| (key(&name, &panel), rect))
         })
         .collect()
 }
@@ -585,7 +648,8 @@ pub fn places(state: &Value) -> Vec<(String, Rect)> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Room {
     pub work: Rect,
-    pub bar: Option<Rect>,
+    /// The panels of the display, each where it is.
+    pub bars: Vec<Rect>,
     pub scale: f32,
     /// The display has the keyboard's window.
     pub focused: bool,
@@ -594,16 +658,7 @@ pub struct Room {
 /// The rooms of the displays of the window manager's state. A display
 /// the state gives no size for is not among them.
 pub fn rooms(state: &Value) -> Vec<Room> {
-    let whole = |value: &Value| value.as_f64().map(|number| number.round() as i32);
-    let rect = |at: &Value, size: &Value| {
-        let rect = (
-            whole(&at["x"])?,
-            whole(&at["y"])?,
-            whole(&size["width"])?,
-            whole(&size["height"])?,
-        );
-        (rect.2 > 0 && rect.3 > 0).then_some(rect)
-    };
+    let rect = rect_of;
     state["monitors"]
         .as_array()
         .into_iter()
@@ -614,7 +669,7 @@ pub fn rooms(state: &Value) -> Vec<Room> {
                 .or_else(|| rect(&monitor["position"], &monitor["size"]))?;
             Some(Room {
                 work,
-                bar: rect(&monitor["bar_position"], &monitor["bar_size"]),
+                bars: panels_of(monitor).into_iter().map(|(_, at)| at).collect(),
                 scale: monitor["scale"]
                     .as_f64()
                     .filter(|scale| scale.is_finite() && *scale >= 0.5)
@@ -649,19 +704,28 @@ pub fn corner_at(
     use gevrek_model::settings::NotificationCorner as Corner;
     let (x, y, width, height) = room.work;
     let (mut top, mut bottom) = (y, y + height);
-    if let Some((_, bar_y, _, bar_height)) = room.bar {
-        // A panel in the upper half is at the top, else at the bottom.
-        if bar_y + bar_height / 2 < y + height / 2 {
-            top = top.max(bar_y + bar_height);
+    let (mut from, mut to) = (x, x + width);
+    for (bar_x, bar_y, bar_width, bar_height) in room.bars.iter().copied() {
+        if bar_width >= bar_height {
+            // A panel in the upper half is at the top, else at the bottom.
+            if bar_y + bar_height / 2 < y + height / 2 {
+                top = top.max(bar_y + bar_height);
+            } else {
+                bottom = bottom.min(bar_y);
+            }
+        } else if bar_x + bar_width / 2 < x + width / 2 {
+            // One down a side: at the left, or at the right. (It was
+            // taken for one at the top, and nothing had room under it.)
+            from = from.max(bar_x + bar_width);
         } else {
-            bottom = bottom.min(bar_y);
+            to = to.min(bar_x);
         }
     }
-    let wide = size.0.min(width - 2 * gap).max(1);
+    let wide = size.0.min(to - from - 2 * gap).max(1);
     let high = size.1.min(bottom - top - 2 * gap).max(1);
     let left = match corner {
-        Corner::TopLeft | Corner::BottomLeft => x + gap,
-        Corner::TopRight | Corner::BottomRight => x + width - gap - wide,
+        Corner::TopLeft | Corner::BottomLeft => from + gap,
+        Corner::TopRight | Corner::BottomRight => to - gap - wide,
     };
     let up = match corner {
         Corner::TopLeft | Corner::TopRight => top + gap,
@@ -807,11 +871,13 @@ pub fn works_here(module: &PanelModule) -> bool {
 
 /// The modules of a panel that are left out on this system, each once,
 /// in the order they stand: to say so where the user can read it.
-pub fn left_out(bar: &PanelProfile) -> Vec<PanelModule> {
+pub fn left_out(bars: &[PanelProfile]) -> Vec<PanelModule> {
     let mut found: Vec<PanelModule> = Vec::new();
-    for module in bar.left.iter().chain(&bar.centre).chain(&bar.right) {
-        if !works_here(module) && !found.contains(module) {
-            found.push(module.clone());
+    for bar in bars.iter().filter(|bar| bar.enabled) {
+        for module in bar.left.iter().chain(&bar.centre).chain(&bar.right) {
+            if !works_here(module) && !found.contains(module) {
+                found.push(module.clone());
+            }
         }
     }
     found
@@ -1048,22 +1114,24 @@ pub fn show_tab(view: &View, index: usize) -> Option<String> {
     serde_json::to_string(&command).ok()
 }
 
-/// The panel as it is on a display: with what the configuration sets
-/// for that display in place of the common settings
-/// (`PanelProfile::on`); `None` where that display has no panel. The
+/// The panel of this id as the configuration has it, where it is on
+/// this display (`PanelProfile::is_on`); with no id, the first panel
+/// that is on it. `None` where that panel is not on that display. The
 /// display is known by several names (what the window manager calls it,
-/// its connector): an entry of the configuration by any of them is its.
-pub fn bar_on(
-    bar: &PanelProfile,
+/// its connector): a panel that names it by any of them is on it.
+pub fn bar_on<'a>(
+    bars: &'a [PanelProfile],
+    panel: &str,
     display: &str,
     place: &gevrek_model::settings::DisplayRef,
-) -> Option<PanelProfile> {
-    let own = bar
-        .displays
-        .iter()
-        .map(|entry| entry.name.trim())
-        .find(|name| !name.is_empty() && place.is_called(name));
-    bar.on(own.unwrap_or(display))
+) -> Option<&'a PanelProfile> {
+    let mut place = place.clone();
+    if !place.is_called(display) && !display.trim().is_empty() {
+        place.names.push(display.trim().to_string());
+    }
+    bars.iter()
+        .filter(|bar| panel.is_empty() || bar.is(panel))
+        .find(|bar| bar.is_on(&place))
 }
 
 /// The command that shows a workspace of a display by its place among
@@ -2875,8 +2943,32 @@ fn draw_module(
         PanelModule::Spacer => {
             ui.add_space(12.0);
         }
+        PanelModule::Separator => {
+            // A thin line across the panel, shorter than it is thick.
+            let (rect, _) = ui.allocate_exact_size(along(7.0), egui::Sense::hover());
+            let stroke = egui::Stroke::new(1.0, text.gamma_multiply(0.22));
+            let reach = (across * 0.32).max(4.0);
+            if upright {
+                ui.painter().hline(
+                    (rect.center().x - reach)..=(rect.center().x + reach),
+                    rect.center().y,
+                    stroke,
+                );
+            } else {
+                ui.painter().vline(
+                    rect.center().x,
+                    (rect.center().y - reach)..=(rect.center().y + reach),
+                    stroke,
+                );
+            }
+        }
         // Nothing to show now, or not known to this version.
-        PanelModule::Layout | PanelModule::Title | PanelModule::Other(_) => {}
+        PanelModule::Layout
+        | PanelModule::Title
+        | PanelModule::Media
+        | PanelModule::Load
+        | PanelModule::Custom
+        | PanelModule::Other(_) => {}
     }
 }
 
@@ -4452,7 +4544,7 @@ mod tests {
         bar.right.push(PanelModule::Power);
         bar.right.push(PanelModule::Power);
         bar.centre.push(PanelModule::Other("weather".to_string()));
-        let out = left_out(&bar);
+        let out = left_out(std::slice::from_ref(&bar));
         assert!(out.contains(&PanelModule::Other("weather".to_string())));
         // The launcher is there on every system.
         assert!(works_here(&PanelModule::Launcher));
@@ -4464,7 +4556,7 @@ mod tests {
         assert_eq!(out.len(), 1);
         // One that is not known is named once, however often it stands.
         bar.left.push(PanelModule::Other("weather".to_string()));
-        assert_eq!(left_out(&bar).len(), 1);
+        assert_eq!(left_out(std::slice::from_ref(&bar)).len(), 1);
     }
 
     #[test]
@@ -4473,7 +4565,7 @@ mod tests {
         assert_eq!(found.len(), 2);
         // No room for windows is told there: all of the display counts.
         assert_eq!(found[0].work, (0, 0, 2560, 1440));
-        assert_eq!(found[0].bar, Some((6, 6, 2548, 36)));
+        assert_eq!(found[0].bars, [(6, 6, 2548, 36)]);
         assert_eq!(found[0].scale, 1.0);
         assert!(found[0].focused && !found[1].focused);
         // Under the panel, at the right.
@@ -4494,7 +4586,7 @@ mod tests {
         // No panel: at the top of the room. Never more than there is.
         let bare = Room {
             work: (0, 0, 800, 600),
-            bar: None,
+            bars: Vec::new(),
             scale: 1.0,
             focused: true,
         };
@@ -4515,7 +4607,7 @@ mod tests {
         );
         // Over a panel at the bottom, under one at the top.
         let low = Room {
-            bar: Some((6, 558, 788, 36)),
+            bars: vec![(6, 558, 788, 36)],
             ..bare.clone()
         };
         assert_eq!(
@@ -4646,35 +4738,98 @@ mod tests {
     }
 
     #[test]
-    fn a_display_has_the_panel_the_configuration_gives_it() {
-        use gevrek_model::settings::{DisplayRef, PanelOnDisplay};
-        let mut bar = PanelProfile::default();
-        let common = bar.left.clone();
-        bar.displays = vec![PanelOnDisplay {
-            name: "DP-2".to_string(),
-            left: Some(vec![PanelModule::Clock]),
-            ..PanelOnDisplay::default()
-        }];
+    fn a_display_has_the_panels_the_configuration_gives_it() {
+        use gevrek_model::settings::{DisplayRef, PanelOn};
+        let common = PanelProfile {
+            not_on: vec!["DP-2".to_string()],
+            ..PanelProfile::default()
+        };
+        let own = PanelProfile {
+            id: "second".to_string(),
+            on: PanelOn::Only,
+            only_on: vec!["dp-2".to_string()],
+            left: vec![PanelModule::Clock],
+            ..PanelProfile::default()
+        };
+        let rail = PanelProfile {
+            id: "rail".to_string(),
+            edge: PanelEdge::Left,
+            ..PanelProfile::default()
+        };
+        let bars = [common, own, rail];
         // A display the window manager calls one thing and whose
-        // connector is another: the entry by its connector is its.
+        // connector is another: the panel that names its connector is its.
         let second = DisplayRef {
             names: vec!["Monitor B".to_string(), "DP-2".to_string()],
             index: Some(1),
             primary: false,
         };
-        let own = bar_on(&bar, "Monitor B", &second).expect("a panel");
-        assert_eq!(own.left, vec![PanelModule::Clock]);
-        assert_eq!(own.right, bar.right);
-        // Another display has the common panel.
         let first = DisplayRef::named("Monitor A");
+        let id = |found: Option<&PanelProfile>| found.map(|bar| bar.id.clone());
         assert_eq!(
-            bar_on(&bar, "Monitor A", &first).expect("a panel").left,
-            common
+            id(bar_on(&bars, "second", "Monitor B", &second)).as_deref(),
+            Some("second")
         );
-        // Switched off for that display: none there.
-        bar.displays[0].enabled = false;
-        assert!(bar_on(&bar, "Monitor B", &second).is_none());
-        assert!(bar_on(&bar, "Monitor A", &first).is_some());
+        assert_eq!(id(bar_on(&bars, "main", "Monitor B", &second)), None);
+        assert_eq!(
+            id(bar_on(&bars, "main", "Monitor A", &first)).as_deref(),
+            Some("main")
+        );
+        assert_eq!(id(bar_on(&bars, "second", "Monitor A", &first)), None);
+        // One that is on every display is on both.
+        assert!(bar_on(&bars, "RAIL", "Monitor A", &first).is_some());
+        assert!(bar_on(&bars, "rail", "Monitor B", &second).is_some());
+        // Not told which: the first that is on the display.
+        assert_eq!(
+            id(bar_on(&bars, "", "Monitor B", &second)).as_deref(),
+            Some("second")
+        );
+        assert_eq!(
+            id(bar_on(&bars, "", "Monitor A", &first)).as_deref(),
+            Some("main")
+        );
+        // A display known by its name alone, which is the one asked by.
+        assert!(bar_on(&bars, "second", "DP-2", &DisplayRef::default()).is_some());
+    }
+
+    #[test]
+    fn each_panel_of_a_display_has_a_key_and_a_place_of_its_own() {
+        let state = json!({"monitors": [
+            {"name": "Monitor A",
+             "position": {"x": 0.0, "y": 0.0}, "size": {"width": 1920, "height": 1080},
+             "bar_position": {"x": 0.0, "y": 0.0}, "bar_size": {"width": 1920, "height": 30},
+             "panels": [
+                {"id": "main", "position": {"x": 0.0, "y": 0.0}, "size": {"width": 1920, "height": 30}},
+                {"id": "rail", "position": {"x": 0.0, "y": 30.0}, "size": {"width": 40, "height": 1050}},
+                {"id": "gone", "position": {"x": 0.0, "y": 0.0}, "size": {"width": 0, "height": 30}},
+             ]},
+            // A window manager that tells of one panel and not which.
+            {"name": "Monitor B",
+             "bar_position": {"x": 1920.0, "y": 0.0}, "bar_size": {"width": 1920, "height": 30}},
+        ]});
+        let found = places(&state);
+        assert_eq!(found.len(), 3);
+        assert_eq!(
+            (key_display(&found[0].0), key_panel(&found[0].0), found[0].1),
+            ("Monitor A", "main", (0, 0, 1920, 30))
+        );
+        assert_eq!(
+            (key_display(&found[1].0), key_panel(&found[1].0), found[1].1),
+            ("Monitor A", "rail", (0, 30, 40, 1050))
+        );
+        assert_eq!(found[2].0, "Monitor B");
+        assert_eq!(
+            (key_display(&found[2].0), key_panel(&found[2].0)),
+            ("Monitor B", "")
+        );
+        assert_ne!(found[0].0, found[1].0);
+        // A surface in a corner keeps clear of each: under the one at
+        // the top, right of the one down the left side.
+        let room = &rooms(&state)[0];
+        assert_eq!(room.bars.len(), 2);
+        use gevrek_model::settings::NotificationCorner as Corner;
+        let (x, y, _, _) = corner_at(room, (300, 100), 10, Corner::TopLeft);
+        assert_eq!((x, y), (50, 40));
     }
 
     #[test]

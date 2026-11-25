@@ -11,7 +11,7 @@ use crate::snap_zones::{presets as snap_zone_presets, SnapZoneConfig, SnapZoneLa
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
-pub const DESKTOP_CONFIG_SCHEMA_VERSION: u32 = 26;
+pub const DESKTOP_CONFIG_SCHEMA_VERSION: u32 = 27;
 
 /// What is wrong with the pattern in a command's window selector, where
 /// it has one that cannot be read (`re:` and what follows is a regular
@@ -177,11 +177,13 @@ impl Default for DesktopConfig {
 }
 
 /// The desktop's own surfaces.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ShellConfig {
-    /// The panel at an edge of every display.
-    pub panel: PanelProfile,
+    /// The panels: each at an edge of the displays it is on, with what
+    /// stands on it and how it looks. One, at the top of every display,
+    /// where nothing else is set; none at all is no panel.
+    pub panels: Vec<PanelProfile>,
     /// Where notifications are shown, how many at once and for how long.
     pub notifications: NotificationsProfile,
     /// Where pictures of the screen go.
@@ -195,6 +197,138 @@ pub struct ShellConfig {
     /// were, so a file from a newer gevrek survives being edited here.
     #[serde(flatten)]
     pub extra: crate::Extra,
+}
+
+impl Default for ShellConfig {
+    fn default() -> Self {
+        Self {
+            panels: vec![PanelProfile::default()],
+            notifications: Default::default(),
+            screenshots: Default::default(),
+            glass: Default::default(),
+            osd: Default::default(),
+            extra: Default::default(),
+        }
+    }
+}
+
+impl ShellConfig {
+    /// The first panel, which is the only one in most configurations:
+    /// `None` where there is no panel at all.
+    pub fn panel(&self) -> Option<&PanelProfile> {
+        self.panels.first()
+    }
+
+    /// The first panel, to be changed; where there is none, one is put
+    /// there (switched on, as a new one is).
+    pub fn panel_mut(&mut self) -> &mut PanelProfile {
+        if self.panels.is_empty() {
+            self.panels.push(PanelProfile::default());
+        }
+        &mut self.panels[0]
+    }
+
+    /// The panel of this id.
+    pub fn panel_of(&self, id: &str) -> Option<&PanelProfile> {
+        self.panels.iter().find(|panel| panel.is(id))
+    }
+
+    pub fn panel_of_mut(&mut self, id: &str) -> Option<&mut PanelProfile> {
+        self.panels.iter_mut().find(|panel| panel.is(id))
+    }
+
+    /// The panels that are on a display, in their order: those that are
+    /// switched on and mean it.
+    pub fn panels_on<'a>(
+        &'a self,
+        display: &'a DisplayRef,
+    ) -> impl Iterator<Item = &'a PanelProfile> + 'a {
+        self.panels.iter().filter(move |panel| panel.is_on(display))
+    }
+
+    /// Some panel that is switched on shows this module.
+    pub fn shows(&self, module: PanelModule) -> bool {
+        self.panels
+            .iter()
+            .any(|panel| panel.enabled && panel.shows(module.clone()))
+    }
+
+    /// An id no panel has yet, made of `wanted` (`side`, `side-2`, ...).
+    pub fn free_panel_id(&self, wanted: &str) -> String {
+        let wanted = match panel_id_of(wanted) {
+            id if id.is_empty() => "panel".to_string(),
+            id => id,
+        };
+        if self.panel_of(&wanted).is_none() {
+            return wanted;
+        }
+        (2..)
+            .map(|number| format!("{wanted}-{number}"))
+            .find(|id| self.panel_of(id).is_none())
+            .unwrap_or(wanted)
+    }
+
+    /// Add a panel (its id made one no other has), and give its id back.
+    pub fn add_panel(&mut self, mut panel: PanelProfile) -> String {
+        panel.id = self.free_panel_id(&panel.id);
+        let id = panel.id.clone();
+        self.panels.push(panel);
+        id
+    }
+
+    /// Take the panel of this id away; whether there was one.
+    pub fn remove_panel(&mut self, id: &str) -> bool {
+        let before = self.panels.len();
+        self.panels.retain(|panel| !panel.is(id));
+        self.panels.len() != before
+    }
+
+    /// What is wrong with the panels, each with where it is.
+    pub fn problems(&self) -> Vec<(String, String)> {
+        let mut problems = Vec::new();
+        for (index, panel) in self.panels.iter().enumerate() {
+            let path = format!("desktop.shell.panels[{index}]");
+            if panel.id.trim().is_empty() {
+                problems.push((format!("{path}.id"), "A panel needs an id".to_string()));
+            } else if panel_id_of(&panel.id) != panel.id {
+                problems.push((
+                    format!("{path}.id"),
+                    format!(
+                        "The id {:?} has other than small letters, digits and '-': {:?} would do",
+                        panel.id,
+                        panel_id_of(&panel.id)
+                    ),
+                ));
+            } else if self.panels[..index].iter().any(|other| other.is(&panel.id)) {
+                problems.push((
+                    format!("{path}.id"),
+                    format!("Two panels have the id {:?}", panel.id),
+                ));
+            }
+            if panel.on == PanelOn::Only && panel.only_on.iter().all(|name| name.trim().is_empty())
+            {
+                problems.push((
+                    format!("{path}.only_on"),
+                    "A panel that is on named displays only names none".to_string(),
+                ));
+            }
+        }
+        problems
+    }
+}
+
+/// What may be a panel's id of a text: its small letters, digits and
+/// `-`, anything else between them a `-`.
+pub fn panel_id_of(text: &str) -> String {
+    let mut id = String::new();
+    for letter in text.trim().chars() {
+        if letter.is_ascii_alphanumeric() {
+            id.push(letter.to_ascii_lowercase());
+        } else if !id.is_empty() && !id.ends_with('-') {
+            id.push('-');
+        }
+    }
+    id.trim_end_matches('-').to_string()
 }
 
 /// The on-screen display: what is said in the middle of the screen for a
@@ -439,6 +573,81 @@ pub enum PanelStyle {
     Bare,
 }
 
+/// Which displays a panel is on.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PanelOn {
+    /// Every display, but those `not_on` names.
+    #[default]
+    All,
+    /// The primary display.
+    Primary,
+    /// The displays `only_on` names, and no other.
+    Only,
+}
+
+/// How words are written on a panel that goes down a side of the display.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SideText {
+    /// Turned a quarter, read from the top down: a word is as long as it
+    /// is, and the panel stays narrow.
+    #[default]
+    Rotated,
+    /// Upright and short under each sign: a number, a few letters.
+    Stacked,
+    /// No words: the signs alone.
+    Signs,
+}
+
+/// When a panel is out of sight.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PanelHide {
+    /// Never: it is always there.
+    #[default]
+    Never,
+    /// Always, until the pointer comes to its edge of the display; no
+    /// room is kept for it.
+    Always,
+    /// While a window lies where it stands (it floats over the windows
+    /// then; no room is kept for it).
+    Covered,
+}
+
+/// What the module `custom` of a panel says.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default)]
+pub struct CustomModule {
+    /// Words that stand there as they are.
+    pub text: String,
+    /// A program and its arguments, started without a shell: the first
+    /// line it writes stands there in place of `text` (nothing: `text`).
+    pub command: Vec<String>,
+    /// How often the program is asked again, in seconds (0: once, when
+    /// the panel comes up; never oftener than every 2 seconds).
+    pub every_seconds: u32,
+    /// A program and its arguments that a press on the module starts.
+    pub on_press: Vec<String>,
+    /// Keys this version does not know: kept, and written back as they were.
+    #[serde(flatten)]
+    pub extra: crate::Extra,
+}
+
+impl CustomModule {
+    /// How often its program is asked, where it is asked again at all.
+    pub fn every(&self) -> Option<std::time::Duration> {
+        (self.every_seconds > 0 && !self.command.is_empty())
+            .then(|| std::time::Duration::from_secs(u64::from(self.every_seconds.clamp(2, 86_400))))
+    }
+}
+
 /// One thing a panel shows.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -486,6 +695,16 @@ pub enum PanelModule {
     ControlCentre,
     /// A gap between two modules.
     Spacer,
+    /// A thin line between two modules.
+    Separator,
+    /// What is playing: its title, and buttons for the piece before, to
+    /// pause and go on, and the next piece.
+    Media,
+    /// How busy the processor is and how full the memory, in percent.
+    Load,
+    /// Words of the person's own, or the first line a program of theirs
+    /// writes (the panel's `custom`).
+    Custom,
     /// A module this version does not know, by its name: kept in its
     /// place and written back as it was, not drawn.
     #[serde(untagged)]
@@ -514,17 +733,39 @@ impl PanelModule {
             Self::Keyboard,
             Self::ControlCentre,
             Self::Spacer,
+            Self::Separator,
+            Self::Media,
+            Self::Load,
+            Self::Custom,
         ]
+    }
+
+    /// The modules a panel may have more than once.
+    pub fn may_repeat(&self) -> bool {
+        matches!(self, Self::Spacer | Self::Separator)
     }
 }
 
-/// The panel: what it shows at its left, in its middle and at its right,
-/// on every display. Its room is kept free of windows.
+/// A panel: what it shows at its left, in its middle and at its right,
+/// on the displays it is on. Its room is kept free of windows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct PanelProfile {
+    /// What it is known by: to a command, and to the shell from one
+    /// start to the next (small letters, digits and `-`; no two panels
+    /// have the same).
+    pub id: String,
+    /// What it is called where panels are listed (nothing: its id).
+    pub name: String,
     /// Show the panel and keep its place free of windows.
     pub enabled: bool,
+    /// Which displays it is on: all, the primary one, or those named.
+    pub on: PanelOn,
+    /// For `on: only`: the displays it is on, by name (`DP-2`,
+    /// `HDMI-A-1`; upper and lower case are the same).
+    pub only_on: Vec<String>,
+    /// For `on: all`: the displays it is not on.
+    pub not_on: Vec<String>,
     pub edge: PanelEdge,
     /// How it is drawn: one strip, a piece for each group, or nothing
     /// behind what it shows.
@@ -539,6 +780,15 @@ pub struct PanelProfile {
     /// It floats over the windows: no room is kept free for it, and
     /// windows reach to the display's edge under it.
     pub floating: bool,
+    /// When it is out of sight: never, always until the pointer comes
+    /// to its edge, or while a window lies where it stands.
+    pub hide: PanelHide,
+    /// What is behind it is blurred, where the system can do that and
+    /// the panel is not solid.
+    pub blur: bool,
+    /// How words are written on it where it goes down a side: turned a
+    /// quarter, upright and short, or not at all.
+    pub side_text: SideText,
     /// Height of the panel in pixels.
     pub height: u32,
     /// Room between the panel and the edges of the screen, in pixels (0:
@@ -590,53 +840,32 @@ pub struct PanelProfile {
     /// (`xembedsniproxy`), where that is installed and X11 programs can
     /// run; without it nothing is different.
     pub older_tray_icons: bool,
-    /// What is otherwise on single displays: no panel there, or other
-    /// things on it. A display that is not named has the panel as it is
-    /// set here.
-    pub displays: Vec<PanelOnDisplay>,
+    /// How many icons of the tray stand on the panel; the others are
+    /// behind one button, and listed on a press (0: all of them).
+    pub tray_shown: u32,
+    /// What its module `custom` says.
+    pub custom: CustomModule,
     /// Keys this version does not know: kept, and written back as they
     /// were, so a file from a newer gevrek survives being edited here.
     #[serde(flatten)]
     pub extra: crate::Extra,
 }
 
-/// The panel of one display, where it is other than the others'.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(default)]
-pub struct PanelOnDisplay {
-    /// The display, by its name (`DP-2`, `HDMI-A-1`; upper and lower
-    /// case are the same).
-    pub name: String,
-    /// Off: this display has no panel.
-    pub enabled: bool,
-    /// What stands at its left, in its middle and at its right there;
-    /// not given: as on the other displays.
-    pub left: Option<Vec<PanelModule>>,
-    pub centre: Option<Vec<PanelModule>>,
-    pub right: Option<Vec<PanelModule>>,
-    /// Keys this version does not know: kept, and written back as they were.
-    #[serde(flatten)]
-    pub extra: crate::Extra,
-}
-
-impl Default for PanelOnDisplay {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            enabled: true,
-            left: None,
-            centre: None,
-            right: None,
-            extra: Default::default(),
-        }
-    }
-}
-
 impl Default for PanelProfile {
     fn default() -> Self {
         Self {
             extra: Default::default(),
+            id: "main".to_string(),
+            name: String::new(),
             enabled: true,
+            on: PanelOn::All,
+            only_on: Vec::new(),
+            not_on: Vec::new(),
+            hide: PanelHide::Never,
+            blur: false,
+            side_text: SideText::Rotated,
+            tray_shown: 0,
+            custom: CustomModule::default(),
             edge: PanelEdge::Top,
             style: PanelStyle::Bar,
             fit: PanelFit::Full,
@@ -673,48 +902,58 @@ impl Default for PanelProfile {
             task_grouping: TaskGrouping::WhenFull,
             clock_format: "%a %d %b  %H:%M".to_string(),
             older_tray_icons: true,
-            displays: Vec::new(),
         }
     }
 }
 
 impl PanelProfile {
-    /// The panel as it is on the display of this name: with what is set
-    /// for that display in place of the common settings; `None` where
-    /// that display has no panel (or the panel is switched off).
-    pub fn on(&self, display: &str) -> Option<PanelProfile> {
-        if !self.enabled {
-            return None;
+    /// Whether this is the panel of that id (upper and lower case are
+    /// the same).
+    pub fn is(&self, id: &str) -> bool {
+        self.id.trim().eq_ignore_ascii_case(id.trim())
+    }
+
+    /// What it is called: its name, or its id where it has none.
+    pub fn label(&self) -> &str {
+        match self.name.trim() {
+            "" => self.id.trim(),
+            name => name,
         }
-        let own = self.displays.iter().find(|entry| {
-            !entry.name.trim().is_empty() && entry.name.trim().eq_ignore_ascii_case(display)
-        });
-        let Some(own) = own else {
-            return Some(self.clone());
-        };
-        if !own.enabled {
-            return None;
-        }
-        let mut panel = self.clone();
-        if let Some(left) = &own.left {
-            panel.left = left.clone();
-        }
-        if let Some(centre) = &own.centre {
-            panel.centre = centre.clone();
-        }
-        if let Some(right) = &own.right {
-            panel.right = right.clone();
-        }
-        Some(panel)
+    }
+
+    /// Whether it is on a display: it is switched on, and means it.
+    pub fn is_on(&self, display: &DisplayRef) -> bool {
+        self.enabled
+            && match self.on {
+                PanelOn::All => !self.not_on.iter().any(|name| display.is_called(name)),
+                PanelOn::Primary => display.primary,
+                PanelOn::Only => self.only_on.iter().any(|name| display.is_called(name)),
+            }
+    }
+
+    /// Whether room is kept for it: not for one that floats over the
+    /// windows, nor for one that is out of sight at times.
+    pub fn keeps_room(&self) -> bool {
+        self.enabled && !self.floating && self.hide == PanelHide::Never
     }
 
     /// How much of the monitor's edge is kept free of windows.
     pub fn reserved(&self) -> i32 {
-        if self.enabled && !self.floating {
+        if self.keeps_room() {
             (self.height.clamp(16, 200) + self.margin.min(100)) as i32
         } else {
             0
         }
+    }
+
+    /// How thick it is, and how far from the display's edges, in the
+    /// pixels of the configuration.
+    pub fn thickness(&self) -> i32 {
+        self.height.clamp(16, 200) as i32
+    }
+
+    pub fn gap(&self) -> i32 {
+        self.margin.min(100) as i32
     }
 
     /// The module is somewhere on the panel.
@@ -729,7 +968,7 @@ impl PanelProfile {
     /// Put a module on the panel (at the left what is about the windows,
     /// at the right the rest, before the clock), or take it off.
     pub fn set_shown(&mut self, module: PanelModule, shown: bool) {
-        if shown == self.shows(module.clone()) {
+        if shown == self.shows(module.clone()) && !(shown && module.may_repeat()) {
             return;
         }
         if !shown {
@@ -1423,6 +1662,7 @@ impl DesktopConfig {
             .chain(self.night_light.problems())
             .chain(crate::outputs::problems(&self.outputs))
             .chain(self.zones.problems())
+            .chain(self.shell.problems())
         {
             issues.push(ConfigIssue::error(path, message));
         }
@@ -4212,38 +4452,118 @@ mod tests {
     }
 
     #[test]
-    fn a_display_has_its_own_panel_or_none() {
-        let panel = PanelProfile {
-            displays: vec![
-                PanelOnDisplay {
-                    name: "DP-3".to_string(),
-                    right: Some(vec![PanelModule::Clock]),
-                    ..Default::default()
-                },
-                PanelOnDisplay {
-                    name: "hdmi-a-1".to_string(),
-                    enabled: false,
-                    ..Default::default()
-                },
-            ],
+    fn a_panel_is_on_the_displays_it_means() {
+        let display = |name: &str, primary: bool| DisplayRef {
+            names: vec![name.to_string()],
+            index: None,
+            primary,
+        };
+        let everywhere = PanelProfile {
+            not_on: vec!["hdmi-a-1".to_string()],
             ..Default::default()
         };
-        // Not named: the panel as it is.
-        assert_eq!(
-            panel.on("DP-2").map(|panel| panel.right),
-            Some(panel.right.clone())
-        );
-        // Named: what is set for it, the rest as on the others.
-        let third = panel.on("dp-3").expect("a panel");
-        assert_eq!(third.right, vec![PanelModule::Clock]);
-        assert_eq!(third.left, panel.left);
-        // Switched off for one display, and for all.
-        assert_eq!(panel.on("HDMI-A-1"), None);
+        assert!(everywhere.is_on(&display("DP-2", false)));
+        assert!(!everywhere.is_on(&display("HDMI-A-1", true)));
+        let primary = PanelProfile {
+            on: PanelOn::Primary,
+            ..Default::default()
+        };
+        assert!(primary.is_on(&display("DP-2", true)));
+        assert!(!primary.is_on(&display("DP-3", false)));
+        let named = PanelProfile {
+            on: PanelOn::Only,
+            only_on: vec!["dp-3".to_string()],
+            ..Default::default()
+        };
+        assert!(named.is_on(&display("DP-3", false)));
+        assert!(!named.is_on(&display("DP-2", true)));
+        // Switched off: on none.
         let off = PanelProfile {
             enabled: false,
             ..Default::default()
         };
-        assert_eq!(off.on("DP-2"), None);
+        assert!(!off.is_on(&display("DP-2", true)));
+    }
+
+    #[test]
+    fn panels_are_added_and_taken_away_by_their_ids() {
+        let mut shell = ShellConfig::default();
+        assert_eq!(shell.panels.len(), 1);
+        assert_eq!(shell.panels[0].id, "main");
+        // A second with the same id gets one of its own.
+        let id = shell.add_panel(PanelProfile::default());
+        assert_eq!(id, "main-2");
+        let id = shell.add_panel(PanelProfile {
+            id: "Side Rail!".to_string(),
+            edge: PanelEdge::Left,
+            ..Default::default()
+        });
+        assert_eq!(id, "side-rail");
+        assert!(shell.problems().is_empty(), "{:?}", shell.problems());
+        assert_eq!(
+            shell.panel_of("SIDE-RAIL").map(|panel| panel.edge),
+            Some(PanelEdge::Left)
+        );
+        assert!(shell.remove_panel("main-2"));
+        assert!(!shell.remove_panel("main-2"));
+        assert_eq!(shell.panels.len(), 2);
+        // None at all is no panel, and `panel_mut` puts one there.
+        shell.panels.clear();
+        assert!(shell.panel().is_none());
+        shell.panel_mut().height = 30;
+        assert_eq!(shell.panels.len(), 1);
+    }
+
+    #[test]
+    fn what_is_wrong_with_the_panels_is_said() {
+        let mut shell = ShellConfig::default();
+        shell.panels.push(PanelProfile::default());
+        shell.panels.push(PanelProfile {
+            id: "Not An Id".to_string(),
+            ..Default::default()
+        });
+        shell.panels.push(PanelProfile {
+            id: "named".to_string(),
+            on: PanelOn::Only,
+            ..Default::default()
+        });
+        let problems = shell.problems();
+        let paths: Vec<&str> = problems.iter().map(|(path, _)| path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "desktop.shell.panels[1].id",
+                "desktop.shell.panels[2].id",
+                "desktop.shell.panels[3].only_on"
+            ],
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn a_room_is_kept_only_for_a_panel_that_is_always_there() {
+        let panel = PanelProfile::default();
+        assert_eq!(panel.reserved(), 42);
+        for other in [
+            PanelProfile {
+                floating: true,
+                ..Default::default()
+            },
+            PanelProfile {
+                hide: PanelHide::Always,
+                ..Default::default()
+            },
+            PanelProfile {
+                hide: PanelHide::Covered,
+                ..Default::default()
+            },
+            PanelProfile {
+                enabled: false,
+                ..Default::default()
+            },
+        ] {
+            assert_eq!(other.reserved(), 0);
+        }
     }
 
     #[test]

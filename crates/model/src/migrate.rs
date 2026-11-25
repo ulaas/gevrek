@@ -104,7 +104,96 @@ const STEPS: &[(u32, Step)] = &[
             to_26(desktop);
         }
     }),
+    // 27: there are panels, `desktop.shell.panels`, each with the
+    // displays it is on. There was one, `desktop.shell.panel`, with what
+    // was otherwise on single displays written beside it.
+    (27, |config| {
+        if let Some(desktop) = config.get_mut("desktop").and_then(Value::as_object_mut) {
+            to_27(desktop);
+        }
+    }),
 ];
+
+/// 26 -> 27: `desktop.shell.panel` became the first of
+/// `desktop.shell.panels`. What it had for single displays (`displays`)
+/// is said by the panels themselves now: a display that had none is one
+/// the panel is not on, and a display with other things on its panel has
+/// a panel of its own, the same but for those.
+fn to_27(desktop: &mut serde_json::Map<String, Value>) {
+    let Some(shell) = desktop.get_mut("shell").and_then(Value::as_object_mut) else {
+        return;
+    };
+    let Some(Value::Object(mut panel)) = shell.remove("panel") else {
+        return;
+    };
+    // Panels already written in the new place win.
+    if shell.contains_key("panels") {
+        return;
+    }
+    let own = match panel.remove("displays") {
+        Some(Value::Array(own)) => own,
+        _ => Vec::new(),
+    };
+    panel.entry("id").or_insert_with(|| Value::from("main"));
+    let mut panels: Vec<Value> = Vec::new();
+    let mut not_on: Vec<Value> = Vec::new();
+    for entry in own {
+        let Some(entry) = entry.as_object() else {
+            continue;
+        };
+        let name = entry
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default();
+        if name.is_empty() {
+            continue;
+        }
+        let enabled = entry
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let sides: Vec<(&str, &Value)> = ["left", "centre", "right"]
+            .into_iter()
+            .filter_map(|side| Some((side, entry.get(side).filter(|given| given.is_array())?)))
+            .collect();
+        // (Named, and nothing other there: the panel as on the others.)
+        if enabled && sides.is_empty() {
+            continue;
+        }
+        not_on.push(Value::from(name));
+        if !enabled {
+            continue;
+        }
+        let mut theirs = panel.clone();
+        let wanted = format!("main-{}", crate::settings::panel_id_of(name));
+        let taken = |id: &str| {
+            panels
+                .iter()
+                .any(|other: &Value| other["id"].as_str() == Some(id))
+        };
+        let id = if taken(&wanted) {
+            (2..)
+                .map(|number| format!("{wanted}-{number}"))
+                .find(|id| !taken(id))
+                .unwrap_or(wanted)
+        } else {
+            wanted
+        };
+        theirs.insert("id".to_string(), Value::from(id));
+        theirs.insert("on".to_string(), Value::from("only"));
+        theirs.insert("only_on".to_string(), Value::Array(vec![Value::from(name)]));
+        for (side, modules) in sides {
+            theirs.insert(side.to_string(), modules.clone());
+        }
+        panels.push(Value::Object(theirs));
+    }
+    if !not_on.is_empty() {
+        panel.insert("not_on".to_string(), Value::Array(not_on));
+    }
+    panels.insert(0, Value::Object(panel));
+    shell.insert("panels".to_string(), Value::Array(panels));
+}
 
 /// 25 -> 26: `desktop.zones` became `desktop.snap_zones`. Whatever a file
 /// from before has under `zones` is of the snap zones, so all of it moves.
@@ -276,7 +365,11 @@ mod chain_tests {
         migrate(&mut document);
         let desktop = &document["desktop"];
         assert!(desktop.get("bar").is_none(), "the old place is empty");
-        let panel = &desktop["shell"]["panel"];
+        assert!(
+            desktop["shell"].get("panel").is_none(),
+            "nor the one after it"
+        );
+        let panel = &desktop["shell"]["panels"][0];
         assert_eq!(panel["left"], serde_json::json!(["workspaces", "title"]));
         assert_eq!(panel["right"], serde_json::json!(["stats", "clock"]));
         assert_eq!(panel["edge"], "bottom");
@@ -284,13 +377,79 @@ mod chain_tests {
         assert_eq!(panel["from_later"], 1, "a key that is not known is kept");
         assert!(panel.get("show_layout").is_none());
         let read: crate::settings::DesktopConfig = serde_json::from_value(desktop.clone()).unwrap();
-        assert_eq!(read.shell.panel.edge, crate::settings::PanelEdge::Bottom);
-        assert!(read.shell.panel.shows(crate::settings::PanelModule::Stats));
-        assert!(!read.shell.panel.shows(crate::settings::PanelModule::Layout));
+        assert_eq!(read.shell.panels.len(), 1);
+        assert_eq!(read.shell.panels[0].id, "main");
+        assert_eq!(
+            read.shell.panels[0].edge,
+            crate::settings::PanelEdge::Bottom
+        );
+        assert!(read.shell.panels[0].shows(crate::settings::PanelModule::Stats));
+        assert!(!read.shell.panels[0].shows(crate::settings::PanelModule::Layout));
+        assert!(read.shell.extra.0.is_empty(), "nothing is left beside them");
         // A file without a bar reads with the panel as it is by default.
         let mut bare = serde_json::json!({ "desktop": { "schema_version": 22 } });
         migrate(&mut bare);
         assert!(bare["desktop"].get("shell").is_none());
+    }
+
+    #[test]
+    fn the_one_panel_becomes_the_first_of_the_panels_with_its_displays() {
+        let mut document = serde_json::json!({ "desktop": { "schema_version": 26, "shell": {
+            "panel": {
+                "edge": "left", "height": 44, "right": ["clock"], "from_later": 1,
+                "displays": [
+                    { "name": "DP-3", "right": ["sound", "clock"] },
+                    { "name": "HDMI-A-1", "enabled": false },
+                    { "name": "DP-4" },
+                    { "name": "" }
+                ]
+            },
+            "osd": { "volume": false }
+        } } });
+        migrate(&mut document);
+        let shell = &document["desktop"]["shell"];
+        assert!(shell.get("panel").is_none());
+        assert_eq!(
+            shell["osd"]["volume"], false,
+            "the rest of the shell is as it was"
+        );
+        let panels = shell["panels"].as_array().expect("panels");
+        assert_eq!(panels.len(), 2);
+        // The panel itself: on every display but the two that had
+        // something of their own.
+        assert_eq!(panels[0]["id"], "main");
+        assert_eq!(panels[0]["not_on"], serde_json::json!(["DP-3", "HDMI-A-1"]));
+        assert!(panels[0].get("displays").is_none());
+        assert_eq!(
+            panels[0]["from_later"], 1,
+            "a key that is not known is kept"
+        );
+        // The display with other things on its panel: a panel of its own.
+        assert_eq!(panels[1]["id"], "main-dp-3");
+        assert_eq!(panels[1]["on"], "only");
+        assert_eq!(panels[1]["only_on"], serde_json::json!(["DP-3"]));
+        assert_eq!(panels[1]["right"], serde_json::json!(["sound", "clock"]));
+        assert_eq!(panels[1]["edge"], "left", "the same but for that");
+        let read: crate::settings::DesktopConfig =
+            serde_json::from_value(document["desktop"].clone()).unwrap();
+        assert!(read.validate().is_empty(), "{:?}", read.validate());
+        let display = |name: &str| crate::settings::DisplayRef::named(name);
+        let on = |name: &str| -> Vec<String> {
+            read.shell
+                .panels_on(&display(name))
+                .map(|panel| panel.id.clone())
+                .collect()
+        };
+        assert_eq!(on("DP-2"), ["main"]);
+        assert_eq!(on("DP-4"), ["main"]);
+        assert_eq!(on("dp-3"), ["main-dp-3"]);
+        assert!(on("HDMI-A-1").is_empty());
+        // A file without a panel reads with the one there is by default.
+        let mut bare = serde_json::json!({ "desktop": { "schema_version": 26, "shell": {} } });
+        migrate(&mut bare);
+        let read: crate::settings::DesktopConfig =
+            serde_json::from_value(bare["desktop"].clone()).unwrap();
+        assert_eq!(read.shell.panels.len(), 1);
     }
 
     #[test]
@@ -528,7 +687,12 @@ mod tests {
                 serde_json::json!({ "desktop": { "schema_version": 26, "zones": zones } });
             let mut migrated = document.clone();
             migrate(&mut migrated);
-            assert_eq!(migrated, document, "a current file is left as it is");
+            // (A later version's step may write its number: nothing else.)
+            assert_eq!(
+                migrated["desktop"]["zones"], document["desktop"]["zones"],
+                "its zones are left as they are"
+            );
+            assert!(migrated["desktop"].get("snap_zones").is_none());
             let error = Config::from_json(&document.to_string()).expect_err("refused");
             assert!(error.to_string().contains("desktop.snap_zones"), "{error}");
         }

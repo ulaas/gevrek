@@ -801,7 +801,7 @@ fn example_aurora() -> BuiltInExample {
     effects.shadow.offset_y = 10;
     effects.shadow.opacity = 150;
     effects.shadow.inactive_opacity = 100;
-    let bar = &mut config.desktop.shell.panel;
+    let bar = config.desktop.shell.panel_mut();
     bar.background = (14, 17, 26);
     bar.opacity = 235;
     bar.margin = 0;
@@ -873,7 +873,7 @@ fn example_focus_stage() -> BuiltInExample {
     effects.shadow.offset_y = 14;
     effects.shadow.opacity = 190;
     effects.shadow.inactive_opacity = 40;
-    let bar = &mut config.desktop.shell.panel;
+    let bar = config.desktop.shell.panel_mut();
     bar.edge = PanelEdge::Bottom;
     bar.height = 30;
     bar.margin = 0;
@@ -913,7 +913,7 @@ fn example_neon_grid() -> BuiltInExample {
     effects.glow.opacity = 210;
     effects.glow.inactive_opacity = 40;
     effects.glow.color = Some((255, 46, 136));
-    let bar = &mut config.desktop.shell.panel;
+    let bar = config.desktop.shell.panel_mut();
     bar.background = (12, 6, 24);
     bar.text = (236, 226, 255);
     bar.accent = Some((255, 214, 10));
@@ -948,7 +948,7 @@ fn example_paper() -> BuiltInExample {
     effects.shadow.color = (40, 50, 70);
     effects.shadow.opacity = 120;
     effects.shadow.inactive_opacity = 60;
-    let bar = &mut config.desktop.shell.panel;
+    let bar = config.desktop.shell.panel_mut();
     bar.background = (244, 245, 248);
     bar.text = (40, 46, 58);
     bar.accent = Some((58, 110, 220));
@@ -2359,7 +2359,10 @@ mod tests {
                 "{}",
                 example.id
             );
-            assert_eq!(worn.desktop.shell.panel, example.config.desktop.shell.panel);
+            assert_eq!(
+                worn.desktop.shell.panels,
+                example.config.desktop.shell.panels
+            );
             assert_eq!(
                 worn.desktop.bindings.len(),
                 example.config.desktop.bindings.len()
@@ -2595,7 +2598,14 @@ mod tests {
                 config.desktop.appearance.effects.any(),
                 "{id} draws nothing"
             );
-            assert!(config.desktop.shell.panel.enabled, "{id} has no bar");
+            assert!(
+                config
+                    .desktop
+                    .shell
+                    .panel()
+                    .is_some_and(|panel| panel.enabled),
+                "{id} has no bar"
+            );
             assert!(config.desktop.animations.enabled, "{id} does not animate");
             // The border sits where gevrek puts it by default.
             assert_eq!(

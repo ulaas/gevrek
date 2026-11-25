@@ -2163,7 +2163,7 @@ impl Runtime {
     fn configure_monitor_profiles(monitor_manager: &mut MonitorManager, config: &DesktopConfig) {
         gevrek_engine::config_apply::configure_monitor_profiles(monitor_manager, config);
         // The bar is a program of this backend: its place is kept here.
-        monitor_manager.set_bar(Some(config.shell.panel.clone()));
+        monitor_manager.set_panels(&config.shell.panels);
         // (Windows measures a display in its own pixels: the panel is as
         // many of them high as the display's scale makes it.)
         monitor_manager.set_lengths_in_display_pixels(true);

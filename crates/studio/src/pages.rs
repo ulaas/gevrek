@@ -151,7 +151,7 @@ impl Page {
             Page::Appearance => "Appearance",
             Page::Animations => "Animations",
             Page::Wallpaper => "Wallpaper",
-            Page::Bar => "Panel",
+            Page::Bar => "Panels",
             Page::Zones => "Zones on the desktop",
             Page::Bindings => "Key bindings",
             Page::Gestures => "Mouse and gestures",
@@ -183,7 +183,7 @@ impl Page {
             Page::Appearance => "Borders, opacity, and the drawn effects around windows.",
             Page::Animations => "How windows and workspaces move.",
             Page::Wallpaper => "The picture, or the colour, behind the windows. A display can have its own.",
-            Page::Bar => "The panel at the edge of each display, and what stands on it.",
+            Page::Bar => "The panels at the edges of the displays, and what stands on each.",
             Page::Zones => "Containers on the desktop that hold its icons: the zones there are, the rules that sort items into them, and how they look. (Not the places windows snap to.)",
             Page::Bindings => "What the keys do.",
             Page::Gestures => "What the corners of a display do, and touchpad gestures.",
@@ -349,12 +349,9 @@ impl Page {
         const WORKSPACES: &[Card] = &[card("Workspaces", "/desktop/workspaces", Show::Place)];
         const ANIMATIONS: &[Card] = &[card("Animations", "/desktop/animations", Show::AllBut(&[]))];
         const BAR: &[Card] = &[
-            // (What stands on it is placed by dragging, in the card above.)
-            card(
-                "Panel",
-                "/desktop/shell/panel",
-                Show::Rest(&["left", "centre", "right"]),
-            ),
+            // (Drawn by the page of its own, `crate::panels_page`: one
+            // panel at a time, what stands on it placed by dragging.)
+            card("Panels", "/desktop/shell/panels", Show::Place),
             card(
                 "Control centre and notifications",
                 "/desktop/shell/glass",

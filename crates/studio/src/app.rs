@@ -68,7 +68,7 @@ pub struct Options {
 }
 
 /// What the window can be told to do without a person, one after the
-/// other: `--script "set /desktop/shell/panel/height 44; apply; quit"`. Each step
+/// other: `--script "set /desktop/shell/panels/0/height 44; apply; quit"`. Each step
 /// waits until the window manager's configuration is there and nothing is
 /// on its way to it, so a script reads like what a person would do.
 #[derive(Debug, Clone, PartialEq)]
@@ -230,6 +230,7 @@ pub struct Studio {
     /// The workspaces of each display.
     workspaces: crate::workspaces::Page,
     snap_zones_edit: crate::snap_zones_edit::SnapZonesEdit,
+    panels_page: crate::panels_page::PanelsPage,
     /// The zones that hold the desktop's icons: their page.
     zones_page: crate::zones_page::ZonesPage,
     /// This studio asked the window manager to have a window picked,
@@ -378,6 +379,7 @@ impl Studio {
             layout_preview: Default::default(),
             workspaces: Default::default(),
             snap_zones_edit: Default::default(),
+            panels_page: Default::default(),
             zones_page: Default::default(),
             picking: false,
             arrangement: Default::default(),
@@ -1698,12 +1700,11 @@ impl Studio {
                         crate::system_idle::show(ui);
                     });
                 }
-                // The panel's modules, placed by dragging (the form below
-                // leaves these lists out).
+                // The panels, one at a time: which, what stands on it
+                // (placed by dragging) and its settings.
                 if page == Page::Bar {
-                    widgets::card(ui, "What stands on it", |ui| {
-                        crate::panel_modules::show(ui, &mut self.document);
-                    });
+                    self.panels_page
+                        .show(ui, &mut self.document, highlight.as_deref());
                 }
                 // The zones, moved and sized by dragging.
                 if page == Page::SnapZones {
@@ -1798,6 +1799,10 @@ impl Studio {
                     // The displays are set in the cards above, each by
                     // its own controls: no second list of them here.
                     if card.pointer == "/desktop/outputs" {
+                        continue;
+                    }
+                    // (Nor of the panels.)
+                    if card.pointer == crate::panels_page::PANELS {
                         continue;
                     }
                     // A display's scale is set with the display. The list
@@ -4010,14 +4015,17 @@ mod tests {
     #[test]
     fn a_script_is_read_step_by_step() {
         let steps = Step::parse_all(
-            "page bar; set /desktop/shell/panel/height 44 ; live on; apply; wait 200; undo; quit",
+            "page bar; set /desktop/shell/panels/0/height 44 ; live on; apply; wait 200; undo; quit",
         )
         .expect("steps");
         assert_eq!(
             steps,
             [
                 Step::Page(Page::Bar),
-                Step::Set("/desktop/shell/panel/height".to_string(), Value::from(44)),
+                Step::Set(
+                    "/desktop/shell/panels/0/height".to_string(),
+                    Value::from(44)
+                ),
                 Step::Live(true),
                 Step::Apply,
                 Step::Wait(200),
