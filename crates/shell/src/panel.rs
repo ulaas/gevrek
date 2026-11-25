@@ -1423,8 +1423,11 @@ struct Ink {
     text: egui::Color32,
     accent: egui::Color32,
     /// The panel goes down a side: what it shows stands under each
-    /// other and is kept narrow (a word is a sign, or a few letters).
+    /// other and is kept narrow.
     upright: bool,
+    /// How words are written there: turned a quarter (a word is as long
+    /// as it is), upright and short, or not at all.
+    side: gevrek_model::settings::SideText,
     /// How long a module that takes what room there is (the taskbar)
     /// may be: as long as its group may be, less what else stands in
     /// the group.
@@ -1442,6 +1445,7 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
         text: rgb(bar.text),
         accent: bar.accent.map_or(shown.accent, rgb),
         upright: bar.edge.is_upright(),
+        side: bar.side_text,
         room: f32::INFINITY,
     };
     let (red, green, blue) = bar.background;
@@ -1820,6 +1824,7 @@ fn draw_marks(ui: &mut egui::Ui, shown: &Shown, ink: &Ink, asked: &mut Asked) {
     if shown.recording {
         let red = egui::Color32::from_rgb(220, 60, 60);
         let words = if ink.upright { "" } else { "  recording" };
+        let words = if ink.turned() { "recording" } else { words };
         let label = egui::RichText::new(format!("{}{words}", icons::RECORD))
             .size(12.5)
             .color(theme::readable(egui::Color32::WHITE, red, 4.5));
@@ -1837,6 +1842,7 @@ fn draw_marks(ui: &mut egui::Ui, shown: &Shown, ink: &Ink, asked: &mut Asked) {
     if shown.sharing {
         let red = egui::Color32::from_rgb(220, 60, 60);
         let words = if ink.upright { "" } else { "  sharing" };
+        let words = if ink.turned() { "sharing" } else { words };
         let label = egui::RichText::new(format!("{}{words}", icons::SCREENCAST))
             .size(12.5)
             .color(theme::readable(egui::Color32::WHITE, red, 4.5));
@@ -2321,6 +2327,46 @@ struct Cell<'a> {
     pressed: bool,
 }
 
+impl Ink {
+    /// Words are written turned a quarter here: down a side, and wanted so.
+    fn turned(&self) -> bool {
+        self.upright && self.side == gevrek_model::settings::SideText::Rotated
+    }
+
+    /// Words are kept short here (a number without its sign, a few
+    /// letters of a name): down a side, where they are not turned.
+    fn short(&self) -> bool {
+        self.upright && self.side != gevrek_model::settings::SideText::Rotated
+    }
+
+    /// No words at all here: down a side, the signs alone.
+    fn signs_only(&self) -> bool {
+        self.upright && self.side == gevrek_model::settings::SideText::Signs
+    }
+}
+
+/// The size of the words on a panel down a side where they are turned.
+const TURNED_SIZE: f32 = 12.0;
+
+/// Paint words turned a quarter, read from the top down: in the column
+/// whose middle is `centre_x`, from `top` on. (They take as much of the
+/// panel's length as they are wide, and as much of its thickness as
+/// they are high.)
+fn paint_turned(
+    painter: &egui::Painter,
+    words: std::sync::Arc<egui::Galley>,
+    centre_x: f32,
+    top: f32,
+    colour: egui::Color32,
+) {
+    // (Turned about its upper left corner, which is the upper right one
+    // of the place the turned words take.)
+    let at = egui::pos2(centre_x + words.size().y / 2.0, top);
+    painter.add(
+        egui::epaint::TextShape::new(at, words, colour).with_angle(std::f32::consts::FRAC_PI_2),
+    );
+}
+
 /// How thick the modules of a panel are across it, by the panel's own
 /// thickness: a low panel has low modules.
 fn across_of(ui: &egui::Ui, upright: bool) -> f32 {
@@ -2337,13 +2383,35 @@ fn across_of(ui: &egui::Ui, upright: bool) -> f32 {
 /// under it, smaller, and the cell is as wide as the panel.
 fn cell(ui: &mut egui::Ui, ink: &Ink, cell: &Cell) -> egui::Response {
     let across = across_of(ui, ink.upright);
-    let font = egui::FontId::proportional(if ink.upright { 10.5 } else { 12.5 });
-    let words = cell.words.filter(|words| !words.is_empty()).map(|words| {
-        ui.painter()
-            .layout_no_wrap(words.to_string(), font, cell.colour)
+    let turned = ink.turned();
+    let font = egui::FontId::proportional(if turned {
+        TURNED_SIZE
+    } else if ink.upright {
+        10.5
+    } else {
+        12.5
     });
     let has_sign = !matches!(cell.sign, Sign::None);
-    let size = if ink.upright {
+    let words = cell
+        .words
+        .filter(|words| !words.is_empty())
+        // (The signs alone: no words beside a sign. Words that have no
+        // sign are all the cell says, and stay.)
+        .filter(|_| !(ink.signs_only() && has_sign))
+        .map(|words| {
+            ui.painter()
+                .layout_no_wrap(words.to_string(), font, cell.colour)
+        });
+    let size = if turned {
+        // The sign, and under it the words, turned: as long as they are.
+        let high = 5.0
+            + if has_sign { 17.0 } else { 0.0 }
+            + words.as_ref().map_or(0.0, |words| {
+                words.size().x + if has_sign { 3.0 } else { 0.0 }
+            })
+            + 5.0;
+        egui::vec2(across, high.max(22.0))
+    } else if ink.upright {
         let high = 5.0
             + if has_sign { 17.0 } else { 0.0 }
             + words.as_ref().map_or(0.0, |words| words.size().y + 1.0)
@@ -2409,6 +2477,21 @@ fn cell(ui: &mut egui::Ui, ink: &Ink, cell: &Cell) -> egui::Response {
                 None => font_sign(ui, or),
             }
         }
+    }
+    if let (Some(words), true) = (&words, turned) {
+        let top = rect.top() + 5.0 + if has_sign { 17.0 + 3.0 } else { 0.0 };
+        // (In the middle of what room there is, where the cell is longer
+        // than its words: one that is 22 high at the least.)
+        let room = rect.bottom() - 5.0 - top;
+        let top = top + ((room - words.size().x) / 2.0).max(0.0);
+        paint_turned(
+            ui.painter(),
+            words.clone(),
+            rect.center().x,
+            top,
+            cell.colour,
+        );
+        return response;
     }
     if let Some(words) = words {
         let at = if ink.upright {
@@ -2532,7 +2615,7 @@ fn draw_module(
                 .scope(|ui| {
                     ui.spacing_mut().item_spacing = egui::Vec2::splat(2.0);
                     for (index, tab) in view.tabs.iter().enumerate() {
-                        let said = if upright {
+                        let said = if ink.short() {
                             short_name(&tab.label)
                         } else {
                             tab.label.clone()
@@ -2549,7 +2632,10 @@ fn draw_module(
                             egui::FontId::proportional(12.5),
                             colour,
                         );
-                        let size = if upright {
+                        let size = if ink.turned() {
+                            // As long as its name, which is turned.
+                            egui::vec2(across, (words.size().x + 16.0).max(26.0))
+                        } else if upright {
                             egui::vec2(across, 26.0)
                         } else {
                             egui::vec2((words.size().x + 18.0).max(28.0), across)
@@ -2561,10 +2647,26 @@ fn draw_module(
                             ui.painter()
                                 .rect_filled(rect, 7.0, text.gamma_multiply(0.12));
                         }
-                        ui.painter()
-                            .galley(rect.center() - words.size() / 2.0, words, colour);
+                        if ink.turned() {
+                            paint_turned(
+                                ui.painter(),
+                                words.clone(),
+                                rect.center().x,
+                                rect.center().y - words.size().x / 2.0,
+                                colour,
+                            );
+                        } else {
+                            ui.painter()
+                                .galley(rect.center() - words.size() / 2.0, words, colour);
+                        }
                         if tab.windows > 0 && !tab.shown {
-                            let dot = egui::pos2(rect.center().x, rect.bottom() - 3.0);
+                            // (Its dot: under the name, or beside it where
+                            // the name runs down.)
+                            let dot = if ink.turned() {
+                                egui::pos2(rect.left() + 3.0, rect.center().y)
+                            } else {
+                                egui::pos2(rect.center().x, rect.bottom() - 3.0)
+                            };
                             ui.painter()
                                 .circle_filled(dot, 1.5, text.gamma_multiply(0.6));
                         }
@@ -2601,7 +2703,7 @@ fn draw_module(
                 ink,
                 &Cell {
                     sign: Sign::Font(icons::SQUARES_FOUR),
-                    words: (!upright).then_some(said.as_str()),
+                    words: (!ink.short()).then_some(said.as_str()),
                     colour: text,
                     fill: Some(text.gamma_multiply(0.07)),
                     pressed: true,
@@ -2612,7 +2714,48 @@ fn draw_module(
                 asked.layout_menu = Some(response.rect);
             }
         }
-        // (A title is as long as it is: not on a panel down a side.)
+        // Down a side a title runs down it, turned, in a place as long as
+        // `title_width` (as long as it is where that is 0, but never more
+        // than a third of a screen): one that is longer ends in "…".
+        PanelModule::Title if !view.title.is_empty() && ink.turned() => {
+            let colour = text.gamma_multiply(if view.focused { 0.95 } else { 0.55 });
+            // (Not by the room its group has just now: the group is placed
+            // by how long it was the last time, which is nothing before
+            // the title was ever drawn. By the display: never more than
+            // two fifths of how high the panel is.)
+            let most = if bar.title_width == 0 {
+                360.0
+            } else {
+                bar.title_width as f32
+            }
+            .min(ui.ctx().content_rect().height() * 0.4);
+            if most < 48.0 {
+                return;
+            }
+            let title: String = view.title.chars().take(200).collect();
+            let mut job = egui::text::LayoutJob::simple_singleline(
+                title,
+                egui::FontId::proportional(TURNED_SIZE),
+                colour,
+            );
+            job.wrap = egui::text::TextWrapping::truncate_at_width(most - 8.0);
+            let words = ui.painter().layout_job(job);
+            let long = if bar.title_width == 0 {
+                words.size().x + 8.0
+            } else {
+                most
+            };
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(across, long), egui::Sense::hover());
+            paint_turned(
+                ui.painter(),
+                words,
+                rect.center().x,
+                rect.top() + 4.0,
+                colour,
+            );
+        }
+        // (Not where words are short or left out: a title is as long as
+        // it is.)
         PanelModule::Title if !view.title.is_empty() && !upright => {
             let title: String = view.title.chars().take(200).collect();
             let words = egui::RichText::new(title)
@@ -2649,7 +2792,10 @@ fn draw_module(
                 bar.clock_format.as_str()
             };
             let said = clock_text(format, &now);
-            if upright {
+            if ink.turned() {
+                // One line, turned, as along the top.
+                cell(ui, ink, &says(Sign::None, Some(said.trim()), text));
+            } else if upright {
                 // Its parts under each other, in their order; the time
                 // itself (the part with a colon) larger, its hours over
                 // its minutes.
@@ -2781,8 +2927,9 @@ fn draw_module(
         }
         PanelModule::Sound => {
             if let Some((percent, muted)) = shown.system.volume {
-                // (Down a side there is no room for the sign of percent.)
-                let said = if upright {
+                // (Upright down a side there is no room for the sign
+                // of percent.)
+                let said = if ink.short() {
                     percent.to_string()
                 } else {
                     format!("{percent}%")
@@ -2822,7 +2969,7 @@ fn draw_module(
         }
         PanelModule::Brightness => {
             if let Some(percent) = shown.system.brightness {
-                let said = if upright {
+                let said = if ink.short() {
                     percent.to_string()
                 } else {
                     format!("{percent}%")
@@ -2837,7 +2984,7 @@ fn draw_module(
         }
         PanelModule::Battery => {
             if let Some(battery) = shown.system.battery {
-                let said = if upright {
+                let said = if ink.short() {
                     battery.percent.to_string()
                 } else {
                     format!("{}%", battery.percent)
@@ -5105,6 +5252,77 @@ mod tests {
     /// taskbar has (they did: the taskbar went on under the clock); and
     /// what is at the end is in its order from the top.
     #[test]
+    fn down_a_side_words_are_turned_kept_short_or_left_out() {
+        use gevrek_model::settings::{PanelEdge, PanelStyle, SideText};
+        let mut view = view(&windows_state(), "Monitor ACM2702 (1)").expect("the display");
+        view.title = "a window with a title of some length".to_string();
+        view.tabs = ["Web", "Mail", "Terminal"]
+            .iter()
+            .enumerate()
+            .map(|(index, name)| Tab {
+                name: name.to_string(),
+                label: name.to_string(),
+                configured: true,
+                shown: index == 0,
+                windows: 1,
+            })
+            .collect();
+        // (Each group on a piece of its own: how long each came to be.)
+        let drawn = |side_text: SideText| -> Vec<f32> {
+            let bar = PanelProfile {
+                edge: PanelEdge::Left,
+                style: PanelStyle::Islands,
+                height: 40,
+                padding: 0,
+                side_text,
+                left: vec![PanelModule::Workspaces],
+                centre: vec![PanelModule::Title],
+                right: vec![PanelModule::Sound],
+                ..Default::default()
+            };
+            panel_drawn(&bar, &view, egui::vec2(40.0, 1000.0), 6, None)
+                .reach
+                .iter()
+                .map(|piece| piece.height())
+                .collect()
+        };
+        let (turned, stacked, signs) = (
+            drawn(SideText::Rotated),
+            drawn(SideText::Stacked),
+            drawn(SideText::Signs),
+        );
+        // Turned: the workspaces by their whole names, which makes them
+        // longer than their first letters; the title in the middle, as
+        // long as it is told to be; the sound with its number beside its
+        // sign's place.
+        assert_eq!(turned.len(), 3, "{turned:?}");
+        assert!(turned[0] > stacked[0] + 20.0, "{turned:?} {stacked:?}");
+        assert!((turned[1] - 260.0).abs() < 1.0, "{turned:?}");
+        // Upright and short: no title (it is as long as it is), and the
+        // sound's number under its sign.
+        assert_eq!(stacked.len(), 2, "{stacked:?}");
+        assert!(turned[2] > stacked[1], "{turned:?} {stacked:?}");
+        // The signs alone: the sound without its number; the workspaces
+        // still by their letters, which is all they have.
+        assert_eq!(signs.len(), 2, "{signs:?}");
+        assert!(signs[1] < stacked[1], "{signs:?} {stacked:?}");
+        assert_eq!(signs[0], stacked[0]);
+        // Along the top nothing of this counts.
+        let lying = |side_text: SideText| {
+            let bar = PanelProfile {
+                side_text,
+                style: PanelStyle::Islands,
+                left: vec![PanelModule::Workspaces],
+                centre: vec![PanelModule::Title],
+                right: vec![PanelModule::Sound],
+                ..Default::default()
+            };
+            panel_drawn(&bar, &view, egui::vec2(1600.0, 36.0), 6, None).reach
+        };
+        assert_eq!(lying(SideText::Rotated), lying(SideText::Signs));
+    }
+
+    #[test]
     fn down_a_side_the_ends_of_the_panel_keep_apart() {
         use gevrek_model::settings::{PanelEdge, PanelStyle};
         let bar = PanelProfile {
@@ -5700,6 +5918,13 @@ mod tests {
         if let Some(height) = said("GEVREK_LOOK_HEIGHT").and_then(|text| text.parse().ok()) {
             bar.height = height;
         }
+        // (`GEVREK_LOOK_TEXT=stacked` or `signs`: how words are written
+        // down a side.)
+        bar.side_text = match said("GEVREK_LOOK_TEXT").as_deref() {
+            Some("stacked") => gevrek_model::settings::SideText::Stacked,
+            Some("signs") => gevrek_model::settings::SideText::Signs,
+            _ => gevrek_model::settings::SideText::Rotated,
+        };
         let thick = bar.height.clamp(16, 200);
         let size = if edge.is_upright() {
             (thick, display.1)
