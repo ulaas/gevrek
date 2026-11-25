@@ -99,6 +99,14 @@ fn folder() -> PathBuf {
     runtime.join(format!("gevrek-window-icons-{}", std::process::id()))
 }
 
+/// Whether an icon is a file gevrek wrote itself: one in its folder.
+/// (Any icon that began with a `/` was taken for one and removed when
+/// the window went or changed its icon: a program that named its icon
+/// `/home/someone/a-file` had that file deleted.)
+fn own_file(icon: &str) -> bool {
+    std::path::Path::new(icon).parent() == Some(folder().as_path())
+}
+
 /// The file of a window's icon.
 fn file_of(window: WindowHandle, serial: u32) -> PathBuf {
     folder().join(format!("{}-{serial}.png", window.0 as u64))
@@ -111,7 +119,7 @@ impl State {
             return;
         };
         // The file of the icon it had goes.
-        if window.icon.starts_with('/') {
+        if own_file(&window.icon) {
             if let Err(error) = std::fs::remove_file(&window.icon) {
                 log::debug!(
                     "a window's old icon {} was not removed: {error}",
@@ -141,7 +149,10 @@ impl State {
                     String::new()
                 }
             }
-            Some((name, None)) => name,
+            // A name is a name of the icon theme's: nothing with a path
+            // in it is taken from a program.
+            Some((name, None)) if !name.contains('/') => name,
+            Some((_, None)) => String::new(),
             None => String::new(),
         };
         let surface = window.surface.clone();
@@ -151,7 +162,7 @@ impl State {
     /// A window is gone: so is the file of its icon.
     pub(crate) fn forget_window_icon(&mut self, id: WindowHandle) {
         if let Some(window) = self.desktop.windows.get(&id) {
-            if window.icon.starts_with('/') {
+            if own_file(&window.icon) {
                 if let Err(error) = std::fs::remove_file(&window.icon) {
                     log::debug!(
                         "the icon {} of a closed window was not removed: {error}",

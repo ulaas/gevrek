@@ -53,6 +53,48 @@ target\release\gevrek.exe pin
 target\release\gevrek.exe tag-clear
 ```
 
+**macOS.** Built and installed as an application
+([packaging/macos/README.txt](../packaging/macos/README.txt) has the
+whole of it, with the permission macOS asks for):
+
+```sh
+packaging/macos/build-app.sh
+packaging/macos/install.sh
+gevrek start wm
+```
+
+The `gevrek` commands are the same there too.
+
+### The first start: the welcome and the tutorial
+
+The first time gevrek runs for you (no configuration of your own yet),
+your windows stay where they are: every workspace floats, and a welcome
+opens. It asks for the layout to begin with, the look, where the panel
+is and the key gevrek's shortcuts are held with (Super or Alt), and
+offers the tour. Nothing is written until you say so there; "Later"
+leaves everything as it was, and the welcome comes again at the next
+start.
+
+The tour is eight short lessons, about a quarter of an hour: windows
+that arrange themselves, going from window to window, moving one,
+workspaces, the launcher, giving a window more room, gevrek studio, and
+where everything is. It runs on practice windows of its own, on
+workspaces of its own (`Tutorial`, and `Tutorial 2` for the lesson on
+workspaces): nothing of yours is moved, and both are gone when it ends.
+A card at the foot of the display says each step with the keys *your*
+configuration has for it, waits until it is done (by a key, the pointer
+or any other way), offers to show it after a while, and can be left at
+any step and taken up again there.
+
+| | |
+|---|---|
+| `gevrek tutorial` | Begin the tutorial, or go on where it was left (also `Super`+`F2`, and in the launcher after a `>`) |
+| `gevrek tutorial next`, `back`, `leave` | The card's buttons, from a terminal |
+| `gevrek tutorial welcome` | The welcome again |
+
+`GEVREK_NO_WELCOME` (set to anything) keeps the welcome away, for
+machines that are set up by a script.
+
 `start all` starts the window manager and, when it is beside
 `gevrek.exe`, the shell (`gevrek-shell`: the panel and what belongs to
 it). The settings program, gevrek studio, is not started with them: open

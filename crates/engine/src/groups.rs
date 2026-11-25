@@ -311,6 +311,7 @@ pub fn merge(
         .containers
         .remove_at(source_index)
         .ok_or(GroupError::SourceGone)?;
+    workspace.container_left(source_index);
     let adjusted_target = if source_index < target_index {
         target_index - 1
     } else {
@@ -360,6 +361,7 @@ pub fn ungroup(
     }
     container.remove_window(window);
     workspace.add_window_at(window, container_index + 1);
+    workspace.container_came(container_index + 1);
     workspace.focus_container(container_index + 1);
     workspace.split_ratios.clear();
     Ok(location)

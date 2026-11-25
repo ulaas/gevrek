@@ -380,7 +380,11 @@ pub fn own_program_name(file_name: &str, subsystem: Option<u16>) -> Option<Strin
     if stem.starts_with("gevrek") || stem.ends_with(".old") || stem.ends_with(".bak") {
         return None;
     }
-    (subsystem == Some(2)).then(|| file_name[..stem.len()].to_string())
+    // (Cut by the ending's own length: the name in small letters may be
+    // longer or shorter than the name, and a cut by its length fell in
+    // the wrong place, or past the end.)
+    let name = file_name.get(..file_name.len().checked_sub(".exe".len())?)?;
+    (subsystem == Some(2)).then(|| name.to_string())
 }
 
 /// The application a program of the person's own folder stands for.
@@ -775,6 +779,13 @@ mod tests {
         // One for a terminal, a copy from before an update, another file.
         assert_eq!(own_program_name("soyuz-tui.exe", Some(3)), None);
         assert_eq!(own_program_name("peek.old.exe", Some(2)), None);
+        // A name whose small letters are longer than it is: cut where
+        // its ending begins (it was cut in the wrong place, and with
+        // more such letters past its end).
+        assert_eq!(
+            own_program_name("\u{130}\u{130}\u{130}\u{130}\u{130}.EXE", Some(2)),
+            Some("\u{130}\u{130}\u{130}\u{130}\u{130}".to_string())
+        );
         assert_eq!(own_program_name("notes.txt", Some(2)), None);
         // Of gevrek's own programs only the settings.
         assert_eq!(own_program_name("gevrek-wm.exe", Some(3)), None);

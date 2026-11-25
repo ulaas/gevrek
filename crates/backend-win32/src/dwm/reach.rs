@@ -9,7 +9,7 @@
 use crate::elevated_helper::{client, After, Answer, Ask};
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
-    PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, ShowWindowAsync,
+    PostMessageW, SetWindowPos, ShowWindow, ShowWindowAsync,
     SET_WINDOW_POS_FLAGS, SHOW_WINDOW_CMD, WM_CLOSE,
 };
 
@@ -102,14 +102,6 @@ pub fn foreground_by_helper(hwnd: HWND) -> bool {
         window: hwnd.0 as isize,
     }));
     true
-}
-
-/// `SetForegroundWindow`, where it is this program's own to do.
-///
-/// # Safety
-/// As the call itself.
-pub unsafe fn set_foreground(hwnd: HWND) -> bool {
-    SetForegroundWindow(hwnd).as_bool()
 }
 
 /// Ask a window to close (`WM_CLOSE`, posted).

@@ -96,7 +96,7 @@ extern "C" fn pass_on_leave(_: libc::c_int) {
 pub fn run() -> anyhow::Result<()> {
     let mut line = String::new();
     std::io::stdin().lock().read_line(&mut line)?;
-    let order: Order = serde_json::from_str(&line)
+    let mut order: Order = serde_json::from_str(&line)
         .map_err(|error| anyhow::anyhow!("the order was not understood: {error}"))?;
     // (The order carries the password: only its parts that are not are
     // said.)
@@ -151,6 +151,13 @@ pub fn run() -> anyhow::Result<()> {
         std::process::exit(1);
     }
     log::debug!("PAM opened the session of {}", order.user);
+    // The password has done its work: none of its copies is kept.
+    client.forget_password();
+    for text in [&mut line, &mut order.password] {
+        // SAFETY: zero bytes are valid UTF-8, and the length is unchanged.
+        unsafe { text.as_bytes_mut() }.fill(0);
+        text.clear();
+    }
     // What PAM's modules want the session to have: logind's own word on
     // the session, `pam_env`'s variables, a keyring's socket.
     let from_pam = client.environment();

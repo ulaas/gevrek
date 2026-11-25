@@ -1,7 +1,7 @@
 ; gevrek's setup program for Windows (Inno Setup 6). `cargo xtask dist`
 ; compiles it, with what it needs to know given on the command line:
 ;
-;   ISCC /DVersion=0.6.0 /DNumbers=0.6.0 /DSource=<the unpacked package>
+;   ISCC /DVersion=0.7.6 /DNumbers=0.7.6 /DSource=<the unpacked package>
 ;        /DOut=<folder> /DName=gevrek-windows-x64-setup gevrek.iss
 ;
 ; It installs for the person who runs it, with no administrator, to the

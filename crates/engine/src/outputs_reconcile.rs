@@ -325,6 +325,41 @@ impl Outputs {
                 changes.windows_to_hide.push(window.handle);
             }
         }
+        // Workspaces may be parked under this handle already: the only
+        // display went as this one came back, and its ring was handed
+        // to the display that takes its place (`detach_monitor`). Their
+        // windows join the ring that comes back: the workspace of the
+        // same name, else the one that is shown. (The ring that came
+        // back was put in its place, and every window of the display
+        // that went was known to nobody from then on.)
+        if let Some(parked) = self.workspaces.remove(&handle) {
+            let mut joined = 0;
+            for workspace in parked.iter() {
+                let index = crate::workspace::Workspace::position_called(
+                    cached.workspaces.elements(),
+                    &workspace.name,
+                )
+                .unwrap_or(visible_index);
+                for window in workspace.all_windows() {
+                    let floating = workspace.floating_windows.iter().any(|other| *other == window);
+                    let Some(target) = cached.workspaces.get_mut(index) else {
+                        continue;
+                    };
+                    if floating {
+                        target.add_floating_window(window);
+                    } else {
+                        target.add_window(window, true);
+                    }
+                    joined += 1;
+                    if index == visible_index {
+                        changes.windows_to_show.push(window);
+                    } else {
+                        changes.windows_to_hide.push(window);
+                    }
+                }
+            }
+            log::info!("Monitor {key} took {joined} window(s) of the display that went as it came");
+        }
         self.workspaces.insert(handle, cached.workspaces);
         if let Some(reserved) = cached.reserved {
             self.reserved_areas.insert(handle, reserved);
@@ -427,6 +462,31 @@ mod tests {
             vec![WindowHandle(1), WindowHandle(2), WindowHandle(3)]
         );
         assert!(manager.get_workspaces(MonitorHandle(2)).is_none());
+    }
+
+    #[test]
+    fn a_display_that_comes_back_as_the_only_one_keeps_the_windows_of_the_one_that_went() {
+        let mut manager = docked();
+        // Undocked: the external display's windows are on the laptop's.
+        manager.reconcile_with(vec![display(1, LAPTOP, true, 0)]);
+        // A window of the laptop's own, on a workspace of its own.
+        manager.create_workspace(MonitorHandle(1), "scratch".into(), LayoutType::BSP);
+        manager
+            .get_workspaces_mut(MonitorHandle(1))
+            .unwrap()
+            .get_mut(1)
+            .unwrap()
+            .add_window(WindowHandle(9), true);
+        // Docked with the lid closed: the laptop's display is gone and
+        // the external one is back, in the same look at the displays.
+        manager.reconcile_with(vec![display(7, EXTERNAL, true, 0)]);
+        for window in [1, 2, 3, 9] {
+            assert_eq!(
+                manager.find_window(WindowHandle(window)).map(|(monitor, _)| monitor),
+                Some(MonitorHandle(7)),
+                "window {window} is known on the display that is left"
+            );
+        }
     }
 
     #[test]

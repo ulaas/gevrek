@@ -131,14 +131,40 @@ pub fn id_list_offsets(bytes: &[u8]) -> Option<(usize, Vec<usize>)> {
     let mut places = Vec::with_capacity(count + 1);
     for index in 0..=count {
         let place = number(4 + index * 4)?;
-        // Every list has at least the two bytes that end it.
-        if place + 2 > bytes.len() {
+        // Every list has at least the two bytes that end it, and ends
+        // within the bytes.
+        if place.checked_add(2).is_none_or(|end| end > bytes.len()) || !list_ends(bytes, place) {
             return None;
         }
         places.push(place);
     }
     let folder = places.remove(0);
     Some((folder, places))
+}
+
+/// Whether the list that begins at `place` ends within the bytes: each
+/// of its parts says how long it is, and one of length nought ends it.
+/// (Only the list's first two bytes were looked at. The shell walks a
+/// list to its end, and whoever drags writes the bytes: a list that did
+/// not end was read past them.)
+fn list_ends(bytes: &[u8], mut place: usize) -> bool {
+    loop {
+        let Some(length) = bytes
+            .get(place..)
+            .and_then(|rest| rest.get(..2))
+            .map(|two| u16::from_le_bytes([two[0], two[1]]) as usize)
+        else {
+            return false;
+        };
+        if length == 0 {
+            return true;
+        }
+        // (A part is at least its own length's two bytes.)
+        if length < 2 {
+            return false;
+        }
+        place += length;
+    }
 }
 
 /// The items the shell's kind names, by their ids.
@@ -387,6 +413,15 @@ mod tests {
         assert_eq!(id_list_offsets(&many), None);
         assert_eq!(id_list_offsets(&bytes[..6]), None);
         assert!(items_of_id_list(&past).is_empty());
+        // A list whose part says it is longer than what is left, and one
+        // that never ends: neither is handed to the shell.
+        let mut long = bytes.clone();
+        long[16..18].copy_from_slice(&400u16.to_le_bytes());
+        assert_eq!(id_list_offsets(&long), None);
+        let mut endless = bytes.clone();
+        endless[16..22].copy_from_slice(&[2, 0, 2, 0, 2, 0]);
+        assert_eq!(id_list_offsets(&endless), None);
+        assert!(items_of_id_list(&endless).is_empty());
     }
 
     #[test]

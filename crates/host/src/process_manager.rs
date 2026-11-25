@@ -103,6 +103,13 @@ impl StartupProcessManager {
             .iter()
             .map(|profile| normalize_id(&profile.id))
             .collect();
+        // The ones that were switched off until now.
+        let were_off: BTreeSet<String> = self
+            .profiles
+            .iter()
+            .filter(|(_, profile)| !profile.enabled)
+            .map(|(id, _)| id.clone())
+            .collect();
         self.profiles = incoming;
 
         for id in self.order.clone() {
@@ -127,6 +134,14 @@ impl StartupProcessManager {
                         "startup application '{id}' is started again but was not stopped: {error:#}"
                     );
                 }
+                self.records.insert(
+                    id,
+                    ProcessRecord::scheduled(now + Duration::from_millis(profile.delay_ms.into())),
+                );
+            } else if were_off.contains(&id) {
+                // Switched on now: it is started, as one that is new.
+                // (What was kept of it said "disabled" and nothing
+                // more, and it was not started until gevrek was.)
                 self.records.insert(
                     id,
                     ProcessRecord::scheduled(now + Duration::from_millis(profile.delay_ms.into())),
@@ -187,6 +202,12 @@ impl StartupProcessManager {
 
     pub fn restart(&mut self, id: &str) -> Result<()> {
         let id = self.resolve_id(id)?;
+        // One that is switched off is not started, again or at all. (It
+        // was set to start at once, could not be, and said so with
+        // every pass of the loop.)
+        if self.profiles.get(&id).is_some_and(|profile| !profile.enabled) {
+            return Err(anyhow!("Startup application '{id}' is disabled"));
+        }
         self.stop_record(&id, "restarting")?;
         if let Some(record) = self.records.get_mut(&id) {
             record.suppress_restart = false;
@@ -387,9 +408,14 @@ impl StartupProcessManager {
         record.next_launch = None;
         if let Some(mut child) = record.child.take() {
             let pid = child.id();
-            child
-                .kill()
-                .map_err(|error| anyhow!("Could not stop startup application '{id}': {error}"))?;
+            if let Err(error) = child.kill() {
+                // Still running, and still ours to watch: it is kept.
+                // (It was let go of, and a second copy was started
+                // beside it later.)
+                record.last_error = Some(error.to_string());
+                record.child = Some(child);
+                return Err(anyhow!("Could not stop startup application '{id}': {error}"));
+            }
             match child.wait() {
                 Ok(exit) => {
                     log::debug!("startup application '{id}' (process {pid}) was stopped ({status}): {exit}")
@@ -504,6 +530,25 @@ fn should_restart(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_that_is_switched_on_by_a_reload_is_started_and_one_that_is_off_is_not_restarted() {
+        let off = StartupProfile {
+            id: "notes".to_string(),
+            enabled: false,
+            ..StartupProfile::default()
+        };
+        let mut manager = StartupProcessManager::new();
+        manager.configure(std::slice::from_ref(&off), false);
+        assert_eq!(manager.records["notes"].status, "disabled");
+        // Off: asked to start again, it says no and nothing is due.
+        assert!(manager.restart("notes").is_err());
+        assert!(manager.records["notes"].next_launch.is_none());
+        // Switched on by a reload: due to be started.
+        let on = StartupProfile { enabled: true, ..off };
+        manager.configure(&[on], true);
+        assert!(manager.records["notes"].next_launch.is_some());
+    }
 
     #[test]
     fn startup_ids_are_normalized_for_control() {

@@ -56,6 +56,10 @@ fn programs() -> Vec<&'static str> {
 /// stays behind.
 const RETIRED: &[&str] = &["gevrek-editor", "gevrek-overlay"];
 
+/// Units of the session an earlier install put there and this one no
+/// longer has: the bar of before the shell.
+const RETIRED_UNITS: &[&str] = &["gevrek-bar.service"];
+
 fn remove_retired(bin: &Path) -> Result<()> {
     for name in RETIRED {
         let file = bin.join(program_file(name));
@@ -448,7 +452,7 @@ fn install_session(prefix: &Path, bin: &Path, previous: &Path) -> Result<()> {
     }
     // (A unit an earlier install put there and this one no longer has:
     // the bar of before the shell.)
-    for gone in ["gevrek-bar.service"] {
+    for gone in RETIRED_UNITS {
         let stale = units.join(gone);
         if stale.exists() {
             std::fs::remove_file(&stale)?;

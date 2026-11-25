@@ -9,7 +9,6 @@ description = "Surfaces for gevrek's shell: a place on the screen (a panel, a la
 [dependencies]
 egui = "0.37"
 egui-wgpu = "0.37"
-gevrek-ui = { path = "../ui" }
 anyhow = { workspace = true }
 log = { workspace = true }
 pollster = "1"
@@ -60,3 +59,5 @@ raw-window-handle = "0.6"
 
 [dev-dependencies]
 env_logger = { workspace = true }
+# The examples are dressed as gevrek's own surfaces are.
+gevrek-ui = { path = "../ui" }

@@ -28,6 +28,19 @@ impl SessionLockHandler for State {
     }
 
     fn lock(&mut self, confirmation: SessionLocker) {
+        // A session that is locked is locked by one program, and only
+        // that one unlocks it. (Every request was confirmed: any other
+        // client could ask for the lock of a locked session, be told
+        // it had it, and unlock without a password.) Another may lock
+        // only where the one that did is gone (a lock screen that
+        // ended by a fault is started again). Refused: the
+        // confirmation, let go of, tells the client it is finished.
+        use smithay::reexports::wayland_server::Resource;
+        if self.locked && self.locker.as_ref().is_some_and(|locker| locker.is_alive()) {
+            log::warn!("a second program asked to lock the locked session: refused");
+            return;
+        }
+        self.locker = Some(confirmation.ext_session_lock().clone());
         log::info!("The session is locked");
         let from_black = self.veiled && self.ends_with_program && !self.locked;
         self.locked = true;
@@ -72,6 +85,7 @@ impl SessionLockHandler for State {
     fn unlock(&mut self) {
         log::info!("The session is unlocked");
         self.locked = false;
+        self.locker = None;
         self.lock_change = self.lock_change_length().map(|length| LockChange {
             since: std::time::Instant::now(),
             kind: ChangeKind::Unlock,

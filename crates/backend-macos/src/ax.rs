@@ -118,7 +118,12 @@ impl Element {
     /// # Safety
     /// `raw` is a valid AXUIElement.
     pub(crate) unsafe fn retained(raw: ffi::AXUIElementRef) -> Option<Self> {
-        Cf::retained(raw).map(Self)
+        // (With the time it is waited for, as every element has: a window
+        // that came by an observer's word was asked with the system's own
+        // six seconds, on the thread that hears the keys.)
+        let element = Cf::retained(raw).map(Self)?;
+        element.set_timeout(TIMEOUT);
+        Some(element)
     }
 
     pub(crate) fn as_ptr(&self) -> ffi::AXUIElementRef {
@@ -210,7 +215,9 @@ impl Element {
 
     /// The window of a program that has its keyboard focus.
     pub fn focused_window(&self) -> Result<Element, AxError> {
-        self.attribute("AXFocusedWindow").map(Element)
+        let window = self.attribute("AXFocusedWindow").map(Element)?;
+        window.set_timeout(TIMEOUT);
+        Ok(window)
     }
 
     pub fn string(&self, name: &str) -> Option<String> {
@@ -347,9 +354,9 @@ impl Element {
     /// Ask the window to close, as its close button does (a program may
     /// ask first whether to save).
     pub fn close(&self) -> Result<(), AxError> {
-        self.attribute("AXCloseButton")
-            .map(Element)?
-            .perform("AXPress")
+        let button = self.attribute("AXCloseButton").map(Element)?;
+        button.set_timeout(TIMEOUT);
+        button.perform("AXPress")
     }
 
     /// Give the window the keyboard: make its program the frontmost one,

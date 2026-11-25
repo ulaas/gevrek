@@ -6,8 +6,8 @@
 </p>
 
 <p align="center">
-  <b>A tiling window manager and desktop shell for Windows and Linux.</b><br>
-  One configuration, one set of keys, one look, on both.
+  <b>A tiling window manager and desktop shell for Windows, Linux and macOS.</b><br>
+  One configuration, one set of keys, one look, on all of them.
 </p>
 
 <p align="center">
@@ -59,6 +59,9 @@ its Wayland compositor.
   light and what is playing
 - Notifications, on-screen displays for volume and brightness, a window
   switcher, a power menu
+- Zones for the desktop's icons: boxes you name, that sort what lands on
+  the desktop by rules of yours or show a folder
+  ([docs/zones/user-guide.md](docs/zones/user-guide.md))
 - On Linux also the lock screen, the wallpaper, screenshots and screen
   recording, the clipboard, and a display manager to sign in with
 
@@ -69,14 +72,15 @@ its Wayland compositor.
   you keep them, with undo for everything
 - An automation graph: what gevrek does by itself when something happens,
   wired from node to node
-- Built-in looks to start from, and live views of the windows, the events
-  and the log
+- Built-in looks to start from, the fonts of the interface and of each of
+  its parts, and live views of the windows, the events and the log
 
 **And for the rest**
 
 - `gevrek`, a command line that can do everything a key can, for scripts
 - A welcome on the first start, and a tutorial that teaches gevrek on
-  practice windows of its own
+  practice windows of its own: a tour of eight short lessons, about a
+  quarter of an hour
 
 ## Where it runs
 
@@ -93,7 +97,7 @@ them. [ARCHITECTURE.md](ARCHITECTURE.md) has the whole picture, and
 [docs/CAPABILITY_MATRIX.md](docs/CAPABILITY_MATRIX.md) says which backend
 offers what.
 
-gevrek is at version 0.6 and young: expect rough edges, and keep the way
+gevrek is at version 0.7 and young: expect rough edges, and keep the way
 out in mind (`gevrek stop all` puts every window back).
 
 ## Install

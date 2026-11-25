@@ -153,14 +153,22 @@ gevrek/
 ├── Cargo.toml                 # Workspace root and the `gevrek` package
 ├── src/bin/
 │   ├── gevrek.rs              # Unified CLI and component manager
-│   └── wm.rs                  # gevrek-wm: the Windows WM runtime (server)
+│   ├── wm.rs                  # gevrek-wm: the WM runtime and its server
+│   │                          # (Windows and macOS)
+│   └── elevated.rs            # gevrek-elevated: the helper for the windows
+│                              # of programs that run as an administrator
 ├── crates/
 │   ├── model/                 # Configuration, node graph, commands, keys,
 │   │                          # rules, themes; `platform/` holds the
 │   │                          # per-system settings. No system API.
+│   ├── schema/                # The configuration's JSON Schema, derived
+│   │                          # from the model
 │   ├── engine/                # Window-management logic and the `Desktop`
 │   │                          # contract; layouts, executor, animations,
 │   │                          # a fake desktop for tests. No system API.
+│   ├── zones/                 # The zones of the desktop (boxes that hold
+│   │                          # its icons): what they are and do. No
+│   │                          # system API.
 │   ├── host/                  # What every host process shares: config store
 │   │                          # and watcher, started programs, heartbeat;
 │   │                          # and the WM host itself (`wm`): commands,
@@ -168,21 +176,54 @@ gevrek/
 │   │                          # once for every backend
 │   ├── protocol/              # gevrek.proto, generated code, client wrapper
 │   ├── server/                # The gRPC server, independent of the system
-│   ├── studio/                # gevrek-studio (egui): every setting, the graph,
-│   │                          # inspectors; builds on every system
+│   ├── link/                  # The line from a program (the studio, the
+│   │                          # shell) to the window manager, on a thread
+│   │                          # of its own
 │   ├── backend-win32/         # Windows backend: Win32/DWM, hooks, drawn
 │   │                          # effects
 │   ├── backend-smithay/       # Linux backend and gevrek-wl: a Smithay
 │   │                          # Wayland compositor (nested window or
 │   │                          # DRM/libinput on the hardware), Xwayland
-│   └── backend-macos/         # macOS backend (gevrek-wm there): windows
-│                              # through the Accessibility API, keys from
-│                              # an event tap, hidden windows parked
-├── tests/
-│   ├── desktop/               # End-to-end checks on a real Windows desktop
-│   └── wayland/               # End-to-end checks of gevrek-wl (nested, KVM)
-├── scripts/run-nested.sh      # Build and run gevrek-wl as a 1920x1080 window
-└── docs/                      # LINUX.md, capability matrix, audits, plans
+│   ├── backend-macos/         # macOS backend (gevrek-wm there): windows
+│   │                          # through the Accessibility API, keys from
+│   │                          # an event tap, hidden windows parked
+│   ├── ui/                    # The look every program of gevrek's shares
+│   │                          # (egui): palette, fonts, widgets, icons
+│   ├── shellkit/              # A surface on the screen (a panel, a
+│   │                          # launcher) that egui draws into, on each
+│   │                          # system's own terms
+│   ├── system/                # What the shell asks of the system: sound,
+│   │                          # networks, battery, clipboard, icons, the
+│   │                          # desktop's files
+│   ├── shell/                 # gevrek-shell: panel, launcher, control
+│   │                          # centre, notifications, zones, the
+│   │                          # tutorial's card
+│   ├── studio/                # gevrek-studio (egui): every setting, the graph,
+│   │                          # inspectors, the welcome; builds on every
+│   │                          # system
+│   ├── tutorial/              # The tutorial without a window: the lessons
+│   │                          # as data, what a step waits for, a lesson
+│   │                          # while it is taken, what is remembered
+│   ├── lock/                  # gevrek-lock: the lock screen and the
+│   │                          # greeter (Linux)
+│   ├── dm/                    # gevrek-dm: the display manager (Linux)
+│   ├── update/                # Updates on Windows: look, download, check,
+│   │                          # put in place, take back
+│   ├── logging/               # How every program of gevrek's logs
+│   ├── build/                 # Which commit a program was built from
+│   └── testclient/            # A Wayland client for the compositor's tests
+├── tests/                     # The gRPC contract against a fake runtime;
+│                              # every lesson of the tutorial played against
+│                              # the real core (`tutorial_played.rs`)
+├── xtask/                     # `cargo xtask`: check, install, package, dist
+├── packaging/                 # Windows setup, .deb, .rpm, Arch, macOS app
+├── resources/                 # The Linux session's units, the display
+│                              # manager's files, the boot splash
+├── scripts/                   # run-nested.sh, the other system's
+│                              # type-check, WSL
+├── site/                      # The web page (GitHub Pages)
+└── docs/                      # GUIDE.md, LINUX.md, capability matrix,
+                               # zones, roadmap
 ```
 
 A new system means a new `crates/backend-*` crate that implements `Desktop`

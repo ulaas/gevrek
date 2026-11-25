@@ -80,6 +80,12 @@ impl BindingsPage {
         self.recording
     }
 
+    /// No keys are waited for any more, and what was heard is nobody's.
+    pub fn stop_recording(&mut self) {
+        self.recording = false;
+        self.heard = None;
+    }
+
     /// Wait for the keys of this binding (what its button does).
     pub fn record(&mut self, binding: usize) {
         self.chosen = Some(binding);

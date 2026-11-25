@@ -25,39 +25,29 @@ system. The archive is not: git leaves it out through
 - Sections 1 to 4 are agreed work. Section 5 is proposals: nothing there
   is decided until it is moved up.
 
-## Where things stand (2026-11-18)
+## Where things stand (2026-11-25)
 
-- Version 0.6.0 is public, with installers for Windows and Linux and
-  updates on Windows. `main` is pushed up to `6cca5e2`; what came
-  after it is committed and not pushed.
-- The work is section 2d: a pass for faults and for speed, in which
-  nothing new is built and nothing that works may stop working. Done
-  of it: the benches and the time of a pass; what is read from outside
-  spoilt (configurations, saved sessions, commands, the journal, two
-  of the shell's files, what the elevated helper and the display
-  manager's service are asked); the engine driven by runs of chance.
-  What is left there waits for the person at the desktop (the list
-  is long: every item marked **person, W** in sections 2 and 2d).
-- Tried by the person on Windows on 2026-11-18: a display's scale set
-  from the studio works. The panel and the layouts following the scale
-  were written after that and are not seen yet.
-- Nothing is left for the person to decide; what is left is to be
-  seen on a desktop.
-- Everything since 2026-11-17 was written on Windows. What it left to
-  do on Linux is gathered in section 2c: start there.
-- The window manager, the shell, the studio, the lock screen and the
-  display manager work on both systems. Linux was last tested by the
-  person on 2026-11-17: all of it passes.
-- CI on `6cca5e2` (run 44189370729): the Windows job and both Linux
-  jobs are green. Only the check of the dependencies failed, on
-  `chrono` being unmaintained; `chrono` is out since (section 1), and
-  the check passes on this machine. Not run by CI yet.
+- Version 0.7.6. Releases have installers for Windows and Linux and
+  updates on Windows; macOS is built from source.
+- The window manager, the shell and the studio work on Windows, on
+  Linux and (new, from 2026-11-22) on macOS; the lock screen and the
+  display manager on Linux.
+- The pass of 2026-11-25 went through every crate for faults (what it
+  found and fixed, and what it found and left, is under "Found on the
+  way"), brought clippy to no warnings on Windows and Linux, and made
+  the tree as `cargo fmt` writes it. CI checks the formatting, runs
+  clippy on Linux too, and type-checks for macOS.
+- The tutorial's tour is played from its first step to its last by a
+  test, against the real core on a desktop in memory
+  (`tests/tutorial_played.rs`). It found three faults a person would
+  have met (section 3). Its chapters are not written, and nothing in
+  the tour promises them any more.
+- What is left waits for the person at a desktop: every item marked
+  **person** in sections 2, 2d and 4, and the list of 2026-11-25 in
+  section 2.
 - The check scripts (`tests/desktop`, `tests/nested`, `tests/vm`,
   `tests/wayland`) are not in this repository: the public one leaves
   them out. On this machine only the crates' own tests can be run.
-- The tutorial has its tour on both systems, and on Windows its ring
-  (not committed, not seen on a desktop). The ring on Linux, the
-  chapters and what belongs around it are not written.
 
 Before a session, on the system you are on:
 
@@ -67,18 +57,16 @@ Before a session, on the system you are on:
 | The other system, type-checked | `pwsh scripts/check-linux.ps1` | `scripts/check-windows.sh` |
 
 (On the Windows machine the Linux side builds and its tests run in WSL,
-in the distribution `FedoraLinux-44`, as its own user and not as root:
+as the distribution's own user and not as root, through one script:
 
-    wsl -d FedoraLinux-44 -- bash -lc '. ~/.cargo/env; cd /mnt/e/source/private/gevrek && CARGO_TARGET_DIR=$HOME/gevrek-target cargo test --workspace --exclude gevrek-win32'
+    scripts/wsl-cargo.sh test --workspace --exclude gevrek-win32
 
-What cannot be had there is the desktop itself. The studio's picture
-test ends with a fault in WSL's own graphics (its Direct3D driver, and
-OpenGL) unless everything is drawn on the processor; all three of these
-are needed:
-
-    LIBGL_ALWAYS_SOFTWARE=1 WGPU_BACKEND=vulkan VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json cargo test -p gevrek-studio --lib
-
-and with `GEVREK_BLESS=1` before it the pictures are drawn anew.)
+It uses WSL's default distribution (`GEVREK_WSL_DISTRO` names another),
+keeps the build on the Linux side, and has everything drawn on the
+processor: WSL's own graphics (its Direct3D driver, and OpenGL) end the
+studio's picture test with a fault otherwise. What cannot be had there
+is the desktop itself. With `GEVREK_BLESS=1` set inside, the pictures
+are drawn anew.)
 
 ---
 
@@ -153,6 +141,37 @@ person at the machine.
 - [ ] **W** The tutorial's tidying after a gevrek that stopped in the
       middle of a lesson: the practice windows gone, the workspace
       closed, the one of before shown.
+
+Written on 2026-11-25, tested without a desktop, to be seen once:
+
+- [ ] **person, any** The tour from the welcome to its last step, on
+      each system. The lesson on workspaces now goes to a second
+      workspace of the tutorial's own (`Tutorial 2`) and no longer to
+      your first one; "make this window wider" now works in Dwindle;
+      "let this window float" is seen done.
+- [ ] **person, any** The welcome with the window manager stopped: it
+      is not marked as answered, and comes again at the next start.
+- [ ] **person, W** After a fault in the middle of a pass
+      (`GEVREK_INJECT_FAULT=panic`): a dimmed, cut, fullscreen or
+      title-less window is as it was before gevrek.
+- [ ] **person, W** A window that opens while gevrek is paused is seen.
+- [ ] **person, W** A black border is black. Fullscreen made by gevrek
+      is undone by `gevrek stop`.
+- [ ] **person, L** The lock screen: a second program asking for the
+      lock while it is locked is refused; a key held as the lock comes
+      is not stuck after unlocking; a window cannot be captured while
+      locked.
+- [ ] **person, L** Login and logout through gevrek-dm still work (the
+      password is forgotten once the session is open; a configuration
+      is read with a time limit).
+- [ ] **person, M** macOS: a window that opened after gevrek started,
+      whose program then hangs, does not hold the keys up for seconds;
+      a parked window whose program is slow comes back at the next try.
+- [ ] **person, any** The web page in a browser, wide and narrow
+      (`site/index.html`), before it is published.
+- [ ] **person** The workflows on GitHub: the actions were brought to
+      their current major versions without a run (checkout 7,
+      upload-artifact 7, download-artifact 8, the Pages actions).
 
 ## 2b. Workspaces (2026-11-17)
 
@@ -928,9 +947,21 @@ code: `crates/tutorial`, `shell/src/tutoring.rs`, `shell/src/coach.rs`,
 - [ ] **any** The welcome folds into the coach's card instead of
       closing (the welcome is the studio's window, the card the
       shell's surface: to be seen on a desktop).
-- [ ] **any** Every lesson played by a check, each step done by its own
-      command and seen done: headless on Linux, the tour on the Windows
-      desktop. Waits for the check scripts (section 1).
+- [x] **any** Every lesson played by a test, each step done by its own
+      command and seen done, against the real core and the shared host
+      on a desktop in memory, with the state read as the shell reads it
+      (`tests/tutorial_played.rs`, 2026-11-25). What stands in: the
+      practice windows as programs and the shell's own surfaces. Found
+      by it and fixed: the lesson on workspaces went to the person's
+      own first workspace (the next one after the tutorial's, the last
+      of the display) and tiled a practice window among theirs, so it
+      has a second workspace of its own now; `resize_axis` did nothing
+      in Dwindle, the layout gevrek starts with; a floating window with
+      the keyboard was told as without it in the state, so "let this
+      window float" was never seen done. Also: a surface put away
+      before the step that asks for it no longer holds the lesson up.
+- [ ] **any** The same on a real desktop, by the check scripts
+      (section 1): the card, the ring, the practice windows as programs.
 
 ### Stage 2: the chapters
 
@@ -1166,14 +1197,136 @@ wanted, strike it when it is not.
 - [ ] What a still gevrek costs (processor, memory, the battery), with
       a number written down at each release and a check that fails when
       it grows.
-- [ ] The two clippy warnings in the shell (`control.rs:243`, a wide
-      type; `tutoring.rs:47`, variants of very different sizes).
-- [ ] `actions/checkout@v4` runs on a Node the runners are putting
-      away; `ubuntu-latest` moves to Ubuntu 26.
+- [x] The two clippy warnings in the shell, and the others: none are
+      left on Windows or Linux (2026-11-25).
+- [x] `actions/checkout@v4` ran on a Node the runners are putting away:
+      the actions are at their current versions (2026-11-25, not run).
+- [ ] `ubuntu-latest` moves to Ubuntu 26.
 
 ---
 
 ## Found on the way
+
+### The pass of 2026-11-25
+
+Every crate was read for faults. Fixed, each with a test where one can be
+written without a desktop (the ones marked * have none):
+
+- **Engine and model.** A display that came back as the only one, in the
+  same look at the displays in which the other went, took the place of
+  that one's workspaces: its windows were known to nobody. Joining two
+  windows as a group, or taking one out, moved every split's share
+  after it by one. The window used before was not the current one when
+  the current one went (`FocusManager`). Dwindle could not be resized by
+  the keys. A floating window with the keyboard was told as without it.
+  A window dragged larger in columns or rows turned a quarter got nine
+  tenths*. A file that says no schema version lost the desktop's zones.
+  The session and the sizes are written whole or not at all*. A rule's
+  yes or no is read one way. An item renamed over one before it kept the
+  wrong place. Geometry from outside no longer runs past what a number
+  holds*.
+- **Host, server, command line.** `gevrek stop` on Linux and macOS
+  could end a program that is not gevrek (a process number left in a
+  file), and a number of 0 was the whole group*. A startup program
+  switched on by a reload was not started; one that is off, asked to
+  start again, wrote a warning with every pass. A program that could
+  not be stopped was let go of. `start --foreground` gave 0 whatever
+  came of it*. An update whose stop failed left the desktop stopped*. A
+  configuration handed over waited five seconds where the server waits
+  ten*; one handed to a line that is down is said to have failed*. The
+  Windows window manager ended in the middle of a pass when its server
+  could not listen, and the macOS one went on with nobody able to speak
+  to it*. The graph's log grew without end*.
+- **Windows.** Windows that opened while gevrek was paused stayed
+  cloaked*. After a fault in a pass only hidden windows were given back,
+  not the dimmed, cut, fullscreen or title-less ones*. Fullscreen made
+  by gevrek was never undone*. A style was changed on a window that
+  does not answer*. A black border was drawn red*. A border or a tab
+  strip whose placing failed stayed on the screen*. The wallpaper's
+  object was let go of after the thread said it was done*.
+- **Linux.** Any program could ask for the lock of a locked session and
+  unlock it*. A program that named its icon as a path had that file
+  deleted when its window went*. One window could be captured while the
+  session was locked*. A key let go while locked was remembered as
+  held*. The display manager waited without an end for a
+  configuration that was a pipe, and kept the password for as long as
+  the session ran*. An X11 resize began without a button held*. The
+  safe and the previous session wanted a second polkit agent*.
+  `scripts/wsl-cargo.sh` said all was well when cargo failed.
+- **Shell and system.** A notification that waited its turn went
+  unseen when the one before it was dismissed. A notification's picture
+  was read from whatever its sender named, a pipe too*. A folder that
+  is there and cannot be listed was gone to again and again (Linux)*.
+  What was thrown away through a link to its folder could not be put
+  back. A program's name was cut by the length of its small letters. A
+  dragged list of the shell's items was read past its end. A text on
+  the clipboard that does not end was read on*. The ids of the portal's
+  notifications were all forgotten at once, the shown ones too*. gevrek
+  studio, opened from the panel, stayed in the process table*.
+- **Studio.** Keys went on being taken after another page was shown.
+  Delete, pressed to be a node's key, took the node away*. A trial
+  whose time was up sent the old configuration into a line that was
+  down*. A conflict left the putting-back for a fault armed*. The raw
+  page read a text otherwise than a file is read*.
+- **macOS** (type-checked, not run). A window that came by an
+  observer's word was asked with the system's six seconds. No list of
+  windows was taken for every window gone. A parked window's place was
+  forgotten before it was back.
+- **Tidy.** Nineteen functions nothing calls are gone; `thiserror` and
+  two more dependencies no crate uses; the workspace's unused `authors`.
+
+Found and left, each wanting more than a pass (and most of them a
+desktop to be seen on):
+
+- [ ] **L** A toplevel's declared geometry is used unclamped
+      (`state.rs`, `set_window_geometry`).
+- [ ] **L** The RPM and the Arch package install gevrek-dm without its
+      SELinux module; the packages do not ship `gevrek-previous.service`.
+- [ ] **L** Xwayland that dies in the middle of a paste can end the
+      compositor (`xwm_state` expects a window manager that is gone).
+- [ ] **L** A virtual pointer that goes with a button held leaves it
+      held; `discrete * 120` runs over.
+- [ ] **L** ext-image-copy-capture sessions do not say a new size.
+- [ ] **L** Displays off: the frame timer goes on, and a picture asked
+      for then never comes.
+- [ ] **L** A lock screen that ends by a fault leaves the session locked
+      with nothing to start it again.
+- [ ] **any** Two update processes at once share their folders with no
+      lock (`gevrek-update`); the updater knows only x64.
+- [ ] **L, M** Two window managers starting together can each take the
+      other's socket away (`bind_local`).
+- [ ] **any** `Shutdown`, `PauseExecution` and `ResumeExecution` are not
+      refused while the session is locked (meant, or not?).
+- [ ] **any** A pushed graph replaces the draft before the push can be
+      refused (`server`, `push_graph`).
+- [ ] **any** Resizing by an edge, and the gaps around a layout, do not
+      follow a layout that is mirrored or turned (`workspace.rs`).
+- [ ] **W** The elevated helper: its pipe is written to from the thread
+      that hears the keys; the window manager does not check who serves
+      the pipe's name; its task's XML lies in `%TEMP%` on its way; it
+      does not undo cloaks; it serves one connection ever; a release
+      that lands over an elevated window is never told.
+- [ ] **W** A second `gevrek-wm` on a TCP address shows the running
+      one's hidden windows.
+- [ ] **W** A border cut at a display's edge is whole again after its
+      next update.
+- [ ] **L** A move across file systems that cannot delete its source
+      leaves a second copy; "never writes over anything" rests on a look
+      before a rename.
+- [ ] **W** A delete that was for good is said to be undoable. A folder
+      that cannot be listed is gone to again and again (the Windows half).
+- [ ] **L** After a secret was copied and cleared, the text from before
+      it is on the clipboard again. The clipboard's history is written
+      in place, under its lock.
+- [ ] **any** A replaced notification can keep its old picture (the
+      cache goes by an address).
+- [ ] **any** Studio: a configuration from the window manager replaces
+      an edited document without a word where there is no session yet;
+      after a reconnect the next Apply can be unconditional; a trial's
+      going back is not tried again when it is refused.
+- [ ] **M** A window whose observer could not be set up is never
+      watched again; a program that hangs as it starts holds the loop
+      up; `frame()` trusts the kind of value it is given.
 
 - [x] **any** CI: the test
       `zones::draw::...everything_of_the_desktop_is_painted...` failed now

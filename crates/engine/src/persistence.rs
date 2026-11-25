@@ -75,7 +75,8 @@ impl ResizeDimensionsState {
             std::fs::create_dir_all(parent)?;
         }
         let content = serde_json::to_string_pretty(self)?;
-        std::fs::write(path, content)?;
+        // (Whole or not at all: a file cut short does not load.)
+        gevrek_model::files::write_atomic(path, content.as_bytes())?;
         log::info!(
             "Saved {} workspace resize snapshot(s) to {}",
             self.workspaces.len(),
@@ -181,7 +182,9 @@ impl WindowManagerState {
     /// Save state to JSON file
     pub fn save(&self, path: &Path) -> Result<()> {
         let content = serde_json::to_string_pretty(self)?;
-        std::fs::write(path, content)?;
+        // (Whole or not at all: the session is saved as gevrek stops,
+        // which is when it is most likely to be ended half way.)
+        gevrek_model::files::write_atomic(path, content.as_bytes())?;
         log::info!("Saved window manager state to {}", path.display());
         log::debug!(
             "Saved {} windows, {} monitors",

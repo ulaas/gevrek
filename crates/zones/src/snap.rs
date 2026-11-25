@@ -45,12 +45,12 @@ fn down(rect: Rect) -> Span {
 }
 
 fn end(span: Span) -> i32 {
-    span.0 + span.1
+    span.0.saturating_add(span.1)
 }
 
 /// Whether two spans come within `reach` of each other.
 fn near(one: Span, other: Span, reach: i32) -> bool {
-    one.0 <= end(other) + reach && other.0 <= end(one) + reach
+    one.0 <= end(other).saturating_add(reach) && other.0 <= end(one).saturating_add(reach)
 }
 
 /// The lines a side of a zone may snap to, each with its rank: among

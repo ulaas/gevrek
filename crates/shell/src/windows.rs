@@ -2082,6 +2082,7 @@ fn tutorial_do(state: &mut State, todo: Vec<crate::tutoring::Do>) {
                         tutoring.before.clone(),
                         windows,
                         tutoring.own_windows(),
+                        tutoring.beside_there(),
                         state.link.teller(),
                     );
                 }

@@ -169,6 +169,11 @@ pub struct State {
     /// The session is locked: only lock surfaces are drawn and reachable.
     pub locked: bool,
     pub(crate) lock_surfaces: Vec<(MonitorHandle, smithay::wayland::session_lock::LockSurface)>,
+    /// The lock of the program that locked the session: no other
+    /// locks or unlocks it while that one lives.
+    pub(crate) locker: Option<
+        smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
+    >,
     /// Made when the event loop is known (`session::open`).
     pub(crate) idle_notifier: Option<smithay::wayland::idle_notify::IdleNotifierState<Self>>,
     /// The pointer's place with its fraction of a pixel: slow movement
@@ -711,6 +716,7 @@ impl State {
             >(&display, |_| true),
             locked: false,
             lock_surfaces: Vec::new(),
+            locker: None,
             idle_notifier: None,
             syncobj_state: None,
             // Small protocols programs look for: touchpad gestures passed

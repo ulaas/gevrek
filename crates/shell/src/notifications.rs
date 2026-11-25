@@ -142,12 +142,25 @@ pub fn picture_of(
         .or_else(|| desktop_entry.and_then(named))
 }
 
+/// How large a file a sender names as its picture may be.
+const PICTURE_FILE_AT_MOST: u64 = 16 * 1024 * 1024;
+
 /// The picture as pixels: an icon is looked for and read, a file is read.
 pub fn pixels_of(picture: Picture) -> Option<Pixels> {
     match picture {
         Picture::Pixels(pixels) => Some(pixels),
         Picture::Named(name) => {
             let read = if std::path::Path::new(&name).is_absolute() {
+                // The sender names the file: only an ordinary one of a
+                // picture's size is read. (Whatever it named was opened
+                // and read to its end on the thread that draws: a pipe
+                // nobody writes to held the whole shell for good.)
+                let ordinary = std::fs::metadata(&name)
+                    .is_ok_and(|file| file.is_file() && file.len() <= PICTURE_FILE_AT_MOST);
+                if !ordinary {
+                    log::debug!("a notification's picture {name} is not read: no ordinary file, or too large");
+                    return None;
+                }
                 gevrek_system::icons::load(std::path::Path::new(&name), PICTURE_SIDE)
             } else {
                 gevrek_system::icons::picture(&name, PICTURE_SIDE)
@@ -335,9 +348,20 @@ impl Stack {
 
     /// Take one away. `false` when there is none with that number.
     pub fn remove(&mut self, id: u32) -> bool {
-        let before = self.items.len();
-        self.items.retain(|item| item.id != id);
-        self.items.len() != before
+        let Some(at) = self.items.iter().position(|item| item.id == id) else {
+            return false;
+        };
+        self.items.remove(at);
+        // One that comes into view by it starts its time now, as when
+        // another's time is over (`expire`). (It kept the time of its
+        // arrival: one that had waited longer than it stays was gone
+        // with the next look, never seen.)
+        if at < self.at_once {
+            if let Some(came) = self.at_once.checked_sub(1).and_then(|last| self.items.get_mut(last)) {
+                came.since = Instant::now();
+            }
+        }
+        true
     }
 
     /// Those whose time is over at `now`, taken off the stack. Only what
@@ -1290,6 +1314,25 @@ mod tests {
         now: Instant,
     ) -> u32 {
         stack.push("test", replaces, summary, "", &[], urgency, expire_ms, now)
+    }
+
+    #[test]
+    fn one_that_comes_into_view_when_another_is_dismissed_has_all_its_time() {
+        // Both came a while ago; only one is shown at once.
+        let Some(then) = Instant::now().checked_sub(Duration::from_secs(10)) else {
+            return;
+        };
+        let mut stack = Stack::default();
+        stack.configure(1, STAY);
+        let first = push(&mut stack, "first", Urgency::Normal, 1000, 0, then);
+        let second = push(&mut stack, "second", Urgency::Normal, 1000, 0, then);
+        let shown = stack.shown().first().map(|note| note.id);
+        let waits = if shown == Some(first) { second } else { first };
+        // The one that is shown is dismissed: the other is seen from now,
+        // and not gone with the next look for having waited too long.
+        assert!(stack.remove(shown.expect("one is shown")));
+        assert!(stack.expire(Instant::now()).is_empty());
+        assert_eq!(stack.shown().first().map(|note| note.id), Some(waits));
     }
 
     #[test]

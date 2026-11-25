@@ -13,7 +13,7 @@ use gevrek_ui::theme::{self, icons};
 use gevrek_ui::widgets;
 
 /// The card's size, in logical pixels.
-pub const SIZE: (u32, u32) = (640, 196);
+pub const SIZE: (u32, u32) = gevrek_tutorial::tutoring::CARD_SIZE;
 
 /// What the card shows now.
 pub struct View<'a> {

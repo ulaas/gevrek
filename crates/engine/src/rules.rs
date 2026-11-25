@@ -563,31 +563,31 @@ impl RuleEngine {
 
             // Boolean property matching - pattern "true" or "false"
             MatchKind::HasParent => {
-                let expected = rule.id.to_lowercase() == "true";
+                let expected = Self::rule_boolean(&rule.id);
                 window.has_parent == expected
             }
             MatchKind::IsVisible => {
-                let expected = rule.id.to_lowercase() == "true";
+                let expected = Self::rule_boolean(&rule.id);
                 window.is_visible == expected
             }
             MatchKind::IsToolWindow => {
-                let expected = rule.id.to_lowercase() == "true";
+                let expected = Self::rule_boolean(&rule.id);
                 window.is_tool_window == expected
             }
             MatchKind::IsNoActivate => {
-                let expected = rule.id.to_lowercase() == "true";
+                let expected = Self::rule_boolean(&rule.id);
                 window.is_noactivate == expected
             }
             MatchKind::HasOwner => {
-                let expected = rule.id.to_lowercase() == "true";
+                let expected = Self::rule_boolean(&rule.id);
                 window.has_owner == expected
             }
             MatchKind::IsCloaked => {
-                let expected = rule.id.to_lowercase() == "true";
+                let expected = Self::rule_boolean(&rule.id);
                 window.is_cloaked == expected
             }
             MatchKind::IsLayered => {
-                let expected = rule.id.to_lowercase() == "true";
+                let expected = Self::rule_boolean(&rule.id);
                 window.is_layered == expected
             }
         }
@@ -664,6 +664,12 @@ impl RuleEngine {
             MatchKind::IsLayered => window.is_layered == Self::expected_boolean(&predicate.value),
         };
         matched != predicate.negate
+    }
+
+    /// A rule's yes or no, read as a predicate's is (`yes`, `1`, ` true`
+    /// are yes too; they were no here). Nothing written is no, as it was.
+    fn rule_boolean(value: &str) -> bool {
+        !value.trim().is_empty() && Self::expected_boolean(value)
     }
 
     fn expected_boolean(value: &str) -> bool {
@@ -1163,6 +1169,16 @@ pub fn normalize_tag(tag: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rules_yes_or_no_is_read_as_a_predicates_is() {
+        for yes in ["true", "TRUE", " true", "1", "yes", "on"] {
+            assert!(RuleEngine::rule_boolean(yes), "{yes:?}");
+        }
+        for no in ["false", "0", "no", "off", "", "  "] {
+            assert!(!RuleEngine::rule_boolean(no), "{no:?}");
+        }
+    }
 
     #[test]
     fn test_window_rule_equals() {

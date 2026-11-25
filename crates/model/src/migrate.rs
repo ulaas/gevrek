@@ -21,6 +21,28 @@ pub fn migrate(config: &mut Value) {
             log::debug!("a configuration of schema {version} is brought to schema {last}");
         }
     }
+    // A file that says no version is taken for the oldest. One written
+    // by hand today may say none and have the zones of the desktop
+    // under `zones`: what has nothing only snap zones have is not
+    // theirs, and stays where it is. (It was moved to `snap_zones`, and
+    // the desktop's zones were as nobody had set them.)
+    let unversioned = config["desktop"].get("schema_version").is_none();
+    let own_zones = (unversioned
+        && config["desktop"]
+            .get("zones")
+            .and_then(Value::as_object)
+            .is_some_and(|zones| !SNAP_ZONE_KEYS.iter().any(|key| zones.contains_key(*key))))
+    .then(|| config["desktop"].as_object_mut().and_then(|desktop| desktop.remove("zones")))
+    .flatten();
+    run_steps(config, version);
+    if let (Some(zones), Some(desktop)) =
+        (own_zones, config.get_mut("desktop").and_then(Value::as_object_mut))
+    {
+        desktop.insert("zones".to_string(), zones);
+    }
+}
+
+fn run_steps(config: &mut Value, version: u64) {
     for (to, step) in STEPS {
         if version < u64::from(*to) {
             step(config);
@@ -283,6 +305,21 @@ mod chain_tests {
             serde_json::to_value(&panel).unwrap()["right"],
             serde_json::json!(["moon_phase", "clock"])
         );
+    }
+
+    #[test]
+    fn a_file_that_says_no_version_keeps_the_desktops_zones_where_they_are() {
+        // Written by hand today: no version, the zones of the desktop.
+        let mut written = serde_json::json!({ "desktop": { "zones": { "enabled": false } } });
+        migrate(&mut written);
+        assert_eq!(written["desktop"]["zones"]["enabled"], false);
+        assert!(written["desktop"].get("snap_zones").is_none());
+        // From before, with no version: what only snap zones have says
+        // whose it is, and it moves.
+        let mut old = serde_json::json!({ "desktop": { "zones": { "behavior": {} } } });
+        migrate(&mut old);
+        assert!(old["desktop"].get("zones").is_none());
+        assert!(old["desktop"]["snap_zones"].get("behavior").is_some());
     }
 
     #[test]

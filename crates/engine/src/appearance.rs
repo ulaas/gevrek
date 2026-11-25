@@ -335,7 +335,21 @@ impl WmCore {
             .map(|container| container.windows.len())
             .sum::<usize>();
         let floating_windows = workspace.floating_windows.len();
-        let focused_window = workspace.focused_window();
+        // The window with the keyboard, where it is one of this
+        // workspace's: a floating one too. (It was the tiled window
+        // last gone to, whatever had the keyboard: a floating window
+        // with the keyboard was told as without it, and a tiled one
+        // beside it as with it.) Else the one the workspace remembers.
+        let focused_window = desktop
+            .active_window()
+            .filter(|active| {
+                workspace.floating_windows.iter().any(|window| window == active)
+                    || workspace
+                        .containers
+                        .iter()
+                        .any(|container| container.contains_window(*active))
+            })
+            .or_else(|| workspace.focused_window());
         let known: HashMap<WindowHandle, gevrek_model::window::WindowInfo> = desktop
             .windows()
             .into_iter()

@@ -520,6 +520,9 @@ impl Studio {
                     log::debug!("the change was not applied: {message}");
                     self.applying = false;
                     self.try_out = None;
+                    // (Nothing is on trial: nothing is to be put back
+                    // if the studio ends by a fault later.)
+                    crate::tryout::forget_revert();
                     self.toast(Tone::Warn, message);
                     self.link.send(Request::Fetch);
                 }
@@ -861,8 +864,16 @@ impl Studio {
 
     /// Every frame: a trial whose time is up goes back by itself, once the
     /// window manager has answered the apply that began it.
+    /// And once there is a window manager to hand the old configuration
+    /// to: with the line down (the very thing a trial is there for, where
+    /// what was tried took the window manager along) it waits for the
+    /// line. (It was sent into a line that was down, where it was lost,
+    /// and the studio said the configuration from before was back.)
     fn follow_trial(&mut self, now: Instant) {
-        if !self.applying && self.try_out.as_ref().is_some_and(|trial| trial.over(now)) {
+        if !self.applying
+            && self.connected()
+            && self.try_out.as_ref().is_some_and(|trial| trial.over(now))
+        {
             self.end_trial(false);
         }
     }
@@ -2247,7 +2258,9 @@ impl Studio {
                 .on_hover_text("Read the text as the configuration (it can be undone)")
                 .clicked()
             {
-                match serde_json::from_str::<Config>(&self.raw) {
+                // (Read as a file is: one from an older gevrek is
+                // brought to today's layout first.)
+                match Config::from_json(&self.raw) {
                     Ok(config) => {
                         self.document.load(&config);
                         self.raw_error.clear();
@@ -2809,6 +2822,16 @@ impl eframe::App for Studio {
         // While the keys of a binding (or of a node that starts at a key)
         // are recorded, every key is the studio's (the window manager's
         // own bindings would run instead).
+        // Keys are waited for on the page that asked for them, and no
+        // longer once another is shown. (They went on being taken, all
+        // of them, and nothing could be typed anywhere in the studio;
+        // the last one was written into the binding on coming back.)
+        if self.page != Page::Bindings {
+            self.bindings.stop_recording();
+        }
+        if self.page != Page::Graph {
+            self.graph.stop_recording();
+        }
         #[cfg(any(target_os = "linux", windows))]
         let recording = self.bindings.is_recording() || self.graph.is_recording();
         #[cfg(target_os = "linux")]

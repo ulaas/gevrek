@@ -271,7 +271,7 @@ pub fn lay_out(
                 break cell;
             }
         });
-        rows = rows.max(cell.row + 1);
+        rows = rows.max(cell.row.saturating_add(1));
         placed.push(PlacedItem::at(
             item.clone(),
             Rect::new(

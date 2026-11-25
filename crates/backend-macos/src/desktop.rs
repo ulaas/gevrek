@@ -401,13 +401,18 @@ impl MacDesktop {
         if !window.parked {
             return Ok(());
         }
-        window.parked = false;
+        // Its place is forgotten once it is back there, and not before:
+        // a program that does not answer in time keeps its window parked,
+        // with the place to bring it back to. (Forgotten first, the
+        // window stayed a sliver in the corner with nowhere to go.)
         let back = self
             .journal
-            .forget(window_id_of(id))
+            .get(window_id_of(id))
             .map_or(window.rect, |parked| parked.rect());
         self.placed_at.insert(id, Instant::now());
         window.rect = window.element.set_frame(back)?;
+        window.parked = false;
+        self.journal.forget(window_id_of(id));
         let rect = window.rect;
         if let Some(borders) = &mut self.borders {
             borders.follow(id, rect);

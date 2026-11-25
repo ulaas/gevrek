@@ -643,6 +643,13 @@ impl MacRuntime {
     /// taken, one that is known and gone is let go.
     fn follow_windows(&mut self) {
         let all = crate::window_list::server_windows(false);
+        // No list is no word on the windows: the system gives none where
+        // it cannot be asked, and that is not every window gone. (All
+        // that were known were let go, and with them where each belonged.)
+        if all.is_empty() && !self.desktop.windows.is_empty() {
+            log::debug!("the system named no window at all: nothing is let go for it");
+            return;
+        }
         let gone: Vec<WindowHandle> = self
             .desktop
             .windows

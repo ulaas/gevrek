@@ -36,6 +36,9 @@ pub struct Scene {
     pub windows: usize,
     /// The layout, by its name in a configuration (`dwindle`).
     pub layout: &'static str,
+    /// A second workspace of the tutorial's own after the first
+    /// (`WORKSPACE_BESIDE`): the lesson goes to the next workspace.
+    pub beside: bool,
 }
 
 /// What the ring is drawn around while a step waits.
@@ -112,7 +115,8 @@ pub struct Step {
 /// A lesson.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Lesson {
-    /// Its name for programs (`focus`): what `gevrek tutorial` is told.
+    /// Its name for programs (`focus`): what the shell is told to begin
+    /// with it, and what the tutorial's memory keeps it by.
     pub id: &'static str,
     pub title: &'static str,
     /// What a person can do after it.
@@ -198,6 +202,7 @@ fn tour() -> Vec<Lesson> {
     let tiled = Scene {
         windows: 3,
         layout: "dwindle",
+        beside: false,
     };
     vec![
         lesson(
@@ -208,6 +213,7 @@ fn tour() -> Vec<Lesson> {
             Scene {
                 windows: 3,
                 layout: "floating",
+                beside: false,
             },
             vec![
                 read(
@@ -316,7 +322,10 @@ fn tour() -> Vec<Lesson> {
             "Workspaces",
             "Keep things apart on workspaces, and take a window along.",
             2,
-            tiled,
+            Scene {
+                beside: true,
+                ..tiled
+            },
             vec![
                 step(
                     "Show the next workspace.",
@@ -525,8 +534,8 @@ fn tour() -> Vec<Lesson> {
                     Demo::None,
                 ),
                 read(
-                    "That was the tour. The chapters go further, one subject each, whenever you want.",
-                    "The launcher finds them after a >, and so does `gevrek tutorial` in a terminal.",
+                    "That was the tour. Every lesson of it can be taken again, whenever you want.",
+                    "The launcher finds the tutorial after a >, and so does `gevrek tutorial` in a terminal. gevrek studio's first page lists the lessons.",
                     Spot::None,
                 ),
             ],
@@ -562,6 +571,20 @@ mod tests {
     fn every_lesson_can_be_taken() {
         let all = lessons();
         assert!(the_tour().len() >= 7);
+        // What the welcome says of the tour's length holds ("about a
+        // quarter of an hour").
+        let minutes: u32 = the_tour().iter().map(|lesson| lesson.minutes).sum();
+        assert!((10..=17).contains(&minutes), "the tour takes {minutes} minutes");
+        // Nothing promises what is not there: only the tour is written.
+        for lesson in all {
+            for step in &lesson.steps {
+                assert!(
+                    !format!("{} {}", step.say, step.why).to_lowercase().contains("chapter"),
+                    "{} speaks of chapters, and there are none",
+                    lesson.id
+                );
+            }
+        }
         let mut ids: Vec<&str> = all.iter().map(|lesson| lesson.id).collect();
         ids.sort_unstable();
         ids.dedup();

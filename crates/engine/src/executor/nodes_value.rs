@@ -202,6 +202,14 @@ impl Executor {
 
                 // Add to visual log
                 if let Ok(mut logs) = self.log_entries.lock() {
+                    // The newest are kept. (Nothing took any out: a
+                    // graph that logs on every focus change grew the
+                    // list for as long as gevrek ran.)
+                    const KEPT: usize = 1000;
+                    if logs.len() >= KEPT {
+                        let over = logs.len() + 1 - KEPT;
+                        logs.drain(..over);
+                    }
                     logs.push(LogEntry {
                         timestamp: std::time::Instant::now(),
                         level: *level,

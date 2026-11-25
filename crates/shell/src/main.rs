@@ -4557,8 +4557,13 @@ mod linux {
                     // (Not without end: an application that never takes
                     // its notifications back.)
                     if state.portal_notes.len() > 500 {
-                        state.portal_notes.clear();
-                        state.portal_ids.clear();
+                        // Those that are shown are kept: a press on one
+                        // still reaches its application. (All were
+                        // forgotten at once, the shown ones too.)
+                        let shown: std::collections::HashSet<u32> =
+                            state.notes.shown().iter().map(|note| note.id).collect();
+                        state.portal_notes.retain(|_, id| shown.contains(id));
+                        state.portal_ids.retain(|id, _| shown.contains(id));
                     }
                     // The application's own name for it is what follows
                     // its id in the key.
@@ -4605,19 +4610,7 @@ mod linux {
                 });
                 let _ = ask.answer.send_blocking(Some(bound.unwrap_or_default()));
             }
-            Asked::ShortcutsConfigure => {
-                let studio = std::env::current_exe()
-                    .ok()
-                    .and_then(|own| Some(own.parent()?.join("gevrek-studio")))
-                    .filter(|studio| studio.exists())
-                    .unwrap_or_else(|| "gevrek-studio".into());
-                if let Err(error) = std::process::Command::new(studio)
-                    .args(["--page", "bindings"])
-                    .spawn()
-                {
-                    log::warn!("the bindings could not be opened: {error}");
-                }
-            }
+            Asked::ShortcutsConfigure => crate::control::open_studio("bindings"),
             // Its application is done with it.
             Asked::ShareEnd(session) => {
                 let mut state = state.borrow_mut();
@@ -5046,6 +5039,7 @@ mod linux {
                         tutoring.before.clone(),
                         windows,
                         tutoring.own_windows(),
+                        tutoring.beside_there(),
                         state.link.teller(),
                     );
                     }

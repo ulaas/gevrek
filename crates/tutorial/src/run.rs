@@ -264,6 +264,7 @@ mod tests {
             containers: 3,
             displays: 1,
             surfaces: Vec::new(),
+            workspaces: Vec::new(),
         }
     }
 

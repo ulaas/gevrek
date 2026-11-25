@@ -421,11 +421,13 @@ mod tests {
 
     #[test]
     fn high_contrast_sets_the_borders_whatever_else_is_said() {
-        let mut appearance = AppearanceProfile::default();
-        appearance.border_enabled = false;
-        appearance.border_width = 1;
-        appearance.active_border_color = (10, 20, 30);
-        appearance.active_border_alpha = 90;
+        let mut appearance = AppearanceProfile {
+            border_enabled: false,
+            border_width: 1,
+            active_border_color: (10, 20, 30),
+            active_border_alpha: 90,
+            ..AppearanceProfile::default()
+        };
         apply_high_contrast(&mut appearance);
         // Not asked for: nothing changes.
         assert!(!appearance.border_enabled);

@@ -342,8 +342,15 @@ async fn run(
                     tokio::select! {
                         _ = &mut wait => break,
                         request = requests.recv() => {
-                            if request.is_none() {
-                                return;
+                            match request {
+                                None => return,
+                                // A configuration that cannot be
+                                // handed over is said to have failed:
+                                // whoever sent it waits for an answer.
+                                Some(Request::Apply { .. }) => tell.tell(Event::ApplyFailed(
+                                    "the window manager is not connected".to_string(),
+                                )),
+                                Some(_) => {}
                             }
                         }
                         told = zones.tells.recv(), if !zones.closed => match told {

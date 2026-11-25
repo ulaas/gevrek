@@ -150,8 +150,10 @@ impl Placements {
         if from == to {
             return;
         }
-        let whereabouts = self.whereabouts(from);
+        // (What had the new name goes first: where it stood before the
+        // item in the same zone, the place read before was one too far.)
         self.take(to);
+        let whereabouts = self.whereabouts(from);
         self.take(from);
         if whereabouts != (Whereabouts::Loose { position: None }) {
             self.put_back(to, &whereabouts);
@@ -193,6 +195,18 @@ mod tests {
 
     fn zone(name: &str) -> ZoneId {
         ZoneId::new(name)
+    }
+
+    #[test]
+    fn an_item_renamed_over_one_before_it_keeps_its_place() {
+        let mut placements = Placements::default();
+        for name in ["b", "a", "c"] {
+            placements.assign(&item(name), &zone("one"), None, None);
+        }
+        // `a` takes the name of `b`, which stood before it: it is where
+        // it was among what is left (it was put one place too far).
+        placements.rename(&item("a"), &item("b"));
+        assert_eq!(placements.items_of(&zone("one")), [item("b"), item("c")]);
     }
 
     #[test]

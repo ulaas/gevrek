@@ -71,6 +71,14 @@ pub struct Session {
 }
 
 impl Session {
+    /// The password is not needed any more (the session is open): what
+    /// was kept of it for PAM's questions is overwritten. (It stayed in
+    /// the worker's memory for as long as the person was logged in.)
+    pub fn forget_password(&mut self) {
+        let mut bytes = std::mem::take(&mut self._credentials.password).into_bytes();
+        bytes.fill(0);
+    }
+
     /// Begin with a service of `/etc/pam.d` and what was typed.
     pub fn start(service: &str, user: &str, password: &str) -> Result<Self, String> {
         let credentials = Box::new(Credentials {

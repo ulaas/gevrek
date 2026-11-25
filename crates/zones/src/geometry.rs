@@ -154,9 +154,15 @@ fn offset_along(along: Along, outer: (i32, i32), inner: (i32, i32)) -> i32 {
     let (outer_start, outer_length) = outer;
     let (inner_start, inner_length) = inner;
     match along {
-        Along::Start => inner_start - outer_start,
-        Along::End => (outer_start + outer_length) - (inner_start + inner_length),
-        Along::Middle => (inner_start + inner_length / 2) - (outer_start + outer_length / 2),
+        // (Never past what a number holds: the spans may be from a file
+        // or a command written by anyone.)
+        Along::Start => inner_start.saturating_sub(outer_start),
+        Along::End => outer_start
+            .saturating_add(outer_length)
+            .saturating_sub(inner_start.saturating_add(inner_length)),
+        Along::Middle => inner_start
+            .saturating_add(inner_length / 2)
+            .saturating_sub(outer_start.saturating_add(outer_length / 2)),
     }
 }
 
@@ -164,9 +170,15 @@ fn offset_along(along: Along, outer: (i32, i32), inner: (i32, i32)) -> i32 {
 fn start_along(along: Along, outer: (i32, i32), offset: i32, length: i32) -> i32 {
     let (outer_start, outer_length) = outer;
     match along {
-        Along::Start => outer_start + offset,
-        Along::End => outer_start + outer_length - offset - length,
-        Along::Middle => outer_start + outer_length / 2 + offset - length / 2,
+        Along::Start => outer_start.saturating_add(offset),
+        Along::End => outer_start
+            .saturating_add(outer_length)
+            .saturating_sub(offset)
+            .saturating_sub(length),
+        Along::Middle => outer_start
+            .saturating_add(outer_length / 2)
+            .saturating_add(offset)
+            .saturating_sub(length / 2),
     }
 }
 

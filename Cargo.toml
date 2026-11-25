@@ -8,7 +8,6 @@ resolver = "2"
 [workspace.package]
 version = "0.7.6"
 edition = "2021"
-authors = ["Gevrek Contributors"]
 license = "MIT"
 repository = "https://github.com/ulaas/gevrek"
 homepage = "https://ulaas.github.io/gevrek/"
@@ -73,7 +72,6 @@ serde_json = "1.0"
 
 # Error Handling
 anyhow = "1.0"
-thiserror = "1.0"
 
 # Utilities
 log = "0.4"
@@ -90,7 +88,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "A tiling window manager for Windows and Linux, growing into a cross-platform desktop environment."
+description = "A tiling window manager and desktop shell for Windows, Linux and macOS."
 
 [lib]
 name = "gevrek"
@@ -129,9 +127,7 @@ anyhow = { workspace = true }
 log = { workspace = true }
 gevrek-logging = { path = "crates/logging" }
 dirs = { workspace = true }
-thiserror = { workspace = true }
 clap = { workspace = true }
-ctrlc = { workspace = true }
 
 # The Windows backend and the Windows API: gevrek-wm, and the process
 # handling of the CLI. On Linux the WM is gevrek-wl (crates/backend-smithay).
@@ -144,6 +140,8 @@ windows = { workspace = true }
 # The macOS backend: gevrek-wm on macOS.
 [target.'cfg(target_os = "macos")'.dependencies]
 gevrek-macos = { path = "crates/backend-macos" }
+# Ctrl+C and SIGTERM end the window manager by its ordinary path.
+ctrlc = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -154,6 +152,10 @@ libc = "0.2"
 gevrek-studio = { path = "crates/studio" }
 # The shell's line for the zones, against the same server.
 gevrek-link = { path = "crates/link" }
+# Every lesson of the tutorial played against the real core on a desktop
+# in memory (tests/tutorial_played.rs).
+gevrek-tutorial = { path = "crates/tutorial" }
+gevrek-engine = { path = "crates/engine", features = ["test-support"] }
 
 # The programs' icon on Windows (build.rs).
 [build-dependencies]

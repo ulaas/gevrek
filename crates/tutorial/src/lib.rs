@@ -28,6 +28,7 @@ pub mod facts;
 pub mod lessons;
 pub mod progress;
 pub mod run;
+pub mod tutoring;
 
 pub use facts::{Facts, Goal, Window};
 pub use lessons::{lessons, Chapter, Demo, Lesson, Need, Scene, Spot, Step};
@@ -37,6 +38,16 @@ pub use run::{Effect, Help, Input, Run, StepState};
 /// The name of the workspace the tutorial practises on. It is the
 /// tutorial's own: made when a lesson begins, gone when it ends.
 pub const WORKSPACE: &str = "Tutorial";
+
+/// A second workspace of the tutorial's own, after the first: where a
+/// lesson goes that shows the next workspace and takes a window there.
+/// Made for such a lesson, and gone with the tutorial.
+pub const WORKSPACE_BESIDE: &str = "Tutorial 2";
+
+/// Whether a workspace of this name is one of the tutorial's own.
+pub fn is_own_workspace(name: &str) -> bool {
+    name == WORKSPACE || name == WORKSPACE_BESIDE
+}
 
 /// What a practice window's application is called (its class, its app
 /// id): by this the window manager knows them, keeps them out of what

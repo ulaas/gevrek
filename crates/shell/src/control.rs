@@ -71,11 +71,20 @@ pub fn open_studio(page: &str) {
         .and_then(|own| Some(own.parent()?.join(&name)))
         .filter(|studio| studio.is_file())
         .unwrap_or_else(|| name.into());
-    if let Err(error) = std::process::Command::new(studio)
-        .args(["--page", page])
-        .spawn()
-    {
-        log::warn!("gevrek studio could not be opened: {error}");
+    match std::process::Command::new(studio).args(["--page", page]).spawn() {
+        // Waited for on a thread of its own: one that is not stays in the
+        // process table, dead, for as long as the shell runs.
+        Ok(mut child) => {
+            let waited = std::thread::Builder::new()
+                .name("gevrek-studio-child".to_string())
+                .spawn(move || {
+                    let _ = child.wait();
+                });
+            if let Err(error) = waited {
+                log::debug!("gevrek studio is not waited for: {error}");
+            }
+        }
+        Err(error) => log::warn!("gevrek studio could not be opened: {error}"),
     }
 }
 
@@ -300,6 +309,10 @@ enum Switch {
     Record,
 }
 
+/// A tile: its switch, its sign, its name, how it stands, whether it is
+/// on, what it opens, and whether the system is still following a press.
+type Tile = (Switch, &'static str, &'static str, String, bool, Option<Detail>, bool);
+
 /// The tiles this machine has, in their order: each with its sign, its
 /// name, how it stands, whether it is on, what it opens, and whether the
 /// system is still following a press.
@@ -307,7 +320,7 @@ fn tiles_of(
     facts: &Facts,
     held: &mut Held,
     now: std::time::Instant,
-) -> Vec<(Switch, &'static str, &'static str, String, bool, Option<Detail>, bool)> {
+) -> Vec<Tile> {
     let mut tiles = Vec::new();
     match (&facts.wifi, &facts.network) {
         (Some(wifi), _) => {

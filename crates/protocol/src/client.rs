@@ -214,9 +214,15 @@ impl WMClient {
         &mut self,
         document: proto::ConfigurationDocument,
     ) -> Result<proto::UpdateConfigurationResponse> {
-        let mut request = Request::new(document);
-        request.set_timeout(Duration::from_secs(5));
-        let response = self.client.update_configuration(request).await?;
+        // (As long as a command: the server waits ten seconds for the
+        // configuration to be taken up before it says "saved, not
+        // applied yet". With five here the call ended first, and a
+        // configuration that was applied a moment later was told as
+        // one that failed.)
+        let response = self
+            .client
+            .update_configuration(with_deadline(document, COMMAND_DEADLINE))
+            .await?;
         Ok(response.into_inner())
     }
 

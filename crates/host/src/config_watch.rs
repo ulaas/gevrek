@@ -41,7 +41,7 @@ impl ConfigFileWatcher {
             pending: None,
             // Allow the first poll immediately so a file changed between WM
             // start and watcher creation is noticed within one interval.
-            last_poll: Instant::now() - POLL_INTERVAL,
+            last_poll: Instant::now().checked_sub(POLL_INTERVAL).unwrap_or_else(Instant::now),
         }
     }
 
@@ -136,7 +136,7 @@ mod tests {
     }
 
     fn poll_now(watcher: &mut ConfigFileWatcher) -> bool {
-        watcher.last_poll = Instant::now() - POLL_INTERVAL;
+        watcher.last_poll = Instant::now().checked_sub(POLL_INTERVAL).unwrap_or_else(Instant::now);
         watcher.poll()
     }
 

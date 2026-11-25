@@ -31,7 +31,7 @@ are gevrek's own and are published with it under the MIT licence.
 
 ## Every crate
 
-627 crates, as Cargo.lock has them. Not every one is in every program: some are
+628 crates, as Cargo.lock has them. Not every one is in every program: some are
 for one system only, some only build or test gevrek.
 
 | Licence | Crates |
@@ -41,8 +41,8 @@ for one system only, some only build or test gevrek.
 | Apache-2.0 OR MIT | 53 |
 | Apache-2.0 | 23 |
 | MIT/Apache-2.0 | 17 |
+| Zlib OR Apache-2.0 OR MIT | 12 |
 | Unlicense OR MIT | 11 |
-| Zlib OR Apache-2.0 OR MIT | 11 |
 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | 9 |
 | MIT OR Apache-2.0 OR Zlib | 6 |
 | BSD-3-Clause | 4 |
@@ -390,6 +390,7 @@ for one system only, some only build or test gevrek.
 | objc2-metal | 0.3.2 | Zlib OR Apache-2.0 OR MIT | <https://github.com/madsmtm/objc2> |
 | objc2-quartz-core | 0.2.2 | MIT | <https://github.com/madsmtm/objc2> |
 | objc2-quartz-core | 0.3.2 | Zlib OR Apache-2.0 OR MIT | <https://github.com/madsmtm/objc2> |
+| objc2-screen-capture-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT | <https://github.com/madsmtm/objc2> |
 | objc2-symbols | 0.2.2 | MIT | <https://github.com/madsmtm/objc2> |
 | objc2-ui-kit | 0.2.2 | MIT | <https://github.com/madsmtm/objc2> |
 | objc2-ui-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT | <https://github.com/madsmtm/objc2> |

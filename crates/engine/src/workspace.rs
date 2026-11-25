@@ -613,12 +613,16 @@ impl Workspace {
     }
 
     /// Update split ratios based on a window being resized
-    /// This recalculates the ratios for all containers based on the new position of the resized window
+    /// This recalculates the ratios for all containers based on the new position of the resized window.
+    /// `new_width` and `work_area_width` are along the way the shares lie;
+    /// `along_height`: that way is the height (the gaps at the top and the
+    /// bottom are the ones taken off).
     pub fn update_split_ratios_from_resize(
         &mut self,
         container_idx: usize,
         new_width: i32,
         work_area_width: i32,
+        along_height: bool,
     ) {
         let count = self.containers.len();
         if count < 2 || container_idx >= count {
@@ -626,7 +630,13 @@ impl Workspace {
         }
 
         // Calculate available width after workspace padding
-        let available_width = work_area_width - self.outer_gaps().left - self.outer_gaps().right;
+        let gaps = self.outer_gaps();
+        let available_width = work_area_width
+            - if along_height {
+                gaps.top + gaps.bottom
+            } else {
+                gaps.left + gaps.right
+            };
         if available_width <= 0 {
             return;
         }
@@ -927,6 +937,52 @@ impl Workspace {
                 }
                 resized
             }
+            // Dwindle shares every room by one ratio (the master ratio,
+            // kept between 0.3 and 0.7). A window keeps the first part of
+            // its own split and lies in the rest of every split before
+            // it: growing it raises the ratio where its own split lies
+            // along the axis, and lowers it where an earlier one does.
+            // (It answered that nothing could be resized: the keys for
+            // wider and narrower did nothing in the layout gevrek starts
+            // with.)
+            LayoutType::Dwindle => {
+                let active = self.active_container_indices();
+                let Some(position) = active.iter().position(|idx| *idx == container_idx) else {
+                    return false;
+                };
+                let count = active.len();
+                if count < 2 {
+                    return false;
+                }
+                self.sync_dwindle_split_history(count);
+                let history = &self.dwindle_split_history;
+                let along = |depth: usize| match history.get(depth) {
+                    Some(DwindleDirection::Vertical) => axis.includes_vertical(),
+                    _ => axis.includes_horizontal(),
+                };
+                let own = position + 1 < count && along(position);
+                let depth = if own {
+                    Some(position)
+                } else {
+                    (0..position).rev().find(|depth| along(*depth))
+                };
+                let Some(depth) = depth else {
+                    return false;
+                };
+                let padded = work_area.with_padding(self.outer_gaps());
+                let extent = match history.get(depth) {
+                    Some(DwindleDirection::Vertical) => padded.height,
+                    _ => padded.width,
+                };
+                if extent <= 0 {
+                    return false;
+                }
+                let sign = if own { 1.0 } else { -1.0 };
+                self.master_ratio = (self.master_ratio.clamp(0.3, 0.7)
+                    + sign * delta_px as f32 / extent as f32)
+                    .clamp(0.3, 0.7);
+                true
+            }
             LayoutType::Columns if axis.includes_horizontal() => {
                 self.adjust_column_ratio(container_idx, delta_px, work_area, LayoutAxis::Horizontal)
             }
@@ -1178,6 +1234,31 @@ impl Workspace {
 
         // Insert at the specified index (preserves order)
         self.containers.insert_at(container_idx, container);
+    }
+
+    /// A container was taken out of the ring at `position` by other
+    /// hands than [`Workspace::remove_window`] (two joined as a group):
+    /// its split goes with it, so the splits after it keep their
+    /// shares. (They were cut at the end instead, and every share
+    /// after the one that went moved along by one.)
+    pub(crate) fn container_left(&mut self, position: usize) {
+        remove_split_at(&mut self.bsp_split_ratios, position);
+        remove_split_at(&mut self.dwindle_split_history, position);
+        let needed = self.containers.len().saturating_sub(1);
+        self.bsp_split_ratios.truncate(needed);
+        self.dwindle_split_history.truncate(needed);
+    }
+
+    /// A container was put into the ring at `position` (a window left
+    /// its group): a split of its own comes in there, an even one, and
+    /// the splits after it keep their shares.
+    pub(crate) fn container_came(&mut self, position: usize) {
+        let needed = self.containers.len().saturating_sub(1);
+        if self.bsp_split_ratios.len() < needed {
+            let at = position.min(self.bsp_split_ratios.len());
+            let share = self.sizes.split_share().unwrap_or(BSP_DEFAULT_SPLIT_RATIO);
+            self.bsp_split_ratios.insert(at, share);
+        }
     }
 
     /// Add a floating window to the workspace
@@ -2402,6 +2483,65 @@ mod tests {
         assert!(workspace.resize_container_edge(0, EdgeDirection::Right, 50, work_area));
         assert!((workspace.master_ratio - 0.55).abs() < 1e-6);
         assert!(!workspace.resize_container_edge(0, EdgeDirection::Left, 50, work_area));
+    }
+
+    #[test]
+    fn a_container_that_leaves_or_comes_by_a_group_takes_only_its_own_split() {
+        let mut workspace = Workspace::new(0, "BSP".to_string());
+        workspace.layout = LayoutType::BSP;
+        for handle in [1, 2, 3].map(WindowHandle) {
+            workspace.add_window(handle, true);
+        }
+        workspace.bsp_split_ratios = vec![0.3, 0.7];
+        // The first container joins the second: its split goes, the
+        // other keeps its share (it was 0.3 that stayed).
+        workspace.containers.remove_at(0);
+        workspace.container_left(0);
+        assert_eq!(workspace.bsp_split_ratios, vec![0.7]);
+        // A window leaves its group after the first container: an even
+        // split comes in there.
+        workspace.add_window_at(WindowHandle(9), 1);
+        workspace.container_came(1);
+        assert_eq!(workspace.bsp_split_ratios, vec![0.7, 0.5]);
+    }
+
+    #[test]
+    fn dwindle_axis_resize_moves_the_ratio_every_room_is_shared_by() {
+        let mut workspace = Workspace::new(0, "Dwindle".to_string());
+        workspace.padding = Padding::default();
+        workspace.layout = LayoutType::Dwindle;
+        workspace.master_ratio = 0.5;
+        for handle in [1, 2, 3].map(WindowHandle) {
+            workspace.add_window(handle, true);
+        }
+        let work_area = Rect::new(0, 0, 1000, 1000);
+        // One window alone has nothing to be resized against.
+        let mut alone = Workspace::new(1, "Alone".to_string());
+        alone.layout = LayoutType::Dwindle;
+        alone.add_window(WindowHandle(9), true);
+        assert!(!alone.resize_container_axis(0, LayoutAxis::Horizontal, 100, work_area));
+
+        // The first window keeps the left of the first split: wider is
+        // more of it.
+        assert!(workspace.resize_container_axis(0, LayoutAxis::Horizontal, 100, work_area));
+        assert!((workspace.master_ratio - 0.6).abs() < 1e-6);
+        // It is as high as the display: nothing to resize that way.
+        assert!(!workspace.resize_container_axis(0, LayoutAxis::Vertical, 100, work_area));
+        // The second lies in the rest of the first split (wider is less
+        // for the first) and keeps the top of the second (higher is more).
+        assert!(workspace.resize_container_axis(1, LayoutAxis::Horizontal, 100, work_area));
+        assert!((workspace.master_ratio - 0.5).abs() < 1e-6);
+        assert!(workspace.resize_container_axis(1, LayoutAxis::Vertical, 100, work_area));
+        assert!((workspace.master_ratio - 0.6).abs() < 1e-6);
+        // The last keeps nothing of its own: it grows by what the ones
+        // before it give.
+        assert!(workspace.resize_container_axis(2, LayoutAxis::Vertical, 100, work_area));
+        assert!((workspace.master_ratio - 0.5).abs() < 1e-6);
+        // Never past what the layout draws.
+        for _ in 0..10 {
+            assert!(workspace.resize_container_axis(0, LayoutAxis::Horizontal, 100, work_area));
+        }
+        assert!((workspace.master_ratio - 0.7).abs() < 1e-6);
     }
 
     #[test]

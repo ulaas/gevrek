@@ -125,6 +125,8 @@ pub struct Facts {
     /// The shell's surfaces that are shown (`gevrek-launcher`), told by
     /// the shell itself.
     pub surfaces: Vec<String>,
+    /// The names of the workspaces that display has, in their order.
+    pub workspaces: Vec<String>,
 }
 
 impl Facts {
@@ -175,6 +177,12 @@ impl Facts {
             containers: workspace["container_count"].as_u64().unwrap_or(0) as usize,
             displays: monitors.len(),
             surfaces: Vec::new(),
+            workspaces: monitor["workspaces"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|workspace| workspace["name"].as_str().map(str::to_string))
+                .collect(),
         }
     }
 
@@ -234,7 +242,10 @@ pub enum Goal {
     Maximized(bool),
     /// A surface of the shell is shown, by its name.
     Shown(&'static str),
-    /// A surface of the shell that was shown is gone.
+    /// A surface of the shell is not shown (any more). Also where it
+    /// went before the step began: a person who put the launcher away
+    /// while reading about it has done what the next step asks, and
+    /// was left waiting for good.
     Gone(&'static str),
     /// A command of this name was carried out (for what leaves nothing to
     /// look at): the name as the window manager's events have it.
@@ -279,10 +290,7 @@ pub fn met(goal: Goal, before: &Facts, now: &Facts, carried_out: &[String]) -> b
         Goal::Tabs(wanted) => (now.containers < now.tiled() && now.tiled() > 1) == wanted,
         Goal::Maximized(wanted) => has.is_some_and(|window| window.maximized == wanted),
         Goal::Shown(name) => now.surfaces.iter().any(|shown| shown == name),
-        Goal::Gone(name) => {
-            before.surfaces.iter().any(|shown| shown == name)
-                && !now.surfaces.iter().any(|shown| shown == name)
-        }
+        Goal::Gone(name) => !now.surfaces.iter().any(|shown| shown == name),
         Goal::Done(name) => carried_out.iter().any(|done| done == name),
     }
 }
@@ -316,6 +324,7 @@ mod tests {
             containers: 3,
             displays: 1,
             surfaces: Vec::new(),
+            workspaces: Vec::new(),
         }
     }
 
@@ -459,7 +468,10 @@ mod tests {
         let mut now = desk();
         now.surfaces.push("gevrek-launcher".to_string());
         assert!(check(Goal::Shown("gevrek-launcher"), &now));
+        assert!(!check(Goal::Gone("gevrek-launcher"), &now));
         assert!(met(Goal::Gone("gevrek-launcher"), &now, &before, &none));
+        // Put away before the step began: done all the same.
+        assert!(met(Goal::Gone("gevrek-launcher"), &before, &before, &none));
         assert!(met(Goal::Done("toggle_expose"), &before, &before, &["toggle_expose".to_string()]));
         assert!(!met(Goal::Done("toggle_expose"), &before, &before, &["quit".to_string()]));
     }

@@ -101,8 +101,12 @@ impl FocusManager {
         self.remove_from_history(handle);
 
         if self.current == Some(handle) {
-            // Focus the next window in history
-            self.current = self.history.focused().copied();
+            // The window used before it: the first of the history.
+            // (It was the ring's own "focused" element, which every
+            // `push_front` moves along: in effect the oldest entry.
+            // The window that then really got the keyboard was taken
+            // for one that had it already, and not moved to the front.)
+            self.current = self.history.get(0).copied();
         }
     }
 
@@ -256,6 +260,22 @@ impl Default for FocusManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_used_before_is_the_current_one_when_the_current_goes() {
+        let mut fm = FocusManager::new();
+        for window in [1, 2, 3] {
+            fm.record_focus(WindowHandle(window));
+        }
+        fm.remove_window(WindowHandle(3));
+        // (It was the oldest, 1.)
+        assert_eq!(fm.current(), Some(WindowHandle(2)));
+        // The keyboard really goes to another: that one is the newest,
+        // and the one before it is not itself.
+        assert!(fm.record_focus(WindowHandle(1)));
+        assert_eq!(fm.current(), Some(WindowHandle(1)));
+        assert_eq!(fm.previous(), Some(WindowHandle(2)));
+    }
 
     #[test]
     fn test_focus_history() {

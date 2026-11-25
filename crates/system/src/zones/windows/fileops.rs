@@ -518,8 +518,10 @@ fn path_in_note(note: &[u8]) -> Option<String> {
         _ => return None,
     };
     let units: Vec<u16> = letters
-        .chunks_exact(2)
-        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| u16::from_le_bytes(*pair))
         .take_while(|unit| *unit != 0)
         .collect();
     let path = String::from_utf16(&units).ok()?;

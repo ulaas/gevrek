@@ -1046,6 +1046,16 @@ impl State {
                             ));
                         }
                         if inhibited || state.locked {
+                            // A key let go here was let go: one whose
+                            // press gevrek kept (the key that locked the
+                            // session, let go after the lock came) is not
+                            // remembered as held or kept. (It was, and the
+                            // next press of it after unlocking reached its
+                            // program without its release.)
+                            if !pressed {
+                                state.release_held(code.raw());
+                                state.suppressed_keys.remove(&code.raw());
+                            }
                             return FilterResult::Forward;
                         }
                         // A window is being picked: Escape ends that, and

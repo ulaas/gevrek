@@ -1910,6 +1910,7 @@ dependencies = [
  "gevrek-server",
  "gevrek-studio",
  "gevrek-system",
+ "gevrek-tutorial",
  "gevrek-update",
  "gevrek-win32",
  "gevrek-zones",
@@ -1917,7 +1918,6 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
  "tonic",
@@ -2047,7 +2047,6 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
 ]
 
 [[package]]

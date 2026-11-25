@@ -1696,18 +1696,32 @@ impl Executor {
                                     let work_area_width = current_monitor_info.work_width;
                                     let work_area_height = current_monitor_info.work_height;
 
-                                    if workspace.layout == crate::layouts::LayoutType::Columns {
-                                        workspace.update_split_ratios_from_resize(
+                                    // The shares lie along the width for
+                                    // columns and along the height for
+                                    // rows, and the other way round where
+                                    // the layout is turned a quarter. (A
+                                    // turned layout's window, as wide as
+                                    // the display, was given nine tenths.)
+                                    let columns = match workspace.layout {
+                                        crate::layouts::LayoutType::Columns => Some(true),
+                                        crate::layouts::LayoutType::Rows => Some(false),
+                                        _ => None,
+                                    };
+                                    let turned = workspace.layout_rotation % 2 == 1;
+                                    match columns.map(|columns| columns != turned) {
+                                        Some(true) => workspace.update_split_ratios_from_resize(
                                             container_idx,
                                             current_rect.width,
                                             work_area_width,
-                                        );
-                                    } else if workspace.layout == crate::layouts::LayoutType::Rows {
-                                        workspace.update_split_ratios_from_resize(
+                                            false,
+                                        ),
+                                        Some(false) => workspace.update_split_ratios_from_resize(
                                             container_idx,
                                             current_rect.height,
                                             work_area_height,
-                                        );
+                                            true,
+                                        ),
+                                        None => {}
                                     }
                                 }
                             }

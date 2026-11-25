@@ -137,14 +137,14 @@ pub fn start() -> Option<Keeper> {
 mod windows_keeper {
     use super::{remember, Keeper};
     use std::sync::{mpsc, Arc, Mutex};
-    use windows::core::{w, PCWSTR};
+    use windows::core::w;
     use windows::Win32::Foundation::{HANDLE, HGLOBAL, HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::DataExchange::{
         AddClipboardFormatListener, CloseClipboard, EmptyClipboard, GetClipboardData,
         IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
     };
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
     use windows::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostMessageW,
         RegisterClassExW, HWND_MESSAGE, MSG, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WNDCLASSEXW,
@@ -287,7 +287,13 @@ mod windows_keeper {
             if letters.is_null() {
                 return None;
             }
-            let text = PCWSTR(letters).to_string().ok();
+            // No further than the memory goes: a program may put a text
+            // there that does not end with a nought. (It was read until
+            // one came, wherever that was.)
+            let most = GlobalSize(memory) / std::mem::size_of::<u16>();
+            let all = std::slice::from_raw_parts(letters, most);
+            let length = all.iter().position(|letter| *letter == 0).unwrap_or(most);
+            let text = String::from_utf16(&all[..length]).ok();
             let _ = GlobalUnlock(memory);
             text
         })();

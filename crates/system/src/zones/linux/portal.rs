@@ -132,7 +132,8 @@ fn watcher(wake: &Wake) -> notify::Result<Watcher> {
 fn read(folder: &Path, system: &System, how: &How, wake: &Wake) -> Outcome {
     loop {
         let mut why = format!("{} is not there", folder.display());
-        if (how.reach)(folder) {
+        let reached = (how.reach)(folder);
+        if reached {
             // The telling begins before the reading, so that nothing
             // that happens between the two is missed.
             let begun = watcher(wake).and_then(|mut watcher| watcher.add(folder).map(|()| watcher));
@@ -162,7 +163,11 @@ fn read(folder: &Path, system: &System, how: &How, wake: &Wake) -> Outcome {
         // What happened before the folder above was listened to went
         // unheard: looked at once more, the folder is still away, or it
         // is gone to again.
-        if sentinel.is_some() && (how.reach)(folder) {
+        // (Only where it was away a moment ago: a folder that is there
+        // and cannot be read, one the person may not list, is as away
+        // as it was, and going to it again at once went round and
+        // round without an end.)
+        if sentinel.is_some() && !reached && (how.reach)(folder) {
             continue;
         }
         return Outcome::Away { why, sentinel };

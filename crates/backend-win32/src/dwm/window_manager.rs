@@ -600,6 +600,8 @@ impl Clone for OverviewShown {
         Self(None)
     }
 }
+/// A rectangle of the desktop: its left, its top, how wide, how high.
+pub type Place = (i32, i32, i32, i32);
 
 #[derive(Clone)]
 pub struct WindowManager {
@@ -646,7 +648,7 @@ pub struct WindowManager {
     /// The windows that are cut at their display's edge (a column of the
     /// scrolling layout that reaches past it), each with the window's
     /// place and the display it was last cut for.
-    cut: RefCell<HashMap<WindowHandle, ((i32, i32, i32, i32), (i32, i32, i32, i32))>>,
+    cut: RefCell<HashMap<WindowHandle, (Place, Place)>>,
     /// Those of them whose title bar the system draws: it is told not to
     /// while they are cut (the bar it draws takes no shape), and told to
     /// again when they are whole.
@@ -949,10 +951,6 @@ impl WindowManager {
         }
     }
 
-    pub fn set_rule_engine(&mut self, rule_engine: Arc<Mutex<RuleEngine>>) {
-        self.rule_engine = Some(rule_engine);
-    }
-
     pub fn set_animation_profile(&mut self, profile: AnimationProfile) {
         self.animation_scheduler.set_profile(profile);
     }
@@ -969,26 +967,6 @@ impl WindowManager {
             + self.going_out.waiting.len()
             + self.going_out.leaving.len()
             + self.effects_resting.len()
-    }
-
-    pub fn animation_summary(&self) -> String {
-        let profile = self.animation_profile();
-        if !profile.enabled {
-            return "disabled".to_string();
-        }
-        format!(
-            "layout={}ms/{:?}, workspace={}ms/{:?}, border={}ms/{:?}, window={}ms/{:?} enter={:?} exit={:?}",
-            profile.layout.duration_ms,
-            profile.layout.curve,
-            profile.workspace.duration_ms,
-            profile.workspace.curve,
-            profile.border.duration_ms,
-            profile.border.curve,
-            profile.window.duration_ms,
-            profile.window.curve,
-            profile.window_enter_style,
-            profile.window_exit_style,
-        )
     }
 
     pub fn is_animation_event_suppressed(&self, handle: WindowHandle) -> bool {
@@ -1378,43 +1356,6 @@ impl WindowManager {
         None
     }
 
-    /// Resolve the rules for a live window. The window's tags are engine
-    /// state and are passed in.
-    pub fn resolve_window_rules_with_context(
-        &self,
-        handle: WindowHandle,
-        workspace: Option<String>,
-        workspace_index: Option<usize>,
-        scope: RuleResolutionScope,
-        tags: &gevrek_engine::rule_state::RuleMetadataMap,
-    ) -> crate::dwm::RuleResolution {
-        let Some(rule_engine) = &self.rule_engine else {
-            return crate::dwm::RuleResolution::default();
-        };
-        let Ok(engine) = rule_engine.lock() else {
-            return crate::dwm::RuleResolution::default();
-        };
-        {
-            self.rule_window_info(handle)
-                .map(|mut window| {
-                    window.tags = match scope {
-                        RuleResolutionScope::All => tags.tags(handle),
-                        RuleResolutionScope::Static | RuleResolutionScope::Dynamic => {
-                            tags.base_tags(handle)
-                        }
-                    };
-                    window.workspace = workspace;
-                    window.workspace_index = workspace_index;
-                    match scope {
-                        RuleResolutionScope::All => engine.resolve(&window),
-                        RuleResolutionScope::Static => engine.resolve_static(&window),
-                        RuleResolutionScope::Dynamic => engine.resolve_dynamic(&window),
-                    }
-                })
-                .unwrap_or_default()
-        }
-    }
-
     /// Whether a window floats: as a rule of the person's says; where none
     /// speaks of it, as the window itself is made (a dialog, a window of
     /// one size, one kept above the others: `window_kind::floats`); and
@@ -1559,32 +1500,6 @@ impl WindowManager {
         }
     }
 
-    /// Find all windows matching a pattern (by title, class, or exe).
-    /// Returns all matching WindowHandles from tracked windows.
-    pub fn find_windows_by_pattern(
-        &self,
-        pattern: &str,
-        match_kind: &crate::node_editor::RuleMatchKind,
-        match_strategy: &crate::node_editor::RuleMatchStrategy,
-    ) -> Vec<WindowHandle> {
-        use crate::node_editor::{RuleMatchKind, RuleMatchStrategy};
-        let kind = match match_kind {
-            RuleMatchKind::Title => crate::dwm::MatchKind::Title,
-            RuleMatchKind::Class => crate::dwm::MatchKind::Class,
-            RuleMatchKind::Exe => crate::dwm::MatchKind::Exe,
-            RuleMatchKind::Path => crate::dwm::MatchKind::Path,
-            RuleMatchKind::AppId => crate::dwm::MatchKind::AppId,
-        };
-        let strategy = match match_strategy {
-            RuleMatchStrategy::Equals => crate::dwm::MatchStrategy::Equals,
-            RuleMatchStrategy::Contains => crate::dwm::MatchStrategy::Contains,
-            RuleMatchStrategy::StartsWith => crate::dwm::MatchStrategy::StartsWith,
-            RuleMatchStrategy::EndsWith => crate::dwm::MatchStrategy::EndsWith,
-            RuleMatchStrategy::Regex => crate::dwm::MatchStrategy::Regex,
-        };
-        self.find_windows_by_match(pattern, &kind, &strategy, false)
-    }
-
     pub fn find_windows_by_match(
         &self,
         pattern: &str,
@@ -1680,38 +1595,6 @@ impl WindowManager {
                     return Ok(()); // Continue without crashing
                 }
                 note_posted_move(hwnd, (x, y, width, height));
-            }
-        }
-        Ok(())
-    }
-
-    pub fn resize_window(&self, handle: WindowHandle, width: i32, height: i32) -> Result<()> {
-        unsafe {
-            let hwnd = handle.to_hwnd();
-            if IsWindow(hwnd).as_bool() {
-                let mut rect = RECT::default();
-                if let Err(e) = GetWindowRect(hwnd, &mut rect) {
-                    log::warn!("Failed to get window rect for resize: {}", e);
-                    return Ok(()); // Skip this window
-                }
-
-                // Use ASYNCWINDOWPOS and NOACTIVATE to prevent visible shuffling
-                if let Err(e) = super::reach::set_window_pos(
-                    hwnd,
-                    None,
-                    rect.left,
-                    rect.top,
-                    width,
-                    height,
-                    SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
-                ) {
-                    log::warn!(
-                        "Failed to resize window (might be protected/system window): {}",
-                        e
-                    );
-                    return Ok(()); // Continue without crashing
-                }
-                note_posted_move(hwnd, (rect.left, rect.top, width, height));
             }
         }
         Ok(())
@@ -1915,7 +1798,7 @@ impl WindowManager {
     /// its own coordinates, so it is made again when the window has
     /// moved; where nothing is another, nothing is asked of the system.
     /// The border around a window is cut with it.
-    pub fn cut_at_displays(&self, windows: &[(WindowHandle, (i32, i32, i32, i32))]) {
+    pub fn cut_at_displays(&self, windows: &[(WindowHandle, Place)]) {
         let mut cut = self.cut.borrow_mut();
         let mut plain_frame = self.plain_frame.borrow_mut();
         // Whether the system draws the window's frame (its title bar):
@@ -2638,41 +2521,6 @@ impl WindowManager {
         Ok(())
     }
 
-    /// Restore all minimized windows - useful for tiling WM startup
-    /// This works across ALL monitors (EnumWindows is system-wide)
-    pub fn restore_all_minimized(&self) -> Result<usize> {
-        let mut restored_count = 0;
-        let total_windows = self.windows.len();
-
-        log::info!(
-            "Checking {} tracked windows for minimized state...",
-            total_windows
-        );
-
-        for window in self.windows.values() {
-            if self.is_window_minimized(window.handle) {
-                log::info!(
-                    "  Restoring minimized window: '{}' ({:?})",
-                    window.title,
-                    window.handle
-                );
-                self.restore_window(window.handle)?;
-                restored_count += 1;
-            }
-        }
-
-        if restored_count > 0 {
-            log::info!(
-                "✅ Restored {} minimized windows (out of {} total)",
-                restored_count,
-                total_windows
-            );
-        } else {
-            log::info!("No minimized windows found to restore");
-        }
-        Ok(restored_count)
-    }
-
     pub fn set_window_title(&self, handle: WindowHandle, title: &str) -> Result<()> {
         unsafe {
             let hwnd = handle.to_hwnd();
@@ -2746,6 +2594,13 @@ impl WindowManager {
         let without_title: Vec<WindowHandle> = self.title_bar_hidden.keys().copied().collect();
         for handle in without_title {
             let _ = self.set_title_bar_visible(handle, true);
+        }
+        // A window gevrek made fullscreen gets its frame and its place
+        // back. (It stayed without a frame, as large as the display,
+        // until its program was started again.)
+        let fullscreen: Vec<WindowHandle> = self.fullscreen_windows.keys().copied().collect();
+        for handle in fullscreen {
+            let _ = self.toggle_fullscreen(handle);
         }
     }
 
@@ -2998,22 +2853,6 @@ impl WindowManager {
         Ok(())
     }
 
-    /// Warp the mouse cursor to the center of a window. Used by the
-    /// mouse-follows-focus option after dispatch-driven focus changes.
-    /// Failures are intentionally silent: warping is a convenience, never
-    /// a reason to fail a focus command.
-    pub fn warp_cursor_to_window_center(&self, handle: WindowHandle) {
-        let Ok(rect) = self.get_window_rect(handle) else {
-            return;
-        };
-        unsafe {
-            let _ = SetCursorPos(
-                rect.x + rect.width.div_euclid(2),
-                rect.y + rect.height.div_euclid(2),
-            );
-        }
-    }
-
     pub fn send_to_back(&self, handle: WindowHandle) -> Result<()> {
         unsafe {
             let hwnd = handle.to_hwnd();
@@ -3110,21 +2949,6 @@ impl WindowManager {
         Ok(())
     }
 
-    /// Set window border color (Windows 11)
-    ///
-    /// Uses DWMWA_BORDER_COLOR to set the native window border color.
-    /// Pass None to reset to default.
-    pub fn set_window_border_color(
-        &mut self,
-        handle: WindowHandle,
-        color: Option<(u8, u8, u8)>,
-    ) -> Result<()> {
-        let color = color
-            .map(|(r, g, b)| RuleColor::Rgb { r, g, b })
-            .unwrap_or(RuleColor::Default);
-        self.set_window_border_rule_color(handle, color)
-    }
-
     pub fn set_window_border_rule_color(
         &mut self,
         handle: WindowHandle,
@@ -3161,18 +2985,6 @@ impl WindowManager {
             .get(&handle)
             .copied()
             .unwrap_or(RuleColor::Default)
-    }
-
-    /// Set window caption/titlebar color (Windows 11)
-    pub fn set_window_caption_color(
-        &mut self,
-        handle: WindowHandle,
-        color: Option<(u8, u8, u8)>,
-    ) -> Result<()> {
-        let color = color
-            .map(|(r, g, b)| RuleColor::Rgb { r, g, b })
-            .unwrap_or(RuleColor::Default);
-        self.set_window_caption_rule_color(handle, color)
     }
 
     pub fn set_window_caption_rule_color(
@@ -4572,15 +4384,6 @@ impl WindowManager {
         restored
     }
 
-    /// Hide multiple windows using cloaking (for workspace switch)
-    pub fn batch_cloak(&self, handles: &[WindowHandle], cloak: bool) -> Result<()> {
-        for handle in handles {
-            // cloak_window already handles hide_border/show_border internally
-            self.cloak_window(*handle, cloak)?;
-        }
-        Ok(())
-    }
-
     pub fn get_window_position(&self, handle: WindowHandle) -> Result<(i32, i32)> {
         unsafe {
             let hwnd = handle.to_hwnd();
@@ -4989,7 +4792,7 @@ impl WindowManager {
             // Position border behind the target window
             // NOTE: No SWP_ASYNCWINDOWPOS here - border must be positioned synchronously
             // on creation to prevent flicker at wrong position
-            SetWindowPos(
+            if let Err(error) = SetWindowPos(
                 border_hwnd,
                 hwnd, // Place behind the target window
                 border_x,
@@ -4997,7 +4800,12 @@ impl WindowManager {
                 border_width_total,
                 border_height_total,
                 SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOCOPYBITS,
-            )?;
+            ) {
+                // (Nobody knows of the window yet: left as it was,
+                // it stayed on the screen until gevrek ended.)
+                let _ = DestroyWindow(border_hwnd);
+                return Err(error.into());
+            }
 
             apply_border_window_region(
                 border_hwnd,
@@ -5207,7 +5015,7 @@ impl WindowManager {
 
             // Position border behind the target window
             // NOTE: No SWP_ASYNCWINDOWPOS - synchronous on creation to prevent flicker
-            SetWindowPos(
+            if let Err(error) = SetWindowPos(
                 border_hwnd,
                 hwnd,
                 border_x,
@@ -5215,7 +5023,12 @@ impl WindowManager {
                 border_width_total,
                 border_height_total,
                 SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOCOPYBITS,
-            )?;
+            ) {
+                // (Nobody knows of the window yet: left as it was,
+                // it stayed on the screen until gevrek ended.)
+                let _ = DestroyWindow(border_hwnd);
+                return Err(error.into());
+            }
 
             apply_border_window_region(
                 border_hwnd,
@@ -5490,11 +5303,6 @@ impl WindowManager {
         self.border_hwnd_set.contains(&handle)
             || self.stackbar_hwnd_set.contains(&handle)
             || self.auras.borrow().owns(handle.to_hwnd())
-    }
-
-    /// Whether the handle belongs to a stackbar tab strip window.
-    pub fn is_stackbar_window(&self, handle: WindowHandle) -> bool {
-        self.stackbar_hwnd_set.contains(&handle)
     }
 
     /// Check if a window has a border
@@ -5817,16 +5625,6 @@ impl WindowManager {
         Ok(())
     }
 
-    pub fn toggle_maximized(&self, handle: WindowHandle) -> Result<bool> {
-        if self.is_window_maximized(handle) {
-            self.unmaximize_window(handle)?;
-            Ok(false)
-        } else {
-            self.maximize_window(handle)?;
-            Ok(true)
-        }
-    }
-
     /// Minimise a window as gevrek does it: it fades where it stands (as
     /// a window that is closed does, where windows have a way out), and is
     /// minimised when it is gone. Windows' own way, the window flying to
@@ -5903,12 +5701,6 @@ impl WindowManager {
         }
     }
 
-    pub fn toggle_window_pinned(&self, handle: WindowHandle) -> Result<bool> {
-        let pinned = !self.is_window_pinned(handle);
-        self.set_always_on_top(handle, pinned)?;
-        Ok(pinned)
-    }
-
     pub fn is_window_fullscreen(&self, handle: WindowHandle) -> bool {
         self.fullscreen_windows.contains_key(&handle)
     }
@@ -5921,6 +5713,12 @@ impl WindowManager {
             if !IsWindow(hwnd).as_bool() {
                 self.fullscreen_windows.remove(&handle);
                 anyhow::bail!("Window {:?} no longer exists", handle);
+            }
+            // A style is changed by a message the window answers: one
+            // that does not answer would hold the whole loop up (and,
+            // as gevrek stops, everything it still has to give back).
+            if is_hung(hwnd) {
+                anyhow::bail!("Window {:?} does not answer", handle);
             }
 
             if let Some(restore) = self.fullscreen_windows.remove(&handle) {
@@ -6006,6 +5804,11 @@ impl WindowManager {
             if !IsWindow(hwnd).as_bool() {
                 self.title_bar_hidden.remove(&handle);
                 anyhow::bail!("Window {:?} no longer exists", handle);
+            }
+            // (As for fullscreen: not asked of a window that does not
+            // answer.)
+            if is_hung(hwnd) {
+                anyhow::bail!("Window {:?} does not answer", handle);
             }
 
             if visible {
@@ -6301,7 +6104,7 @@ impl WindowManager {
             // Place below the container's focused window (and its border):
             // the strip is reserved space, and what of it lies lower is
             // behind the window.
-            SetWindowPos(
+            if let Err(error) = SetWindowPos(
                 stackbar_hwnd,
                 self.stackbar_goes_behind(state.key),
                 x,
@@ -6309,7 +6112,12 @@ impl WindowManager {
                 width,
                 config.height + overlap,
                 SWP_NOACTIVATE,
-            )?;
+            ) {
+                // (Nobody knows of the window yet: left as it was,
+                // it stayed on the screen until gevrek ended.)
+                let _ = DestroyWindow(stackbar_hwnd);
+                return Err(error.into());
+            }
 
             let stackbar_handle = WindowHandle::from_hwnd(stackbar_hwnd);
             self.stackbar_windows.insert(
@@ -6613,79 +6421,6 @@ impl WindowManager {
         }
     }
 
-    /// Remove the native DWM border color (restore system default)
-    pub fn reset_native_border_color(&self, handle: WindowHandle) -> Result<bool> {
-        unsafe {
-            let hwnd = handle.to_hwnd();
-            if !IsWindow(hwnd).as_bool() {
-                return Ok(false);
-            }
-
-            // DWMWA_COLOR_DEFAULT = 0xFFFFFFFF
-            let color: u32 = 0xFFFFFFFF;
-
-            let result = super::reach::dwm_set_window_attribute(
-                hwnd,
-                DWMWINDOWATTRIBUTE(34), // DWMWA_BORDER_COLOR
-                &color as *const _ as *const _,
-                std::mem::size_of::<u32>() as u32,
-            );
-
-            Ok(result.is_ok())
-        }
-    }
-
-    /// Remove native DWM border entirely (no border visible)
-    pub fn remove_native_border(&self, handle: WindowHandle) -> Result<bool> {
-        unsafe {
-            let hwnd = handle.to_hwnd();
-            if !IsWindow(hwnd).as_bool() {
-                return Ok(false);
-            }
-
-            // DWMWA_COLOR_NONE = 0xFFFFFFFE
-            let color: u32 = 0xFFFFFFFE;
-
-            let result = super::reach::dwm_set_window_attribute(
-                hwnd,
-                DWMWINDOWATTRIBUTE(34), // DWMWA_BORDER_COLOR
-                &color as *const _ as *const _,
-                std::mem::size_of::<u32>() as u32,
-            );
-
-            Ok(result.is_ok())
-        }
-    }
-
-    /// Set both native border color AND corner preference on a window (Windows 11+)
-    /// Convenience method for full DWM border customization
-    pub fn set_native_border_style(
-        &self,
-        handle: WindowHandle,
-        r: u8,
-        g: u8,
-        b: u8,
-        corner: WindowCorner,
-    ) -> Result<bool> {
-        let color_set = self.set_native_border_color(handle, r, g, b)?;
-
-        unsafe {
-            let hwnd = handle.to_hwnd();
-            if !IsWindow(hwnd).as_bool() {
-                return Ok(false);
-            }
-
-            let corner_value = corner as i32;
-            let _ = super::reach::dwm_set_window_attribute(
-                hwnd,
-                DWMWINDOWATTRIBUTE(33), // DWMWA_WINDOW_CORNER_PREFERENCE
-                &corner_value as *const _ as *const _,
-                std::mem::size_of::<i32>() as u32,
-            );
-        }
-
-        Ok(color_set)
-    }
 }
 
 impl Default for WindowManager {
@@ -7575,11 +7310,9 @@ unsafe extern "system" fn border_window_proc(
             if !hdc.is_invalid() {
                 // Get border color from window user data
                 let color_ref = GetWindowLongW(hwnd, GWLP_USERDATA) as u32;
-                let color = if color_ref == 0 {
-                    COLORREF(0x000000FF) // Default red (debug)
-                } else {
-                    COLORREF(color_ref)
-                };
+                // (Nought is black, a colour as any other: it was drawn
+                // red, as a sign that no colour was set.)
+                let color = COLORREF(color_ref);
 
                 // Fill the ENTIRE window with the border color.
                 // The border window sits behind the target window in z-order,
@@ -7602,11 +7335,7 @@ unsafe extern "system" fn border_window_proc(
             let hdc = HDC(wparam.0 as *mut _);
             if !hdc.is_invalid() {
                 let color_ref = GetWindowLongW(hwnd, GWLP_USERDATA) as u32;
-                let color = if color_ref == 0 {
-                    COLORREF(0x000000FF)
-                } else {
-                    COLORREF(color_ref)
-                };
+                let color = COLORREF(color_ref);
                 let mut rect = RECT::default();
                 if GetClientRect(hwnd, &mut rect).is_ok() {
                     let brush = CreateSolidBrush(color);

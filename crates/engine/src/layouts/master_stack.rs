@@ -70,17 +70,6 @@ impl MasterStackLayout {
         self.master_ratio = (self.master_ratio + delta).clamp(0.1, 0.9);
     }
 
-    /// Increment master count
-    pub fn increment_master(&mut self) {
-        self.master_count += 1;
-    }
-
-    /// Decrement master count (minimum 1)
-    pub fn decrement_master(&mut self) {
-        if self.master_count > 1 {
-            self.master_count -= 1;
-        }
-    }
 }
 
 impl Default for MasterStackLayout {

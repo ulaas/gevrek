@@ -345,6 +345,14 @@ impl State {
             if !capture.frame.is_alive() {
                 continue;
             }
+            // A locked session shows none of its windows: a picture of
+            // a display is the lock screen's then, and a picture of one
+            // window is not given. (It was drawn from the window's own
+            // surfaces, locked or not.)
+            if self.locked && matches!(capture.source, Source::Window(_)) {
+                capture.frame.failed(FailureReason::Stopped);
+                continue;
+            }
             let Some(size) = self.image_size(capture.source) else {
                 capture.frame.failed(FailureReason::Stopped);
                 continue;

@@ -45,7 +45,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
@@ -113,7 +113,7 @@ jobs:
           # 1 behind, which the step would end with; every check has passed.
           exit 0
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gevrek-windows-x64
           path: |
@@ -127,7 +127,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
@@ -150,7 +150,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends ./target/dist/gevrek-linux-x64.deb
           gevrek --version
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gevrek-linux-x64-deb
           path: |
@@ -170,7 +170,7 @@ jobs:
       - name: Tools and libraries
         run: |
           dnf install -y git curl tar gzip gcc gcc-c++ make pkgconf-pkg-config wayland-devel libxkbcommon-devel mesa-libEGL-devel libglvnd-devel systemd-devel libinput-devel mesa-libgbm-devel libseat-devel libdrm-devel pam-devel pipewire-devel pixman-devel clang rpm-build systemd-rpm-macros
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
@@ -189,7 +189,7 @@ jobs:
           dnf install -y --setopt=install_weak_deps=False ./target/dist/gevrek-linux-x64.rpm
           gevrek --version
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gevrek-linux-x64-rpm
           path: target/dist/gevrek-linux-x64.rpm
@@ -205,7 +205,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true

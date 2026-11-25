@@ -61,9 +61,13 @@ impl Rect {
         )
     }
 
-    /// Get center point
+    /// Get center point. (Never past what a number holds: a rectangle
+    /// from outside may lie at the very edge of it.)
     pub fn center(&self) -> (i32, i32) {
-        (self.x + self.width / 2, self.y + self.height / 2)
+        (
+            self.x.saturating_add(self.width / 2),
+            self.y.saturating_add(self.height / 2),
+        )
     }
 
     /// Check if point is inside rectangle

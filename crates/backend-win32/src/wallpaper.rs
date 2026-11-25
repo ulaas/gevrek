@@ -729,7 +729,9 @@ pub mod system {
 
     /// Windows' desktop wallpaper, for the thread it was asked for on.
     pub struct Desktop {
-        api: IDesktopWallpaper,
+        /// (Let go of by hand, before the thread says it is done with
+        /// the shell's objects.)
+        api: std::mem::ManuallyDrop<IDesktopWallpaper>,
         /// The thread was set up for the shell's objects here.
         set_up: bool,
     }
@@ -744,7 +746,10 @@ pub mod system {
                     CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE).is_ok();
                 match CoCreateInstance::<_, IDesktopWallpaper>(&DesktopWallpaper, None, CLSCTX_ALL)
                 {
-                    Ok(api) => Some(Self { api, set_up }),
+                    Ok(api) => Some(Self {
+                        api: std::mem::ManuallyDrop::new(api),
+                        set_up,
+                    }),
                     Err(error) => {
                         log::warn!("Windows' wallpaper cannot be asked for: {error}");
                         if set_up {
@@ -759,9 +764,13 @@ pub mod system {
 
     impl Drop for Desktop {
         fn drop(&mut self) {
+            // SAFETY: let go of once, here, and not used after. First
+            // the object, then the thread's word that it is done: a
+            // field is let go of after this function, which was after
+            // `CoUninitialize`.
+            unsafe { std::mem::ManuallyDrop::drop(&mut self.api) };
             if self.set_up {
                 // SAFETY: the one telling for the one setting up above.
-                // (The object itself is let go of before, with the field.)
                 unsafe { CoUninitialize() };
             }
         }

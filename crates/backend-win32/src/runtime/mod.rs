@@ -56,6 +56,8 @@ pub use gevrek_host::command::{
 const DISPLAY_CHANGE_SETTLE: std::time::Duration = std::time::Duration::from_millis(400);
 
 pub struct Runtime {
+    /// `run` came to its end and gave everything back itself.
+    gave_back: bool,
     config: Config,
     /// The Win32 backend: it carries out what the core decides.
     window_manager: WindowManager,
@@ -155,11 +157,37 @@ const NOTICE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
 /// closing of the focused window (see `output_that_lost_its_focus`).
 const FOCUS_LEFT_A_MOMENT_AGO: std::time::Duration = std::time::Duration::from_millis(300);
 
+/// One thing given back as the runtime is dropped: a fault in it is
+/// said, and the next thing is given back all the same.
+fn given_back(what: &str, step: impl FnOnce()) {
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(step)).is_err() {
+        log::error!("Runtime dropped: {what} could not be given back");
+    }
+}
+
 /// Last-resort safety net: if the runtime is dropped without reaching the
 /// clean shutdown at the end of `run` (an early `?` return or a caught
 /// panic), put every window Gevrek hid back on screen.
 impl Drop for Runtime {
     fn drop(&mut self) {
+        // What gevrek changed of other programs' windows is given back
+        // here too where `run` did not come to do it (a panic that was
+        // caught, an early return). (Only the hidden windows were shown:
+        // a window that was dimmed, cut at a display's edge, fullscreen
+        // or without its title bar stayed so after gevrek was gone.)
+        // Each on its own: what stopped the loop may stop one of them.
+        if !self.gave_back {
+            let wm = &mut self.window_manager;
+            given_back("the windows' own look", || {
+                wm.restore_all_window_alpha_styles();
+            });
+            given_back("the windows' frames", || wm.restore_all_window_frames());
+            given_back("the windows cut at a display's edge", || wm.cut_at_displays(&[]));
+            given_back("the system's own window movements", || {
+                wm.set_system_transitions_for_all(false)
+            });
+            crate::windows_key::configure(false, false);
+        }
         let restored = crate::dwm::hidden_journal::emergency_restore();
         if restored > 0 {
             log::warn!("Runtime dropped: restored {restored} hidden window(s)");
@@ -385,6 +413,7 @@ impl Runtime {
         }
 
         Ok(Self {
+            gave_back: false,
             config,
             window_manager,
             window_monitor,
@@ -633,6 +662,12 @@ impl Runtime {
                     log::warn!("The new display settings were not kept: going back to the ones before");
                     self.answer_display_trial(gevrek_model::command::TrialAnswer::Revert);
                 }
+                // A window that opened meanwhile was cloaked until this
+                // loop had placed it; paused, it places nothing, so the
+                // window is seen as it is. (It stayed cloaked until
+                // gevrek went on.)
+                crate::dwm::veil::events_taken();
+                crate::dwm::veil::pass_ended();
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 continue;
             }
@@ -1158,7 +1193,7 @@ impl Runtime {
                 self.core
                     .executor
                     .focused_monitor()
-                    .map_or(0, |display| display.0 as isize),
+                    .map_or(0, |display| display.0),
             );
             // (What this pass hid and showed is in the journal's file.)
             crate::dwm::hidden_journal::flush();
@@ -1445,6 +1480,7 @@ impl Runtime {
         self.window_manager.restore_all_window_frames();
         // Windows that were cut at a display's edge are whole again.
         self.window_manager.cut_at_displays(&[]);
+        self.gave_back = true;
         // The displays have their own colours again.
         self.night_light.restore();
         // And the desktop the wallpaper it had.

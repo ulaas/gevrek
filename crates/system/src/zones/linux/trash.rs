@@ -252,10 +252,26 @@ impl Trash {
         notes
     }
 
+    /// A place as the trash notes it: by the real place of its folder,
+    /// whatever links lead there (`put`). Where the folder is gone, as it
+    /// is said. (What was thrown away from a folder reached through a
+    /// link was noted by the real place and looked for by the said one:
+    /// it was never found again to be put back.)
+    fn as_noted(original: &Path) -> PathBuf {
+        match (original.parent(), original.file_name()) {
+            (Some(folder), Some(name)) => std::fs::canonicalize(folder)
+                .map(|folder| folder.join(name))
+                .unwrap_or_else(|_| original.to_path_buf()),
+            _ => original.to_path_buf(),
+        }
+    }
+
     /// Put back what was last thrown away from `original`. An error where
     /// nothing from there is in the trash, and where something is at that
     /// place again: nothing is ever written over.
     pub fn restore(&self, original: &Path) -> std::io::Result<Trashed> {
+        let noted = Self::as_noted(original);
+        let original = noted.as_path();
         let mut found: Vec<Note> = self
             .cans_of(original)
             .iter()
@@ -288,6 +304,8 @@ impl Trash {
     /// Where everything thrown away from `original` is now, the last
     /// thrown away last.
     pub fn find(&self, original: &Path) -> Vec<Trashed> {
+        let noted = Self::as_noted(original);
+        let original = noted.as_path();
         let mut found: Vec<Note> = self
             .cans_of(original)
             .iter()
@@ -369,6 +387,26 @@ mod tests {
         std::fs::remove_file(&file).expect("removed");
         assert_eq!(trash.restore(&file).expect_err("nothing left").kind(), ErrorKind::NotFound);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn what_was_thrown_away_through_a_link_to_its_folder_comes_back_by_the_same_way() {
+        let root = crate::zones::linux::testing::folder("trash-through-a-link");
+        let root = std::fs::canonicalize(&root).expect("real");
+        let trash = trash_in(&root);
+        let real = root.join("home/Documents/Desktop");
+        std::fs::create_dir_all(&real).expect("a folder");
+        // The desktop is a link to a folder elsewhere.
+        let desktop = root.join("home/Desktop");
+        std::os::unix::fs::symlink(&real, &desktop).expect("a link");
+        let file = desktop.join("a.txt");
+        std::fs::write(&file, "one").expect("written");
+        trash.put(&file).expect("thrown away");
+        assert!(!file.exists());
+        // Found and put back by the place as it was said.
+        assert_eq!(trash.find(&file).len(), 1);
+        trash.restore(&file).expect("put back");
+        assert_eq!(std::fs::read_to_string(&file).expect("read"), "one");
     }
 
     #[test]

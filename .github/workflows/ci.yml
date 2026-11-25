@@ -17,9 +17,14 @@ jobs:
     name: Linux (model and engine)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
       - uses: Swatinem/rust-cache@v2
+      # The whole tree is written as cargo fmt writes it.
+      - name: Formatting
+        run: cargo fmt --all -- --check
       - name: Test backend-neutral crates
         run: cargo test -p gevrek-model -p gevrek-engine -p gevrek-zones --all-targets
       - name: No Windows, UI, or async dependency
@@ -41,8 +46,10 @@ jobs:
     name: Linux (everything but the Windows backend)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Libraries
         run: |
@@ -53,6 +60,8 @@ jobs:
       # editor run their tests here as on Windows.
       - name: Test
         run: cargo test --workspace --exclude gevrek-win32 --no-fail-fast
+      - name: Clippy (no errors)
+        run: cargo clippy --workspace --exclude gevrek-win32 --all-targets
       # End to end, with no display: gevrek-wl with outputs in memory, a real
       # terminal as its client, made-up keys and mouse input.
       - name: Nested checks
@@ -63,20 +72,35 @@ jobs:
           cargo build -p gevrek-ui --example gallery
           python3 tests/nested/checks.py
 
+  # macOS, type-checked from Linux (no linker is needed for a check, and
+  # nothing is run): what the macOS backend and the shell's macOS half
+  # stand on does not grow Linux- or Windows-only without anyone noticing.
+  macos:
+    name: macOS (type-checked)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Check
+        run: bash scripts/check-macos.sh
+
   # What may be a dependency: no known fault, no licence that MIT cannot
   # be combined with, nothing from outside crates.io (deny.toml).
   dependencies:
     name: Dependencies (cargo-deny)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
 
   windows:
     name: Windows (everything)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy

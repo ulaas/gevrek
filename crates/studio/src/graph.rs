@@ -192,6 +192,12 @@ impl GraphPage {
         self.recording.is_some()
     }
 
+    /// No keys are waited for any more, and what was heard is nobody's.
+    pub fn stop_recording(&mut self) {
+        self.recording = None;
+        self.heard = None;
+    }
+
     /// Wait for the keys of a node that starts at a key, as its button
     /// does: the node is the one chosen, so that its settings are shown.
     pub fn record(&mut self, node: NodeId) {
@@ -748,8 +754,10 @@ impl GraphPage {
             }
         }
 
-        // The keys are the sheet's while nothing is being typed.
-        if ui.memory(|memory| memory.focused().is_none()) {
+        // The keys are the sheet's while nothing is being typed, and
+        // while no key is waited for as a node's own. (Delete, pressed
+        // to be a node's key, took the node away.)
+        if self.recording.is_none() && ui.memory(|memory| memory.focused().is_none()) {
             let mut zoom = None;
             ui.input(|input| {
                 for event in &input.events {

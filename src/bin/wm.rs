@@ -96,6 +96,7 @@ mod macos_main {
         .with_backend(gevrek_macos::backend_info());
         drop(in_runtime);
         let server_stop = Arc::clone(&stop_flag);
+        let failed_stop = Arc::clone(&stop_flag);
         let server_thread = std::thread::Builder::new()
             .name("gevrek-ipc".to_string())
             .spawn(move || {
@@ -103,6 +104,12 @@ mod macos_main {
                     runtime.block_on(gevrek_server::serve_on(address, server, server_stop))
                 {
                     log::error!("IPC server stopped: {error}");
+                    // A window manager nobody can speak to cannot be
+                    // stopped or configured: it ends, by its ordinary
+                    // path. (It went on arranging windows.)
+                    *failed_stop
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
                 }
             })?;
         // Ctrl+C and SIGTERM stop the WM through its ordinary path: the
@@ -373,13 +380,17 @@ mod windows_main {
         )
         .with_backend(gevrek_win32::backend_info());
 
-        gevrek_server::serve_on(addr, wm_server, Arc::clone(&stop_flag)).await?;
+        // (Its error is kept until the runtime has stopped: a server that
+        // could not listen ended the process at once, with the runtime in
+        // the middle of a pass and nothing of the desktop given back.)
+        let served = gevrek_server::serve_on(addr, wm_server, Arc::clone(&stop_flag)).await;
 
         // Signal runtime to stop
         *stop_flag.lock().unwrap_or_else(|p| p.into_inner()) = true;
         let runtime_joined = runtime_thread.join();
         // A console close waits for this before letting Windows end the process.
         gevrek_win32::runtime::process_guard::shutdown_complete();
+        served?;
         if runtime_joined.is_err() {
             anyhow::bail!("Window manager runtime thread panicked during shutdown");
         }

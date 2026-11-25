@@ -274,6 +274,8 @@ section.light figure img { border-color: rgba(33, 17, 10, 0.25); box-shadow: 0 3
 
 /* Building */
 .code-pair { display: grid; gap: 2rem; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+.code-three { grid-template-columns: repeat(auto-fit, minmax(min(100%, 21rem), 1fr)); }
+.systems dd code { color: var(--sesame); overflow-wrap: anywhere; }
 pre {
   margin: 0; padding: 1.1rem 1.2rem; overflow-x: auto;
   background: #170B06; border: 1px solid var(--line); border-radius: 12px;

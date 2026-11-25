@@ -77,6 +77,9 @@ pub fn taken(config: &gevrek_model::Config, home: &Path) -> Taken {
     }
 }
 
+/// How long a file of a person's is waited for.
+const READ_FOR: std::time::Duration = std::time::Duration::from_secs(4);
+
 /// Who a file is read as.
 pub struct Reader<'a> {
     pub name: &'a str,
@@ -86,7 +89,11 @@ pub struct Reader<'a> {
 
 /// Read a file as that person does: a child with their rights reads it,
 /// and no more than `most` bytes of it are taken. Nothing where it is not
-/// theirs to read, is no ordinary file, or is larger.
+/// theirs to read, is no ordinary file, or is larger, and nothing where
+/// it does not come within `READ_FOR`. (It was waited for without an end:
+/// a configuration that was a pipe nobody wrote to, or lay on a mount
+/// that did not answer, kept the worker from ever ending, and with it
+/// every later login.)
 pub fn read_as(reader: &Reader, file: &Path, most: u64) -> Option<Vec<u8>> {
     let name = std::ffi::CString::new(reader.name).ok()?;
     let (uid, gid) = (reader.uid, reader.gid);
@@ -112,12 +119,24 @@ pub fn read_as(reader: &Reader, file: &Path, most: u64) -> Option<Vec<u8>> {
         });
     }
     let mut child = command.spawn().ok()?;
-    let mut bytes = Vec::new();
-    let read = child.stdout.take()?.take(most + 1).read_to_end(&mut bytes);
+    let out = child.stdout.take()?;
+    // Read on a thread of its own, so that it can be given up on: the
+    // child killed, its end of the pipe closes and the thread ends.
+    let (done, read) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let read = out.take(most + 1).read_to_end(&mut bytes);
+        let _ = done.send((read.is_ok(), bytes));
+    });
+    let answer = read.recv_timeout(READ_FOR);
     // (Whatever it was still writing: it is not waited for with a full pipe.)
     let _ = child.kill();
     let ended = child.wait().ok()?;
-    let whole = read.is_ok() && bytes.len() as u64 <= most;
+    let Ok((read, bytes)) = answer else {
+        log::warn!("{} was not read in time", file.display());
+        return None;
+    };
+    let whole = read && bytes.len() as u64 <= most;
     // Killed by us after everything was read is fine; an error of its
     // own (no such file, not allowed) is not.
     (whole && !bytes.is_empty() && ended.code().is_none_or(|code| code == 0)).then_some(bytes)

@@ -1092,6 +1092,12 @@ impl XwmHandler for State {
         };
         // The button the program reports is X11's (1 is the left one).
         let code = if button == 3 { 0x111 } else { 0x110 };
+        // A press that was let go before the program's word came is no
+        // drag (as for a move): the window was resized by every move
+        // of the pointer until the next press.
+        if code == 0x110 && !self.desktop.primary_button_down {
+            return;
+        }
         self.begin_drag(id, Some((left, top)), code);
     }
 

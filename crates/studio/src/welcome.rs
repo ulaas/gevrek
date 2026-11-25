@@ -596,7 +596,7 @@ impl Welcome {
                 ui,
                 icons::COMPASS,
                 "Take the tour",
-                "About ten minutes, on practice windows of its own. It can be left at any step.",
+                "About a quarter of an hour, on practice windows of its own. It can be left at any step.",
                 true,
             ) {
                 outcome = Some(Outcome::Tour);
@@ -709,14 +709,53 @@ struct Window {
     asked: std::time::Instant,
     /// Set where the tour is to begin after this window.
     wants_tour: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// What was chosen was handed over and refused, because another
+    /// configuration ran by then: it is handed over once more, on the
+    /// configuration that is asked for now.
+    again: Again,
+}
+
+/// Whether what was chosen is handed over once more.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Again {
+    /// Nothing was refused.
+    No,
+    /// Refused: with the next configuration that is heard of.
+    Due,
+    /// Handed over a second time: not a third.
+    Done,
 }
 
 impl Window {
+    /// What is handed to the window manager, and the revision it is laid
+    /// on: a first launch gets its first configuration, whatever was
+    /// chosen; a person who has one gets only what they chose here laid
+    /// over theirs. Nothing where nothing was chosen, and where no
+    /// window manager was heard of.
+    fn wanted(&self) -> Option<(Config, u64)> {
+        match &self.running {
+            Some((_, revision)) if self.first => Some((self.welcome.chosen(), *revision)),
+            Some((running, revision)) if self.welcome.has_chosen() => {
+                Some((self.welcome.laid_over(running), *revision))
+            }
+            _ => None,
+        }
+    }
+
     fn end(&mut self, outcome: Outcome) {
         // "Later" on a first launch is later: nothing is written, the
         // desktop keeps floating, and the welcome is there at the next
         // start. Every other answer is an answer.
-        if !(outcome == Outcome::Later && self.first) {
+        // Nor is an answer one that could not be kept: with no window
+        // manager heard of, nothing of what was chosen can be handed
+        // over, and the welcome is there again at the next start. (It
+        // was marked as answered, and what was chosen was lost for
+        // good.)
+        let kept = match outcome {
+            Outcome::Later => !self.first,
+            _ => self.running.is_some(),
+        };
+        if kept {
             let mut progress = gevrek_tutorial::Progress::load(&gevrek_tutorial::progress::file());
             progress.welcomed = true;
             if progress.version.is_empty() {
@@ -729,17 +768,10 @@ impl Window {
             // chosen (with it the desktop stops floating, unless floating
             // was chosen); a person who has one gets only what they
             // chose here laid over theirs.
-            let wanted = match &self.running {
-                Some((_, revision)) if self.first => Some((self.welcome.chosen(), *revision)),
-                Some((running, revision)) if self.welcome.has_chosen() => {
-                    Some((self.welcome.laid_over(running), *revision))
-                }
-                Some(_) => None,
-                None => {
-                    log::warn!("what was chosen is not kept: no window manager answers");
-                    None
-                }
-            };
+            if self.running.is_none() {
+                log::warn!("what was chosen is not kept: no window manager answers");
+            }
+            let wanted = self.wanted();
             if let Some((config, base_revision)) = wanted {
                 log::debug!(
                     "the welcome sends {} on revision {base_revision}",
@@ -793,8 +825,23 @@ impl eframe::App for Window {
         for event in self.link.poll() {
             match &event {
                 Event::Applied(revision) => log::debug!("the window manager applied revision {revision}"),
-                Event::ApplyFailed(why) | Event::Conflict(why) => {
+                Event::ApplyFailed(why) => {
                     log::warn!("what the welcome sent was not applied: {why}")
+                }
+                // Another configuration ran by the time it came (it
+                // was changed elsewhere meanwhile): the one that runs
+                // now is asked for, and what was chosen is laid on it.
+                Event::Conflict(why) => {
+                    log::warn!("what the welcome sent was not applied: {why}");
+                    if self.again == Again::No {
+                        self.again = Again::Due;
+                        self.link.send(Request::Fetch);
+                        // (The window stays for the answer.)
+                        let longer = std::time::Instant::now() + std::time::Duration::from_secs(3);
+                        if let Some(over) = &mut self.over {
+                            *over = longer;
+                        }
+                    }
                 }
                 Event::Disconnected(why) => log::debug!("the line to the window manager is down: {why}"),
                 _ => {}
@@ -804,6 +851,21 @@ impl eframe::App for Window {
                     self.first = gevrek_tutorial::welcome_due(&config);
                 }
                 self.running = Some((*config, revision));
+                if self.again == Again::Due {
+                    self.again = Again::Done;
+                    if let Some((config, base_revision)) = self.wanted() {
+                        log::debug!("the welcome sends what was chosen again, on revision {base_revision}");
+                        self.link.send(Request::Apply {
+                            config: Box::new(config),
+                            base_revision,
+                            client_id: "gevrek-welcome".to_string(),
+                        });
+                        // The tour waits for this one to run.
+                        if let Some(Tour(before, _)) = &mut self.tour {
+                            *before = base_revision;
+                        }
+                    }
+                }
             }
         }
         if !self.fonts {
@@ -912,6 +974,7 @@ pub fn run(address: String, appearance: &std::path::Path) -> anyhow::Result<bool
                 tour: None,
                 asked: std::time::Instant::now(),
                 wants_tour: wanted,
+                again: Again::No,
             }))
         }),
     )

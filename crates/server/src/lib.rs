@@ -267,7 +267,7 @@ pub fn overlay_response(
     let timestamp_ms = data
         .timestamp
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_millis() as i64;
 
     let monitors = data
@@ -1605,7 +1605,7 @@ impl WMService for WMServer {
                     trigger_type: "GraphPush".to_string(),
                     timestamp_ms: SystemTime::now()
                         .duration_since(UNIX_EPOCH)
-                        .unwrap()
+                        .unwrap_or_default()
                         .as_millis() as i64,
                 },
             )),
@@ -2367,7 +2367,7 @@ impl WMService for WMServer {
                 WorkingGraphUpdated {
                     timestamp_ms: SystemTime::now()
                         .duration_since(UNIX_EPOCH)
-                        .unwrap()
+                        .unwrap_or_default()
                         .as_millis() as i64,
                     editor_id: editor_id.clone(),
                 },
@@ -3013,7 +3013,7 @@ mod overlay_conversion_tests {
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_nanos()
         ));
         let (config_sender, config_receiver) = std::sync::mpsc::channel();
@@ -3085,7 +3085,7 @@ mod overlay_conversion_tests {
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();

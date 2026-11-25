@@ -1382,8 +1382,10 @@ fn is_process_running(pid: u32) -> bool {
     }
     #[cfg(not(windows))]
     {
-        // On Unix, send signal 0 to check if process exists
-        unsafe { libc::kill(pid as i32, 0) == 0 }
+        // On Unix, send signal 0 to check if process exists. (A number
+        // that is no process's is none: as a signal's target, 0 is the
+        // caller's whole group and what does not fit is everyone.)
+        signalable(pid) && unsafe { libc::kill(pid as i32, 0) == 0 }
     }
 }
 
@@ -1424,9 +1426,46 @@ fn process_matches_component(pid: u32, component: &Component) -> bool {
 
     #[cfg(not(windows))]
     {
-        let _ = component;
+        // Running, and this component's program. (Only running was
+        // asked: a number left in a file by a gevrek that had ended,
+        // and since given to another program, was taken for gevrek,
+        // and `gevrek stop` ended that program.) Where the system does
+        // not say whose a process is, running is all that is known.
         is_process_running(pid)
+            && program_of(pid).is_none_or(|name| name_is(&name, component.binary_name()))
     }
+}
+
+/// Whether a number can be a process to send a signal to.
+#[cfg(not(windows))]
+fn signalable(pid: u32) -> bool {
+    pid > 0 && pid <= i32::MAX as u32
+}
+
+/// Whether a program's file name is this component's (a file that was
+/// replaced while it ran is said with ` (deleted)` after it).
+#[cfg(not(windows))]
+fn name_is(name: &str, wanted: &str) -> bool {
+    name.trim_end_matches(" (deleted)") == wanted
+}
+
+/// The file name of the program a process runs, where the system says.
+#[cfg(not(windows))]
+fn program_of(pid: u32) -> Option<String> {
+    let name = |path: &std::path::Path| {
+        path.file_name().map(|name| name.to_string_lossy().into_owned())
+    };
+    if let Ok(program) = std::fs::read_link(format!("/proc/{pid}/exe")) {
+        return name(&program);
+    }
+    // (No /proc: macOS.)
+    let said = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let said = String::from_utf8_lossy(&said.stdout).trim().to_string();
+    (!said.is_empty()).then(|| name(std::path::Path::new(&said))).flatten()
 }
 
 #[cfg(windows)]
@@ -2592,6 +2631,9 @@ async fn stop_component(component: &Component, force: bool, address: &str) -> Re
     #[cfg(not(windows))]
     {
         for pid in &pids {
+            if !signalable(*pid) {
+                continue;
+            }
             // SAFETY: a signal to a process of this component.
             if unsafe { libc::kill(*pid as i32, libc::SIGTERM) } == 0 {
                 log::debug!("{} (process {pid}) was sent SIGTERM", component.name());
@@ -4112,10 +4154,28 @@ async fn update_now(address: &str, check_only: bool) -> Result<()> {
     let was_running = get_component_status(&Component::Wm).0;
     if was_running {
         println!("gevrek is running: stopping it for the update.");
+        // One that does not stop ends the update, not the desktop: what
+        // was stopped before it is started again below. (The error went
+        // out at once, with the shell gone and nothing started.)
+        let mut stopped = Ok(());
         for component in Component::all().iter().rev() {
-            stop_component(component, false, address).await?;
+            if let Err(error) = stop_component(component, false, address).await {
+                stopped = Err(error);
+                break;
+            }
         }
         sleep(Duration::from_secs(1)).await;
+        if let Err(error) = stopped {
+            println!("gevrek did not stop: it is started again, and nothing is updated.");
+            if let Err(again) =
+                Command::new(install.join(format!("gevrek{}", std::env::consts::EXE_SUFFIX)))
+                    .args(["--address", address, "start", "all"])
+                    .status()
+            {
+                log::warn!("gevrek could not be started again: {again}");
+            }
+            return Err(error);
+        }
     }
     let applied = gevrek_update::apply(&package, &install);
     if applied.is_ok() {
@@ -4185,7 +4245,13 @@ async fn run() -> Result<()> {
                     if foreground && components.len() == 1 {
                         // If only WM and foreground, wait for it
                         if let Some(mut child) = start_component(comp, true, &cli.address)? {
-                            child.wait()?;
+                            // How it ended is how this ends. (It was
+                            // waited for and forgotten: a window
+                            // manager that failed left 0 behind.)
+                            let ended = child.wait()?;
+                            if !ended.success() {
+                                std::process::exit(ended.code().unwrap_or(1));
+                            }
                         }
                     } else {
                         start_component(comp, false, &cli.address)?;
@@ -4202,7 +4268,15 @@ async fn run() -> Result<()> {
             // Start other components
             for comp in &components {
                 if *comp != Component::Wm {
-                    start_component(comp, foreground && components.len() == 1, &cli.address)?;
+                    let alone = foreground && components.len() == 1;
+                    // In the foreground it is waited for, as the window
+                    // manager is.
+                    if let Some(mut child) = start_component(comp, alone, &cli.address)?.filter(|_| alone) {
+                        let ended = child.wait()?;
+                        if !ended.success() {
+                            std::process::exit(ended.code().unwrap_or(1));
+                        }
+                    }
                 }
             }
 
@@ -6367,9 +6441,11 @@ mod tests {
         };
         use gevrek_model::wallpaper::{WallpaperConfig, WallpaperFit};
 
-        let mut section = WallpaperConfig::default();
         // One display's own: added with the common fit, then replaced.
-        section.fit = WallpaperFit::Fit;
+        let mut section = WallpaperConfig {
+            fit: WallpaperFit::Fit,
+            ..WallpaperConfig::default()
+        };
         wallpaper_set(&mut section, "/a.png".into(), Some("DP-2"), None);
         wallpaper_set(
             &mut section,

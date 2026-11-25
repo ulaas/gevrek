@@ -119,6 +119,7 @@ pub(crate) fn test_runtime(config: Config) -> ManuallyDrop<Runtime> {
     let (_config_sender, config_receiver) = std::sync::mpsc::channel();
     let (_command_sender, manual_command_receiver) = std::sync::mpsc::channel();
     ManuallyDrop::new(Runtime {
+        gave_back: true,
         window_manager: WindowManager::new_with_rules(rule_engine.clone()),
         window_monitor: WindowMonitor::inert(),
         core: super::core::WmCore::new(
