@@ -308,6 +308,12 @@ pub struct Outputs {
     primary_monitor: Option<MonitorHandle>,
     /// Workspaces per monitor (monitor_handle -> Ring<Workspace>)
     workspaces: HashMap<MonitorHandle, Ring<Workspace>>,
+    /// Where each window is (its display, and its workspace's place
+    /// there), made when it is first asked for after the workspaces
+    /// changed: every method that can change them lets go of it. (A
+    /// window was looked for through every workspace of every display
+    /// each time, by some ninety callers.)
+    window_places: std::cell::RefCell<Option<HashMap<crate::WindowHandle, (MonitorHandle, usize)>>>,
     /// Default number of workspaces to create per monitor
     /// Next workspace ID
     next_workspace_id: usize,
@@ -715,6 +721,7 @@ impl Outputs {
             monitors: HashMap::new(),
             primary_monitor: None,
             workspaces: HashMap::new(),
+            window_places: Default::default(),
             next_workspace_id: 0,
             previous_workspace: HashMap::new(),
             reserved_areas: HashMap::new(),
@@ -732,6 +739,7 @@ impl Outputs {
 
     #[cfg(any(test, feature = "test-support"))]
     pub fn add_test_monitor(&mut self, handle: MonitorHandle, name: &str) {
+        self.window_places.get_mut().take();
         self.monitors.insert(
             handle,
             MonitorInfo {
@@ -770,6 +778,7 @@ impl Outputs {
     /// Install a freshly enumerated monitor set (without creating workspaces).
     /// Workspaces should be created by OnStartup nodes or ensure_default_workspaces()
     pub fn replace_monitors(&mut self, current: Vec<MonitorInfo>) {
+        self.window_places.get_mut().take();
         // log::info!("=== Refreshing Monitor Configuration ===");
 
         self.monitors.clear();
@@ -877,6 +886,7 @@ impl Outputs {
 
     /// Get mutable workspaces for a monitor
     pub fn get_workspaces_mut(&mut self, monitor: MonitorHandle) -> Option<&mut Ring<Workspace>> {
+        self.window_places.get_mut().take();
         // (Whoever lays a workspace out gets it here: it is told the
         // scale of the display it is on now, see `Workspace::scale`.)
         let scale = self.length_scale(monitor);
@@ -905,6 +915,7 @@ impl Outputs {
         source: MonitorHandle,
         target: MonitorHandle,
     ) -> Result<usize> {
+        self.window_places.get_mut().take();
         if source == target {
             anyhow::bail!("Source and target monitor are the same");
         }
@@ -964,6 +975,7 @@ impl Outputs {
         first: MonitorHandle,
         second: MonitorHandle,
     ) -> Result<()> {
+        self.window_places.get_mut().take();
         if first == second {
             anyhow::bail!("Both monitor selectors resolve to the same monitor");
         }
@@ -1005,6 +1017,7 @@ impl Outputs {
 
     /// Switch to next workspace on a monitor
     pub fn focus_next_workspace(&mut self, monitor: MonitorHandle) {
+        self.window_places.get_mut().take();
         if let Some((current, len)) = self
             .workspaces
             .get(&monitor)
@@ -1023,6 +1036,7 @@ impl Outputs {
     }
 
     pub fn focus_previous_workspace(&mut self, monitor: MonitorHandle) {
+        self.window_places.get_mut().take();
         if let Some((current, len)) = self
             .workspaces
             .get(&monitor)
@@ -1036,6 +1050,7 @@ impl Outputs {
 
     /// Focus specific workspace by index on a monitor
     pub fn focus_workspace_at(&mut self, monitor: MonitorHandle, idx: usize) -> bool {
+        self.window_places.get_mut().take();
         if let Some(workspaces) = self.workspaces.get_mut(&monitor) {
             let previous = workspaces.focused_idx();
             let result = workspaces.focus_at(idx);
@@ -1066,6 +1081,7 @@ impl Outputs {
         name: String,
         layout: crate::layouts::LayoutType,
     ) -> Option<usize> {
+        self.window_places.get_mut().take();
         if let Some(workspaces) = self.workspaces.get_mut(&monitor) {
             let mut workspace =
                 crate::workspace::Workspace::new(self.next_workspace_id, name.clone());
@@ -1098,6 +1114,7 @@ impl Outputs {
         monitor: MonitorHandle,
         index: usize,
     ) -> bool {
+        self.window_places.get_mut().take();
         let Some(workspaces) = self.workspaces.get_mut(&monitor) else {
             return false;
         };
@@ -1141,6 +1158,7 @@ impl Outputs {
         monitor: MonitorHandle,
         place: impl Fn(&crate::workspace::Workspace) -> Option<usize>,
     ) -> bool {
+        self.window_places.get_mut().take();
         let Some(workspaces) = self.workspaces.get_mut(&monitor) else {
             return false;
         };
@@ -1179,6 +1197,7 @@ impl Outputs {
     /// closed workspace's name. Focus advances to the workspace that shifts
     /// into the freed slot.
     pub fn close_focused_empty_workspace(&mut self, monitor: MonitorHandle) -> Option<String> {
+        self.window_places.get_mut().take();
         let workspaces = self.workspaces.get_mut(&monitor)?;
         if workspaces.len() <= 1 {
             return None;
@@ -1208,6 +1227,7 @@ impl Outputs {
         name: String,
         settings: &WorkspaceSettings,
     ) -> Option<usize> {
+        self.window_places.get_mut().take();
         let WorkspaceSettings {
             layout,
             container_padding_x,
@@ -1260,6 +1280,7 @@ impl Outputs {
         index: usize,
         settings: &WorkspaceSettings,
     ) -> bool {
+        self.window_places.get_mut().take();
         let Some(workspace) = self
             .workspaces
             .get_mut(&monitor)
@@ -1277,6 +1298,7 @@ impl Outputs {
         &mut self,
         stale: impl Fn(crate::WindowHandle) -> Option<StaleWindow>,
     ) -> usize {
+        self.window_places.get_mut().take();
         let mut total_removed = 0;
         for (monitor, workspaces_ring) in self.workspaces.iter_mut() {
             for workspace in workspaces_ring.elements_mut() {
@@ -1304,6 +1326,7 @@ impl Outputs {
 
     /// Reset all workspaces (called during hot-reload to clear old workspaces before recreating)
     pub fn reset_workspaces(&mut self) {
+        self.window_places.get_mut().take();
         log::info!("Resetting all workspaces");
         for (monitor, workspaces) in self.workspaces.iter_mut() {
             let count = workspaces.len();
@@ -1450,6 +1473,67 @@ impl Outputs {
     /// Find a window in any workspace on any monitor
     /// Returns Some((monitor_handle, workspace_index)) if found, None otherwise
     pub fn find_window(&self, handle: crate::WindowHandle) -> Option<(MonitorHandle, usize)> {
+        let found = {
+            let mut places = self.window_places.borrow_mut();
+            places
+                .get_or_insert_with(|| {
+                    let mut places = HashMap::new();
+                    for (monitor, ring) in self.workspaces.iter() {
+                        for (index, workspace) in ring.iter().enumerate() {
+                            let tiled = workspace
+                                .containers
+                                .iter()
+                                .flat_map(|container| container.windows.iter());
+                            for window in tiled.chain(workspace.floating_windows.iter()) {
+                                places.entry(*window).or_insert((*monitor, index));
+                            }
+                        }
+                    }
+                    places
+                })
+                .get(&handle)
+                .copied()
+        };
+        // (While this is built to be looked into, what was kept is held
+        // against going through them all: a method that changes the
+        // workspaces and does not let go of what is kept is found by any
+        // test that comes by it.)
+        #[cfg(debug_assertions)]
+        {
+            let scanned = self.find_window_by_looking(handle);
+            debug_assert_eq!(
+                found.is_some(),
+                scanned.is_some(),
+                "{handle:?}: kept {found:?}, found by looking {scanned:?}"
+            );
+            if let Some((monitor, index)) = found {
+                let there = self
+                    .workspaces
+                    .get(&monitor)
+                    .and_then(|ring| ring.iter().nth(index))
+                    .is_some_and(|workspace| {
+                        workspace
+                            .containers
+                            .iter()
+                            .any(|container| container.contains_window(handle))
+                            || workspace
+                                .floating_windows
+                                .iter()
+                                .any(|window| *window == handle)
+                    });
+                debug_assert!(there, "{handle:?} is kept at {found:?} and is not there");
+            }
+        }
+        found
+    }
+
+    /// As [`Outputs::find_window`], by going through every workspace of
+    /// every display.
+    #[cfg(debug_assertions)]
+    fn find_window_by_looking(
+        &self,
+        handle: crate::WindowHandle,
+    ) -> Option<(MonitorHandle, usize)> {
         for (monitor_handle, workspaces_ring) in self.workspaces.iter() {
             for (workspace_idx, workspace) in workspaces_ring.iter().enumerate() {
                 // Check both tiled and floating windows
@@ -1471,6 +1555,7 @@ impl Outputs {
         &mut self,
         handle: crate::WindowHandle,
     ) -> Option<(MonitorHandle, usize)> {
+        self.window_places.get_mut().take();
         for (monitor_handle, workspaces_ring) in self.workspaces.iter_mut() {
             for (workspace_idx, workspace) in workspaces_ring.iter_mut().enumerate() {
                 if workspace.remove_window(handle) {

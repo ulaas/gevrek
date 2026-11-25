@@ -235,6 +235,10 @@ struct State {
     /// The window manager's notices that were told as notifications (by
     /// what it knows them by): each is told once for as long as it holds.
     told: HashSet<String>,
+    /// The overview of the workspaces was opened at least once since the
+    /// shell started: pictures of windows are taken as they get and lose
+    /// the keyboard from then on, and not before.
+    overview_used: bool,
     /// The panels a window lies on, by their keys, as of the last state:
     /// one that is out of sight while it is covered goes by this.
     covered: HashSet<String>,
@@ -400,6 +404,7 @@ pub fn run() -> anyhow::Result<()> {
         notes_corner: Default::default(),
         notes_surface: None,
         told: HashSet::new(),
+        overview_used: false,
         covered: HashSet::new(),
         load: None,
         custom: HashMap::new(),
@@ -2497,6 +2502,7 @@ fn toggle_overview(state: &Rc<RefCell<State>>, control: &mut Control) {
     });
     let mut state = state.borrow_mut();
     state.overview = Some((id, Default::default()));
+    state.overview_used = true;
     // What is in sight is taken a picture of now: as it is.
     take_pictures(&mut state, in_sight, Duration::ZERO);
     state.link.send(Request::State);
@@ -2853,12 +2859,20 @@ fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
                     let keyboard = crate::switcher::with_keyboard(&wm);
                     if keyboard != state.had_keyboard {
                         let before = std::mem::replace(&mut state.had_keyboard, keyboard);
-                        take_pictures(state, before.into_iter().collect(), Duration::ZERO);
-                        take_pictures(
-                            state,
-                            keyboard.into_iter().collect(),
-                            Duration::from_millis(500),
-                        );
+                        // (Only for a person who looks at the overview:
+                        // each of these has a program draw its whole
+                        // window into memory, at every change of the
+                        // keyboard's window, for pictures nobody saw.
+                        // The first overview has those of what is in
+                        // sight then; from there on, as before.)
+                        if state.overview_used {
+                            take_pictures(state, before.into_iter().collect(), Duration::ZERO);
+                            take_pictures(
+                                state,
+                                keyboard.into_iter().collect(),
+                                Duration::from_millis(500),
+                            );
+                        }
                     }
                     if let Some((surface, _)) = &state.overview {
                         control.redraw(*surface);

@@ -174,7 +174,7 @@ fn watch(who: &'static str) {
     let mut last_input = last_input_tick();
     let mut deaf = false;
     loop {
-        std::thread::sleep(Duration::from_millis(200));
+        std::thread::sleep(Duration::from_millis(500));
         let now = now_us();
 
         let part = Part::from_u8(PART.load(Ordering::Relaxed));

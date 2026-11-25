@@ -117,7 +117,7 @@ impl WorkspaceRule {
 }
 
 /// Information about a window for rule matching
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WindowInfo {
     pub handle: WindowHandle,
     pub title: String,
@@ -155,6 +155,39 @@ pub struct RuleEngine {
     pub workspace_rules: Vec<WorkspaceRule>,
     #[serde(default)]
     pub declarative_rules: Vec<WindowRuleProfile>,
+    /// What the rules said of windows they were held against before
+    /// ([`Remembered`]).
+    #[serde(skip)]
+    remembered: std::cell::RefCell<Remembered>,
+}
+
+/// How many answers are kept before all of them are let go.
+const REMEMBERED_MOST: usize = 1024;
+
+/// Which of the rules a window is held against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Held {
+    All,
+    Dynamic,
+    Static,
+}
+
+/// What the rules said of windows they were held against before.
+///
+/// The rules are held against a window again and again (for each of its
+/// events, for the state, when the keyboard goes elsewhere), and nearly
+/// always against the same facts. What they say depends on nothing but
+/// those facts and the rules themselves, so the answer to the same facts
+/// is the answer that was given. Whatever changes the rules lets go of
+/// all of it; and so that a change nobody told of is not missed, the
+/// answers are kept only while the rules are as many, and as many of
+/// them on, as when they were given.
+#[derive(Debug, Clone, Default)]
+struct Remembered {
+    rules: (usize, usize, usize, usize, usize, usize),
+    resolved: std::collections::HashMap<u64, Vec<(Held, WindowInfo, RuleResolution)>>,
+    ignored: std::collections::HashMap<u64, Vec<(WindowInfo, Option<String>)>>,
+    kept: usize,
 }
 
 /// The combined result of every matching declarative rule.
@@ -293,40 +326,122 @@ impl RuleEngine {
         Self::default()
     }
 
+    /// The rules are others: what they said before is let go of.
+    fn forget(&mut self) {
+        *self.remembered.get_mut() = Remembered::default();
+    }
+
+    /// How many rules of each kind there are, and how many of the
+    /// configuration's are on.
+    fn shape(&self) -> (usize, usize, usize, usize, usize, usize) {
+        (
+            self.float_rules.len(),
+            self.ignore_rules.len(),
+            self.manage_rules.len(),
+            self.workspace_rules.len(),
+            self.declarative_rules.len(),
+            self.declarative_rules
+                .iter()
+                .filter(|rule| rule.enabled)
+                .count(),
+        )
+    }
+
+    /// What is remembered, let go of first where the rules are not what
+    /// they were when it was.
+    fn remembered(&self) -> std::cell::RefMut<'_, Remembered> {
+        let mut remembered = self.remembered.borrow_mut();
+        let rules = self.shape();
+        if remembered.rules != rules {
+            *remembered = Remembered {
+                rules,
+                ..Remembered::default()
+            };
+        }
+        remembered
+    }
+
+    fn key_of(window: &WindowInfo) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        window.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Room for one answer more: where there are very many, all go.
+    fn make_room(remembered: &mut Remembered) {
+        if remembered.kept >= REMEMBERED_MOST {
+            remembered.resolved.clear();
+            remembered.ignored.clear();
+            remembered.kept = 0;
+        }
+        remembered.kept += 1;
+    }
+
     /// Add a float rule
     pub fn add_float_rule(&mut self, rule: FloatRule) {
+        self.forget();
         self.float_rules.push(rule);
     }
 
     /// Add an ignore rule
     pub fn add_ignore_rule(&mut self, rule: IgnoreRule) {
+        self.forget();
         self.ignore_rules.push(rule);
     }
 
     /// Add a manage rule
     pub fn add_manage_rule(&mut self, rule: ManageRule) {
+        self.forget();
         self.manage_rules.push(rule);
     }
 
     /// Add a workspace rule
     pub fn add_workspace_rule(&mut self, rule: WorkspaceRule) {
+        self.forget();
         self.workspace_rules.push(rule);
     }
 
     pub fn set_declarative_rules(&mut self, rules: Vec<WindowRuleProfile>) {
+        self.forget();
         self.declarative_rules = rules;
     }
 
     pub fn resolve(&self, window: &WindowInfo) -> RuleResolution {
-        self.resolve_filtered(window, |_| true)
+        self.resolve_held(Held::All, window)
     }
 
     pub fn resolve_dynamic(&self, window: &WindowInfo) -> RuleResolution {
-        self.resolve_filtered(window, |rule| rule.dynamic)
+        self.resolve_held(Held::Dynamic, window)
     }
 
     pub fn resolve_static(&self, window: &WindowInfo) -> RuleResolution {
-        self.resolve_filtered(window, |rule| !rule.dynamic)
+        self.resolve_held(Held::Static, window)
+    }
+
+    /// What the rules of one kind say of a window: as they said of the
+    /// same facts before, or held against it now and remembered.
+    fn resolve_held(&self, held: Held, window: &WindowInfo) -> RuleResolution {
+        let key = Self::key_of(window);
+        if let Some((_, _, said)) = self.remembered().resolved.get(&key).and_then(|same| {
+            same.iter()
+                .find(|(kind, facts, _)| *kind == held && facts == window)
+        }) {
+            return said.clone();
+        }
+        let said = match held {
+            Held::All => self.resolve_filtered(window, |_| true),
+            Held::Dynamic => self.resolve_filtered(window, |rule| rule.dynamic),
+            Held::Static => self.resolve_filtered(window, |rule| !rule.dynamic),
+        };
+        let mut remembered = self.remembered();
+        Self::make_room(&mut remembered);
+        remembered
+            .resolved
+            .entry(key)
+            .or_default()
+            .push((held, window.clone(), said.clone()));
+        said
     }
 
     fn resolve_filtered(
@@ -471,6 +586,7 @@ impl RuleEngine {
     }
 
     pub fn set_rule_enabled(&mut self, name: &str, enabled: bool) -> Result<bool, String> {
+        self.forget();
         let matches = self
             .declarative_rules
             .iter_mut()
@@ -523,6 +639,27 @@ impl RuleEngine {
     /// (Class)`), or `None` where the window is managed. Asked often (for
     /// every event of a window): what it finds is said at trace only.
     pub fn ignored_by(&self, window: &WindowInfo) -> Option<String> {
+        let key = Self::key_of(window);
+        if let Some((_, said)) = self
+            .remembered()
+            .ignored
+            .get(&key)
+            .and_then(|same| same.iter().find(|(facts, _)| facts == window))
+        {
+            return said.clone();
+        }
+        let said = self.ignored_by_now(window);
+        let mut remembered = self.remembered();
+        Self::make_room(&mut remembered);
+        remembered
+            .ignored
+            .entry(key)
+            .or_default()
+            .push((window.clone(), said.clone()));
+        said
+    }
+
+    fn ignored_by_now(&self, window: &WindowInfo) -> Option<String> {
         if let Some(managed) = self.resolve_static(window).managed {
             return (!managed).then(|| "a rule of the configuration".to_string());
         }
@@ -754,6 +891,7 @@ impl RuleEngine {
 
     /// Create common float rules for typical floating windows
     pub fn add_common_float_rules(&mut self) {
+        self.forget();
         let common_floats = vec![
             // gevrek's own settings program: a window to have beside what
             // it sets, not a tile among the others. (A rule of the
@@ -950,6 +1088,7 @@ impl RuleEngine {
     /// Create system ignore rules for windows that should never be managed
     /// These are filters that were previously hardcoded in window_monitor and window_manager
     pub fn add_system_ignore_rules(&mut self) {
+        self.forget();
         let mut system_ignores: Vec<(&str, MatchKind, MatchStrategy, &str)> = vec![
             // === Gevrek internal windows (our own creations) ===
             (
@@ -1269,6 +1408,110 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn what_the_rules_said_is_remembered_until_the_rules_or_the_window_are_others() {
+        let window = |title: &str| WindowInfo {
+            handle: WindowHandle(7),
+            title: title.to_string(),
+            class: "Editor".to_string(),
+            exe: "editor.exe".to_string(),
+            path: "C:\\editor.exe".to_string(),
+            app_id: "editor".to_string(),
+            has_parent: false,
+            is_visible: true,
+            is_tool_window: false,
+            is_noactivate: false,
+            has_owner: false,
+            is_cloaked: false,
+            is_layered: false,
+            tags: BTreeSet::new(),
+            workspace: None,
+            workspace_index: None,
+        };
+        let rule = |name: &str, title: &str, effect: RuleEffect, dynamic: bool| WindowRuleProfile {
+            name: name.to_string(),
+            enabled: true,
+            dynamic,
+            predicates: vec![RulePredicate {
+                kind: MatchKind::Title,
+                strategy: MatchStrategy::Contains,
+                value: title.to_string(),
+                ..RulePredicate::default()
+            }],
+            effects: vec![effect],
+            ..WindowRuleProfile::default()
+        };
+        let mut engine = RuleEngine::new();
+        engine.set_declarative_rules(vec![
+            rule("notes float", "notes", RuleEffect::Float, false),
+            rule("drafts dim", "draft", RuleEffect::Opacity(200), true),
+        ]);
+        // Asked twice, the same; and the same as an engine that never
+        // remembered anything says.
+        let fresh = |engine: &RuleEngine, window: &WindowInfo| {
+            let mut other = engine.clone();
+            other.forget();
+            (
+                other.resolve(window),
+                other.resolve_static(window),
+                other.resolve_dynamic(window),
+                other.ignored_by(window),
+            )
+        };
+        let asked = |engine: &RuleEngine, window: &WindowInfo| {
+            (
+                engine.resolve(window),
+                engine.resolve_static(window),
+                engine.resolve_dynamic(window),
+                engine.ignored_by(window),
+            )
+        };
+        for title in ["notes", "a draft of notes", "nothing"] {
+            let window = window(title);
+            let first = asked(&engine, &window);
+            assert_eq!(first, asked(&engine, &window), "{title}");
+            assert_eq!(first, fresh(&engine, &window), "{title}");
+        }
+        assert_eq!(engine.resolve(&window("notes")).floating, Some(true));
+        assert!(engine.remembered.borrow().kept > 0, "something is kept");
+        // The static rules alone do not dim, the dynamic ones alone do
+        // not float: each kind has its own answer for the same window.
+        let both = window("a draft of notes");
+        assert_eq!(engine.resolve_static(&both).opacity, None);
+        assert_eq!(engine.resolve_dynamic(&both).floating, None);
+        assert_eq!(engine.resolve(&both).opacity, Some(200));
+        // Another title is another window to the rules.
+        assert_eq!(engine.resolve(&window("nothing")).floating, None);
+        // A rule switched off: what it said is not said any more.
+        engine.set_rule_enabled("notes float", false).unwrap();
+        assert_eq!(engine.resolve(&window("notes")).floating, None);
+        engine.toggle_rule("notes float").unwrap();
+        assert_eq!(engine.resolve(&window("notes")).floating, Some(true));
+        // Other rules altogether.
+        engine.set_declarative_rules(vec![rule("notes tile", "notes", RuleEffect::Tile, false)]);
+        assert_eq!(engine.resolve(&window("notes")).floating, Some(false));
+        // A rule that leaves a window alone, added later: said at once.
+        assert_eq!(engine.ignored_by(&window("notes")), None);
+        engine.add_ignore_rule(IgnoreRule {
+            rule: WindowRule::new(
+                "Editor".to_string(),
+                MatchKind::Class,
+                MatchStrategy::Equals,
+            ),
+            comment: None,
+        });
+        assert!(engine.ignored_by(&window("notes")).is_some());
+        // Changed from outside without a word (the lists are open): the
+        // answers of before are not given for rules that are fewer.
+        engine.ignore_rules.clear();
+        assert_eq!(engine.ignored_by(&window("notes")), None);
+        // Very many windows: no more is kept than there is room for.
+        for number in 0..(REMEMBERED_MOST * 2 + 10) {
+            engine.resolve(&window(&format!("window {number}")));
+        }
+        assert!(engine.remembered.borrow().kept <= REMEMBERED_MOST);
     }
 
     #[test]

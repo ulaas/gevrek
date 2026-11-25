@@ -908,8 +908,12 @@ pub mod server {
                     // What the Windows key and the mouse did to a window.
                     let tell = told.clone();
                     std::thread::spawn(move || loop {
-                        std::thread::sleep(std::time::Duration::from_millis(30));
-                        for event in crate::windows_key::take_events() {
+                        // (Asleep until a drag begins or ends: it looked
+                        // thirty times a second, drag or no drag.)
+                        let events = crate::windows_key::wait_for_events(
+                            std::time::Duration::from_secs(30),
+                        );
+                        for event in events {
                             let heard = match event {
                                 crate::windows_key::DragEvent::Started(window) => {
                                     Heard::DragStarted(window)

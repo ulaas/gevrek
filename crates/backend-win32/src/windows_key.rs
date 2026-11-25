@@ -111,11 +111,28 @@ pub fn push_event(event: DragEvent) {
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .push(event);
+    EVENTS_CAME.notify_all();
     gevrek_host::wake::now();
 }
 
 pub fn take_events() -> Vec<DragEvent> {
     std::mem::take(&mut *EVENTS.lock().unwrap_or_else(|error| error.into_inner()))
+}
+
+/// Told whenever an event is queued: whoever waits for one sleeps until
+/// then.
+static EVENTS_CAME: std::sync::Condvar = std::sync::Condvar::new();
+
+/// As [`take_events`], waiting for one where there is none: until one is
+/// queued, and no longer than `at_most` (then nothing is given). For a
+/// thread that passes the events on: it looked thirty times a second,
+/// drag or no drag.
+pub fn wait_for_events(at_most: std::time::Duration) -> Vec<DragEvent> {
+    let events = EVENTS.lock().unwrap_or_else(|error| error.into_inner());
+    let (mut events, _) = EVENTS_CAME
+        .wait_timeout_while(events, at_most, |events| events.is_empty())
+        .unwrap_or_else(|error| error.into_inner());
+    std::mem::take(&mut *events)
 }
 
 /// Which way a drag changes its window.
@@ -324,6 +341,7 @@ mod system {
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
                 .push(DragEvent::Started(window.0 as isize));
+            EVENTS_CAME.notify_all();
             gevrek_host::wake::now();
             // (The Windows key was used with something, whatever the
             // setting for the key says: it is down, so this comes after it.)
@@ -474,6 +492,7 @@ mod system {
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
                 .push(DragEvent::Ended(held.window));
+            EVENTS_CAME.notify_all();
             gevrek_host::wake::now();
         }
     }
@@ -494,6 +513,7 @@ mod system {
                     .lock()
                     .unwrap_or_else(|error| error.into_inner())
                     .push(DragEvent::Ended(window));
+                EVENTS_CAME.notify_all();
                 gevrek_host::wake::now();
                 true
             }
