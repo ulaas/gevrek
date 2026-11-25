@@ -558,6 +558,7 @@ impl<M: 'static> Shell<M> {
         let module = unsafe { GetModuleHandleW(None) }.context("this program's module")?;
         let mut host = Host {
             surfaces: Vec::new(),
+            spares: Default::default(),
             gpu: None,
             instance: wgpu::Instance::new(descriptor),
             see_through,
@@ -735,6 +736,7 @@ impl<M: 'static> Shell<M> {
         // Surfaces first: they draw with the device.
         self.host.hooks = None;
         self.host.surfaces.clear();
+        self.host.spares.clear();
         if self.host.timings.frames > 0 {
             self.host.timings.mean_ms = self.host.total_ms / self.host.timings.frames as f64;
         }
@@ -1516,6 +1518,8 @@ struct Surface {
     // Dropped first: it draws on the window below.
     target: wgpu::Surface<'static>,
     renderer: egui_wgpu::Renderer,
+    /// The pictures the renderer holds: given to it and not taken away.
+    textures: std::collections::HashSet<egui::TextureId>,
     format: wgpu::TextureFormat,
     alpha: wgpu::CompositeAlphaMode,
     window: Window,
@@ -1647,6 +1651,9 @@ impl Surface {
 struct Host {
     // Dropped before the device they draw with.
     surfaces: Vec<Surface>,
+    /// What drew surfaces that were closed, kept for the next that opens
+    /// (dropped before the device, as the surfaces are).
+    spares: crate::spare::Spares,
     gpu: Option<Gpu>,
     instance: wgpu::Instance,
     /// Surfaces are layers of the desktop's compositor: what is not
@@ -1887,11 +1894,24 @@ impl Host {
                 log::debug!("surface {id:?} is closed");
                 give_back(surface.window.handle, surface.before);
             }
-            // A surface's popups go with it (and before it).
-            self.surfaces.retain(
-                |surface| !matches!(&surface.role, Role::Popup(parent, ..) if *parent == id),
-            );
-            self.surfaces.retain(|surface| surface.id != id);
+            // A surface's popups go with it (and before it). What drew
+            // each is kept for the next surface that opens.
+            let (popups, others): (Vec<Surface>, Vec<Surface>) =
+                std::mem::take(&mut self.surfaces).into_iter().partition(
+                    |surface| matches!(&surface.role, Role::Popup(parent, ..) if *parent == id),
+                );
+            let (closed, open): (Vec<Surface>, Vec<Surface>) =
+                others.into_iter().partition(|surface| surface.id == id);
+            self.surfaces = open;
+            for surface in popups.into_iter().chain(closed) {
+                let Surface {
+                    renderer,
+                    format,
+                    textures,
+                    ..
+                } = surface;
+                self.spares.keep(format, renderer, textures);
+            }
             if self.pointer_on == Some(id) {
                 self.pointer_on = None;
             }
@@ -2272,14 +2292,15 @@ impl Host {
                 .copied()
                 .unwrap_or(wgpu::CompositeAlphaMode::Auto)
         };
-        let renderer =
-            egui_wgpu::Renderer::new(&gpu.device, format, egui_wgpu::RendererOptions::default());
+        // (One a closed surface drew with, where one was kept.)
+        let renderer = self.spares.take(&gpu.device, format);
         let access = Access::new(window.handle);
         Ok(Surface {
             id,
             access,
             target,
             renderer,
+            textures: Default::default(),
             format,
             alpha,
             window,
@@ -2885,6 +2906,7 @@ impl Host {
         // The pictures egui made or changed (its font atlas first of
         // all) are taken in whatever becomes of this frame.
         for (id, deltas) in &output.textures_delta.set {
+            surface.textures.insert(*id);
             for delta in deltas {
                 surface
                     .renderer
@@ -3003,6 +3025,7 @@ impl Host {
             .submit(before.into_iter().chain(std::iter::once(encoder.finish())));
         for id in &freed {
             surface.renderer.free_texture(id);
+            surface.textures.remove(id);
         }
         gpu.queue.present(frame);
 

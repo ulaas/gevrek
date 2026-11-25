@@ -37,6 +37,10 @@ pub mod look;
 #[cfg(target_os = "macos")]
 pub mod mac;
 pub mod place;
+// What draws a surface, kept for the next one (where surfaces are drawn
+// with the graphics card by this crate itself).
+#[cfg(any(windows, target_os = "linux"))]
+mod spare;
 pub mod stall;
 #[cfg(windows)]
 pub mod win;

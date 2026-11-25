@@ -966,13 +966,28 @@ done without a desktop to measure on)
       window manager's start is gone. To tick: the launcher comes up
       with letters first and icons after; a program started as an
       administrator does not freeze the panel while Windows asks.
-- [ ] **any** Left: an index for `find_window` and a window's rules
-      remembered from pass to pass (neither has a number that asks for
-      it; the second is not safe without one); the borders of moved
-      windows in the batch; a pool of surfaces for menus and hints;
-      window pictures taken only when the overview opens; the device
-      for drawing made while the line connects; the check that fails
-      where a bench grows by a tenth.
+- [x] **any** What the rules said of a window is remembered for the
+      same facts and the same rules (the bench: 20 rules against 50
+      windows that were asked before, 6.8 µs where it was 1.03 ms), and
+      a window's place is looked up in a table that every method that
+      can change the workspaces lets go of. Both are held against the
+      slow way: the first by a test, the second by every lookup in a
+      build with its checks on.
+- [ ] **W** In a motion, a border that only moves is placed with the
+      others in one go, without being asked again what it was asked a
+      frame ago; the helper for elevated windows and the watch over
+      the input thread look less often. To tick: borders stay around
+      their windows through a change of workspace and a layout that
+      moves; a window minimized in the middle of a motion loses its
+      border by the motion's end.
+- [ ] **any** What drew a closed menu or hint is kept for the next one
+      (three at the most), on both systems; on Windows the pictures of
+      windows for the overview are taken only once the overview was
+      opened. To tick: menus and hints open and look as before, one
+      after the other and a submenu beside its menu; the first
+      overview shows the windows in sight, later ones the others too.
+- [ ] **any** Left: the device for drawing made while the line
+      connects; the check that fails where a bench grows by a tenth.
 
 **Panels**
 
@@ -1001,12 +1016,21 @@ done without a desktop to measure on)
       month under the clock; the middle button on a window's button
       closes the window. To tick: each seen; a `custom` whose program
       does not exist shows its own words and says so in the log.
-- [ ] **any** Left: a panel sliding in and out; a window's picture
-      under the pointer on the taskbar; its buttons put in another
-      order by dragging; modules moved on the panel itself; the groups
-      of a panel laid out in one frame (they are still placed by how
-      long they were the frame before); one host for the panel on both
-      systems (each still has its own glue around the shared drawing).
+- [ ] **any** A hiding panel slides to its edge and back; the hint of
+      a window's button has the window's picture; a button of the
+      taskbar taken and put down on another's place stands there (the
+      order is the shell's own, while it runs). To tick, on both
+      systems: each seen; on Linux the picture is the right window's
+      where two windows have one title.
+- [x] **any** The groups of a panel are laid out in the frame they are
+      drawn in (a test holds the first frame against the sixth for
+      sixteen panels), and what both systems decide for a panel is
+      decided in one place (`panel::soft_parts`, `carry_out`,
+      `order_after`, `extras_to_watch`, `Hiding`). To be seen: that a
+      panel does not flicker when what it shows changes.
+- [ ] **any** Left: modules moved on the panel itself (not asked for);
+      the loop, the menus and the surfaces of the panel are still each
+      system's own code around the shared drawing.
 
 ## 3. The tutorial
 

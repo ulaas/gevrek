@@ -670,6 +670,11 @@ pub struct WindowManager {
     /// whether a frame of a motion is being placed just now.
     insets_kept: RefCell<HashMap<isize, (FrameInsets, Instant)>>,
     insets_in_motion: std::cell::Cell<bool>,
+    /// The borders of the windows of the motion that is going on, each
+    /// as large as it was when it was last looked at and found in sight
+    /// (and when that was): one that is as large in the next frame only
+    /// moves.
+    borders_in_motion: HashMap<isize, ((i32, i32), Instant)>,
     /// Stackbar windows keyed by the container's focused window handle.
     stackbar_windows: HashMap<WindowHandle, StackbarInfo>,
     /// O(1) lookup for "is this a stackbar window?" Kept separate from
@@ -902,6 +907,7 @@ impl WindowManager {
             auras: RefCell::new(Default::default()),
             insets_kept: RefCell::new(HashMap::new()),
             insets_in_motion: std::cell::Cell::new(false),
+            borders_in_motion: HashMap::new(),
             stackbar_windows: HashMap::new(),
             stackbar_hwnd_set: HashSet::new(),
             stackbar_click_queue: Arc::new(Mutex::new(Vec::new())),
@@ -945,6 +951,7 @@ impl WindowManager {
             auras: RefCell::new(Default::default()),
             insets_kept: RefCell::new(HashMap::new()),
             insets_in_motion: std::cell::Cell::new(false),
+            borders_in_motion: HashMap::new(),
             stackbar_windows: HashMap::new(),
             stackbar_hwnd_set: HashSet::new(),
             stackbar_click_queue: Arc::new(Mutex::new(Vec::new())),
@@ -4254,10 +4261,12 @@ impl WindowManager {
         let frame = self.animation_scheduler.tick(Instant::now());
         let close_windows = frame.close_windows;
         if frame.rectangles.is_empty() {
-            // (No window moves: what was kept of their frames is let go.)
+            // (No window moves: what was kept of their frames, and of
+            // their borders, is let go.)
             if !self.insets_kept.borrow().is_empty() {
                 self.insets_kept.borrow_mut().clear();
             }
+            self.borders_in_motion.clear();
         }
         if !frame.rectangles.is_empty() {
             gevrek_engine::counts::count(gevrek_engine::counts::Counted::MotionFrame);
@@ -4275,10 +4284,44 @@ impl WindowManager {
                     self.stand_ins.place(handle, rect, part);
                 }
             }
+            // The borders of the windows that moved. One that was seen to
+            // be there, around a window that is there, as large as it is
+            // to be now, only moves: those are placed together, in one
+            // go, without each being asked again what it was asked a
+            // frame ago. Every other (the first frame of a motion, a
+            // border that changes its size, one that was hidden) is
+            // placed by itself with every look at what is there, as
+            // before, and is known from then on.
+            let now = Instant::now();
+            let mut only_moved: Vec<(WindowHandle, HWND, HWND, i32, i32)> = Vec::new();
             for (handle, rect) in &frame.rectangles {
                 // (The pictures of an overview have none: the borders are
                 // put away for it, and are back when it is over.)
                 if self.overview_holds(*handle) || self.overview_leaving.contains(handle) {
+                    continue;
+                }
+                let Some((border_hwnd, border_width, border_offset)) = self
+                    .border_windows
+                    .get(handle)
+                    .map(|border| (border.border_hwnd.to_hwnd(), border.width, border.offset))
+                else {
+                    continue;
+                };
+                let (x, y, wide, high) = border_rect_around_frame(
+                    (rect.x, rect.y, rect.width, rect.height),
+                    border_width,
+                    border_offset,
+                );
+                let (y, high) = border_rect_with_strip(y, high, self.strip_above(*handle));
+                let known = self
+                    .borders_in_motion
+                    .get(&(border_hwnd.0 as isize))
+                    .is_some_and(|(size, seen)| {
+                        *size == (wide, high)
+                            && now.saturating_duration_since(*seen) < INSETS_KEPT_FOR
+                    });
+                if known && !self.kept_out_of_sight(*handle) {
+                    only_moved.push((*handle, border_hwnd, handle.to_hwnd(), x, y));
                     continue;
                 }
                 let _ = self.update_border_position_explicit(
@@ -4288,6 +4331,39 @@ impl WindowManager {
                     rect.width,
                     rect.height,
                 );
+                // (Known for the frames to come where it is in sight now.)
+                // SAFETY: a plain question about a window of this thread's.
+                if unsafe { IsWindowVisible(border_hwnd) }.as_bool() {
+                    self.borders_in_motion
+                        .insert(border_hwnd.0 as isize, ((wide, high), now));
+                } else {
+                    self.borders_in_motion.remove(&(border_hwnd.0 as isize));
+                }
+            }
+            if !only_moved.is_empty() {
+                if !Self::move_borders_together(&only_moved) {
+                    // (Not together: each by itself, as it would have been.)
+                    for (_, border, target, x, y) in &only_moved {
+                        // SAFETY: a window of this thread's is placed.
+                        let _ = unsafe {
+                            SetWindowPos(
+                                *border,
+                                *target,
+                                *x,
+                                *y,
+                                0,
+                                0,
+                                SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOSIZE,
+                            )
+                        };
+                    }
+                }
+                for (handle, ..) in &only_moved {
+                    self.sync_effects(*handle);
+                    if let Some(border) = self.border_windows.get_mut(handle) {
+                        border.last_update = now;
+                    }
+                }
             }
         }
         for border in frame.borders {
@@ -4479,6 +4555,39 @@ impl WindowManager {
             targets.len()
         );
         Ok(())
+    }
+
+    /// The borders that only move, each to its place behind its window,
+    /// in one go. `false` where that could not be done (nothing was moved
+    /// then, or not all of them: whoever asks places each by itself).
+    fn move_borders_together(borders: &[(WindowHandle, HWND, HWND, i32, i32)]) -> bool {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            BeginDeferWindowPos, DeferWindowPos, EndDeferWindowPos,
+        };
+        // SAFETY: the windows are this thread's own borders, each put
+        // behind the window it is around.
+        unsafe {
+            let Ok(mut batch) = BeginDeferWindowPos(borders.len() as i32) else {
+                return false;
+            };
+            for (_, border, target, x, y) in borders {
+                match DeferWindowPos(
+                    batch,
+                    *border,
+                    *target,
+                    *x,
+                    *y,
+                    0,
+                    0,
+                    SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOSIZE,
+                ) {
+                    Ok(next) => batch = next,
+                    // (The batch is gone with the call that failed.)
+                    Err(_) => return false,
+                }
+            }
+            EndDeferWindowPos(batch).is_ok()
+        }
     }
 
     /// Applies `targets` as one deferred batch. On failure returns the index

@@ -500,6 +500,7 @@ impl<M: 'static> Shell<M> {
             access_wake,
             surfaces: Vec::new(),
             upright: Vec::new(),
+            spares: Default::default(),
             gpu: None,
             instance: wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle()),
             compositor,
@@ -657,6 +658,7 @@ impl<M: 'static> Shell<M> {
         }
         // Surfaces first: they draw on the connection.
         self.host.surfaces.clear();
+        self.host.spares.clear();
         if self.host.timings.frames > 0 {
             self.host.timings.mean_ms = self.host.total_ms / self.host.timings.frames as f64;
         }
@@ -705,7 +707,11 @@ struct Surface {
     id: SurfaceId,
     // Dropped first: it draws on the layer surface below.
     target: wgpu::Surface<'static>,
-    renderer: egui_wgpu::Renderer,
+    /// (None once the surface is closed: what drew it is kept for the
+    /// next one.)
+    renderer: Option<egui_wgpu::Renderer>,
+    /// The pictures the renderer holds: given to it and not taken away.
+    textures: std::collections::HashSet<egui::TextureId>,
     format: wgpu::TextureFormat,
     alpha: wgpu::CompositeAlphaMode,
     role: Role,
@@ -768,6 +774,9 @@ struct Host {
     /// The surfaces that go down a side of the display: what pops up
     /// from them stands beside them, not under.
     upright: Vec<SurfaceId>,
+    /// What drew surfaces that were closed, kept for the next that opens
+    /// (dropped before the device, as the surfaces are).
+    spares: crate::spare::Spares,
     gpu: Option<Gpu>,
     instance: wgpu::Instance,
     compositor: CompositorState,
@@ -885,7 +894,19 @@ impl Host {
             if self.surfaces.iter().any(|surface| surface.id == id) {
                 log::debug!("surface {id:?} is closed");
             }
-            // A surface's popups go with it (and before it).
+            // A surface's popups go with it (and before it). What drew
+            // each is kept for the next surface that opens.
+            for surface in self.surfaces.iter_mut().filter(|surface| {
+                surface.id == id || matches!(&surface.role, Role::Popup(_, parent) if *parent == id)
+            }) {
+                if let Some(renderer) = surface.renderer.take() {
+                    self.spares.keep(
+                        surface.format,
+                        renderer,
+                        std::mem::take(&mut surface.textures),
+                    );
+                }
+            }
             self.surfaces.retain(
                 |surface| !matches!(&surface.role, Role::Popup(_, parent) if *parent == id),
             );
@@ -1370,8 +1391,8 @@ impl Host {
                 .copied()
                 .unwrap_or(wgpu::CompositeAlphaMode::Auto)
         };
-        let renderer =
-            egui_wgpu::Renderer::new(&gpu.device, format, egui_wgpu::RendererOptions::default());
+        // (One a closed surface drew with, where one was kept.)
+        let renderer = self.spares.take(&gpu.device, format);
         // The display's scale as a fraction, where the compositor says it.
         let fraction = match (&self.fractional, &self.viewporter) {
             (Some(fractional), Some(viewporter)) => {
@@ -1387,7 +1408,8 @@ impl Host {
         Ok(Surface {
             id,
             target,
-            renderer,
+            renderer: Some(renderer),
+            textures: Default::default(),
             format,
             alpha,
             role,
@@ -1446,11 +1468,15 @@ impl Host {
         });
         // The pictures egui made or changed (its font atlas first of
         // all) are taken in whatever becomes of this frame.
+        // (What draws it is there for as long as the surface is open.)
+        let pixels = surface.pixels();
+        let Some(renderer) = surface.renderer.as_mut() else {
+            return;
+        };
         for (id, deltas) in &output.textures_delta.set {
+            surface.textures.insert(*id);
             for delta in deltas {
-                surface
-                    .renderer
-                    .update_texture(&gpu.device, &gpu.queue, *id, delta);
+                renderer.update_texture(&gpu.device, &gpu.queue, *id, delta);
             }
         }
         output.textures_delta.set.clear();
@@ -1507,7 +1533,7 @@ impl Host {
             .context
             .tessellate(output.shapes, output.pixels_per_point);
         let screen = egui_wgpu::ScreenDescriptor {
-            size_in_pixels: surface.pixels().into(),
+            size_in_pixels: pixels.into(),
             pixels_per_point: output.pixels_per_point,
         };
         let frame = match surface.target.get_current_texture() {
@@ -1542,10 +1568,7 @@ impl Host {
         let mut encoder = gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        let before =
-            surface
-                .renderer
-                .update_buffers(&gpu.device, &gpu.queue, &mut encoder, &jobs, &screen);
+        let before = renderer.update_buffers(&gpu.device, &gpu.queue, &mut encoder, &jobs, &screen);
         {
             let mut pass = encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1562,12 +1585,13 @@ impl Host {
                     ..Default::default()
                 })
                 .forget_lifetime();
-            surface.renderer.render(&mut pass, &jobs, &screen);
+            renderer.render(&mut pass, &jobs, &screen);
         }
         gpu.queue
             .submit(before.into_iter().chain(std::iter::once(encoder.finish())));
         for id in &freed {
-            surface.renderer.free_texture(id);
+            renderer.free_texture(id);
+            surface.textures.remove(id);
         }
         // Told when this frame is shown: the next is not drawn before.
         // (Asked for before the frame is handed over: handing over commits.)
