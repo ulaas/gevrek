@@ -23,8 +23,8 @@ use gevrek_engine::layouts::{apply_layout, LayoutType};
 use gevrek_engine::outputs::{MonitorHandle, Outputs};
 use gevrek_engine::reload::ConfigDiff;
 use gevrek_engine::rules::{RuleEngine, WindowInfo};
-use gevrek_engine::testing::fake_desktop::FakeDesktop;
 use gevrek_engine::snap_zones::SnapZoneManager;
+use gevrek_engine::testing::fake_desktop::FakeDesktop;
 use gevrek_engine::{Padding, Rect, WindowId};
 use gevrek_model::command::{DispatchCommand, WorkspaceSelector};
 use gevrek_model::config::Config;
@@ -86,7 +86,11 @@ fn window(index: usize) -> WindowInfo {
         title: format!("Document {index} - An editor of some kind"),
         class: format!("WindowClass{}", index % 12),
         exe: format!("program{}.exe", index % 12),
-        path: format!("C:\\Program Files\\Program {}\\program{}.exe", index % 12, index % 12),
+        path: format!(
+            "C:\\Program Files\\Program {}\\program{}.exe",
+            index % 12,
+            index % 12
+        ),
         app_id: format!("program{}", index % 12),
         has_parent: false,
         is_visible: true,
@@ -122,7 +126,8 @@ fn rules() -> RuleEngine {
         .collect();
     let mut engine = RuleEngine::new();
     engine.set_declarative_rules(
-        serde_json::from_value(serde_json::Value::Array(rules)).expect("rules as the model reads them"),
+        serde_json::from_value(serde_json::Value::Array(rules))
+            .expect("rules as the model reads them"),
     );
     engine
 }
@@ -131,7 +136,12 @@ fn main() {
     let mut bench = Bench::from_args();
 
     // A layout of 1, 10 and 50 windows, in each layout.
-    let area = Rect { x: 0, y: 0, width: 2560, height: 1400 };
+    let area = Rect {
+        x: 0,
+        y: 0,
+        width: 2560,
+        height: 1400,
+    };
     let padding = Padding::default();
     for (name, layout) in [
         ("bsp", LayoutType::BSP),
@@ -212,7 +222,10 @@ fn main() {
         let (before, _) = core.monitor_data(&desktop, &config);
         let after = before.clone();
         bench.case("state/what_changed_when_nothing_did", || {
-            black_box(gevrek_engine::overlay_data::changes(black_box(&before), black_box(&after)));
+            black_box(gevrek_engine::overlay_data::changes(
+                black_box(&before),
+                black_box(&after),
+            ));
         });
         bench.case("state/copied", || {
             black_box(black_box(&before).clone());

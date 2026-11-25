@@ -333,12 +333,18 @@ impl Welcome {
             );
         });
         if !still {
-            ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(33));
         }
     }
 
     fn setup(&mut self, ui: &mut egui::Ui, palette: &theme::Palette) {
-        ui.label(egui::RichText::new("Make it yours").size(22.0).strong().color(palette.text));
+        ui.label(
+            egui::RichText::new("Make it yours")
+                .size(22.0)
+                .strong()
+                .color(palette.text),
+        );
         ui.label(
             egui::RichText::new(
                 "A few choices to begin with. Each can be changed at any time in gevrek studio, and there is much more there.",
@@ -359,10 +365,18 @@ impl Welcome {
                 ui.painter().rect(
                     rect,
                     10.0,
-                    if response.hovered() { palette.control_hover() } else { palette.control },
+                    if response.hovered() {
+                        palette.control_hover()
+                    } else {
+                        palette.control
+                    },
                     egui::Stroke::new(
                         if chosen { 2.0 } else { 1.0 },
-                        if chosen { palette.accent } else { palette.border },
+                        if chosen {
+                            palette.accent
+                        } else {
+                            palette.border
+                        },
                     ),
                     egui::StrokeKind::Inside,
                 );
@@ -380,7 +394,11 @@ impl Welcome {
                     theme::mix(palette.bg, palette.surface, 0.4),
                     theme::mix(palette.control, palette.text, 0.06),
                     palette.border,
-                    if chosen { palette.accent } else { palette.muted },
+                    if chosen {
+                        palette.accent
+                    } else {
+                        palette.muted
+                    },
                 );
                 ui.painter().text(
                     egui::pos2(rect.left() + 10.0, rect.bottom() - 12.0),
@@ -404,7 +422,8 @@ impl Welcome {
         widgets::caption(ui, "The look");
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(10.0, 8.0);
-            let colour = |(red, green, blue): (u8, u8, u8)| egui::Color32::from_rgb(red, green, blue);
+            let colour =
+                |(red, green, blue): (u8, u8, u8)| egui::Color32::from_rgb(red, green, blue);
             for index in 0..self.looks.len() {
                 let chosen = self.look == index;
                 let look = &self.looks[index];
@@ -418,7 +437,11 @@ impl Welcome {
                     ground,
                     egui::Stroke::new(
                         if chosen { 2.0 } else { 1.0 },
-                        if chosen { palette.accent } else { palette.border },
+                        if chosen {
+                            palette.accent
+                        } else {
+                            palette.border
+                        },
                     ),
                     egui::StrokeKind::Inside,
                 );
@@ -491,7 +514,10 @@ impl Welcome {
         // The main key: every binding is held with it.
         widgets::caption(ui, "The key gevrek's shortcuts are held with");
         use gevrek_model::settings::MainKey;
-        let keys = [(MainKey::Super, "Super (the Windows key)"), (MainKey::Alt, "Alt")];
+        let keys = [
+            (MainKey::Super, "Super (the Windows key)"),
+            (MainKey::Alt, "Alt"),
+        ];
         ui.horizontal(|ui| {
             if let Some(key) = widgets::segmented(
                 ui,
@@ -508,10 +534,12 @@ impl Welcome {
             let taken = self.taken_keys();
             let says = match (self.main_key, taken.is_empty()) {
                 (MainKey::Super, true) => {
-                    "Programs do not use it for themselves, so nothing of theirs is taken.".to_string()
+                    "Programs do not use it for themselves, so nothing of theirs is taken."
+                        .to_string()
                 }
                 (MainKey::Alt, true) => {
-                    "Programs use Alt for their menus: a shortcut of gevrek's comes first.".to_string()
+                    "Programs use Alt for their menus: a shortcut of gevrek's comes first."
+                        .to_string()
                 }
                 (_, false) => format!(
                     "These would take keys you may know otherwise: {}.",
@@ -616,7 +644,12 @@ impl Welcome {
     }
 
     /// Draw the welcome. How it ended, once it has.
-    pub fn draw(&mut self, ui: &mut egui::Ui, palette: &theme::Palette, still: bool) -> Option<Outcome> {
+    pub fn draw(
+        &mut self,
+        ui: &mut egui::Ui,
+        palette: &theme::Palette,
+        still: bool,
+    ) -> Option<Outcome> {
         let mut outcome = None;
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(palette.bg).inner_margin(26))
@@ -775,7 +808,11 @@ impl Window {
             if let Some((config, base_revision)) = wanted {
                 log::debug!(
                     "the welcome sends {} on revision {base_revision}",
-                    if self.first { "a first configuration" } else { "what was chosen" }
+                    if self.first {
+                        "a first configuration"
+                    } else {
+                        "what was chosen"
+                    }
                 );
                 self.link.send(Request::Apply {
                     config: Box::new(config),
@@ -810,7 +847,8 @@ impl Window {
     /// lesson's beginning, and a practice window went there. A window
     /// that is closed is not gone before its program is.)
     fn begin_tour(&mut self) {
-        self.wants_tour.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.wants_tour
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -824,7 +862,9 @@ impl eframe::App for Window {
         let context = ui.ctx().clone();
         for event in self.link.poll() {
             match &event {
-                Event::Applied(revision) => log::debug!("the window manager applied revision {revision}"),
+                Event::Applied(revision) => {
+                    log::debug!("the window manager applied revision {revision}")
+                }
                 Event::ApplyFailed(why) => {
                     log::warn!("what the welcome sent was not applied: {why}")
                 }
@@ -843,7 +883,9 @@ impl eframe::App for Window {
                         }
                     }
                 }
-                Event::Disconnected(why) => log::debug!("the line to the window manager is down: {why}"),
+                Event::Disconnected(why) => {
+                    log::debug!("the line to the window manager is down: {why}")
+                }
                 _ => {}
             }
             if let Event::Configuration(config, revision) = event {
@@ -854,7 +896,9 @@ impl eframe::App for Window {
                 if self.again == Again::Due {
                     self.again = Again::Done;
                     if let Some((config, base_revision)) = self.wanted() {
-                        log::debug!("the welcome sends what was chosen again, on revision {base_revision}");
+                        log::debug!(
+                            "the welcome sends what was chosen again, on revision {base_revision}"
+                        );
                         self.link.send(Request::Apply {
                             config: Box::new(config),
                             base_revision,
@@ -1001,12 +1045,20 @@ mod tests {
         welcome.edge = Some(PanelEdge::Bottom);
         welcome.look = 1;
         let chosen = welcome.chosen();
-        assert!(chosen.desktop.workspaces.iter().all(|workspace| workspace.layout == LayoutType::Columns));
+        assert!(chosen
+            .desktop
+            .workspaces
+            .iter()
+            .all(|workspace| workspace.layout == LayoutType::Columns));
         assert!(chosen.desktop.shell.panel.enabled);
         assert_eq!(chosen.desktop.shell.panel.edge, PanelEdge::Bottom);
         assert_eq!(
             chosen.desktop.appearance.active_border_color,
-            welcome.looks[1].config.desktop.appearance.active_border_color
+            welcome.looks[1]
+                .config
+                .desktop
+                .appearance
+                .active_border_color
         );
         // It is a configuration gevrek takes.
         let errors: Vec<_> = chosen
@@ -1045,15 +1097,25 @@ mod tests {
             assert_eq!(laid.desktop.bindings.len(), running.desktop.bindings.len());
         }
         let over = welcome.laid_over(&theirs);
-        assert!(over.desktop.workspaces.iter().all(|workspace| workspace.layout == LayoutType::Columns));
-        assert_eq!(over.desktop.focus.history_size, theirs.desktop.focus.history_size);
+        assert!(over
+            .desktop
+            .workspaces
+            .iter()
+            .all(|workspace| workspace.layout == LayoutType::Columns));
+        assert_eq!(
+            over.desktop.focus.history_size,
+            theirs.desktop.focus.history_size
+        );
         assert_eq!(over.desktop.shell.panel, theirs.desktop.shell.panel);
         // Every layout offered is placed by the engine, inside the display.
         for (layout, name, _) in LAYOUTS {
             let rects = placed(layout, 4);
             assert!(!rects.is_empty(), "{name}");
             for rect in rects {
-                assert!(rect[2] > 0.0 && rect[3] > 0.0 && rect[0] >= 0.0 && rect[1] >= 0.0, "{name}: {rect:?}");
+                assert!(
+                    rect[2] > 0.0 && rect[3] > 0.0 && rect[0] >= 0.0 && rect[1] >= 0.0,
+                    "{name}: {rect:?}"
+                );
             }
         }
     }
@@ -1093,8 +1155,11 @@ mod tests {
     fn the_welcome_is_drawn_to_be_looked_at() {
         use gevrek_ui::picture::Painter;
         let said = |name: &str| std::env::var(name).ok().filter(|text| !text.is_empty());
-        let out = std::path::PathBuf::from(said("GEVREK_LOOK_OUT").expect("GEVREK_LOOK_OUT: a file"));
-        let moment: f64 = said("GEVREK_LOOK_AT").and_then(|text| text.parse().ok()).unwrap_or(2.5);
+        let out =
+            std::path::PathBuf::from(said("GEVREK_LOOK_OUT").expect("GEVREK_LOOK_OUT: a file"));
+        let moment: f64 = said("GEVREK_LOOK_AT")
+            .and_then(|text| text.parse().ok())
+            .unwrap_or(2.5);
         let mut welcome = Welcome {
             page: match said("GEVREK_LOOK").as_deref() {
                 Some("setup") => Page::Setup,
@@ -1112,9 +1177,14 @@ mod tests {
         theme::apply(&context, &palette, &settings);
         let mut pixels = Vec::new();
         for frame in 0..3 {
-            pixels = painter.frame_of(&context, moment + f64::from(frame) * 0.001, Vec::new(), |ui| {
-                welcome.draw(ui, &palette, false);
-            });
+            pixels = painter.frame_of(
+                &context,
+                moment + f64::from(frame) * 0.001,
+                Vec::new(),
+                |ui| {
+                    welcome.draw(ui, &palette, false);
+                },
+            );
         }
         painter.save(&pixels, &out).expect("the picture is written");
     }

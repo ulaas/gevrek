@@ -10,8 +10,8 @@
 
 pub mod brand;
 pub mod brand_icons;
-pub mod color;
 pub mod browser;
+pub mod color;
 pub mod controls;
 pub mod fonts;
 pub mod gallery;

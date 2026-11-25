@@ -77,12 +77,12 @@ use crate::zones::reach::Reach;
 use crate::zones::smart::Smart;
 use crate::zones::sources::Source;
 use entries::{DesktopFile, Entry};
-use gevrek_zones::config::SmartSource;
 use gevrek_model::geometry::{Point, Rect};
 use gevrek_zones::backend::{
     BackendError, BackendEvent, DragActions, DropPayload, FileOperation, IconHandle, IconRequest,
     IconSize, Location, WatchId, ZonesBackend,
 };
+use gevrek_zones::config::SmartSource;
 use gevrek_zones::geometry::{Display, Edge, ReservedArea};
 use gevrek_zones::ids::ItemId;
 use gevrek_zones::item::{Item, ItemFacts, ItemKind};
@@ -95,7 +95,10 @@ use std::sync::{Arc, Mutex};
 /// alone (0700): the trash, the thumbnails and gevrek's own notes are
 /// nobody else's business.
 pub(crate) fn private_folder(path: &Path) -> std::io::Result<()> {
-    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(path)
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(path)
 }
 
 /// Write a file for the person alone (0600), whole or not at all: into a
@@ -103,7 +106,10 @@ pub(crate) fn private_folder(path: &Path) -> std::io::Result<()> {
 pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     static WRITTEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let count = WRITTEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let name = path.file_name().ok_or(std::io::ErrorKind::InvalidInput)?.to_string_lossy();
+    let name = path
+        .file_name()
+        .ok_or(std::io::ErrorKind::InvalidInput)?
+        .to_string_lossy();
     let beside = path.with_file_name(format!(".{name}.{}.{count}.tmp", std::process::id()));
     let written = std::fs::OpenOptions::new()
         .write(true)
@@ -135,10 +141,20 @@ pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 pub(crate) fn open_quietly(path: &Path) -> std::io::Result<std::fs::File> {
     // (The number of `O_NOATIME` on the processors gevrek is built for;
     // on any other the plain way is taken.)
-    #[cfg(any(target_arch = "x86_64", target_arch = "x86", target_arch = "aarch64", target_arch = "arm", target_arch = "riscv64"))]
+    #[cfg(any(
+        target_arch = "x86_64",
+        target_arch = "x86",
+        target_arch = "aarch64",
+        target_arch = "arm",
+        target_arch = "riscv64"
+    ))]
     {
         const NO_ACCESS_TIME: i32 = 0o1000000;
-        if let Ok(file) = std::fs::OpenOptions::new().read(true).custom_flags(NO_ACCESS_TIME).open(path) {
+        if let Ok(file) = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(NO_ACCESS_TIME)
+            .open(path)
+        {
             return Ok(file);
         }
     }
@@ -147,13 +163,20 @@ pub(crate) fn open_quietly(path: &Path) -> std::io::Result<std::fs::File> {
 
 /// A time as seconds since 1970.
 pub(crate) fn seconds(time: Option<std::time::SystemTime>) -> Option<u64> {
-    time?.duration_since(std::time::UNIX_EPOCH).ok().map(|since| since.as_secs())
+    time?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|since| since.as_secs())
 }
 
 /// The side of a picture in pixels: the logical size at the display's
 /// scale, within what is drawn.
 pub fn pixels(size: IconSize) -> u32 {
-    let scale = if size.scale.is_finite() && size.scale > 0.0 { size.scale } else { 1.0 };
+    let scale = if size.scale.is_finite() && size.scale > 0.0 {
+        size.scale
+    } else {
+        1.0
+    };
     ((f64::from(size.size) * scale).round() as u32).clamp(8, 1024)
 }
 
@@ -241,17 +264,32 @@ impl System {
         let own = std::fs::symlink_metadata(path).ok()?;
         let is_link = own.file_type().is_symlink();
         // What a link leads to, where it leads anywhere.
-        let data = if is_link { std::fs::metadata(path).ok() } else { Some(own.clone()) };
+        let data = if is_link {
+            std::fs::metadata(path).ok()
+        } else {
+            Some(own.clone())
+        };
         let is_folder = data.as_ref().is_some_and(|data| data.is_dir());
         let mime = self.mimes.of_file(path);
         let mut item = Item {
             id: uris::item_id(path),
-            kind: if is_folder { ItemKind::Folder } else { ItemKind::File },
+            kind: if is_folder {
+                ItemKind::Folder
+            } else {
+                ItemKind::File
+            },
             name: file_name.to_string(),
             path: path.to_str().map(str::to_string),
             facts: ItemFacts {
-                extension: if is_folder { None } else { gevrek_zones::item::extension_of(&file_name) },
-                size: data.as_ref().filter(|data| data.is_file()).map(|data| data.len()),
+                extension: if is_folder {
+                    None
+                } else {
+                    gevrek_zones::item::extension_of(&file_name)
+                },
+                size: data
+                    .as_ref()
+                    .filter(|data| data.is_file())
+                    .map(|data| data.len()),
                 created: seconds(own.created().ok()),
                 modified: seconds(data.as_ref().unwrap_or(&own).modified().ok()),
                 accessed: seconds(data.as_ref().unwrap_or(&own).accessed().ok()),
@@ -264,7 +302,10 @@ impl System {
             item.kind = ItemKind::Shortcut;
             item.facts.shortcut_target = std::fs::read_link(path).ok().map(|target| {
                 // (As a whole path, wherever the link is read from.)
-                path.parent().map_or(target.clone(), |folder| folder.join(&target)).to_string_lossy().into_owned()
+                path.parent()
+                    .map_or(target.clone(), |folder| folder.join(&target))
+                    .to_string_lossy()
+                    .into_owned()
             });
         }
         let mut entry = None;
@@ -288,7 +329,12 @@ impl System {
             }
             entry = Some(seen);
         }
-        Some(Described { item, icon_names, entry, mode: data.unwrap_or(own).mode() & 0o7777 })
+        Some(Described {
+            item,
+            icon_names,
+            entry,
+            mode: data.unwrap_or(own).mode() & 0o7777,
+        })
     }
 
     /// The item at `path`.
@@ -311,7 +357,12 @@ impl System {
     pub fn icon_file(&self, names: &[String], pixels: u32) -> Option<PathBuf> {
         names.iter().find_map(|name| {
             let wanted = (name.clone(), pixels);
-            if let Some(known) = self.found_icons.lock().ok().and_then(|found| found.get(&wanted).cloned()) {
+            if let Some(known) = self
+                .found_icons
+                .lock()
+                .ok()
+                .and_then(|found| found.get(&wanted).cloned())
+            {
                 return known;
             }
             let file = crate::icons::find_in(
@@ -352,7 +403,13 @@ impl System {
     /// is one or one can be made. Not for the thread that draws.
     pub fn thumbnail(&self, path: &Path, pixels: u32) -> Option<Picture> {
         let (uri, mime, modified, size) = self.thumbnail_source(path)?;
-        let source = thumbs::Source { path, uri: &uri, mime: &mime, modified, size };
+        let source = thumbs::Source {
+            path,
+            uri: &uri,
+            mime: &mime,
+            modified,
+            size,
+        };
         thumbs::picture(&self.places, &source, pixels)
     }
 
@@ -365,7 +422,8 @@ impl System {
 
     /// The program that opens the file at `path` when it is just opened.
     pub fn default_program(&self, path: &Path) -> Option<Program> {
-        Associations::load(&self.places, &self.locales).default_for(&self.mimes, &self.mimes.of_file(path))
+        Associations::load(&self.places, &self.locales)
+            .default_for(&self.mimes, &self.mimes.of_file(path))
     }
 }
 
@@ -417,20 +475,29 @@ pub fn start_directly(launch: &Launch) -> std::io::Result<()> {
         ));
     }
     let mut command = Command::new(&launch.program);
-    command.args(&launch.args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    command
+        .args(&launch.args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     if let Some(directory) = &launch.directory {
         command.current_dir(directory);
     }
     let mut child = command.spawn()?;
     // Waited for on a thread of its own, so that it does not stay behind
     // as a dead entry of the process table when it ends.
-    let waited = std::thread::Builder::new().name("gevrek-zones-child".to_string()).spawn(move || {
-        if let Err(error) = child.wait() {
-            log::debug!("zones: the end of a program that was started is not known: {error}");
-        }
-    });
+    let waited = std::thread::Builder::new()
+        .name("gevrek-zones-child".to_string())
+        .spawn(move || {
+            if let Err(error) = child.wait() {
+                log::debug!("zones: the end of a program that was started is not known: {error}");
+            }
+        });
     if let Err(error) = waited {
-        log::debug!("zones: {} is not waited for, and stays behind when it ends: {error}", launch.program);
+        log::debug!(
+            "zones: {} is not waited for, and stays behind when it ends: {error}",
+            launch.program
+        );
     }
     log::debug!("zones: {} was started directly", launch.program);
     Ok(())
@@ -518,10 +585,11 @@ pub fn displays_of_state(state: &serde_json::Value) -> (Vec<Display>, Vec<Reserv
     let number = |value: &serde_json::Value| value.as_f64().unwrap_or(0.0).round() as i32;
     for monitor in state["monitors"].as_array().into_iter().flatten() {
         let said = |key: &str| monitor[key].as_str().filter(|text| !text.is_empty());
-        let Some(id) = said("stable_id")
-            .map(str::to_string)
-            .or_else(|| said("connector").or_else(|| said("name")).map(|port| format!("port:{port}")))
-        else {
+        let Some(id) = said("stable_id").map(str::to_string).or_else(|| {
+            said("connector")
+                .or_else(|| said("name"))
+                .map(|port| format!("port:{port}"))
+        }) else {
             continue;
         };
         let rect = Rect::new(
@@ -533,7 +601,10 @@ pub fn displays_of_state(state: &serde_json::Value) -> (Vec<Display>, Vec<Reserv
         if rect.width <= 0 || rect.height <= 0 {
             continue;
         }
-        let scale = monitor["scale"].as_f64().filter(|scale| *scale > 0.0).unwrap_or(1.0);
+        let scale = monitor["scale"]
+            .as_f64()
+            .filter(|scale| *scale > 0.0)
+            .unwrap_or(1.0);
         let mut display = Display::new(&id, rect);
         display.scale = scale;
         display.primary = monitor["is_primary"].as_bool().unwrap_or(false);
@@ -561,7 +632,11 @@ pub fn displays_of_state(state: &serde_json::Value) -> (Vec<Display>, Vec<Reserv
         };
         for (edge, thickness) in sides {
             if thickness > 0 {
-                reserved.push(ReservedArea { display: display.id.clone(), edge, thickness });
+                reserved.push(ReservedArea {
+                    display: display.id.clone(),
+                    edge,
+                    thickness,
+                });
             }
         }
         displays.push(display);
@@ -587,8 +662,15 @@ fn pictures_of(
                 if thumbnail {
                     return None;
                 }
-                let icon = programs.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).icon_of(id)?;
-                let file = if icon.starts_with('/') { PathBuf::from(icon) } else { system.icon_file(&[icon], pixels)? };
+                let icon = programs
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .icon_of(id)?;
+                let file = if icon.starts_with('/') {
+                    PathBuf::from(icon)
+                } else {
+                    system.icon_file(&[icon], pixels)?
+                };
                 return crate::icons::load(&file, pixels);
             }
             let path = uris::path_of(id)?;
@@ -667,21 +749,37 @@ fn carry_out_now(
     // (Without knowing who the person is, no trash can is theirs.)
     let can = || trash.ok_or(BackendError::Unsupported);
     match operation {
-        FileOperation::Copy { from, to_folder } => files::copy_told(Path::new(from), Path::new(to_folder), tick)
-            .map(|copy| FileOperation::Trash { path: text(&copy) })
-            .map_err(|error| refusal(error, from)),
+        FileOperation::Copy { from, to_folder } => {
+            files::copy_told(Path::new(from), Path::new(to_folder), tick)
+                .map(|copy| FileOperation::Trash { path: text(&copy) })
+                .map_err(|error| refusal(error, from))
+        }
         FileOperation::Move { from, to_folder } => {
-            let back = Path::new(from).parent().map(text).ok_or_else(|| BackendError::NotFound { what: from.clone() })?;
+            let back = Path::new(from)
+                .parent()
+                .map(text)
+                .ok_or_else(|| BackendError::NotFound { what: from.clone() })?;
             files::move_into_told(Path::new(from), Path::new(to_folder), tick)
-                .map(|moved| FileOperation::Move { from: text(&moved), to_folder: back })
+                .map(|moved| FileOperation::Move {
+                    from: text(&moved),
+                    to_folder: back,
+                })
                 .map_err(|error| refusal(error, from))
         }
         FileOperation::Rename { path, new_name } => {
-            let old = Path::new(path).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+            let old = Path::new(path)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
             files::rename(Path::new(path), new_name)
-                .map(|renamed| FileOperation::Rename { path: text(&renamed), new_name: old })
+                .map(|renamed| FileOperation::Rename {
+                    path: text(&renamed),
+                    new_name: old,
+                })
                 .map_err(|error| match error.kind() {
-                    std::io::ErrorKind::AlreadyExists => BackendError::Exists { what: new_name.clone() },
+                    std::io::ErrorKind::AlreadyExists => BackendError::Exists {
+                        what: new_name.clone(),
+                    },
                     _ => refusal(error, path),
                 })
         }
@@ -702,11 +800,17 @@ fn carry_out_now(
 /// What an error of the file system is to the core.
 fn refusal(error: std::io::Error, what: &str) -> BackendError {
     match error.kind() {
-        std::io::ErrorKind::NotFound => BackendError::NotFound { what: what.to_string() },
-        std::io::ErrorKind::AlreadyExists => BackendError::Exists { what: what.to_string() },
+        std::io::ErrorKind::NotFound => BackendError::NotFound {
+            what: what.to_string(),
+        },
+        std::io::ErrorKind::AlreadyExists => BackendError::Exists {
+            what: what.to_string(),
+        },
         std::io::ErrorKind::Unsupported => BackendError::Unsupported,
         std::io::ErrorKind::Interrupted => BackendError::Cancelled,
-        _ => BackendError::Refused { what: format!("{what}: {error}") },
+        _ => BackendError::Refused {
+            what: format!("{what}: {error}"),
+        },
     }
 }
 
@@ -739,19 +843,29 @@ impl SystemBackend {
             Arc::new(move || apps::installed_in(&reading.places.all_data_dirs(), &reading.locales)),
             data.iter().map(|dir| dir.join("applications")).collect(),
             Arc::new(move |events| {
-                telling.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).extend(events);
+                telling
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .extend(events);
                 woken();
             }),
         );
         let (answer, answers) = std::sync::mpsc::channel();
         let (telling, woken) = (Arc::clone(&told), Arc::clone(&wake));
         let operations = crate::zones::operations::Operations::new(Arc::new(move |events| {
-            telling.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).extend(events);
+            telling
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .extend(events);
             woken();
         }));
         Self {
             operations,
-            pictures: pictures_of(Arc::clone(&system), Arc::clone(&smart.known), Arc::clone(&wake)),
+            pictures: pictures_of(
+                Arc::clone(&system),
+                Arc::clone(&smart.known),
+                Arc::clone(&wake),
+            ),
             system,
             wake,
             watcher: None,
@@ -798,10 +912,15 @@ impl SystemBackend {
         if self.displays == displays && self.reserved == reserved {
             return;
         }
-        log::debug!("zones: the displays or the room kept on them changed: {} displays, {} areas kept", displays.len(), reserved.len());
+        log::debug!(
+            "zones: the displays or the room kept on them changed: {} displays, {} areas kept",
+            displays.len(),
+            reserved.len()
+        );
         self.displays = displays.clone();
         self.reserved = reserved.clone();
-        self.events.push(BackendEvent::Displays { displays, reserved });
+        self.events
+            .push(BackendEvent::Displays { displays, reserved });
     }
 
     /// The watched folders that cannot be reached now, each with why:
@@ -821,8 +940,12 @@ impl SystemBackend {
     /// back), and for the person's own "try again". Returns at once; a
     /// folder that is back is told whole.
     pub fn retry_unreachable(&mut self) {
-        let away: Vec<WatchId> =
-            self.portals.iter().filter(|(_, portal)| portal.reach.is_away()).map(|(watch, _)| *watch).collect();
+        let away: Vec<WatchId> = self
+            .portals
+            .iter()
+            .filter(|(_, portal)| portal.reach.is_away())
+            .map(|(watch, _)| *watch)
+            .collect();
         for watch in away {
             self.go_to(watch);
         }
@@ -909,12 +1032,22 @@ impl SystemBackend {
             self.answer.clone(),
             Arc::clone(&self.wake),
         );
-        log::debug!("zones: going to {} (watch {}) on a thread of its own", portal.folder.display(), watch.0);
+        log::debug!(
+            "zones: going to {} (watch {}) on a thread of its own",
+            portal.folder.display(),
+            watch.0
+        );
         if let Err(error) = gone {
-            log::debug!("zones: {} cannot be gone to: no thread: {error}", portal.folder.display());
+            log::debug!(
+                "zones: {} cannot be gone to: no thread: {error}",
+                portal.folder.display()
+            );
             portal.opening = false;
-            let reach = Reach::Away { why: format!("{}: no thread to read it on: {error}", text(&portal.folder)) };
-            self.events.extend(crate::zones::reach::told(&portal.location, &reach));
+            let reach = Reach::Away {
+                why: format!("{}: no thread to read it on: {error}", text(&portal.folder)),
+            };
+            self.events
+                .extend(crate::zones::reach::told(&portal.location, &reach));
             portal.reach = reach;
         }
     }
@@ -937,14 +1070,25 @@ impl SystemBackend {
             return;
         };
         let (reach, done) = match outcome {
-            portal::Outcome::Slow => {
-                (Reach::Away { why: format!("{} does not answer", text(&portal.folder)) }, false)
-            }
+            portal::Outcome::Slow => (
+                Reach::Away {
+                    why: format!("{} does not answer", text(&portal.folder)),
+                },
+                false,
+            ),
             portal::Outcome::There { watcher, items } => {
                 portal.watcher = Some(watcher);
                 portal.sentinel = None;
-                self.folders.adopt(watch, portal.location.clone(), portal.folder.clone(), &items);
-                events.push(BackendEvent::Listed { location: portal.location.clone(), items });
+                self.folders.adopt(
+                    watch,
+                    portal.location.clone(),
+                    portal.folder.clone(),
+                    &items,
+                );
+                events.push(BackendEvent::Listed {
+                    location: portal.location.clone(),
+                    items,
+                });
                 (Reach::There, true)
             }
             portal::Outcome::Away { why, sentinel } => {
@@ -956,8 +1100,16 @@ impl SystemBackend {
         };
         if portal.reach != reach {
             match &reach {
-                Reach::There => log::debug!("zones: {} is there (watch {})", portal.folder.display(), watch.0),
-                Reach::Away { why } => log::debug!("zones: {} is away (watch {}): {why}", portal.folder.display(), watch.0),
+                Reach::There => log::debug!(
+                    "zones: {} is there (watch {})",
+                    portal.folder.display(),
+                    watch.0
+                ),
+                Reach::Away { why } => log::debug!(
+                    "zones: {} is away (watch {}): {why}",
+                    portal.folder.display(),
+                    watch.0
+                ),
                 Reach::Opening => {}
             }
             events.extend(crate::zones::reach::told(&portal.location, &reach));
@@ -982,7 +1134,10 @@ impl SystemBackend {
             crate::zones::smart::told_as(SmartSource::Recent, &self.smart.recent_wanted),
             move || recent::read(&system, recent::MOST),
             std::slice::from_ref(&self.system.places.data_home),
-            |path| path.file_name().is_some_and(|name| name == "recently-used.xbel"),
+            |path| {
+                path.file_name()
+                    .is_some_and(|name| name == "recently-used.xbel")
+            },
             self.smart_tell(),
         ));
     }
@@ -1005,7 +1160,9 @@ impl SystemBackend {
     fn smart_tell(&self) -> crate::zones::sources::Tell {
         let (told, wake) = (Arc::clone(&self.told), Arc::clone(&self.wake));
         Arc::new(move |events| {
-            told.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).extend(events);
+            told.lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .extend(events);
             wake();
         })
     }
@@ -1035,7 +1192,8 @@ impl SystemBackend {
     /// what that takes and does).
     pub fn allow_launching(&mut self, item: &ItemId) -> Result<(), BackendError> {
         let path = self.path_of(item)?;
-        entries::allow(&self.system.places, self.system.uid, &path).map_err(|error| refusal(error, &text(&path)))?;
+        entries::allow(&self.system.places, self.system.uid, &path)
+            .map_err(|error| refusal(error, &text(&path)))?;
         self.changed(item);
         Ok(())
     }
@@ -1044,7 +1202,9 @@ impl SystemBackend {
     fn path_of(&self, item: &ItemId) -> Result<PathBuf, BackendError> {
         uris::path_of_item(item)
             .filter(|path| path.symlink_metadata().is_ok())
-            .ok_or_else(|| BackendError::NotFound { what: item.to_string() })
+            .ok_or_else(|| BackendError::NotFound {
+                what: item.to_string(),
+            })
     }
 
     /// An item is other than it was by something done here that the
@@ -1059,7 +1219,9 @@ impl SystemBackend {
         let mut commands = apps::commands_for(exec, &app.name, &app.icon, &app.entry, opened);
         if commands.is_empty() {
             if !app.dbus_activatable {
-                return Err(BackendError::Refused { what: format!("{} names no program", app.name) });
+                return Err(BackendError::Refused {
+                    what: format!("{} names no program", app.name),
+                });
             }
             // Only over the bus: one start, with everything.
             commands.push(Vec::new());
@@ -1075,7 +1237,15 @@ impl SystemBackend {
                 addresses: opened.iter().map(|opened| opened.address.clone()).collect(),
             };
             (self.launcher)(&launch).map_err(|error| refusal(error, &app.name))?;
-            log::debug!("zones: {} is started ({})", app.name, if launch.program.is_empty() { "over the bus" } else { &launch.program });
+            log::debug!(
+                "zones: {} is started ({})",
+                app.name,
+                if launch.program.is_empty() {
+                    "over the bus"
+                } else {
+                    &launch.program
+                }
+            );
         }
         Ok(())
     }
@@ -1084,8 +1254,14 @@ impl SystemBackend {
     fn open_as(&mut self, mime: &str, opened: Opened) -> Result<(), BackendError> {
         let program = Associations::load(&self.system.places, &self.system.locales)
             .default_for(&self.system.mimes, mime)
-            .ok_or_else(|| BackendError::NotFound { what: format!("a program that opens {mime}") })?;
-        log::debug!("zones: {} is opened with {}, the program for {mime}", opened.file, program.app.name);
+            .ok_or_else(|| BackendError::NotFound {
+                what: format!("a program that opens {mime}"),
+            })?;
+        log::debug!(
+            "zones: {} is opened with {}, the program for {mime}",
+            opened.file,
+            program.app.name
+        );
         self.start(&program.app, &program.exec, &[opened])
     }
 
@@ -1098,13 +1274,17 @@ impl SystemBackend {
             .collect();
         let associations = Associations::load(&system.places, &system.locales);
         let mime_of = |described: &Described| described.item.facts.mime.clone().unwrap_or_default();
-        let untrusted = |described: &Described| matches!(described.entry, Some(DesktopFile::Untrusted));
-        let trusted = |described: &Described| matches!(described.entry, Some(DesktopFile::Trusted(_)));
+        let untrusted =
+            |described: &Described| matches!(described.entry, Some(DesktopFile::Untrusted));
+        let trusted =
+            |described: &Described| matches!(described.entry, Some(DesktopFile::Trusted(_)));
         let mut actions = Vec::new();
         if let Some(first) = described.first() {
             actions.push(MenuAction::Open);
             // One type throughout, and nothing that starts itself.
-            let one_type = described.iter().all(|other| mime_of(other) == mime_of(first));
+            let one_type = described
+                .iter()
+                .all(|other| mime_of(other) == mime_of(first));
             if one_type && !described.iter().any(trusted) {
                 let programs = associations.candidates(&system.mimes, &mime_of(first));
                 if !programs.is_empty() {
@@ -1142,11 +1322,21 @@ impl SystemBackend {
                 opens_with: if trusted(described) {
                     None
                 } else {
-                    associations.default_for(&system.mimes, &mime_of(described)).map(|program| program.name)
+                    associations
+                        .default_for(&system.mimes, &mime_of(described))
+                        .map(|program| program.name)
                 },
             })
             .collect();
-        ContextMenu { at, items: described.iter().map(|described| described.item.id.clone()).collect(), actions, properties }
+        ContextMenu {
+            at,
+            items: described
+                .iter()
+                .map(|described| described.item.id.clone())
+                .collect(),
+            actions,
+            properties,
+        }
     }
 }
 
@@ -1158,12 +1348,18 @@ impl ZonesBackend for SystemBackend {
         // it is told when it is. So a mount that does not answer holds
         // nobody.
         if let Location::Directory { .. } = location {
-            let mut watched = self.portals.values().filter(|portal| portal.folder == folder).peekable();
+            let mut watched = self
+                .portals
+                .values()
+                .filter(|portal| portal.folder == folder)
+                .peekable();
             if watched.peek().is_some() && !watched.any(|portal| portal.reach == Reach::There) {
                 return Ok(Vec::new());
             }
         }
-        self.system.list(&folder).map_err(|error| refusal(error, &text(&folder)))
+        self.system
+            .list(&folder)
+            .map_err(|error| refusal(error, &text(&folder)))
     }
 
     fn watch(&mut self, location: &Location) -> Result<WatchId, BackendError> {
@@ -1174,17 +1370,26 @@ impl ZonesBackend for SystemBackend {
             self.numbers += 1;
             let watch = WatchId(self.numbers);
             log::debug!("zones: {} is watched (watch {})", folder.display(), watch.0);
-            self.portals.insert(watch, portal::Portal::new(location.clone(), folder));
+            self.portals
+                .insert(watch, portal::Portal::new(location.clone(), folder));
             self.go_to(watch);
             return Ok(watch);
         }
         if !folder.is_dir() {
-            log::debug!("zones: {} is not watched: it is no folder", folder.display());
-            return Err(BackendError::NotFound { what: text(&folder) });
+            log::debug!(
+                "zones: {} is not watched: it is no folder",
+                folder.display()
+            );
+            return Err(BackendError::NotFound {
+                what: text(&folder),
+            });
         }
         self.numbers += 1;
         let watch = WatchId(self.numbers);
-        if !self.folders.add(watch, location.clone(), folder.clone(), &*self.system) {
+        if !self
+            .folders
+            .add(watch, location.clone(), folder.clone(), &*self.system)
+        {
             return Ok(watch);
         }
         let wake = Arc::clone(&self.wake);
@@ -1202,14 +1407,20 @@ impl ZonesBackend for SystemBackend {
         begun.map(|()| watch).map_err(|error| {
             log::debug!("zones: {} cannot be watched: {error}", folder.display());
             self.folders.remove(watch);
-            BackendError::Refused { what: format!("{}: {error}", text(&folder)) }
+            BackendError::Refused {
+                what: format!("{}: {error}", text(&folder)),
+            }
         })
     }
 
     fn unwatch(&mut self, watch: WatchId) {
         // (A portal's own watcher and its threads' answers go with it.)
         if let Some(portal) = self.portals.remove(&watch) {
-            log::debug!("zones: {} is no longer watched (watch {})", portal.folder.display(), watch.0);
+            log::debug!(
+                "zones: {} is no longer watched (watch {})",
+                portal.folder.display(),
+                watch.0
+            );
             self.folders.remove(watch);
             return;
         }
@@ -1226,7 +1437,11 @@ impl ZonesBackend for SystemBackend {
             None => {}
         }
         if let (Some(folder), Some(watcher)) = (self.folders.remove(watch), &mut self.watcher) {
-            log::debug!("zones: {} is no longer watched (watch {})", folder.display(), watch.0);
+            log::debug!(
+                "zones: {} is no longer watched (watch {})",
+                folder.display(),
+                watch.0
+            );
             watcher.remove(&folder);
         }
         if self.folders.is_empty() {
@@ -1237,12 +1452,21 @@ impl ZonesBackend for SystemBackend {
 
     fn drain_events(&mut self) -> Vec<BackendEvent> {
         let mut events = std::mem::take(&mut self.events);
-        events.append(&mut self.told.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
+        events.append(
+            &mut self
+                .told
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        );
         // What the threads that went to folders found.
         while let Ok(answer) = self.answers.try_recv() {
             self.settle(answer, &mut events);
         }
-        let mut changes = self.watcher.as_mut().map(watch::Watcher::take).unwrap_or_default();
+        let mut changes = self
+            .watcher
+            .as_mut()
+            .map(watch::Watcher::take)
+            .unwrap_or_default();
         for portal in self.portals.values_mut() {
             if let Some(watcher) = &mut portal.watcher {
                 changes.extend(watcher.take());
@@ -1271,7 +1495,10 @@ impl ZonesBackend for SystemBackend {
             // again, which says so or tells it whole.
             for shaken in self.folders.take_shaken() {
                 again.extend(
-                    self.portals.iter().filter(|(_, portal)| portal.folder == shaken).map(|(watch, _)| *watch),
+                    self.portals
+                        .iter()
+                        .filter(|(_, portal)| portal.folder == shaken)
+                        .map(|(watch, _)| *watch),
                 );
             }
         }
@@ -1286,7 +1513,9 @@ impl ZonesBackend for SystemBackend {
         if Smart::is_program(item) {
             return self.smart.item(item).map(|item| item.facts);
         }
-        self.system.item(&uris::path_of_item(item)?).map(|item| item.facts)
+        self.system
+            .item(&uris::path_of_item(item)?)
+            .map(|item| item.facts)
     }
 
     fn request_icon(&mut self, item: &ItemId, size: IconSize) -> IconRequest {
@@ -1302,7 +1531,9 @@ impl ZonesBackend for SystemBackend {
             return self.smart.focus(item);
         }
         if Smart::is_program(item) {
-            let app = self.smart.app(item).ok_or_else(|| BackendError::NotFound { what: item.to_string() })?;
+            let app = self.smart.app(item).ok_or_else(|| BackendError::NotFound {
+                what: item.to_string(),
+            })?;
             // (The entry was read with nothing to open: its command is
             // ready as it is.)
             let launch = Launch {
@@ -1320,25 +1551,48 @@ impl ZonesBackend for SystemBackend {
         let described = self
             .system
             .describe(&path)
-            .ok_or_else(|| BackendError::NotFound { what: item.to_string() })?;
+            .ok_or_else(|| BackendError::NotFound {
+                what: item.to_string(),
+            })?;
         match described.entry {
-            Some(DesktopFile::Trusted(Entry::Application { app, exec })) => self.start(&app, &exec, &[]),
+            Some(DesktopFile::Trusted(Entry::Application { app, exec })) => {
+                self.start(&app, &exec, &[])
+            }
             Some(DesktopFile::Trusted(Entry::Link { url, .. })) => match uris::path_of(&url) {
                 // A link to a file is that file, opened as any.
                 Some(file) => self.open(&uris::item_id(&file)),
                 None => {
                     let scheme = url.split(':').next().unwrap_or_default().to_lowercase();
-                    self.open_as(&format!("x-scheme-handler/{scheme}"), Opened { file: url.clone(), address: url })
+                    self.open_as(
+                        &format!("x-scheme-handler/{scheme}"),
+                        Opened {
+                            file: url.clone(),
+                            address: url,
+                        },
+                    )
                 }
             },
             // Never started, and not opened as text either: the person
             // is to see that it is a launcher they have not allowed.
             Some(DesktopFile::Untrusted) => Err(BackendError::Refused {
-                what: format!("{} is a launcher that was not allowed to start", described.item.name),
+                what: format!(
+                    "{} is a launcher that was not allowed to start",
+                    described.item.name
+                ),
             }),
             Some(DesktopFile::NotAnEntry) | None => {
-                let mime = described.item.facts.mime.unwrap_or_else(|| mime::UNKNOWN.to_string());
-                self.open_as(&mime, Opened { file: text(&path), address: uris::uri_of(&path) })
+                let mime = described
+                    .item
+                    .facts
+                    .mime
+                    .unwrap_or_else(|| mime::UNKNOWN.to_string());
+                self.open_as(
+                    &mime,
+                    Opened {
+                        file: text(&path),
+                        address: uris::uri_of(&path),
+                    },
+                )
             }
         }
     }
@@ -1353,13 +1607,22 @@ impl ZonesBackend for SystemBackend {
             Some(id) => {
                 let program = associations
                     .program(id)
-                    .ok_or_else(|| BackendError::NotFound { what: id.to_string() })?;
-                let opened = Opened { file: text(&path), address: uris::uri_of(&path) };
+                    .ok_or_else(|| BackendError::NotFound {
+                        what: id.to_string(),
+                    })?;
+                let opened = Opened {
+                    file: text(&path),
+                    address: uris::uri_of(&path),
+                };
                 self.start(&program.app, &program.exec, &[opened])
             }
             None => {
-                let programs = associations.candidates(&self.system.mimes, &self.system.mimes.of_file(&path));
-                self.choice = Some(ProgramChoice { item: item.clone(), programs });
+                let programs =
+                    associations.candidates(&self.system.mimes, &self.system.mimes.of_file(&path));
+                self.choice = Some(ProgramChoice {
+                    item: item.clone(),
+                    programs,
+                });
                 (self.wake)();
                 Ok(())
             }
@@ -1390,7 +1653,10 @@ impl ZonesBackend for SystemBackend {
                 carry_out(trash.as_ref(), &operation, &mut |done, total| {
                     watched.progress(done, total);
                     if watched.called_off() {
-                        return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "called off"));
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::Interrupted,
+                            "called off",
+                        ));
                     }
                     Ok(())
                 })
@@ -1407,14 +1673,27 @@ impl ZonesBackend for SystemBackend {
     }
 
     fn start_drag(&mut self, items: &[ItemId], allowed: DragActions) -> Result<(), BackendError> {
-        let there: Vec<ItemId> = items.iter().filter(|item| self.path_of(item).is_ok()).cloned().collect();
+        let there: Vec<ItemId> = items
+            .iter()
+            .filter(|item| self.path_of(item).is_ok())
+            .cloned()
+            .collect();
         if there.len() < items.len() {
-            log::debug!("zones: {} of the {} items dragged are no files that are there", items.len() - there.len(), items.len());
+            log::debug!(
+                "zones: {} of the {} items dragged are no files that are there",
+                items.len() - there.len(),
+                items.len()
+            );
         }
         if there.is_empty() {
-            return Err(BackendError::NotFound { what: "anything to drag".to_string() });
+            return Err(BackendError::NotFound {
+                what: "anything to drag".to_string(),
+            });
         }
-        self.dragged_out = Some(DragOut { items: there, allowed });
+        self.dragged_out = Some(DragOut {
+            items: there,
+            allowed,
+        });
         (self.wake)();
         Ok(())
     }
@@ -1439,8 +1718,12 @@ impl ZonesBackend for SystemBackend {
             return false;
         };
         let folder = PathBuf::from(path);
-        let watched: Vec<WatchId> =
-            self.portals.iter().filter(|(_, portal)| portal.folder == folder).map(|(watch, _)| *watch).collect();
+        let watched: Vec<WatchId> = self
+            .portals
+            .iter()
+            .filter(|(_, portal)| portal.folder == folder)
+            .map(|(watch, _)| *watch)
+            .collect();
         if watched.is_empty() {
             // Not watched: read once, on a thread of its own, and told.
             return portal::once(
@@ -1480,7 +1763,9 @@ impl ZonesBackend for SystemBackend {
             SmartSource::Downloads => {
                 let folder = self.system.places.downloads();
                 if !folder.is_dir() {
-                    return Err(BackendError::NotFound { what: text(&folder) });
+                    return Err(BackendError::NotFound {
+                        what: text(&folder),
+                    });
                 }
                 self.read_downloads(folder);
             }
@@ -1503,7 +1788,10 @@ pub(crate) mod testing {
     pub(crate) fn folder(name: &str) -> PathBuf {
         static MADE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let count = MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let folder = std::env::temp_dir().join(format!("gevrek-zones-{name}-{}-{count}", std::process::id()));
+        let folder = std::env::temp_dir().join(format!(
+            "gevrek-zones-{name}-{}-{count}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(&folder).expect("a folder");
         std::fs::canonicalize(&folder).expect("a real folder")

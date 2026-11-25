@@ -66,7 +66,10 @@ pub enum Change {
     Remove(usize),
     /// The entry at `from` is put down before the one at `to` (the list's
     /// length: at its end).
-    Move { from: usize, to: usize },
+    Move {
+        from: usize,
+        to: usize,
+    },
 }
 
 impl Change {
@@ -133,14 +136,19 @@ pub fn another_zone(zones: &[Value]) -> Value {
 /// where the old id was this zone's alone: of two zones with one id
 /// nobody can say which a rule meant.
 pub fn rename_zone(section: &mut Value, index: usize, new: &str) {
-    let old = section["zones"][index]["id"].as_str().unwrap_or("").to_string();
+    let old = section["zones"][index]["id"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
     if section["zones"].get(index).is_none() || old == new {
         return;
     }
-    let shared = section["zones"]
-        .as_array()
-        .map_or(0, |zones| zones.iter().filter(|zone| zone["id"] == old.as_str()).count())
-        > 1;
+    let shared = section["zones"].as_array().map_or(0, |zones| {
+        zones
+            .iter()
+            .filter(|zone| zone["id"] == old.as_str())
+            .count()
+    }) > 1;
     section["zones"][index]["id"] = Value::from(new);
     if old.trim().is_empty() || shared {
         return;
@@ -208,7 +216,10 @@ pub fn zone_said(zone: &Value) -> String {
         (false, true) => said.push("items locked".to_string()),
         (false, false) => {}
     }
-    if let Some(group) = zone["tab_group"].as_str().filter(|group| !group.trim().is_empty()) {
+    if let Some(group) = zone["tab_group"]
+        .as_str()
+        .filter(|group| !group.trim().is_empty())
+    {
         said.push(format!("a tab of \u{201c}{group}\u{201d}"));
     }
     said.join("  ·  ")
@@ -258,9 +269,18 @@ fn days(count: u64) -> String {
 pub fn matcher_said(matcher: &Value) -> String {
     let text = |key: &str| matcher[key].as_str().unwrap_or("").trim().to_string();
     let number = |key: &str| matcher[key].as_u64();
-    let or_none = |text: String| if text.is_empty() { "(nothing yet)".to_string() } else { text };
+    let or_none = |text: String| {
+        if text.is_empty() {
+            "(nothing yet)".to_string()
+        } else {
+            text
+        }
+    };
     match matcher["match"].as_str().unwrap_or("") {
-        "extension" => format!("extension is {}", or_none(words_of(&matcher["any_of"]).join(", "))),
+        "extension" => format!(
+            "extension is {}",
+            or_none(words_of(&matcher["any_of"]).join(", "))
+        ),
         "mime" => format!("type fits {}", or_none(text("pattern"))),
         "name" => format!("name fits {}", or_none(text("pattern"))),
         "shortcut_target" => format!("leads to {}", or_none(text("pattern"))),
@@ -447,7 +467,9 @@ pub fn table(
     };
     Table {
         steps: rows("steps", &|step| action_said(&step["action"], zones)),
-        held: rows("held", &|held| reason_said(held["reason"].as_str().unwrap_or(""))),
+        held: rows("held", &|held| {
+            reason_said(held["reason"].as_str().unwrap_or(""))
+        }),
     }
 }
 
@@ -466,20 +488,30 @@ pub fn table_of_lines(lines: &[Value], rules: &[Value]) -> Table {
             .unwrap_or_else(|| item_name(line["item"].as_str().unwrap_or("")));
         // (The rule's name as the zones have it: theirs are the rules
         // that decided, also where the ones here were changed since.)
-        let by = match (line["decided"]["rule"].as_u64(), line["rule"].as_str().map(str::trim)) {
+        let by = match (
+            line["decided"]["rule"].as_u64(),
+            line["rule"].as_str().map(str::trim),
+        ) {
             (Some(index), Some(name)) if !name.is_empty() => {
                 format!("rule {}, \u{201c}{name}\u{201d}", index + 1)
             }
             _ => decided_said(&line["decided"], rules),
         };
         if let Some(reason) = line["held"].as_str() {
-            table.held.push(Row { item, does: reason_said(reason), by });
+            table.held.push(Row {
+                item,
+                does: reason_said(reason),
+                by,
+            });
             continue;
         }
         let destination = &line["destination"];
         let does = match destination["to"].as_str().unwrap_or("") {
             "zone" => {
-                let title = destination["title"].as_str().map(str::trim).filter(|title| !title.is_empty());
+                let title = destination["title"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|title| !title.is_empty());
                 let called = title.or(destination["zone"].as_str()).unwrap_or("");
                 format!("into \u{201c}{called}\u{201d}")
             }
@@ -609,11 +641,21 @@ pub fn made_said(event: &Value) -> String {
         return "There was nothing to do.".to_string();
     }
     let mut said = match zones {
-        0 => format!("{} sorted into the zones made by type before.", counted(count("items"), "item")),
-        zones => format!("{} made, {} sorted.", counted(zones, "zone"), counted(count("items"), "item")),
+        0 => format!(
+            "{} sorted into the zones made by type before.",
+            counted(count("items"), "item")
+        ),
+        zones => format!(
+            "{} made, {} sorted.",
+            counted(zones, "zone"),
+            counted(count("items"), "item")
+        ),
     };
     if count("rules") > 0 {
-        said.push_str(&format!(" {} added for what comes later.", counted(count("rules"), "rule")));
+        said.push_str(&format!(
+            " {} added for what comes later.",
+            counted(count("rules"), "rule")
+        ));
     }
     said
 }
@@ -662,7 +704,11 @@ struct Asked {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
     /// The plan: what would be done, or (`done`) what was.
-    Plan { table: Table, every_item: bool, done: bool },
+    Plan {
+        table: Table,
+        every_item: bool,
+        done: bool,
+    },
     /// The zones that would be made by type.
     ByType { table: ByType, every_item: bool },
     /// Something to say; `bad`: it did not work.
@@ -688,7 +734,9 @@ pub fn refusal(error: &str, delivered: bool) -> Outcome {
                 .to_string(),
         );
     }
-    if lower.contains("unimplemented") || (lower.contains("unknown variant") && lower.contains("zones")) {
+    if lower.contains("unimplemented")
+        || (lower.contains("unknown variant") && lower.contains("zones"))
+    {
         return Outcome::NotRunning(
             "This window manager does not know zones yet (it is an older one).".to_string(),
         );
@@ -712,7 +760,10 @@ pub fn written(document: &Value, file: &str) -> Result<(), String> {
     let written = std::fs::write(&path, text + "\n");
     match &written {
         Ok(()) => log::debug!("the zones' arrangement was written to {}", path.display()),
-        Err(error) => log::debug!("the zones' arrangement could not be written to {}: {error}", path.display()),
+        Err(error) => log::debug!(
+            "the zones' arrangement could not be written to {}: {error}",
+            path.display()
+        ),
     }
     written.map_err(|error| error.to_string())
 }
@@ -725,8 +776,13 @@ pub fn imported_said(event: &Value) -> String {
     } else {
         format!("Read in and kept as \u{201c}{name}\u{201d}.")
     };
-    if let Some(before) = event["kept_as"].as_str().filter(|before| !before.is_empty()) {
-        said.push_str(&format!(" What there was is kept as \u{201c}{before}\u{201d}."));
+    if let Some(before) = event["kept_as"]
+        .as_str()
+        .filter(|before| !before.is_empty())
+    {
+        said.push_str(&format!(
+            " What there was is kept as \u{201c}{before}\u{201d}."
+        ));
     }
     said
 }
@@ -797,8 +853,14 @@ impl Running {
                 names.insert(id.to_string(), name.to_string());
             }
         };
-        let zones = told["zones"].as_array().map(Vec::as_slice).unwrap_or_default();
-        let loose = told["loose"].as_array().map(Vec::as_slice).unwrap_or_default();
+        let zones = told["zones"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let loose = told["loose"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         zones
             .iter()
             .flat_map(|zone| zone["items"].as_array().into_iter().flatten())
@@ -814,9 +876,10 @@ impl Running {
                     name: kept["name"].as_str()?.to_string(),
                     taken_at: kept["taken_at"].as_u64().unwrap_or(0),
                     // (Told as how many, or as the zones themselves.)
-                    zones: kept["zones"]
-                        .as_u64()
-                        .map_or_else(|| kept["zones"].as_array().map_or(0, Vec::len), |count| count as usize),
+                    zones: kept["zones"].as_u64().map_or_else(
+                        || kept["zones"].as_array().map_or(0, Vec::len),
+                        |count| count as usize,
+                    ),
                     automatic: kept["automatic"].as_bool().unwrap_or(false),
                 })
             })
@@ -931,7 +994,10 @@ pub struct ZonesPage {
 impl ZonesPage {
     fn ask(&mut self, what: Ask, command: Value, wishes: &mut Vec<Wish>) {
         // (Only what is asked: an arrangement read in is a whole document.)
-        log::debug!("the zones are asked from the studio: {what:?} ({})", command["command"].as_str().unwrap_or("?"));
+        log::debug!(
+            "the zones are asked from the studio: {what:?} ({})",
+            command["command"].as_str().unwrap_or("?")
+        );
         let command = command.to_string();
         self.below = matches!(what, Ask::Snapshot | Ask::Export(_) | Ask::Import);
         self.of_types = matches!(what, Ask::TypesPreview | Ask::TypesMake | Ask::TypesUndo);
@@ -972,24 +1038,39 @@ impl ZonesPage {
             log::debug!(
                 "the zones did not do {:?}{}: {}",
                 asked.what,
-                if delivered { "" } else { " (it did not reach them)" },
+                if delivered {
+                    ""
+                } else {
+                    " (it did not reach them)"
+                },
                 error.unwrap_or("refused")
             );
             self.outcome = Some(refusal(error.unwrap_or("refused"), delivered));
             return true;
         }
-        log::debug!("the zones did {:?}, after {} ms, with {} events", asked.what, asked.at.elapsed().as_millis(), events.len());
+        log::debug!(
+            "the zones did {:?}, after {} ms, with {} events",
+            asked.what,
+            asked.at.elapsed().as_millis(),
+            events.len()
+        );
         let events: Vec<Value> = events
             .iter()
             .filter_map(|event| {
                 serde_json::from_str(event)
-                    .inspect_err(|error| log::debug!("an event of the zones' answer is not understood: {error}"))
+                    .inspect_err(|error| {
+                        log::debug!("an event of the zones' answer is not understood: {error}")
+                    })
                     .ok()
             })
             .collect();
         let event = |name: &str| events.iter().find(|event| event["event"] == name);
         let list = |pointer: &str| list_at(document, pointer);
-        let names = self.running.as_ref().map(|running| running.names.clone()).unwrap_or_default();
+        let names = self
+            .running
+            .as_ref()
+            .map(|running| running.names.clone())
+            .unwrap_or_default();
         let every_item = self.every_item;
         let types_every_item = self.types_every_item;
         let plan = |event: &Value, done: bool| Outcome::Plan {
@@ -1006,7 +1087,9 @@ impl ZonesPage {
             text: "The zones answered, but did not say what their rules would do.".to_string(),
         };
         self.outcome = Some(match asked.what {
-            Ask::Preview => event("rules_previewed").map_or_else(missing, |event| plan(event, false)),
+            Ask::Preview => {
+                event("rules_previewed").map_or_else(missing, |event| plan(event, false))
+            }
             Ask::Apply => event("rules_applied").map_or_else(missing, |event| plan(event, true)),
             Ask::Undo => Outcome::Said {
                 bad: false,
@@ -1015,11 +1098,20 @@ impl ZonesPage {
             Ask::Snapshot => {
                 let called = |event: &Value| event["name"].as_str().unwrap_or("").to_string();
                 if let Some(event) = event("snapshot_saved") {
-                    said(format!("The arrangement \u{201c}{}\u{201d} is kept.", called(event)))
+                    said(format!(
+                        "The arrangement \u{201c}{}\u{201d} is kept.",
+                        called(event)
+                    ))
                 } else if let Some(event) = event("snapshot_restored") {
-                    said(format!("The arrangement \u{201c}{}\u{201d} is back.", called(event)))
+                    said(format!(
+                        "The arrangement \u{201c}{}\u{201d} is back.",
+                        called(event)
+                    ))
                 } else if let Some(event) = event("snapshot_deleted") {
-                    said(format!("The arrangement \u{201c}{}\u{201d} is gone.", called(event)))
+                    said(format!(
+                        "The arrangement \u{201c}{}\u{201d} is gone.",
+                        called(event)
+                    ))
                 } else {
                     said("Done.".to_string())
                 }
@@ -1051,7 +1143,8 @@ impl ZonesPage {
                     text: "The zones answered, but did not say what they would make.".to_string(),
                 },
             },
-            Ask::TypesMake => event("auto_created").map_or_else(|| said("Done.".to_string()), |event| said(made_said(event))),
+            Ask::TypesMake => event("auto_created")
+                .map_or_else(|| said("Done.".to_string()), |event| said(made_said(event))),
             Ask::TypesUndo => event("auto_undone").map_or_else(
                 || said("The zones made by type were taken back.".to_string()),
                 |event| said(unmade_said(event)),
@@ -1077,14 +1170,21 @@ impl ZonesPage {
         if !around.connected {
             self.running = None;
             self.state_asked = None;
-        } else if self.state_asked.is_none_or(|asked| asked.elapsed() > STATE_AGAIN) {
+        } else if self
+            .state_asked
+            .is_none_or(|asked| asked.elapsed() > STATE_AGAIN)
+        {
             self.state_asked = Some(Instant::now());
             wishes.push(Wish::AskState);
             context.request_repaint_after(STATE_AGAIN);
         }
         if let Some(asked) = &self.asked {
             if asked.at.elapsed() > ANSWER_ARRIVES {
-                log::debug!("the zones did not answer {:?} within {} ms", asked.what, ANSWER_ARRIVES.as_millis());
+                log::debug!(
+                    "the zones did not answer {:?} within {} ms",
+                    asked.what,
+                    ANSWER_ARRIVES.as_millis()
+                );
                 self.outcome = Some(Outcome::Said {
                     bad: true,
                     text: "No answer from the window manager.".to_string(),
@@ -1111,12 +1211,16 @@ impl ZonesPage {
                     switch_card(ui, document, around, &palette, &mut wishes);
                 });
             } else if card.pointer == LIST {
-                widgets::card(ui, card.title, |ui| self.zones_card(ui, document, around, &palette));
+                widgets::card(ui, card.title, |ui| {
+                    self.zones_card(ui, document, around, &palette)
+                });
                 widgets::card(ui, "Zones by type", |ui| {
                     self.types_card(ui, around, &palette, &mut wishes);
                 });
             } else if card.pointer == ZONES && names.contains(&"rules") {
-                widgets::card(ui, card.title, |ui| self.rules_card(ui, document, around, &palette));
+                widgets::card(ui, card.title, |ui| {
+                    self.rules_card(ui, document, around, &palette)
+                });
                 widgets::card(ui, "What the rules would do", |ui| {
                     self.dry_run_card(ui, around, &palette, &mut wishes);
                 });
@@ -1131,7 +1235,9 @@ impl ZonesPage {
                     look_fields(ui, document, card.pointer, around.highlight, &palette);
                 });
             } else {
-                widgets::card(ui, card.title, |ui| generic(ui, document, card, around.highlight));
+                widgets::card(ui, card.title, |ui| {
+                    generic(ui, document, card, around.highlight)
+                });
             }
         }
         widgets::card(ui, "Arrangements kept by name", |ui| {
@@ -1140,7 +1246,13 @@ impl ZonesPage {
         wishes
     }
 
-    fn zones_card(&mut self, ui: &mut Ui, document: &mut Document, around: &Around<'_>, palette: &Palette) {
+    fn zones_card(
+        &mut self,
+        ui: &mut Ui,
+        document: &mut Document,
+        around: &Around<'_>,
+        palette: &Palette,
+    ) {
         let zones = list_at(document, LIST);
         ui.label(
             RichText::new(
@@ -1170,7 +1282,9 @@ impl ZonesPage {
                 let mut tail = |ui: &mut Ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let mut toggled = false;
-                        if let Some(asked) = line_buttons(ui, index, zones.len(), open, &mut toggled) {
+                        if let Some(asked) =
+                            line_buttons(ui, index, zones.len(), open, &mut toggled)
+                        {
                             change = Some(asked);
                         }
                         if toggled {
@@ -1179,8 +1293,10 @@ impl ZonesPage {
                         let said = zone_said(zone);
                         if !said.is_empty() {
                             ui.add(
-                                egui::Label::new(RichText::new(said).size(12.0).color(palette.muted))
-                                    .truncate(),
+                                egui::Label::new(
+                                    RichText::new(said).size(12.0).color(palette.muted),
+                                )
+                                .truncate(),
                             );
                         }
                     });
@@ -1216,7 +1332,9 @@ impl ZonesPage {
         }
         ui.add_space(4.0);
         if widgets::text_button(ui, icons::PLUS, "Add a zone")
-            .on_hover_text("It appears on the desktop beside the ones there are, to be put where it belongs.")
+            .on_hover_text(
+                "It appears on the desktop beside the ones there are, to be put where it belongs.",
+            )
             .clicked()
         {
             let zone = another_zone(&zones);
@@ -1237,7 +1355,13 @@ impl ZonesPage {
         }
     }
 
-    fn rules_card(&mut self, ui: &mut Ui, document: &mut Document, around: &Around<'_>, palette: &Palette) {
+    fn rules_card(
+        &mut self,
+        ui: &mut Ui,
+        document: &mut Document,
+        around: &Around<'_>,
+        palette: &Palette,
+    ) {
         let rules = list_at(document, RULES);
         let zones = list_at(document, LIST);
         ui.label(
@@ -1265,16 +1389,24 @@ impl ZonesPage {
                 let mut tail = |ui: &mut Ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let mut toggled = false;
-                        if let Some(asked) = line_buttons(ui, index, rules.len(), open, &mut toggled) {
+                        if let Some(asked) =
+                            line_buttons(ui, index, rules.len(), open, &mut toggled)
+                        {
                             change = Some(asked);
                         }
                         if toggled {
                             self.open_rule = (!open).then_some(index);
                         }
-                        let ink = if enabled { palette.muted } else { palette.faint };
+                        let ink = if enabled {
+                            palette.muted
+                        } else {
+                            palette.faint
+                        };
                         ui.add(
-                            egui::Label::new(RichText::new(rule_said(rule, &zones)).size(12.0).color(ink))
-                                .truncate(),
+                            egui::Label::new(
+                                RichText::new(rule_said(rule, &zones)).size(12.0).color(ink),
+                            )
+                            .truncate(),
                         );
                     });
                 };
@@ -1342,7 +1474,9 @@ impl ZonesPage {
         ui.add_space(10.0);
         widgets::caption(ui, "What no rule matches");
         said_of(ui, document.issues(), "desktop.zones.catch_all", palette);
-        let present = document.get(CATCH_ALL).is_some_and(|action| !action.is_null());
+        let present = document
+            .get(CATCH_ALL)
+            .is_some_and(|action| !action.is_null());
         let mut wanted = present;
         ui.horizontal(|ui| {
             widgets::switch(ui, &mut wanted);
@@ -1373,7 +1507,13 @@ impl ZonesPage {
         form.only(ui, ZONES, &["rules_on_arrival", "timed_rules"]);
     }
 
-    fn dry_run_card(&mut self, ui: &mut Ui, around: &Around<'_>, palette: &Palette, wishes: &mut Vec<Wish>) {
+    fn dry_run_card(
+        &mut self,
+        ui: &mut Ui,
+        around: &Around<'_>,
+        palette: &Palette,
+        wishes: &mut Vec<Wish>,
+    ) {
         ui.label(
             RichText::new(
                 "Ask the zones that run now what their rules would do with what is on the \
@@ -1475,7 +1615,11 @@ impl ZonesPage {
                 ui.label(RichText::new("when a window manager is connected").color(palette.muted));
             }
         });
-        let Some(outcome) = self.outcome.as_ref().filter(|_| !self.below && !self.of_types) else {
+        let Some(outcome) = self
+            .outcome
+            .as_ref()
+            .filter(|_| !self.below && !self.of_types)
+        else {
             return;
         };
         ui.add_space(8.0);
@@ -1483,7 +1627,13 @@ impl ZonesPage {
     }
 
     /// Zones made by type: asked for, shown, made, and taken back.
-    fn types_card(&mut self, ui: &mut Ui, around: &Around<'_>, palette: &Palette, wishes: &mut Vec<Wish>) {
+    fn types_card(
+        &mut self,
+        ui: &mut Ui,
+        around: &Around<'_>,
+        palette: &Palette,
+        wishes: &mut Vec<Wish>,
+    ) {
         ui.label(
             RichText::new(
                 "A zone for each type of item on the desktop (folders, programs, documents, \
@@ -1523,7 +1673,10 @@ impl ZonesPage {
             );
         ui.horizontal_wrapped(|ui| {
             ui.label("Sort");
-            let options = [(false, "items in no zone"), (true, "also what zones made by hand hold")];
+            let options = [
+                (false, "items in no zone"),
+                (true, "also what zones made by hand hold"),
+            ];
             if let Some(picked) = widgets::segmented(
                 ui,
                 ui.scope_id().with("which items are sorted by type"),
@@ -1584,7 +1737,13 @@ impl ZonesPage {
         outcome_said(ui, outcome, palette);
     }
 
-    fn snapshots_card(&mut self, ui: &mut Ui, around: &Around<'_>, palette: &Palette, wishes: &mut Vec<Wish>) {
+    fn snapshots_card(
+        &mut self,
+        ui: &mut Ui,
+        around: &Around<'_>,
+        palette: &Palette,
+        wishes: &mut Vec<Wish>,
+    ) {
         ui.label(
             RichText::new(
                 "The zones, what lies in each and where each is, kept under a name and put \
@@ -1597,7 +1756,11 @@ impl ZonesPage {
         let can = around.connected
             && self.asked.is_none()
             && self.running.as_ref().is_none_or(|running| running.running);
-        let kept: Vec<Kept> = self.running.as_ref().map(|running| running.kept.clone()).unwrap_or_default();
+        let kept: Vec<Kept> = self
+            .running
+            .as_ref()
+            .map(|running| running.kept.clone())
+            .unwrap_or_default();
         let file = self.file.trim().to_string();
         let mut asked: Option<(Ask, Value)> = None;
         // The ones there are: each a line.
@@ -1650,11 +1813,17 @@ impl ZonesPage {
                     .desired_width(190.0),
             );
             if ui
-                .add_enabled(can && !name.is_empty(), egui::Button::new("Keep the zones as they are now"))
+                .add_enabled(
+                    can && !name.is_empty(),
+                    egui::Button::new("Keep the zones as they are now"),
+                )
                 .on_hover_text("Under this name. One that is kept under it already is replaced.")
                 .clicked()
             {
-                asked = Some((Ask::Snapshot, json!({"command": "save_snapshot", "name": name})));
+                asked = Some((
+                    Ask::Snapshot,
+                    json!({"command": "save_snapshot", "name": name}),
+                ));
             }
             if !around.connected {
                 ui.label(RichText::new("when a window manager is connected").color(palette.muted));
@@ -1843,7 +2012,10 @@ pub fn place_said(path: &str) -> String {
     };
     numbered("zones", "Zone")
         .or_else(|| numbered("rules", "Rule"))
-        .or_else(|| rest.starts_with("catch_all").then(|| "What no rule matches".to_string()))
+        .or_else(|| {
+            rest.starts_with("catch_all")
+                .then(|| "What no rule matches".to_string())
+        })
         .unwrap_or_default()
 }
 
@@ -1876,7 +2048,11 @@ fn handle(ui: &mut Ui, palette: &Palette, list: &'static str, index: usize) {
     })
     .response
     .on_hover_text("Drag to put it in another place");
-    ui.label(RichText::new(format!("{}.", index + 1)).monospace().color(palette.faint));
+    ui.label(
+        RichText::new(format!("{}.", index + 1))
+            .monospace()
+            .color(palette.faint),
+    );
 }
 
 /// An entry of the same list put down on this one: before it, or behind
@@ -1901,8 +2077,11 @@ fn put_down(
         } else {
             frame.rect.top() - 1.0
         };
-        ui.painter()
-            .hline(frame.rect.x_range(), y, egui::Stroke::new(2.0, palette.accent));
+        ui.painter().hline(
+            frame.rect.x_range(),
+            y,
+            egui::Stroke::new(2.0, palette.accent),
+        );
     }
     let dragged = frame.dnd_release_payload::<Dragged>()?;
     (dragged.list == list).then_some(Change::Move {
@@ -1912,16 +2091,27 @@ fn put_down(
 }
 
 /// The buttons at the end of an entry's line (drawn from the right).
-fn line_buttons(ui: &mut Ui, index: usize, count: usize, open: bool, toggled: &mut bool) -> Option<Change> {
+fn line_buttons(
+    ui: &mut Ui,
+    index: usize,
+    count: usize,
+    open: bool,
+    toggled: &mut bool,
+) -> Option<Change> {
     let mut change = None;
     if widgets::small_icon_button(ui, icons::TRASH, "Take it out").clicked() {
         change = Some(Change::Remove(index));
     }
-    let caret = if open { icons::CARET_UP } else { icons::CARET_DOWN };
+    let caret = if open {
+        icons::CARET_UP
+    } else {
+        icons::CARET_DOWN
+    };
     if widgets::small_icon_button(ui, caret, "Its settings").clicked() {
         *toggled = true;
     }
-    if index + 1 < count && widgets::small_icon_button(ui, icons::ARROW_DOWN, "Move down").clicked() {
+    if index + 1 < count && widgets::small_icon_button(ui, icons::ARROW_DOWN, "Move down").clicked()
+    {
         change = Change::down(index, count);
     }
     if index > 0 && widgets::small_icon_button(ui, icons::ARROW_UP, "Move up").clicked() {
@@ -1940,8 +2130,13 @@ fn switch_card(
 ) {
     let pointer = format!("{ZONES}/enabled");
     // (Zones are shown unless the configuration says no.)
-    let on = document.get(&pointer).and_then(Value::as_bool).unwrap_or(true);
-    let is_set = document.default_at(&pointer).is_some_and(|default| default != &Value::Bool(on));
+    let on = document
+        .get(&pointer)
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let is_set = document
+        .default_at(&pointer)
+        .is_some_and(|default| default != &Value::Bool(on));
     let mut wanted = on;
     let ((), reset) = widgets::row(
         ui,
@@ -1967,7 +2162,10 @@ fn switch_card(
         .color(palette.muted),
     );
     ui.add_space(6.0);
-    let hides = document.get(HIDE_ICONS).and_then(Value::as_bool).unwrap_or(true);
+    let hides = document
+        .get(HIDE_ICONS)
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
     let words = if hides {
         "On Windows, while zones are shown, Explorer's own desktop icons are put away: the \
          zones draw every item of the desktop instead. They are put back when zones are \
@@ -2011,16 +2209,34 @@ fn kind_called(name: &str) -> String {
 
 /// Where a zone's items come from: the one that is chosen, the others on
 /// a press.
-fn kind_picker(ui: &mut Ui, document: &mut Document, pointer: &str, zone: &Value, kinds: &[Variant<'static>]) {
+fn kind_picker(
+    ui: &mut Ui,
+    document: &mut Document,
+    pointer: &str,
+    zone: &Value,
+    kinds: &[Variant<'static>],
+) {
     let chosen = zone["kind"]["type"].as_str().unwrap_or("").to_string();
     let mut options: Vec<(String, String, String)> = kinds
         .iter()
-        .map(|kind| (kind.name.to_string(), kind_called(kind.name), kind.description.to_string()))
+        .map(|kind| {
+            (
+                kind.name.to_string(),
+                kind_called(kind.name),
+                kind.description.to_string(),
+            )
+        })
         .collect();
     if !options.iter().any(|(name, _, _)| *name == chosen) {
         options.insert(0, (chosen.clone(), kind_called(&chosen), String::new()));
     }
-    if let Some(picked) = widgets::dropdown(ui, &format!("the kind of {pointer}"), &chosen, &options, 170.0) {
+    if let Some(picked) = widgets::dropdown(
+        ui,
+        &format!("the kind of {pointer}"),
+        &chosen,
+        &options,
+        170.0,
+    ) {
         if let Some(kind) = kinds.iter().find(|kind| kind.name == picked) {
             document.set(&format!("{pointer}/kind"), kind.blank());
         }
@@ -2108,7 +2324,11 @@ fn zone_body(
     // (What a zone that fills itself looks through, and how much of it
     // it shows, stand with its query above; other zones have no use for
     // them.)
-    form.fields(ui, &pointer, &["id", "title", "kind", "look", "source", "limit"]);
+    form.fields(
+        ui,
+        &pointer,
+        &["id", "title", "kind", "look", "source", "limit"],
+    );
     egui::CollapsingHeader::new("A look of its own")
         .id_salt(("the look of a zone", index))
         .show(ui, |ui| {
@@ -2126,18 +2346,34 @@ fn zone_body(
                     ui.add_space(6.0);
                 }
             }
-            look_fields(ui, document, &format!("{pointer}/look"), around.highlight, palette);
+            look_fields(
+                ui,
+                document,
+                &format!("{pointer}/look"),
+                around.highlight,
+                palette,
+            );
         });
 }
 
 /// A folder, chosen as a folder, on a row of its own.
 fn folder_row(ui: &mut Ui, document: &mut Document, place: &str, help: &str) {
-    let mut folder = document.get(place).and_then(Value::as_str).unwrap_or("").to_string();
+    let mut folder = document
+        .get(place)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
     let mut changed = false;
     widgets::row(ui, "Folder", help, false, false, |ui| {
         let home = dirs::home_dir();
-        changed = widgets::path_field(ui, &mut folder, widgets::PathKind::Folder, home.as_deref(), 260.0)
-            .changed();
+        changed = widgets::path_field(
+            ui,
+            &mut folder,
+            widgets::PathKind::Folder,
+            home.as_deref(),
+            260.0,
+        )
+        .changed();
     });
     if changed {
         document.set(place, Value::String(folder));
@@ -2160,7 +2396,13 @@ fn source_called(name: &str) -> String {
 
 /// What a zone that fills itself looks through: the one that is chosen,
 /// the others on a press; and the folder, where it is one.
-fn source_row(ui: &mut Ui, document: &mut Document, pointer: &str, source: &Value, around: &Around<'_>) {
+fn source_row(
+    ui: &mut Ui,
+    document: &mut Document,
+    pointer: &str,
+    source: &Value,
+    around: &Around<'_>,
+) {
     let kinds = variants_at(pointer);
     // (A model that has no sources: the desktop is the only one.)
     if kinds.is_empty() {
@@ -2169,7 +2411,13 @@ fn source_row(ui: &mut Ui, document: &mut Document, pointer: &str, source: &Valu
     let chosen = source["from"].as_str().unwrap_or("").to_string();
     let mut options: Vec<(String, String, String)> = kinds
         .iter()
-        .map(|kind| (kind.name.to_string(), source_called(kind.name), kind.description.to_string()))
+        .map(|kind| {
+            (
+                kind.name.to_string(),
+                source_called(kind.name),
+                kind.description.to_string(),
+            )
+        })
         .collect();
     if !options.iter().any(|(name, _, _)| *name == chosen) {
         options.insert(0, (chosen.clone(), source_called(&chosen), String::new()));
@@ -2182,14 +2430,25 @@ fn source_row(ui: &mut Ui, document: &mut Document, pointer: &str, source: &Valu
         false,
         around.highlight == Some(pointer),
         |ui| {
-            picked = widgets::dropdown(ui, &format!("the source at {pointer}"), &chosen, &options, 220.0);
+            picked = widgets::dropdown(
+                ui,
+                &format!("the source at {pointer}"),
+                &chosen,
+                &options,
+                220.0,
+            );
         },
     );
     if let Some(kind) = picked.and_then(|picked| kinds.iter().find(|kind| kind.name == picked)) {
         document.set(pointer, kind.blank());
         return;
     }
-    for field in kinds.iter().find(|kind| kind.matches(source)).map(fields_of).unwrap_or_default() {
+    for field in kinds
+        .iter()
+        .find(|kind| kind.matches(source))
+        .map(fields_of)
+        .unwrap_or_default()
+    {
         let place = format!("{pointer}/{}", field.name);
         if field.name == "directory" {
             folder_row(ui, document, &place, "The zone looks into this folder.");
@@ -2222,10 +2481,22 @@ fn rule_body(
             .color(palette.muted),
         );
     }
-    matchers(ui, document, &format!("{pointer}/matchers"), around.highlight);
+    matchers(
+        ui,
+        document,
+        &format!("{pointer}/matchers"),
+        around.highlight,
+    );
     ui.add_space(6.0);
     widgets::caption(ui, "The item");
-    action_editor(ui, document, &format!("{pointer}/action"), &rule["action"], zones, around.highlight);
+    action_editor(
+        ui,
+        document,
+        &format!("{pointer}/action"),
+        &rule["action"],
+        zones,
+        around.highlight,
+    );
     // What a rule has beside these (a field of a newer model): as a form.
     let mut form = Form::new(document);
     form.highlight = around.highlight;
@@ -2254,7 +2525,13 @@ fn matchers(ui: &mut Ui, document: &mut Document, pointer: &str, highlight: Opti
     let list = list_at(document, pointer);
     let options: Vec<(String, String, String)> = kinds
         .iter()
-        .map(|kind| (kind.name.to_string(), matcher_called(kind.name), kind.description.to_string()))
+        .map(|kind| {
+            (
+                kind.name.to_string(),
+                matcher_called(kind.name),
+                kind.description.to_string(),
+            )
+        })
         .collect();
     let mut remove = None;
     for (index, matcher) in list.iter().enumerate() {
@@ -2273,7 +2550,8 @@ fn matchers(ui: &mut Ui, document: &mut Document, pointer: &str, highlight: Opti
                 if chosen.is_none() {
                     options.insert(0, (name.clone(), matcher_called(&name), String::new()));
                 }
-                if let Some(picked) = widgets::dropdown(ui, "what is asked", &name, &options, 190.0) {
+                if let Some(picked) = widgets::dropdown(ui, "what is asked", &name, &options, 190.0)
+                {
                     if let Some(kind) = kinds.iter().find(|kind| kind.name == picked) {
                         document.set(&place, kind.blank());
                     }
@@ -2285,7 +2563,8 @@ fn matchers(ui: &mut Ui, document: &mut Document, pointer: &str, highlight: Opti
                         document.set(&at, new);
                     }
                 }
-                if widgets::small_icon_button(ui, icons::TRASH, "Take this condition out").clicked() {
+                if widgets::small_icon_button(ui, icons::TRASH, "Take this condition out").clicked()
+                {
                     remove = Some(index);
                 }
             });
@@ -2294,7 +2573,13 @@ fn matchers(ui: &mut Ui, document: &mut Document, pointer: &str, highlight: Opti
                     let mut form = Form::new(document);
                     form.highlight = highlight;
                     for field in fields {
-                        form.place(ui, &format!("{place}/{}", field.name), field.node, &title(field.name), 1);
+                        form.place(
+                            ui,
+                            &format!("{place}/{}", field.name),
+                            field.node,
+                            &title(field.name),
+                            1,
+                        );
                     }
                 });
             }
@@ -2418,8 +2703,16 @@ fn action_editor(
                 .zip(&called)
                 .map(|(kind, called)| (kind.name.to_string(), called.as_str()))
                 .collect();
-            let picked = widgets::segmented(ui, ui.scope_id().with("what is done"), Some(&name), &options, false);
-            if let Some(kind) = picked.and_then(|picked| kinds.iter().find(|kind| kind.name == picked)) {
+            let picked = widgets::segmented(
+                ui,
+                ui.scope_id().with("what is done"),
+                Some(&name),
+                &options,
+                false,
+            );
+            if let Some(kind) =
+                picked.and_then(|picked| kinds.iter().find(|kind| kind.name == picked))
+            {
                 let mut new = kind.blank();
                 if kind.name == "assign_to_zone" {
                     new["zone"] = Value::from(first_id(zones));
@@ -2439,8 +2732,14 @@ fn action_editor(
                     "folder" => {
                         let mut folder = action["folder"].as_str().unwrap_or("").to_string();
                         let home = dirs::home_dir();
-                        if widgets::path_field(ui, &mut folder, widgets::PathKind::Folder, home.as_deref(), 240.0)
-                            .changed()
+                        if widgets::path_field(
+                            ui,
+                            &mut folder,
+                            widgets::PathKind::Folder,
+                            home.as_deref(),
+                            240.0,
+                        )
+                        .changed()
                         {
                             document.set(&place, Value::String(folder));
                         }
@@ -2454,7 +2753,13 @@ fn action_editor(
         form.highlight = highlight;
         for field in chosen.map(fields_of).unwrap_or_default() {
             if !matches!(field.name, "zone" | "folder") {
-                form.place(ui, &format!("{pointer}/{}", field.name), field.node, &title(field.name), 1);
+                form.place(
+                    ui,
+                    &format!("{pointer}/{}", field.name),
+                    field.node,
+                    &title(field.name),
+                    1,
+                );
             }
         }
     });
@@ -2494,7 +2799,11 @@ fn zone_picker(ui: &mut Ui, zones: &[Value], id: &str) -> Option<String> {
         } else {
             format!("{id}  (no such zone)")
         };
-        options.push((id.to_string(), shown, "No zone of the configuration has this name.".to_string()));
+        options.push((
+            id.to_string(),
+            shown,
+            "No zone of the configuration has this name.".to_string(),
+        ));
     }
     widgets::dropdown(ui, "the zone it goes to", &id.to_string(), &options, 220.0)
 }
@@ -2507,12 +2816,21 @@ fn is_colour(name: &str, kind: &Kind<'_>) -> bool {
         Kind::Optional(inner) => matches!(inner.kind(), Kind::Text),
         _ => false,
     };
-    text && (name == "background" || name.ends_with("tint") || name.ends_with("colour") || name.ends_with("color"))
+    text && (name == "background"
+        || name.ends_with("tint")
+        || name.ends_with("colour")
+        || name.ends_with("color"))
 }
 
 /// The fields of a look (every zone's, or one zone's own): a colour is
 /// chosen as a colour, the rest is the form's.
-fn look_fields(ui: &mut Ui, document: &mut Document, pointer: &str, highlight: Option<&str>, palette: &Palette) {
+fn look_fields(
+    ui: &mut Ui,
+    document: &mut Document,
+    pointer: &str,
+    highlight: Option<&str>,
+    palette: &Palette,
+) {
     let Some(node) = gevrek_schema::schema().at(pointer) else {
         return;
     };
@@ -2528,7 +2846,9 @@ fn look_fields(ui: &mut Ui, document: &mut Document, pointer: &str, highlight: O
             form.place(ui, &place, field.node, &title(field.name), 1);
             continue;
         }
-        colour_row(ui, document, &place, field.node, field.name, highlight, palette);
+        colour_row(
+            ui, document, &place, field.node, field.name, highlight, palette,
+        );
     }
 }
 
@@ -2541,7 +2861,10 @@ fn colour_row(
     highlight: Option<&str>,
     palette: &Palette,
 ) {
-    let current = document.get(place).and_then(Value::as_str).map(str::to_string);
+    let current = document
+        .get(place)
+        .and_then(Value::as_str)
+        .map(str::to_string);
     // (What the theme gives where nothing is set: shown in the swatch.)
     let fallback = match name {
         "background" => palette.surface,
@@ -2558,7 +2881,12 @@ fn colour_row(
         highlight == Some(place),
         |ui| {
             ui.push_id(place, |ui| {
-                new = widgets::color_field_or(ui, ui.scope_id().with("colour"), current.as_deref(), Some(fallback));
+                new = widgets::color_field_or(
+                    ui,
+                    ui.scope_id().with("colour"),
+                    current.as_deref(),
+                    Some(fallback),
+                );
                 if current.is_none() {
                     ui.weak("from the theme");
                 }
@@ -2583,10 +2911,21 @@ fn look_preview(ui: &mut Ui, look: &ZoneLook, title: &str, palette: &Palette) {
     // A desktop behind it: a ground and two shapes, so that what shows
     // through the zone is seen to.
     painter.rect_filled(ground, 8.0, theme::mix(palette.bg, palette.accent, 0.28));
-    painter.circle_filled(ground.left_top() + egui::vec2(width * 0.22, 40.0), 62.0, palette.purple.gamma_multiply(0.55));
-    painter.circle_filled(ground.right_bottom() - egui::vec2(width * 0.2, 30.0), 70.0, palette.accent.gamma_multiply(0.6));
+    painter.circle_filled(
+        ground.left_top() + egui::vec2(width * 0.22, 40.0),
+        62.0,
+        palette.purple.gamma_multiply(0.55),
+    );
+    painter.circle_filled(
+        ground.right_bottom() - egui::vec2(width * 0.2, 30.0),
+        70.0,
+        palette.accent.gamma_multiply(0.6),
+    );
     let zone = ground.shrink2(egui::vec2(28.0, 20.0));
-    let radius = look.corner_radius.map_or(12.0, |radius| radius as f32).min(zone.height() / 2.0);
+    let radius = look
+        .corner_radius
+        .map_or(12.0, |radius| radius as f32)
+        .min(zone.height() / 2.0);
     let fill = look
         .background
         .as_deref()
@@ -2606,14 +2945,22 @@ fn look_preview(ui: &mut Ui, look: &ZoneLook, title: &str, palette: &Palette) {
         .and_then(gevrek_ui::color::parse)
         .unwrap_or(palette.text);
     // (A title shown only under the pointer: drawn faintly here.)
-    let ink = if look.title_on_hover.unwrap_or(false) { ink.gamma_multiply(0.35) } else { ink };
+    let ink = if look.title_on_hover.unwrap_or(false) {
+        ink.gamma_multiply(0.35)
+    } else {
+        ink
+    };
     let head = egui::pos2(zone.left() + 12.0, zone.top() + 16.0);
     painter.rect_filled(
         egui::Rect::from_center_size(head, egui::vec2(3.0, 12.0)),
         1.5,
         palette.accent,
     );
-    let shown = if title.trim().is_empty() { "A zone" } else { title.trim() };
+    let shown = if title.trim().is_empty() {
+        "A zone"
+    } else {
+        title.trim()
+    };
     painter.text(
         head + egui::vec2(10.0, 0.0),
         egui::Align2::LEFT_CENTER,
@@ -2627,9 +2974,17 @@ fn look_preview(ui: &mut Ui, look: &ZoneLook, title: &str, palette: &Palette) {
         if left + 44.0 > zone.right() {
             break;
         }
-        let icon = egui::Rect::from_min_size(egui::pos2(left, zone.top() + 36.0), egui::vec2(34.0, 34.0));
-        painter.rect_filled(icon, 7.0, theme::mix(palette.control, palette.accent, 0.18 + 0.12 * item as f32));
-        let name = egui::Rect::from_min_size(egui::pos2(left - 3.0, icon.bottom() + 7.0), egui::vec2(40.0, 5.0));
+        let icon =
+            egui::Rect::from_min_size(egui::pos2(left, zone.top() + 36.0), egui::vec2(34.0, 34.0));
+        painter.rect_filled(
+            icon,
+            7.0,
+            theme::mix(palette.control, palette.accent, 0.18 + 0.12 * item as f32),
+        );
+        let name = egui::Rect::from_min_size(
+            egui::pos2(left - 3.0, icon.bottom() + 7.0),
+            egui::vec2(40.0, 5.0),
+        );
         painter.rect_filled(name, 2.5, palette.text.gamma_multiply(0.55));
     }
 }
@@ -2689,15 +3044,21 @@ fn types_table(ui: &mut Ui, table: &ByType, palette: &Palette) {
                         }
                         ui.end_row();
                         for row in &table.rows {
-                            ui.label(RichText::new(widgets::ellipsize(&row.title, 300.0)).color(palette.text))
-                                .on_hover_text(&row.title);
+                            ui.label(
+                                RichText::new(widgets::ellipsize(&row.title, 300.0))
+                                    .color(palette.text),
+                            )
+                            .on_hover_text(&row.title);
                             ui.label(counted(row.items, "item"));
                             if row.new {
                                 ui.label(format!("new, {}", row.place));
                             } else {
                                 ui.label(RichText::new("is there already").color(palette.muted));
                             }
-                            ui.label(RichText::new(if row.rule { "a rule" } else { "" }).color(palette.muted));
+                            ui.label(
+                                RichText::new(if row.rule { "a rule" } else { "" })
+                                    .color(palette.muted),
+                            );
                             ui.end_row();
                         }
                     });
@@ -2714,9 +3075,11 @@ fn types_table(ui: &mut Ui, table: &ByType, palette: &Palette) {
         widgets::caption(ui, "Left where they are");
         ui.label(RichText::new(names.join(", ")).color(palette.muted));
         ui.label(
-            RichText::new("Too few of a type for a zone of its own, or the zone of their type is locked.")
-                .size(12.0)
-                .color(palette.faint),
+            RichText::new(
+                "Too few of a type for a zone of its own, or the zone of their type is locked.",
+            )
+            .size(12.0)
+            .color(palette.faint),
         );
     }
 }
@@ -2755,8 +3118,11 @@ fn plan_table(ui: &mut Ui, table: &Table, done: bool, palette: &Palette) {
                         }
                         ui.end_row();
                         for row in rows {
-                            ui.label(RichText::new(widgets::ellipsize(&row.item, 300.0)).color(palette.text))
-                                .on_hover_text(&row.item);
+                            ui.label(
+                                RichText::new(widgets::ellipsize(&row.item, 300.0))
+                                    .color(palette.text),
+                            )
+                            .on_hover_text(&row.item);
                             ui.label(&row.does);
                             ui.label(RichText::new(&row.by).color(palette.muted));
                             ui.end_row();
@@ -2764,8 +3130,17 @@ fn plan_table(ui: &mut Ui, table: &Table, done: bool, palette: &Palette) {
                     });
             });
     };
-    let does = if done { "What was done" } else { "What would happen" };
-    part(ui, if done { "Sorted" } else { "Would be sorted" }, ["Item", does, "Decided by"], &table.steps);
+    let does = if done {
+        "What was done"
+    } else {
+        "What would happen"
+    };
+    part(
+        ui,
+        if done { "Sorted" } else { "Would be sorted" },
+        ["Item", does, "Decided by"],
+        &table.steps,
+    );
     part(ui, "Left alone", ["Item", "Why", "Matched by"], &table.held);
 }
 
@@ -2784,7 +3159,10 @@ mod tests {
         assert_eq!(after(Change::Remove(1)), ("acd".to_string(), true));
         assert_eq!(after(Change::Remove(9)), ("abcd".to_string(), false));
         assert_eq!(after(Change::up(2).unwrap()), ("acbd".to_string(), true));
-        assert_eq!(after(Change::down(2, 4).unwrap()), ("abdc".to_string(), true));
+        assert_eq!(
+            after(Change::down(2, 4).unwrap()),
+            ("abdc".to_string(), true)
+        );
         // The first has nowhere to go up to, the last nowhere down.
         assert_eq!(Change::up(0), None);
         assert_eq!(Change::down(3, 4), None);
@@ -2794,18 +3172,26 @@ mod tests {
         assert_eq!(follows(Some(1), 4, Change::up(2).unwrap()), Some(2));
         assert_eq!(follows(Some(3), 4, Change::Remove(1)), Some(2));
         assert_eq!(follows(Some(1), 4, Change::Remove(1)), None);
-        assert_eq!(follows(Some(0), 4, Change::Move { from: 0, to: 4 }), Some(3));
+        assert_eq!(
+            follows(Some(0), 4, Change::Move { from: 0, to: 4 }),
+            Some(3)
+        );
         assert_eq!(follows(None, 4, Change::Remove(1)), None);
     }
 
     #[test]
     fn a_zone_that_is_added_has_a_name_of_its_own_and_is_one_the_model_reads() {
-        let zones = vec![json!({"id": "zone-1"}), json!({"id": "work"}), json!({"id": "zone-3"})];
+        let zones = vec![
+            json!({"id": "zone-1"}),
+            json!({"id": "work"}),
+            json!({"id": "zone-3"}),
+        ];
         assert_eq!(free_id(&zones), "zone-2");
         let zone = another_zone(&zones);
         assert_eq!(zone["id"], "zone-2");
         assert_eq!(zone["title"], "Zone 2");
-        let read: gevrek_model::zones::ZoneDefinition = serde_json::from_value(zone).expect("a zone");
+        let read: gevrek_model::zones::ZoneDefinition =
+            serde_json::from_value(zone).expect("a zone");
         assert_eq!(read.kind, gevrek_model::zones::ZoneKind::Manual);
     }
 
@@ -2841,7 +3227,10 @@ mod tests {
 
     #[test]
     fn a_zones_line_says_only_what_is_other_than_usual() {
-        assert_eq!(zone_said(&json!({"kind": {"type": "manual"}, "view": "grid"})), "");
+        assert_eq!(
+            zone_said(&json!({"kind": {"type": "manual"}, "view": "grid"})),
+            ""
+        );
         let zone = json!({
             "kind": {"type": "portal", "directory": "/home/ada/Downloads"},
             "view": "list",
@@ -2854,13 +3243,22 @@ mod tests {
             "/home/ada/Downloads  ·  as a list  ·  rolled up  ·  locked  ·  a tab of \u{201c}left\u{201d}"
         );
         let smart = json!({"kind": {"type": "smart", "query": [{}]}, "lock": {"members": true}, "always_visible": true});
-        assert_eq!(zone_said(&smart), "1 condition  ·  always visible  ·  items locked");
-        assert_eq!(zone_said(&json!({"kind": {"type": "portal", "directory": " "}})), "no folder yet");
+        assert_eq!(
+            zone_said(&smart),
+            "1 condition  ·  always visible  ·  items locked"
+        );
+        assert_eq!(
+            zone_said(&json!({"kind": {"type": "portal", "directory": " "}})),
+            "no folder yet"
+        );
     }
 
     #[test]
     fn extensions_are_typed_as_one_text() {
-        assert_eq!(listed("pdf, docx;.txt  *.md PDF"), ["pdf", "docx", "txt", "md"]);
+        assert_eq!(
+            listed("pdf, docx;.txt  *.md PDF"),
+            ["pdf", "docx", "txt", "md"]
+        );
         assert_eq!(listed(" , "), Vec::<String>::new());
         // While it is typed: a comma just written adds nothing yet.
         assert_eq!(listed("pdf,"), ["pdf"]);
@@ -2868,7 +3266,10 @@ mod tests {
 
     #[test]
     fn a_rule_reads_as_a_sentence() {
-        let zones = vec![json!({"id": "docs", "title": "Documents"}), json!({"id": "bare"})];
+        let zones = vec![
+            json!({"id": "docs", "title": "Documents"}),
+            json!({"id": "bare"}),
+        ];
         let rule = json!({
             "matchers": [
                 {"match": "extension", "any_of": ["pdf", "docx"]},
@@ -2880,22 +3281,36 @@ mod tests {
             rule_said(&rule, &zones),
             format!("extension is pdf, docx and untouched for 30 days  {THEN}  into \u{201c}Documents\u{201d}")
         );
-        let moves = json!({"matchers": [], "action": {"action": "move_to_folder", "folder": "/tmp/old"}});
+        let moves =
+            json!({"matchers": [], "action": {"action": "move_to_folder", "folder": "/tmp/old"}});
         assert_eq!(
             rule_said(&moves, &zones),
             format!("matches nothing yet  {THEN}  the file is moved to /tmp/old")
         );
         // A zone without a title, a zone that is not there, none at all.
-        let into = |zone: &str| action_said(&json!({"action": "assign_to_zone", "zone": zone}), &zones);
+        let into =
+            |zone: &str| action_said(&json!({"action": "assign_to_zone", "zone": zone}), &zones);
         assert_eq!(into("bare"), "into \u{201c}bare\u{201d}");
         assert_eq!(into("gone"), "into \u{201c}gone\u{201d}");
         assert_eq!(into(""), "into a zone (none chosen)");
 
         let said = |matcher: Value| matcher_said(&matcher);
-        assert_eq!(said(json!({"match": "mime", "pattern": "image/*"})), "type fits image/*");
-        assert_eq!(said(json!({"match": "name", "pattern": ""})), "name fits (nothing yet)");
-        assert_eq!(said(json!({"match": "kind", "any_of": ["folder", "shortcut"]})), "is a folder or a shortcut");
-        assert_eq!(said(json!({"match": "untouched", "days": 1})), "untouched for 1 day");
+        assert_eq!(
+            said(json!({"match": "mime", "pattern": "image/*"})),
+            "type fits image/*"
+        );
+        assert_eq!(
+            said(json!({"match": "name", "pattern": ""})),
+            "name fits (nothing yet)"
+        );
+        assert_eq!(
+            said(json!({"match": "kind", "any_of": ["folder", "shortcut"]})),
+            "is a folder or a shortcut"
+        );
+        assert_eq!(
+            said(json!({"match": "untouched", "days": 1})),
+            "untouched for 1 day"
+        );
         assert_eq!(said(json!({"match": "size"})), "any size");
         assert!(said(json!({"match": "size", "at_least": 1048576})).starts_with("at least "));
         assert_eq!(
@@ -2907,7 +3322,10 @@ mod tests {
             "modified more than 1 day ago"
         );
         // One a newer model has: by its own name.
-        assert_eq!(said(json!({"match": "from_the_future", "x": 1})), "from the future");
+        assert_eq!(
+            said(json!({"match": "from_the_future", "x": 1})),
+            "from the future"
+        );
     }
 
     #[test]
@@ -2938,7 +3356,11 @@ mod tests {
         assert_eq!(
             table.steps,
             [
-                row("report.pdf", "into \u{201c}Documents\u{201d}", "rule 1, \u{201c}Papers\u{201d}"),
+                row(
+                    "report.pdf",
+                    "into \u{201c}Documents\u{201d}",
+                    "rule 1, \u{201c}Papers\u{201d}"
+                ),
                 row("old.txt", "the file is moved to C:\\Old", "rule 2"),
                 row(
                     "A name told with it",
@@ -2955,31 +3377,61 @@ mod tests {
                     "it is no file that could be moved",
                     "rule 2"
                 ),
-                row("a.lnk", "the zone is locked", "rule 1, \u{201c}Papers\u{201d}"),
+                row(
+                    "a.lnk",
+                    "the zone is locked",
+                    "rule 1, \u{201c}Papers\u{201d}"
+                ),
                 row("b", "something new", "rule 8"),
             ]
         );
-        assert_eq!(summed(&table, false), "3 items would be sorted. 3 items a rule matched are left alone.");
-        assert_eq!(summed(&table, true), "3 items were sorted. 3 items a rule matched are left alone.");
+        assert_eq!(
+            summed(&table, false),
+            "3 items would be sorted. 3 items a rule matched are left alone."
+        );
+        assert_eq!(
+            summed(&table, true),
+            "3 items were sorted. 3 items a rule matched are left alone."
+        );
         // Nothing in it, or nothing that can be read: an empty table.
-        let empty = super::table(&json!({"steps": [], "held": []}), &rules, &zones, &Default::default());
+        let empty = super::table(
+            &json!({"steps": [], "held": []}),
+            &rules,
+            &zones,
+            &Default::default(),
+        );
         assert_eq!(empty, Table::default());
-        assert_eq!(super::table(&Value::Null, &rules, &zones, &Default::default()), Table::default());
+        assert_eq!(
+            super::table(&Value::Null, &rules, &zones, &Default::default()),
+            Table::default()
+        );
         assert_eq!(
             summed(&empty, false),
             "Nothing would be moved: every item is where its rule wants it."
         );
-        let one = Table { steps: vec![row("a", "b", "c")], held: vec![row("d", "e", "f")] };
-        assert_eq!(summed(&one, false), "1 item would be sorted. 1 item a rule matched is left alone.");
+        let one = Table {
+            steps: vec![row("a", "b", "c")],
+            held: vec![row("d", "e", "f")],
+        };
+        assert_eq!(
+            summed(&one, false),
+            "1 item would be sorted. 1 item a rule matched is left alone."
+        );
     }
 
     #[test]
     fn an_item_is_called_by_its_files_name() {
         assert_eq!(item_name("/home/ada/Desktop/report.pdf"), "report.pdf");
-        assert_eq!(item_name("C:\\Users\\ada\\Desktop\\Old stuff\\"), "Old stuff");
+        assert_eq!(
+            item_name("C:\\Users\\ada\\Desktop\\Old stuff\\"),
+            "Old stuff"
+        );
         assert_eq!(item_name("file:///home/ada/Desktop/a%20b.txt"), "a%20b.txt");
         assert_eq!(item_name("plain"), "plain");
-        assert_eq!(item_name("::{645FF040-5081-101B-9F08-00AA002F954E}"), "::{645FF040-5081-101B-9F08-00AA002F954E}");
+        assert_eq!(
+            item_name("::{645FF040-5081-101B-9F08-00AA002F954E}"),
+            "::{645FF040-5081-101B-9F08-00AA002F954E}"
+        );
     }
 
     #[test]
@@ -2988,7 +3440,9 @@ mod tests {
             "Zones are not running: no gevrek-shell that runs them is attached to this window manager",
             false,
         );
-        assert!(matches!(&not_running, Outcome::NotRunning(text) if text.starts_with("Zones are not running")));
+        assert!(
+            matches!(&not_running, Outcome::NotRunning(text) if text.starts_with("Zones are not running"))
+        );
         assert!(matches!(
             refusal("zones are switched off (desktop.zones.enabled)", true),
             Outcome::NotRunning(text) if text.starts_with("Zones are switched off")
@@ -3005,7 +3459,10 @@ mod tests {
         // Anything else is the zones' own word.
         assert_eq!(
             refusal("no zone is called nowhere", true),
-            Outcome::Said { bad: true, text: "no zone is called nowhere".to_string() }
+            Outcome::Said {
+                bad: true,
+                text: "no zone is called nowhere".to_string()
+            }
         );
     }
 
@@ -3023,23 +3480,50 @@ mod tests {
         let running = Running::of(true, false, &told, "");
         assert!(running.can_be_asked());
         assert_eq!((running.zones, running.loose), (2, 2));
-        assert_eq!(running.names.get("::{BIN}").map(String::as_str), Some("Recycle Bin"));
-        assert_eq!(running.said(), (false, "The zones that run: 2 zones, 2 items in none.".to_string()));
+        assert_eq!(
+            running.names.get("::{BIN}").map(String::as_str),
+            Some("Recycle Bin")
+        );
+        assert_eq!(
+            running.said(),
+            (
+                false,
+                "The zones that run: 2 zones, 2 items in none.".to_string()
+            )
+        );
         // Switched on and not shown: said with the reason, and still asked.
-        let hindered = json!({"enabled": true, "not_shown": "Not shown: the journal could not be written"});
+        let hindered =
+            json!({"enabled": true, "not_shown": "Not shown: the journal could not be written"});
         let running = Running::of(true, false, &hindered.to_string(), "");
         assert!(running.can_be_asked());
-        assert!(running.said().1.ends_with("Not shown: the journal could not be written"));
+        assert!(running
+            .said()
+            .1
+            .ends_with("Not shown: the journal could not be written"));
         // Switched off: nobody to ask about rules.
         let running = Running::of(true, false, r#"{"enabled": false}"#, "");
         assert!(!running.can_be_asked());
         assert!(running.said().0 && running.said().1.starts_with("Zones are switched off"));
         // No shell: the window manager's own words. What a shell that
         // has gone last told is nobody's state.
-        let gone = Running::of(false, true, &told, "Zones are not running: no gevrek-shell is attached");
+        let gone = Running::of(
+            false,
+            true,
+            &told,
+            "Zones are not running: no gevrek-shell is attached",
+        );
         assert!(!gone.can_be_asked() && gone.names.is_empty());
-        assert_eq!(gone.said(), (true, "Zones are not running: no gevrek-shell is attached".to_string()));
-        assert!(Running::of(false, false, "", "").said().1.starts_with("Zones are not running"));
+        assert_eq!(
+            gone.said(),
+            (
+                true,
+                "Zones are not running: no gevrek-shell is attached".to_string()
+            )
+        );
+        assert!(Running::of(false, false, "", "")
+            .said()
+            .1
+            .starts_with("Zones are not running"));
     }
 
     #[test]
@@ -3053,14 +3537,25 @@ mod tests {
             "",
         );
         let mut wishes = Vec::new();
-        page.ask(Ask::Preview, json!({"command": "preview_rules", "scope": "loose"}), &mut wishes);
+        page.ask(
+            Ask::Preview,
+            json!({"command": "preview_rules", "scope": "loose"}),
+            &mut wishes,
+        );
         let [Wish::Ask(command)] = wishes.as_slice() else {
             panic!("one command is asked: {wishes:?}");
         };
         let sent: Value = serde_json::from_str(command).unwrap();
         assert_eq!(sent, json!({"command": "preview_rules", "scope": "loose"}));
         // An answer to what another page asked is not this page's.
-        assert!(!page.answered(r#"{"command":"quick_hide"}"#, true, true, None, &[], &document));
+        assert!(!page.answered(
+            r#"{"command":"quick_hide"}"#,
+            true,
+            true,
+            None,
+            &[],
+            &document
+        ));
         assert!(page.asked.is_some() && page.outcome.is_none());
         // The answer, with the plan among what happened.
         let events = vec![json!({"event": "rules_previewed", "plan": {"steps": [
@@ -3070,35 +3565,74 @@ mod tests {
         .to_string()];
         assert!(page.answered(command, true, true, None, &events, &document));
         assert!(page.asked.is_none());
-        let Some(Outcome::Plan { table, done: false, every_item: false }) = &page.outcome else {
+        let Some(Outcome::Plan {
+            table,
+            done: false,
+            every_item: false,
+        }) = &page.outcome
+        else {
             panic!("a plan is shown: {:?}", page.outcome);
         };
         // An item is called what the zones call it, its file's name else.
         let items: Vec<&str> = table.steps.iter().map(|row| row.item.as_str()).collect();
         assert_eq!(items, ["a.pdf", "Holiday.lnk"]);
-        assert!(!page.answered(command, true, true, None, &events, &document), "answered once");
+        assert!(
+            !page.answered(command, true, true, None, &events, &document),
+            "answered once"
+        );
 
         // Carried out: the same table, as what was done.
         let mut wishes = Vec::new();
-        page.ask(Ask::Apply, json!({"command": "apply_rules", "scope": "loose"}), &mut wishes);
-        let Wish::Ask(command) = &wishes[0] else { panic!() };
-        let events = vec![json!({"event": "rules_applied", "plan": {"steps": [], "held": []}}).to_string()];
+        page.ask(
+            Ask::Apply,
+            json!({"command": "apply_rules", "scope": "loose"}),
+            &mut wishes,
+        );
+        let Wish::Ask(command) = &wishes[0] else {
+            panic!()
+        };
+        let events =
+            vec![json!({"event": "rules_applied", "plan": {"steps": [], "held": []}}).to_string()];
         assert!(page.answered(command, true, true, None, &events, &document));
-        assert!(matches!(&page.outcome, Some(Outcome::Plan { done: true, .. })));
+        assert!(matches!(
+            &page.outcome,
+            Some(Outcome::Plan { done: true, .. })
+        ));
         // An answer without the plan says so, and shows no empty table.
         let mut wishes = Vec::new();
-        page.ask(Ask::Preview, json!({"command": "preview_rules"}), &mut wishes);
-        let Wish::Ask(command) = &wishes[0] else { panic!() };
+        page.ask(
+            Ask::Preview,
+            json!({"command": "preview_rules"}),
+            &mut wishes,
+        );
+        let Wish::Ask(command) = &wishes[0] else {
+            panic!()
+        };
         assert!(page.answered(command, true, true, None, &[], &document));
-        assert!(matches!(&page.outcome, Some(Outcome::Said { bad: true, .. })));
+        assert!(matches!(
+            &page.outcome,
+            Some(Outcome::Said { bad: true, .. })
+        ));
         // Taken back.
         let mut wishes = Vec::new();
         page.ask(Ask::Undo, json!({"command": "undo_rules"}), &mut wishes);
-        let Wish::Ask(command) = &wishes[0] else { panic!() };
-        assert!(page.answered(command, true, true, None, &[r#"{"event":"rules_undone"}"#.to_string()], &document));
+        let Wish::Ask(command) = &wishes[0] else {
+            panic!()
+        };
+        assert!(page.answered(
+            command,
+            true,
+            true,
+            None,
+            &[r#"{"event":"rules_undone"}"#.to_string()],
+            &document
+        ));
         assert_eq!(
             page.outcome,
-            Some(Outcome::Said { bad: false, text: "The last sorting was taken back.".to_string() })
+            Some(Outcome::Said {
+                bad: false,
+                text: "The last sorting was taken back.".to_string()
+            })
         );
     }
 
@@ -3107,8 +3641,14 @@ mod tests {
         let document = Document::new(&Config::default());
         let mut page = ZonesPage::default();
         let mut wishes = Vec::new();
-        page.ask(Ask::Preview, json!({"command": "preview_rules"}), &mut wishes);
-        let Wish::Ask(command) = &wishes[0] else { panic!() };
+        page.ask(
+            Ask::Preview,
+            json!({"command": "preview_rules"}),
+            &mut wishes,
+        );
+        let Wish::Ask(command) = &wishes[0] else {
+            panic!()
+        };
         assert!(page.answered(
             command,
             false,
@@ -3122,16 +3662,36 @@ mod tests {
         // Refused by the zones themselves: their reason.
         let mut wishes = Vec::new();
         page.ask(Ask::Undo, json!({"command": "undo_rules"}), &mut wishes);
-        let Wish::Ask(command) = &wishes[0] else { panic!() };
-        assert!(page.answered(command, false, true, Some("nothing to take back"), &[], &document));
-        assert_eq!(page.outcome, Some(Outcome::Said { bad: true, text: "nothing to take back".to_string() }));
+        let Wish::Ask(command) = &wishes[0] else {
+            panic!()
+        };
+        assert!(page.answered(
+            command,
+            false,
+            true,
+            Some("nothing to take back"),
+            &[],
+            &document
+        ));
+        assert_eq!(
+            page.outcome,
+            Some(Outcome::Said {
+                bad: true,
+                text: "nothing to take back".to_string()
+            })
+        );
     }
 
     #[test]
     fn the_page_asks_how_the_zones_are_while_a_window_manager_is_there() {
         let context = egui::Context::default();
         let mut page = ZonesPage::default();
-        let around = |connected: bool| Around { connected, dirty: false, windows: false, highlight: None };
+        let around = |connected: bool| Around {
+            connected,
+            dirty: false,
+            windows: false,
+            highlight: None,
+        };
         let mut wishes = Vec::new();
         page.follow(&context, &around(false), &mut wishes);
         assert!(wishes.is_empty(), "nobody to ask");
@@ -3162,8 +3722,14 @@ mod tests {
         let names: Vec<&str> = running.kept.iter().map(|kept| kept.name.as_str()).collect();
         assert_eq!(names, ["Work", "Before import"]);
         assert!(!running.can_undo);
-        assert_eq!(running.kept[0].said(), "4 zones  \u{b7}  2026-11-18 11:06 UTC");
-        assert_eq!(running.kept[1].said(), "2 zones  \u{b7}  kept by the zones themselves");
+        assert_eq!(
+            running.kept[0].said(),
+            "4 zones  \u{b7}  2026-11-18 11:06 UTC"
+        );
+        assert_eq!(
+            running.kept[1].said(),
+            "2 zones  \u{b7}  kept by the zones themselves"
+        );
         // Zones that do not say whether there is something to take back
         // are asked, and answer for themselves.
         assert!(Running::of(true, false, r#"{"enabled": true}"#, "").can_undo);
@@ -3174,33 +3740,63 @@ mod tests {
         let document = Document::new(&Config::default());
         let mut page = ZonesPage::default();
         let mut wishes = Vec::new();
-        page.ask(Ask::Snapshot, json!({"command": "save_snapshot", "name": "work"}), &mut wishes);
-        let Wish::Ask(command) = &wishes[0] else { panic!() };
+        page.ask(
+            Ask::Snapshot,
+            json!({"command": "save_snapshot", "name": "work"}),
+            &mut wishes,
+        );
+        let Wish::Ask(command) = &wishes[0] else {
+            panic!()
+        };
         let events = vec![r#"{"event":"snapshot_saved","name":"work"}"#.to_string()];
         assert!(page.answered(command, true, true, None, &events, &document));
         assert!(page.below, "said in the arrangements' card");
         assert_eq!(
             page.outcome,
-            Some(Outcome::Said { bad: false, text: "The arrangement \u{201c}work\u{201d} is kept.".to_string() })
+            Some(Outcome::Said {
+                bad: false,
+                text: "The arrangement \u{201c}work\u{201d} is kept.".to_string()
+            })
         );
 
         // Written to a file: the document the zones gave, as it is.
-        let folder = std::env::temp_dir().join(format!("gevrek-studio-zones-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("gevrek-studio-zones-{}", std::process::id()));
         std::fs::create_dir_all(&folder).unwrap();
         let file = folder.join("work.json").display().to_string();
-        let exported = json!({"format": "gevrek-zones-layout", "version": 1, "layout": {"name": "Work"}});
+        let exported =
+            json!({"format": "gevrek-zones-layout", "version": 1, "layout": {"name": "Work"}});
         let mut wishes = Vec::new();
-        page.ask(Ask::Export(file.clone()), json!({"command": "export_layout", "name": "Work"}), &mut wishes);
-        let Wish::Ask(command) = &wishes[0] else { panic!() };
+        page.ask(
+            Ask::Export(file.clone()),
+            json!({"command": "export_layout", "name": "Work"}),
+            &mut wishes,
+        );
+        let Wish::Ask(command) = &wishes[0] else {
+            panic!()
+        };
         let events = vec![json!({"event": "layout_exported", "document": exported}).to_string()];
         assert!(page.answered(command, true, true, None, &events, &document));
-        assert_eq!(page.outcome, Some(Outcome::Said { bad: false, text: format!("Written to {file}.") }));
+        assert_eq!(
+            page.outcome,
+            Some(Outcome::Said {
+                bad: false,
+                text: format!("Written to {file}.")
+            })
+        );
         let read: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(read, exported);
         // Nowhere to write it: said, with the reason.
-        let nowhere = folder.join("no such folder").join("work.json").display().to_string();
+        let nowhere = folder
+            .join("no such folder")
+            .join("work.json")
+            .display()
+            .to_string();
         assert!(written(&exported, &nowhere).is_err());
-        assert!(written(&Value::Null, &file).is_err(), "nothing is no document");
+        assert!(
+            written(&Value::Null, &file).is_err(),
+            "nothing is no document"
+        );
         let _ = std::fs::remove_dir_all(&folder);
 
         // Read in.
@@ -3216,7 +3812,11 @@ mod tests {
         );
         // A dry run is said with the rules again.
         let mut wishes = Vec::new();
-        page.ask(Ask::Preview, json!({"command": "preview_rules"}), &mut wishes);
+        page.ask(
+            Ask::Preview,
+            json!({"command": "preview_rules"}),
+            &mut wishes,
+        );
         assert!(!page.below && page.outcome.is_none());
     }
 
@@ -3243,24 +3843,47 @@ mod tests {
             table.steps,
             [
                 // (The rule by the name the zones have for it.)
-                row("cat.png", "into \u{201c}Pictures\u{201d}", "rule 1, \u{201c}Pictures\u{201d}"),
-                row("b.tmp", "the file is moved to /home/ada/Archive", "rule 1, \u{201c}Renamed here since\u{201d}"),
+                row(
+                    "cat.png",
+                    "into \u{201c}Pictures\u{201d}",
+                    "rule 1, \u{201c}Pictures\u{201d}"
+                ),
+                row(
+                    "b.tmp",
+                    "the file is moved to /home/ada/Archive",
+                    "rule 1, \u{201c}Renamed here since\u{201d}"
+                ),
             ]
         );
         assert_eq!(
             table.held,
-            [row("old.doc", "it is no file that could be moved", "no rule matched: what is done with the rest")]
+            [row(
+                "old.doc",
+                "it is no file that could be moved",
+                "no rule matched: what is done with the rest"
+            )]
         );
         // An answer that has them is shown by them.
         let document = Document::new(&Config::default());
         let mut page = ZonesPage::default();
         let mut wishes = Vec::new();
-        page.ask(Ask::Preview, json!({"command": "preview_rules"}), &mut wishes);
-        let Wish::Ask(command) = &wishes[0] else { panic!() };
-        let events = vec![json!({"event": "rules_previewed", "plan": {"steps": [], "held": []}, "lines": lines}).to_string()];
+        page.ask(
+            Ask::Preview,
+            json!({"command": "preview_rules"}),
+            &mut wishes,
+        );
+        let Wish::Ask(command) = &wishes[0] else {
+            panic!()
+        };
+        let events = vec![
+            json!({"event": "rules_previewed", "plan": {"steps": [], "held": []}, "lines": lines})
+                .to_string(),
+        ];
         assert!(page.answered(command, true, true, None, &events, &document));
         let by_lines = table_of_lines(&lines, &[]);
-        assert!(matches!(&page.outcome, Some(Outcome::Plan { table: shown, .. }) if *shown == by_lines));
+        assert!(
+            matches!(&page.outcome, Some(Outcome::Plan { table: shown, .. }) if *shown == by_lines)
+        );
     }
 
     #[test]
@@ -3299,22 +3922,39 @@ mod tests {
             "1 zone would be made, and 3 items would be put into the zones of their types. \
              2 items are left where they are."
         );
-        let only_old = ByType { rows: vec![row("Photos", false, 1, "", false)], ..ByType::default() };
-        assert_eq!(by_type_summed(&only_old), "No zone would be made; 1 item would be put into its type\u{2019}s zone.");
-        let nothing = by_type(&json!({"zones": [], "left": ["/desk/a.mp3"]}), &Default::default());
+        let only_old = ByType {
+            rows: vec![row("Photos", false, 1, "", false)],
+            ..ByType::default()
+        };
+        assert_eq!(
+            by_type_summed(&only_old),
+            "No zone would be made; 1 item would be put into its type\u{2019}s zone."
+        );
+        let nothing = by_type(
+            &json!({"zones": [], "left": ["/desk/a.mp3"]}),
+            &Default::default(),
+        );
         assert!(by_type_summed(&nothing).starts_with("There is nothing to make"));
         assert!(by_type_summed(&nothing).ends_with("1 item is left where it is."));
-        assert_eq!(by_type(&Value::Null, &Default::default()), ByType::default());
+        assert_eq!(
+            by_type(&Value::Null, &Default::default()),
+            ByType::default()
+        );
         // What was made, and what was taken back.
         assert_eq!(
-            made_said(&json!({"event": "auto_created", "zones": ["zone-4", "zone-5"], "items": 7, "rules": 2})),
+            made_said(
+                &json!({"event": "auto_created", "zones": ["zone-4", "zone-5"], "items": 7, "rules": 2})
+            ),
             "2 zones made, 7 items sorted. 2 rules added for what comes later."
         );
         assert_eq!(
             made_said(&json!({"event": "auto_created", "zones": [], "items": 1, "rules": 0})),
             "1 item sorted into the zones made by type before."
         );
-        assert_eq!(made_said(&json!({"zones": [], "items": 0, "rules": 0})), "There was nothing to do.");
+        assert_eq!(
+            made_said(&json!({"zones": [], "items": 0, "rules": 0})),
+            "There was nothing to do."
+        );
         assert_eq!(
             unmade_said(&json!({"event": "auto_undone", "zones": 3, "items": 1, "rules": 2})),
             "Taken back: 3 zones taken away, 1 item put back, 2 rules taken out."
@@ -3325,13 +3965,30 @@ mod tests {
     fn zones_by_type_are_asked_for_shown_made_and_taken_back() {
         let document = Document::new(&Config::default());
         let mut page = ZonesPage::default();
-        page.state(true, false, r#"{"enabled": true, "loose": [{"id": "shell:42", "name": "Holiday.lnk"}]}"#, "");
-        assert!(!page.running.as_ref().unwrap().can_undo_types, "nothing was made yet");
+        page.state(
+            true,
+            false,
+            r#"{"enabled": true, "loose": [{"id": "shell:42", "name": "Holiday.lnk"}]}"#,
+            "",
+        );
+        assert!(
+            !page.running.as_ref().unwrap().can_undo_types,
+            "nothing was made yet"
+        );
         let mut wishes = Vec::new();
-        page.ask(Ask::TypesPreview, json!({"command": "auto_create", "scope": "loose", "dry_run": true}), &mut wishes);
-        let Wish::Ask(command) = &wishes[0] else { panic!() };
+        page.ask(
+            Ask::TypesPreview,
+            json!({"command": "auto_create", "scope": "loose", "dry_run": true}),
+            &mut wishes,
+        );
+        let Wish::Ask(command) = &wishes[0] else {
+            panic!()
+        };
         let sent: Value = serde_json::from_str(command).unwrap();
-        assert_eq!(sent, json!({"command": "auto_create", "scope": "loose", "dry_run": true}));
+        assert_eq!(
+            sent,
+            json!({"command": "auto_create", "scope": "loose", "dry_run": true})
+        );
         let events = vec![json!({"event": "auto_planned", "plan": {
             "display": "fake-1",
             "zones": [{"category": "pictures", "title": "Pictures",
@@ -3340,17 +3997,33 @@ mod tests {
             "left": ["shell:42"]}})
         .to_string()];
         assert!(page.answered(command, true, true, None, &events, &document));
-        assert!(page.of_types && !page.below, "said in the card of the zones by type");
-        let Some(Outcome::ByType { table, every_item: false }) = &page.outcome else {
+        assert!(
+            page.of_types && !page.below,
+            "said in the card of the zones by type"
+        );
+        let Some(Outcome::ByType {
+            table,
+            every_item: false,
+        }) = &page.outcome
+        else {
             panic!("the plan is shown: {:?}", page.outcome);
         };
-        assert_eq!((table.rows.len(), table.rows[0].items, table.rows[0].new), (1, 2, true));
+        assert_eq!(
+            (table.rows.len(), table.rows[0].items, table.rows[0].new),
+            (1, 2, true)
+        );
         assert_eq!(table.left, ["Holiday.lnk"]);
 
         // Made: what the zones say they made.
         let mut wishes = Vec::new();
-        page.ask(Ask::TypesMake, json!({"command": "auto_create", "scope": "loose"}), &mut wishes);
-        let Wish::Ask(command) = &wishes[0] else { panic!() };
+        page.ask(
+            Ask::TypesMake,
+            json!({"command": "auto_create", "scope": "loose"}),
+            &mut wishes,
+        );
+        let Wish::Ask(command) = &wishes[0] else {
+            panic!()
+        };
         let events = vec![
             r#"{"event":"zone_created","zone":"zone-4"}"#.to_string(),
             r#"{"event":"auto_created","zones":["zone-4"],"items":2,"rules":1}"#.to_string(),
@@ -3364,35 +4037,72 @@ mod tests {
             })
         );
         // The zones say there is something to take back now.
-        page.state(true, false, r#"{"enabled": true, "can_undo_auto": true}"#, "");
+        page.state(
+            true,
+            false,
+            r#"{"enabled": true, "can_undo_auto": true}"#,
+            "",
+        );
         assert!(page.running.as_ref().unwrap().can_undo_types);
         let mut wishes = Vec::new();
-        page.ask(Ask::TypesUndo, json!({"command": "undo_auto_create"}), &mut wishes);
-        let Wish::Ask(command) = &wishes[0] else { panic!() };
+        page.ask(
+            Ask::TypesUndo,
+            json!({"command": "undo_auto_create"}),
+            &mut wishes,
+        );
+        let Wish::Ask(command) = &wishes[0] else {
+            panic!()
+        };
         let events = vec![r#"{"event":"auto_undone","zones":1,"items":2,"rules":1}"#.to_string()];
         assert!(page.answered(command, true, true, None, &events, &document));
         assert_eq!(
             page.outcome,
             Some(Outcome::Said {
                 bad: false,
-                text: "Taken back: 1 zone taken away, 2 items put back, 1 rule taken out.".to_string()
+                text: "Taken back: 1 zone taken away, 2 items put back, 1 rule taken out."
+                    .to_string()
             })
         );
         // An answer without the plan says so; a refusal gives its reason.
         let mut wishes = Vec::new();
-        page.ask(Ask::TypesPreview, json!({"command": "auto_create", "dry_run": true}), &mut wishes);
-        let Wish::Ask(command) = &wishes[0] else { panic!() };
+        page.ask(
+            Ask::TypesPreview,
+            json!({"command": "auto_create", "dry_run": true}),
+            &mut wishes,
+        );
+        let Wish::Ask(command) = &wishes[0] else {
+            panic!()
+        };
         assert!(page.answered(command, true, true, None, &[], &document));
-        assert!(matches!(&page.outcome, Some(Outcome::Said { bad: true, .. })));
+        assert!(matches!(
+            &page.outcome,
+            Some(Outcome::Said { bad: true, .. })
+        ));
         let mut wishes = Vec::new();
-        page.ask(Ask::TypesMake, json!({"command": "auto_create"}), &mut wishes);
-        let Wish::Ask(command) = &wishes[0] else { panic!() };
+        page.ask(
+            Ask::TypesMake,
+            json!({"command": "auto_create"}),
+            &mut wishes,
+        );
+        let Wish::Ask(command) = &wishes[0] else {
+            panic!()
+        };
         let locked = "every zone is locked: nothing goes in or out";
         assert!(page.answered(command, false, true, Some(locked), &[], &document));
-        assert_eq!(page.outcome, Some(Outcome::Said { bad: true, text: locked.to_string() }));
+        assert_eq!(
+            page.outcome,
+            Some(Outcome::Said {
+                bad: true,
+                text: locked.to_string()
+            })
+        );
         // Asking the rules afterwards is said with the rules again.
         let mut wishes = Vec::new();
-        page.ask(Ask::Preview, json!({"command": "preview_rules"}), &mut wishes);
+        page.ask(
+            Ask::Preview,
+            json!({"command": "preview_rules"}),
+            &mut wishes,
+        );
         assert!(!page.of_types);
     }
 
@@ -3422,7 +4132,10 @@ mod tests {
             "left": ["/home/ada/Desktop/song.mp3", "/home/ada/Desktop/film.mkv"],
         });
         let mut page = ZonesPage {
-            outcome: Some(Outcome::ByType { table: by_type(&plan, &Default::default()), every_item: false }),
+            outcome: Some(Outcome::ByType {
+                table: by_type(&plan, &Default::default()),
+                every_item: false,
+            }),
             of_types: true,
             running: Some(Running::of(
                 true,
@@ -3434,7 +4147,12 @@ mod tests {
             state_asked: Some(Instant::now()),
             ..ZonesPage::default()
         };
-        let around = Around { connected: true, dirty: false, windows: false, highlight: None };
+        let around = Around {
+            connected: true,
+            dirty: false,
+            windows: false,
+            highlight: None,
+        };
         let context = egui::Context::default();
         let settings = gevrek_ui::Settings::default();
         gevrek_ui::theme::install_fonts(&context, false);
@@ -3452,7 +4170,10 @@ mod tests {
         };
         let Some(out) = std::env::var_os("GEVREK_LOOK_OUT") else {
             let input = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 760.0))),
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000.0, 760.0),
+                )),
                 ..Default::default()
             };
             let mut output = context.run_ui(input, |ui| draw(ui));
@@ -3464,7 +4185,9 @@ mod tests {
             .expect("a graphics device that computes on the processor");
         let mut pixels = Vec::new();
         for step in 0..3 {
-            pixels = painter.frame_of(&context, 10.0 + f64::from(step) * 0.5, Vec::new(), |ui| draw(ui));
+            pixels = painter.frame_of(&context, 10.0 + f64::from(step) * 0.5, Vec::new(), |ui| {
+                draw(ui)
+            });
         }
         image::save_buffer(&out, &pixels, size.0, size.1, image::ColorType::Rgba8)
             .expect("the picture is written");
@@ -3513,7 +4236,12 @@ mod tests {
             state_asked: Some(Instant::now()),
             ..ZonesPage::default()
         };
-        let around = Around { connected: true, dirty: true, windows: false, highlight: None };
+        let around = Around {
+            connected: true,
+            dirty: true,
+            windows: false,
+            highlight: None,
+        };
         let context = egui::Context::default();
         let settings = gevrek_ui::Settings::default();
         gevrek_ui::theme::install_fonts(&context, false);
@@ -3534,7 +4262,10 @@ mod tests {
         };
         let Some(out) = std::env::var_os("GEVREK_LOOK_OUT") else {
             let input = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 760.0))),
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000.0, 760.0),
+                )),
                 ..Default::default()
             };
             let mut output = context.run_ui(input, |ui| draw(ui));
@@ -3546,7 +4277,9 @@ mod tests {
             .expect("a graphics device that computes on the processor");
         let mut pixels = Vec::new();
         for step in 0..3 {
-            pixels = painter.frame_of(&context, 10.0 + f64::from(step) * 0.5, Vec::new(), |ui| draw(ui));
+            pixels = painter.frame_of(&context, 10.0 + f64::from(step) * 0.5, Vec::new(), |ui| {
+                draw(ui)
+            });
         }
         image::save_buffer(&out, &pixels, size.0, size.1, image::ColorType::Rgba8)
             .expect("the picture is written");
@@ -3556,8 +4289,14 @@ mod tests {
     fn the_checks_messages_are_said_where_they_belong() {
         let issues = vec![
             ConfigIssue::error("desktop.zones.zones[1].id", "A zone needs an id"),
-            ConfigIssue::warning("desktop.zones.rules[2].action.zone", "No zone is called 'gone'"),
-            ConfigIssue::warning("desktop.zones.catch_all.zone", "No zone is called 'nowhere'"),
+            ConfigIssue::warning(
+                "desktop.zones.rules[2].action.zone",
+                "No zone is called 'gone'",
+            ),
+            ConfigIssue::warning(
+                "desktop.zones.catch_all.zone",
+                "No zone is called 'nowhere'",
+            ),
             ConfigIssue::error("desktop.zones.rules_on_arrival", "not one of the rules"),
             ConfigIssue::error("desktop.focus.history_size", "elsewhere"),
         ];
@@ -3571,7 +4310,10 @@ mod tests {
         );
         assert_eq!(
             issues_under(&issues, "desktop.zones.catch_all"),
-            [(false, "What no rule matches: No zone is called 'nowhere'".to_string())]
+            [(
+                false,
+                "What no rule matches: No zone is called 'nowhere'".to_string()
+            )]
         );
         assert_eq!(place_said("desktop.zones.look.opacity"), "");
     }
@@ -3600,9 +4342,14 @@ mod tests {
         assert_eq!(ids, ["papers", "zone-1"]);
         assert_eq!(
             zones.rules[0].action,
-            gevrek_model::zones::RuleAction::AssignToZone { zone: gevrek_model::zones::ZoneId::new("papers") }
+            gevrek_model::zones::RuleAction::AssignToZone {
+                zone: gevrek_model::zones::ZoneId::new("papers")
+            }
         );
-        assert!(document.issues().iter().all(|issue| !issue.path.starts_with("desktop.zones")));
+        assert!(document
+            .issues()
+            .iter()
+            .all(|issue| !issue.path.starts_with("desktop.zones")));
         // Taken out: its rule is said to name nothing, and stops nothing.
         document.edit(LIST, |list| {
             changed(list.as_array_mut().unwrap(), Change::Remove(0));
@@ -3618,19 +4365,40 @@ mod tests {
         // The pickers are filled from the schema: what the model gains
         // is offered here. These are the ones this page has words for.
         let names = |pointer: &str| -> Vec<String> {
-            variants_at(pointer).iter().map(|kind| kind.name.to_string()).collect()
+            variants_at(pointer)
+                .iter()
+                .map(|kind| kind.name.to_string())
+                .collect()
         };
         let kinds = names("/desktop/zones/zones/0/kind");
         for known in ["manual", "portal", "smart"] {
-            assert!(kinds.iter().any(|kind| kind == known), "{known} is no kind of zone: {kinds:?}");
+            assert!(
+                kinds.iter().any(|kind| kind == known),
+                "{known} is no kind of zone: {kinds:?}"
+            );
         }
         let matchers = names("/desktop/zones/rules/0/matchers/0");
-        for known in ["extension", "mime", "name", "kind", "date", "size", "shortcut_target", "untouched"] {
-            assert!(matchers.iter().any(|kind| kind == known), "{known} is no condition: {matchers:?}");
+        for known in [
+            "extension",
+            "mime",
+            "name",
+            "kind",
+            "date",
+            "size",
+            "shortcut_target",
+            "untouched",
+        ] {
+            assert!(
+                matchers.iter().any(|kind| kind == known),
+                "{known} is no condition: {matchers:?}"
+            );
         }
         assert_eq!(names("/desktop/zones/zones/0/kind/query/0"), matchers);
         let actions = names("/desktop/zones/rules/0/action");
-        assert!(actions.contains(&"assign_to_zone".to_string()) && actions.contains(&"move_to_folder".to_string()));
+        assert!(
+            actions.contains(&"assign_to_zone".to_string())
+                && actions.contains(&"move_to_folder".to_string())
+        );
         assert_eq!(names(CATCH_ALL), actions);
     }
 }

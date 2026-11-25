@@ -119,7 +119,12 @@ pub fn in_order(mut found: Vec<Network>) -> Vec<Network> {
 /// How a network is kept safe, as a profile of Windows' names it: the
 /// authentication and the encryption. `None`: a kind that is not joined
 /// with a password alone (a company's network with accounts).
-pub fn profile_security(secured: bool, wpa3: bool, old_wpa: bool, tkip: bool) -> Option<(&'static str, &'static str)> {
+pub fn profile_security(
+    secured: bool,
+    wpa3: bool,
+    old_wpa: bool,
+    tkip: bool,
+) -> Option<(&'static str, &'static str)> {
     match (secured, wpa3, old_wpa) {
         (false, _, _) => Some(("open", "none")),
         (true, true, _) => Some(("WPA3SAE", "AES")),
@@ -231,7 +236,10 @@ pub fn read() -> Option<Wifi> {
 #[cfg(target_os = "linux")]
 pub fn rescan() -> bool {
     let took = ask(&["device", "wifi", "rescan"]).is_some();
-    log::debug!("the system is asked to look for networks: {}", if took { "taken" } else { "refused" });
+    log::debug!(
+        "the system is asked to look for networks: {}",
+        if took { "taken" } else { "refused" }
+    );
     took
 }
 
@@ -244,7 +252,11 @@ pub fn rescan() -> bool {
 #[cfg(target_os = "linux")]
 pub fn set_enabled(on: bool) -> bool {
     let took = ask(&["radio", "wifi", if on { "on" } else { "off" }]).is_some();
-    log::debug!("the wireless radio is asked to be {}: {}", if on { "on" } else { "off" }, if took { "taken" } else { "refused" });
+    log::debug!(
+        "the wireless radio is asked to be {}: {}",
+        if on { "on" } else { "off" },
+        if took { "taken" } else { "refused" }
+    );
     took
 }
 
@@ -258,12 +270,18 @@ pub fn join(name: &str, known: bool, password: Option<&str>) -> bool {
     use std::io::Write;
     if known {
         let joined = ask(&["--wait", "20", "connection", "up", "id", name]).is_some();
-        log::debug!("the known wireless network {name}: {}", if joined { "joined" } else { "not joined" });
+        log::debug!(
+            "the known wireless network {name}: {}",
+            if joined { "joined" } else { "not joined" }
+        );
         return joined;
     }
     let Some(password) = password.filter(|password| !password.is_empty()) else {
         let joined = ask(&["--wait", "20", "device", "wifi", "connect", name]).is_some();
-        log::debug!("the open wireless network {name}: {}", if joined { "joined" } else { "not joined" });
+        log::debug!(
+            "the open wireless network {name}: {}",
+            if joined { "joined" } else { "not joined" }
+        );
         return joined;
     };
     let mut child = match tool()
@@ -349,13 +367,16 @@ mod mac {
     fn interface() -> Option<Retained<AnyObject>> {
         // SAFETY: CoreWLAN's shared client and its default interface.
         unsafe {
-            let client: Option<Retained<AnyObject>> = msg_send![class!(CWWiFiClient), sharedWiFiClient];
+            let client: Option<Retained<AnyObject>> =
+                msg_send![class!(CWWiFiClient), sharedWiFiClient];
             msg_send![&*client?, interface]
         }
     }
 
     fn text(object: Option<Retained<NSString>>) -> Option<String> {
-        object.map(|text| text.to_string()).filter(|text| !text.is_empty())
+        object
+            .map(|text| text.to_string())
+            .filter(|text| !text.is_empty())
     }
 
     /// Whether this program may know the location (and so the networks'
@@ -384,7 +405,8 @@ mod mac {
 
     /// The manager that asked (kept for the program's life: it is what
     /// macOS answers), as a pointer, once it exists.
-    static MANAGER: std::sync::atomic::AtomicPtr<AnyObject> = std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+    static MANAGER: std::sync::atomic::AtomicPtr<AnyObject> =
+        std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
 
     /// The question is answered: the location that was asked for to have
     /// it asked is not wanted (it would cost the battery).
@@ -418,10 +440,15 @@ mod mac {
                     let _: () = msg_send![&*manager, requestWhenInUseAuthorization];
                     // (macOS asks only once a location is wanted.)
                     let _: () = msg_send![&*manager, startUpdatingLocation];
-                    MANAGER.store(Retained::into_raw(manager), std::sync::atomic::Ordering::Release);
+                    MANAGER.store(
+                        Retained::into_raw(manager),
+                        std::sync::atomic::Ordering::Release,
+                    );
                 }
             }
-            log::info!("the wifi's networks are named only to a program that may know the location: asked");
+            log::info!(
+                "the wifi's networks are named only to a program that may know the location: asked"
+            );
             // SAFETY: the main queue, which the shell's run loop serves.
             unsafe { dispatch_async_f(&_dispatch_main_q, std::ptr::null_mut(), ask) };
         });
@@ -482,7 +509,11 @@ mod mac {
                 Some(networks) => networks,
                 None => {
                     rescan();
-                    FOUND.lock().ok().and_then(|found| found.clone()).unwrap_or_default()
+                    FOUND
+                        .lock()
+                        .ok()
+                        .and_then(|found| found.clone())
+                        .unwrap_or_default()
                 }
             };
             // SAFETY: a plain property.
@@ -501,7 +532,9 @@ mod mac {
             return false;
         };
         // SAFETY: the interface's own setter; no error is read back.
-        unsafe { msg_send![&*interface, setPower: on, error: std::ptr::null_mut::<*mut AnyObject>()] }
+        unsafe {
+            msg_send![&*interface, setPower: on, error: std::ptr::null_mut::<*mut AnyObject>()]
+        }
     }
 
     /// Look around for networks again. Whether it could.
@@ -570,7 +603,10 @@ mod mac {
                 error: std::ptr::null_mut::<*mut AnyObject>()
             ]
         };
-        log::debug!("wifi: {name} {}", if joined { "joined" } else { "not joined" });
+        log::debug!(
+            "wifi: {name} {}",
+            if joined { "joined" } else { "not joined" }
+        );
         joined
     }
 
@@ -770,7 +806,10 @@ mod system {
             // SAFETY: a plain call.
             unsafe { WlanScan(service.handle, &service.device, None, None, None) == 0 }
         });
-        log::debug!("the system is asked to look for networks: {}", if took { "taken" } else { "refused" });
+        log::debug!(
+            "the system is asked to look for networks: {}",
+            if took { "taken" } else { "refused" }
+        );
         took
     }
 
@@ -805,7 +844,11 @@ mod system {
                 )
             } == 0;
         }
-        log::debug!("the wireless radio is asked to be {}: {}", if on { "on" } else { "off" }, if all { "taken" } else { "refused" });
+        log::debug!(
+            "the wireless radio is asked to be {}: {}",
+            if on { "on" } else { "off" },
+            if all { "taken" } else { "refused" }
+        );
         all
     }
 
@@ -821,7 +864,9 @@ mod system {
         let heard = service.heard();
         let kept = heard
             .iter()
-            .find(|(network, profile, _)| network.name == name && network.known && !profile.is_empty())
+            .find(|(network, profile, _)| {
+                network.name == name && network.known && !profile.is_empty()
+            })
             .map(|(_, profile, _)| profile.clone());
         let (profile, made) = match kept.filter(|_| known) {
             Some(profile) => (profile, false),
@@ -889,13 +934,28 @@ mod system {
         }
         log::debug!(
             "the wireless network {name}{}: {}",
-            if made { ", by a profile made for it" } else { "" },
-            if joined { "joined" } else if asked { "not joined in time" } else { "not asked for" }
+            if made {
+                ", by a profile made for it"
+            } else {
+                ""
+            },
+            if joined {
+                "joined"
+            } else if asked {
+                "not joined in time"
+            } else {
+                "not asked for"
+            }
         );
         if !joined && made {
             // SAFETY: the text lives until the call returns.
             unsafe {
-                WlanDeleteProfile(service.handle, &service.device, PCWSTR(profile_name.as_ptr()), None);
+                WlanDeleteProfile(
+                    service.handle,
+                    &service.device,
+                    PCWSTR(profile_name.as_ptr()),
+                    None,
+                );
             }
         }
         joined
@@ -987,7 +1047,11 @@ mod tests {
         };
         println!("the radio was on: {}", before.enabled);
         let other = !before.enabled;
-        println!("asked to be {}: taken={}", if other { "on" } else { "off" }, set_enabled(other));
+        println!(
+            "asked to be {}: taken={}",
+            if other { "on" } else { "off" },
+            set_enabled(other)
+        );
         println!("it is so within ten seconds: {}", wait_for(other));
         if other {
             println!("asked to look for networks: {}", rescan());
@@ -1004,7 +1068,11 @@ mod tests {
                     "  {:>3}  {}{}{}",
                     network.signal,
                     if network.known { "kept " } else { "" },
-                    if network.secured { "secured  " } else { "open  " },
+                    if network.secured {
+                        "secured  "
+                    } else {
+                        "open  "
+                    },
                     network.name
                 );
             }
@@ -1016,19 +1084,35 @@ mod tests {
     #[test]
     fn a_profile_for_windows_names_the_network_and_keeps_its_password_as_text() {
         // How it is kept safe decides what the profile says.
-        assert_eq!(profile_security(false, false, false, false), Some(("open", "none")));
-        assert_eq!(profile_security(true, false, false, false), Some(("WPA2PSK", "AES")));
-        assert_eq!(profile_security(true, true, false, false), Some(("WPA3SAE", "AES")));
-        assert_eq!(profile_security(true, false, true, true), Some(("WPAPSK", "TKIP")));
+        assert_eq!(
+            profile_security(false, false, false, false),
+            Some(("open", "none"))
+        );
+        assert_eq!(
+            profile_security(true, false, false, false),
+            Some(("WPA2PSK", "AES"))
+        );
+        assert_eq!(
+            profile_security(true, true, false, false),
+            Some(("WPA3SAE", "AES"))
+        );
+        assert_eq!(
+            profile_security(true, false, true, true),
+            Some(("WPAPSK", "TKIP"))
+        );
         let xml = profile_xml("Cafe & <Bar>", ("WPA2PSK", "AES"), Some("p\"a<ss"));
         assert!(xml.contains("<name>Cafe &amp; &lt;Bar&gt;</name>"));
         // (The name's bytes, as the profile wants them beside the name.)
         assert!(xml.contains("<hex>436166652026203C4261723E</hex>"));
-        assert!(xml.contains("<authentication>WPA2PSK</authentication><encryption>AES</encryption>"));
+        assert!(
+            xml.contains("<authentication>WPA2PSK</authentication><encryption>AES</encryption>")
+        );
         assert!(xml.contains("<keyMaterial>p&quot;a&lt;ss</keyMaterial>"));
         // An open one has no key, whatever is handed over.
         let open = profile_xml("Open", ("open", "none"), Some("ignored"));
-        assert!(!open.contains("sharedKey") && open.contains("<authentication>open</authentication>"));
+        assert!(
+            !open.contains("sharedKey") && open.contains("<authentication>open</authentication>")
+        );
         // The order of a list: the one in use, then the best heard.
         let network = |name: &str, signal, in_use| Network {
             name: name.to_string(),
@@ -1037,10 +1121,14 @@ mod tests {
             in_use,
             known: false,
         };
-        let names: Vec<String> = in_order(vec![network("b", 90, false), network("a", 40, true), network("c", 90, false)])
-            .into_iter()
-            .map(|network| network.name)
-            .collect();
+        let names: Vec<String> = in_order(vec![
+            network("b", 90, false),
+            network("a", 40, true),
+            network("c", 90, false),
+        ])
+        .into_iter()
+        .map(|network| network.name)
+        .collect();
         assert_eq!(names, ["a", "b", "c"]);
     }
 

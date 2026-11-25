@@ -1,12 +1,12 @@
 //! Input from any Smithay input backend (the nested window, libinput):
 //! the pointer and the keyboard of the seat.
 
-use gevrek_host::wm::bindings::Bindings as _;
-use gevrek_host::wm::commands::Commands as _;
 use crate::state::State;
 use gevrek_engine::events::WindowEvent;
 use gevrek_engine::input::HotkeyEvent;
 use gevrek_engine::WindowHandle;
+use gevrek_host::wm::bindings::Bindings as _;
+use gevrek_host::wm::commands::Commands as _;
 use gevrek_model::settings::{BindingDevice, BindingTrigger};
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, GestureBeginEvent,
@@ -526,8 +526,12 @@ impl State {
             );
             if pressed {
                 self.hold(button, BindingDevice::Mouse, name);
-                let (ids, consume) =
-                    self.matching_bindings(BindingDevice::Mouse, name, chord, BindingTrigger::Press);
+                let (ids, consume) = self.matching_bindings(
+                    BindingDevice::Mouse,
+                    name,
+                    chord,
+                    BindingTrigger::Press,
+                );
                 self.run_mouse_bindings(name, ids, chord, BindingTrigger::Press);
                 if consume {
                     self.suppressed_buttons.insert(button);
@@ -695,17 +699,16 @@ impl State {
     ) {
         if !ids.is_empty() {
             self.bindings_triggered(&HotkeyEvent {
-                    registration_ids: ids,
-                    key: name.to_string(),
-                    ctrl: modifiers.0,
-                    alt: modifiers.1,
-                    shift: modifiers.2,
-                    win: modifiers.3,
-                    device: BindingDevice::Mouse,
-                    trigger,
-                    held_ms: 0,
-                },
-            );
+                registration_ids: ids,
+                key: name.to_string(),
+                ctrl: modifiers.0,
+                alt: modifiers.1,
+                shift: modifiers.2,
+                win: modifiers.3,
+                device: BindingDevice::Mouse,
+                trigger,
+                held_ms: 0,
+            });
         }
     }
 
@@ -809,17 +812,16 @@ impl State {
         }
         for (ids, held, trigger, held_ms) in due {
             self.bindings_triggered(&HotkeyEvent {
-                    registration_ids: ids,
-                    key: held.name,
-                    ctrl: held.modifiers.0,
-                    alt: held.modifiers.1,
-                    shift: held.modifiers.2,
-                    win: held.modifiers.3,
-                    device: held.device,
-                    trigger,
-                    held_ms,
-                },
-            );
+                registration_ids: ids,
+                key: held.name,
+                ctrl: held.modifiers.0,
+                alt: held.modifiers.1,
+                shift: held.modifiers.2,
+                win: held.modifiers.3,
+                device: held.device,
+                trigger,
+                held_ms,
+            });
         }
     }
 
@@ -1086,8 +1088,7 @@ impl State {
                             && ((pressed
                                 && crate::window_overview::is_its_key(&name)
                                 && state.window_overview_is_up())
-                                || (!pressed
-                                    && state.window_overview.held.contains(&code.raw())))
+                                || (!pressed && state.window_overview.held.contains(&code.raw())))
                         {
                             if pressed {
                                 state.window_overview.held.insert(code.raw());
@@ -1155,11 +1156,7 @@ impl State {
                         let modifiers = &told;
                         if !pressed {
                             // (Bindings rest while gevrek is paused.)
-                            let ids = if state.paused {
-                                Vec::new()
-                            } else {
-                                on_release
-                            };
+                            let ids = if state.paused { Vec::new() } else { on_release };
                             // The release of a key whose press was kept
                             // is kept too; one whose press the program
                             // saw is seen by it.
@@ -1225,17 +1222,16 @@ impl State {
                         continue;
                     }
                     self.bindings_triggered(&HotkeyEvent {
-                            registration_ids: ids,
-                            key,
-                            ctrl: modifiers.ctrl,
-                            alt: modifiers.alt,
-                            shift: modifiers.shift,
-                            win: modifiers.logo,
-                            device: BindingDevice::Keyboard,
-                            trigger,
-                            held_ms: 0,
-                        },
-                    );
+                        registration_ids: ids,
+                        key,
+                        ctrl: modifiers.ctrl,
+                        alt: modifiers.alt,
+                        shift: modifiers.shift,
+                        win: modifiers.logo,
+                        device: BindingDevice::Keyboard,
+                        trigger,
+                        held_ms: 0,
+                    });
                 }
             }
         }

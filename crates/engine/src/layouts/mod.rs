@@ -54,7 +54,10 @@ fn best_rows(room: &Rect, windows: usize) -> (usize, i32) {
             (rows, side)
         })
         // (The first of the best: the fewest rows.)
-        .fold((1, i32::MIN), |best, now| if now.1 > best.1 { now } else { best })
+        .fold(
+            (1, i32::MIN),
+            |best, now| if now.1 > best.1 { now } else { best },
+        )
 }
 
 /// Whether a room is shared no further: into `kept`, which one window
@@ -418,7 +421,10 @@ mod tests {
     /// fill the display and none lies on another.
     #[test]
     fn a_tile_is_not_made_smaller_than_the_smallest() {
-        for area in [Rect::new(0, 0, 1920, 1080), Rect::new(-2560, 40, 2560, 1400)] {
+        for area in [
+            Rect::new(0, 0, 1920, 1080),
+            Rect::new(-2560, 40, 2560, 1400),
+        ] {
             for (name, layout) in sharing_layouts() {
                 for windows in 1..=40 {
                     let tiles = shared(layout.as_ref(), area, windows);
@@ -443,7 +449,11 @@ mod tests {
                             assert!(apart, "{told}");
                         }
                     }
-                    assert_eq!(covered, i64::from(area.width) * i64::from(area.height), "{told}");
+                    assert_eq!(
+                        covered,
+                        i64::from(area.width) * i64::from(area.height),
+                        "{told}"
+                    );
                     // As many windows as a person has on one workspace:
                     // none smaller than the smallest, either way.
                     if windows <= 9 {
@@ -482,10 +492,13 @@ mod tests {
         assert_eq!(many[..4], dwindle[..4]);
         assert_eq!(many[4], Rect::new(1440, 810, 120, 135));
         assert_eq!(many[11], Rect::new(1800, 945, 120, 135));
-        assert_eq!(in_equal_parts(Rect::new(10, 20, 100, 301), 3), [
-            Rect::new(10, 20, 100, 100),
-            Rect::new(10, 120, 100, 100),
-            Rect::new(10, 220, 100, 101),
-        ]);
+        assert_eq!(
+            in_equal_parts(Rect::new(10, 20, 100, 301), 3),
+            [
+                Rect::new(10, 20, 100, 100),
+                Rect::new(10, 120, 100, 100),
+                Rect::new(10, 220, 100, 101),
+            ]
+        );
     }
 }

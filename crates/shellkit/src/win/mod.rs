@@ -76,9 +76,9 @@ use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, MDT_EFFECTIVE_DPI,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetDoubleClickTime, GetKeyState, ReleaseCapture, SendInput, SetCapture, SetFocus, TrackMouseEvent, INPUT,
-    INPUT_MOUSE, TME_LEAVE, TRACKMOUSEEVENT, VK_CONTROL, VK_ESCAPE, VK_F4, VK_LBUTTON, VK_MBUTTON,
-    VK_MENU, VK_RBUTTON, VK_SHIFT,
+    GetDoubleClickTime, GetKeyState, ReleaseCapture, SendInput, SetCapture, SetFocus,
+    TrackMouseEvent, INPUT, INPUT_MOUSE, TME_LEAVE, TRACKMOUSEEVENT, VK_CONTROL, VK_ESCAPE, VK_F4,
+    VK_LBUTTON, VK_MBUTTON, VK_MENU, VK_RBUTTON, VK_SHIFT,
 };
 use windows::Win32::UI::Shell::{
     SHAppBarMessage, ABM_ACTIVATE, ABM_NEW, ABM_QUERYPOS, ABM_REMOVE, ABM_SETPOS,
@@ -86,19 +86,19 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetCursorPos,
-    GetForegroundWindow, GetMessageTime, GetSystemMetrics, GetWindowLongPtrW, IsWindow, LoadCursorW, MsgWaitForMultipleObjectsEx,
-    PeekMessageW, PostThreadMessageW, RegisterClassExW, SetCursor, SetForegroundWindow,
-    SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, SetWindowsHookExW, ShowWindow,
-    TranslateMessage, UnhookWindowsHookEx, EVENT_SYSTEM_FOREGROUND, GWL_EXSTYLE, HCURSOR, HHOOK,
-    HTCLIENT, HWND_BOTTOM, SM_CXDOUBLECLK, SM_CYDOUBLECLK,
-    HWND_TOPMOST, KBDLLHOOKSTRUCT, LWA_ALPHA, MA_NOACTIVATE, MSG, MSLLHOOKSTRUCT,
-    MWMO_INPUTAVAILABLE, PM_REMOVE, QS_ALLINPUT, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SWP_NOZORDER, SW_SHOWNOACTIVATE, WH_KEYBOARD_LL, WH_MOUSE_LL, WINDOWPOS, WINEVENT_OUTOFCONTEXT,
-    WM_ACTIVATE, WM_APP, WM_CHAR, WM_CLOSE, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND,
-    WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MBUTTONDBLCLK, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEHWHEEL, WM_MOUSEMOVE,
-    WM_MOUSEWHEEL, WM_PAINT, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR,
-    WM_SETFOCUS, WM_SETTINGCHANGE, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_WINDOWPOSCHANGED,
+    GetForegroundWindow, GetMessageTime, GetSystemMetrics, GetWindowLongPtrW, IsWindow,
+    LoadCursorW, MsgWaitForMultipleObjectsEx, PeekMessageW, PostThreadMessageW, RegisterClassExW,
+    SetCursor, SetForegroundWindow, SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos,
+    SetWindowsHookExW, ShowWindow, TranslateMessage, UnhookWindowsHookEx, EVENT_SYSTEM_FOREGROUND,
+    GWL_EXSTYLE, HCURSOR, HHOOK, HTCLIENT, HWND_BOTTOM, HWND_TOPMOST, KBDLLHOOKSTRUCT, LWA_ALPHA,
+    MA_NOACTIVATE, MSG, MSLLHOOKSTRUCT, MWMO_INPUTAVAILABLE, PM_REMOVE, QS_ALLINPUT,
+    SM_CXDOUBLECLK, SM_CYDOUBLECLK, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SW_SHOWNOACTIVATE, WH_KEYBOARD_LL, WH_MOUSE_LL, WINDOWPOS, WINEVENT_OUTOFCONTEXT, WM_ACTIVATE,
+    WM_APP, WM_CHAR, WM_CLOSE, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN,
+    WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDBLCLK,
+    WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+    WM_PAINT, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SETFOCUS,
+    WM_SETTINGCHANGE, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_WINDOWPOSCHANGED,
     WM_WINDOWPOSCHANGING, WM_XBUTTONDBLCLK, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSEXW,
     WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
     WS_EX_TRANSPARENT, WS_POPUP,
@@ -122,7 +122,9 @@ enum Popped {
     Menu,
     /// A menu that opens from a line of another: beside that line.
     Sub,
-    Hint { beside: bool },
+    Hint {
+        beside: bool,
+    },
 }
 
 #[derive(Default)]
@@ -718,10 +720,12 @@ impl<M: 'static> Shell<M> {
                     continue;
                 };
                 let (host, messages, watch) = (&mut self.host, &self.messages, &self.watch);
-                let outcome =
-                    dnd::run(&ready.object, ready.allowed, ready.image.as_ref(), &mut || {
-                        turn(host, messages, &mut on_message, watch)
-                    });
+                let outcome = dnd::run(
+                    &ready.object,
+                    ready.allowed,
+                    ready.image.as_ref(),
+                    &mut || turn(host, messages, &mut on_message, watch),
+                );
                 self.host.end_drag(from, outcome);
             }
         }
@@ -766,7 +770,9 @@ fn turn<M>(
     });
     watch.during(Part::CarryOut, || host.carry_out());
     watch.during(Part::Access, || host.access_news());
-    watch.during(Part::Other("looking at the covered surfaces"), || host.look_at_the_covered());
+    watch.during(Part::Other("looking at the covered surfaces"), || {
+        host.look_at_the_covered()
+    });
     let now = Instant::now();
     for index in 0..host.surfaces.len() {
         let surface = &mut host.surfaces[index];
@@ -777,7 +783,10 @@ fn turn<M>(
         if surface.redraw {
             let (width, height) = surface.configured;
             let size = (width.max(0) as u32, height.max(0) as u32);
-            let part = Part::Draw { surface: surface.id.0, size };
+            let part = Part::Draw {
+                surface: surface.id.0,
+                size,
+            };
             watch.during(part, || host.draw(index));
         }
     }
@@ -1128,8 +1137,7 @@ impl Host {
             if !surface.covered {
                 continue;
             }
-            let Some(display) = all.iter().find(|display| display.device == surface.display)
-            else {
+            let Some(display) = all.iter().find(|display| display.device == surface.display) else {
                 continue;
             };
             if !display_is_covered(display.whole) {
@@ -1905,7 +1913,10 @@ impl Host {
                     if let Some(at) = self.control.put.iter().position(|(put, _)| *put == id) {
                         surface.pinned = Some(self.control.put.remove(at).1);
                     }
-                    log::debug!("the surface {name} is opened as {id:?} on {}", surface.display);
+                    log::debug!(
+                        "the surface {name} is opened as {id:?} on {}",
+                        surface.display
+                    );
                     self.surfaces.push(surface);
                     self.settle(self.surfaces.len() - 1);
                     self.show(self.surfaces.len() - 1);
@@ -1999,7 +2010,11 @@ impl Host {
                     if !look::exclude_from_capture(surface.window.handle, exclude) {
                         log::warn!(
                             "Windows did not {} surface {id:?} of pictures of the screen",
-                            if exclude { "leave out" } else { "put back into" }
+                            if exclude {
+                                "leave out"
+                            } else {
+                                "put back into"
+                            }
                         );
                     }
                     surface.backdrops.exclude_from_capture(exclude);
@@ -2214,7 +2229,12 @@ impl Host {
                 }))
                     .context("the graphics device")?;
             let info = adapter.get_info();
-            log::debug!("drawing with {} ({:?}, {:?})", info.name, info.backend, info.device_type);
+            log::debug!(
+                "drawing with {} ({:?}, {:?})",
+                info.name,
+                info.backend,
+                info.device_type
+            );
             device.on_uncaptured_error(std::sync::Arc::new(|error| {
                 log::warn!("the graphics device: {error}");
             }));
@@ -2507,7 +2527,9 @@ impl Host {
                 SetWindowLongPtrW(window, GWL_EXSTYLE, wanted);
             }
         }
-        change_facts(window, |facts| facts.activates = keyboard != Keyboard::Never);
+        change_facts(window, |facts| {
+            facts.activates = keyboard != Keyboard::Never
+        });
         if keyboard == Keyboard::Exclusive {
             let before = take_keyboard(window);
             let ours = self
@@ -2625,7 +2647,11 @@ impl Host {
                 // One step back: of menus that opened from each other the
                 // last one goes (a menu alone is the last), and the one it
                 // opened from is drawn again, to see that it is gone.
-                let last = self.surfaces.iter().rev().find(|surface| surface.is_popup());
+                let last = self
+                    .surfaces
+                    .iter()
+                    .rev()
+                    .find(|surface| surface.is_popup());
                 if let Some((id, parent)) = last.map(|surface| (surface.id, surface.parent())) {
                     self.control.close.push(id);
                     if let Some(parent) = parent.and_then(|parent| self.by_id(parent)) {
@@ -2921,9 +2947,15 @@ impl Host {
             }
             other => {
                 if surface.failing {
-                    log::trace!("still no frame to draw into on surface {:?}: {other:?}", surface.id);
+                    log::trace!(
+                        "still no frame to draw into on surface {:?}: {other:?}",
+                        surface.id
+                    );
                 } else {
-                    log::debug!("no frame to draw into on surface {:?}: {other:?}", surface.id);
+                    log::debug!(
+                        "no frame to draw into on surface {:?}: {other:?}",
+                        surface.id
+                    );
                     surface.failing = true;
                 }
                 surface.configure_target(&gpu.device);

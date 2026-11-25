@@ -15,8 +15,17 @@ use std::collections::BTreeSet;
 
 /// A zone, as the configuration names it.
 #[derive(
-    Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash,
-    Serialize, Deserialize, schemars::JsonSchema,
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
 )]
 #[serde(transparent)]
 pub struct ZoneId(pub String);
@@ -45,8 +54,18 @@ impl From<&str> for ZoneId {
 
 /// What sort of thing an item of the desktop is.
 #[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash,
-    Serialize, Deserialize, schemars::JsonSchema,
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ItemKind {
@@ -144,7 +163,11 @@ impl ZonesConfig {
             .iter()
             .enumerate()
             .map(|(index, rule)| (format!("desktop.zones.rules[{index}].action"), &rule.action))
-            .chain(self.catch_all.iter().map(|action| ("desktop.zones.catch_all".to_string(), action)))
+            .chain(
+                self.catch_all
+                    .iter()
+                    .map(|action| ("desktop.zones.catch_all".to_string(), action)),
+            )
     }
 
     /// What cannot be right, as `(path, message)`.
@@ -198,9 +221,15 @@ impl ZonesConfig {
         for (index, category) in self.auto.categories.iter().enumerate() {
             let path = format!("desktop.zones.auto.categories[{index}].id");
             if category.id.trim().is_empty() {
-                say(path, "A type needs an id: the zone made for it is known by it");
+                say(
+                    path,
+                    "A type needs an id: the zone made for it is known by it",
+                );
             } else if !categories.insert(&category.id) {
-                say(path, &format!("Another type is called '{}' already", category.id));
+                say(
+                    path,
+                    &format!("Another type is called '{}' already", category.id),
+                );
             }
         }
         let mut ids = BTreeSet::new();
@@ -209,7 +238,10 @@ impl ZonesConfig {
             if zone.id.as_str().trim().is_empty() {
                 say(format!("{path}.id"), "A zone needs an id");
             } else if !ids.insert(&zone.id) {
-                say(format!("{path}.id"), &format!("Another zone is called '{}' already", zone.id));
+                say(
+                    format!("{path}.id"),
+                    &format!("Another zone is called '{}' already", zone.id),
+                );
             }
             if size_is_wrong(zone.icon_size) {
                 say(format!("{path}.icon_size"), SIZE);
@@ -218,16 +250,37 @@ impl ZonesConfig {
                 say(path, &message);
             }
             if matches!(&zone.kind, ZoneKind::Portal { directory } if directory.trim().is_empty()) {
-                say(format!("{path}.kind.directory"), "A portal needs the folder it shows");
+                say(
+                    format!("{path}.kind.directory"),
+                    "A portal needs the folder it shows",
+                );
             }
-            if zone.tab_group.as_ref().is_some_and(|group| group.trim().is_empty()) {
-                say(format!("{path}.tab_group"), "A group of tabs needs a name (or leave it out)");
+            if zone
+                .tab_group
+                .as_ref()
+                .is_some_and(|group| group.trim().is_empty())
+            {
+                say(
+                    format!("{path}.tab_group"),
+                    "A group of tabs needs a name (or leave it out)",
+                );
             }
-            if matches!(&zone.source, SmartSource::Folder { directory } if directory.trim().is_empty()) {
-                say(format!("{path}.source.directory"), "Name the folder the zone looks into");
+            if matches!(&zone.source, SmartSource::Folder { directory } if directory.trim().is_empty())
+            {
+                say(
+                    format!("{path}.source.directory"),
+                    "Name the folder the zone looks into",
+                );
             }
-            if zone.workspaces.iter().any(|workspace| workspace.trim().is_empty()) {
-                say(format!("{path}.workspaces"), "A workspace is named by its name, not by nothing");
+            if zone
+                .workspaces
+                .iter()
+                .any(|workspace| workspace.trim().is_empty())
+            {
+                say(
+                    format!("{path}.workspaces"),
+                    "A workspace is named by its name, not by nothing",
+                );
             }
         }
         for (path, action) in self.actions() {
@@ -236,7 +289,10 @@ impl ZonesConfig {
                     say(format!("{path}.zone"), "Name the zone the items go to");
                 }
                 RuleAction::MoveToFolder { folder } if folder.trim().is_empty() => {
-                    say(format!("{path}.folder"), "Name the folder the files are moved to");
+                    say(
+                        format!("{path}.folder"),
+                        "Name the folder the files are moved to",
+                    );
                 }
                 _ => {}
             }
@@ -254,7 +310,10 @@ impl ZonesConfig {
                 RuleAction::AssignToZone { zone }
                     if !zone.as_str().trim().is_empty() && self.zone(zone).is_none() =>
                 {
-                    Some((format!("{path}.zone"), format!("No zone is called '{zone}'")))
+                    Some((
+                        format!("{path}.zone"),
+                        format!("No zone is called '{zone}'"),
+                    ))
                 }
                 _ => None,
             })
@@ -374,8 +433,17 @@ pub enum ZoneKind {
 
 /// What a zone that fills itself looks through.
 #[derive(
-    Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash,
-    Serialize, Deserialize, schemars::JsonSchema,
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
 )]
 #[serde(tag = "from", rename_all = "snake_case")]
 pub enum SmartSource {
@@ -571,14 +639,20 @@ impl AutoCategory {
 
     /// The types as they come (the table at `AutoZones`).
     pub fn built_in() -> Vec<AutoCategory> {
-        let words = |text: &str| text.split_whitespace().map(str::to_string).collect::<Vec<_>>();
-        let category = |id: &str, title: &str, kinds: &[ItemKind], extensions: &str, mime: &str| AutoCategory {
-            id: id.to_string(),
-            title: title.to_string(),
-            extensions: words(extensions),
-            mime_prefixes: words(mime),
-            kinds: kinds.to_vec(),
-            extra: Extra::new(),
+        let words = |text: &str| {
+            text.split_whitespace()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+        let category = |id: &str, title: &str, kinds: &[ItemKind], extensions: &str, mime: &str| {
+            AutoCategory {
+                id: id.to_string(),
+                title: title.to_string(),
+                extensions: words(extensions),
+                mime_prefixes: words(mime),
+                kinds: kinds.to_vec(),
+                extra: Extra::new(),
+            }
         };
         vec![
             category("folders", "Folders", &[ItemKind::Folder], "", ""),
@@ -771,11 +845,17 @@ impl ZoneLook {
     /// This look, with what it leaves open taken from `general`.
     pub fn over(&self, general: &ZoneLook) -> ZoneLook {
         ZoneLook {
-            background: self.background.clone().or_else(|| general.background.clone()),
+            background: self
+                .background
+                .clone()
+                .or_else(|| general.background.clone()),
             opacity: self.opacity.or(general.opacity),
             blur: self.blur.or(general.blur),
             corner_radius: self.corner_radius.or(general.corner_radius),
-            title_colour: self.title_colour.clone().or_else(|| general.title_colour.clone()),
+            title_colour: self
+                .title_colour
+                .clone()
+                .or_else(|| general.title_colour.clone()),
             title_on_hover: self.title_on_hover.or(general.title_on_hover),
             title_bar: self.title_bar.or(general.title_bar),
             labels: self.labels.or(general.labels),
@@ -789,16 +869,26 @@ impl ZoneLook {
     /// `path`.
     pub fn problems(&self, path: &str) -> Vec<(String, String)> {
         let mut problems = Vec::new();
-        let mut say =
-            |name: &str, message: &str| problems.push((format!("{path}.{name}"), message.to_string()));
+        let mut say = |name: &str, message: &str| {
+            problems.push((format!("{path}.{name}"), message.to_string()))
+        };
         if self.opacity.is_some_and(|opacity| opacity > 100) {
             say("opacity", "Opacity is in hundredths, from 0 to 100");
         }
-        if self.corner_radius.is_some_and(|radius| radius > MOST_CORNER_RADIUS) {
+        if self
+            .corner_radius
+            .is_some_and(|radius| radius > MOST_CORNER_RADIUS)
+        {
             say("corner_radius", "A corner is rounded by 64 units at most");
         }
-        if self.icon_saturation.is_some_and(|saturation| saturation > 100) {
-            say("icon_saturation", "Saturation is in hundredths, from 0 to 100");
+        if self
+            .icon_saturation
+            .is_some_and(|saturation| saturation > 100)
+        {
+            say(
+                "icon_saturation",
+                "Saturation is in hundredths, from 0 to 100",
+            );
         }
         for (name, colour) in [
             ("background", &self.background),
@@ -999,10 +1089,20 @@ mod tests {
     fn the_section_has_a_schema_for_the_configurations_own() {
         let schema = serde_json::to_value(schemars::schema_for!(ZonesConfig)).unwrap();
         for field in ["enabled", "zones", "rules", "catch_all", "look", "snap"] {
-            assert!(schema["properties"].get(field).is_some(), "{field} is not in the schema");
+            assert!(
+                schema["properties"].get(field).is_some(),
+                "{field} is not in the schema"
+            );
         }
         let text = schema.to_string();
-        for name in ["ZoneDefinition", "Matcher", "RuleAction", "untouched", "move_to_folder", "portal"] {
+        for name in [
+            "ZoneDefinition",
+            "Matcher",
+            "RuleAction",
+            "untouched",
+            "move_to_folder",
+            "portal",
+        ] {
             assert!(text.contains(name), "{name} is not in the schema");
         }
     }
@@ -1011,8 +1111,13 @@ mod tests {
     fn what_cannot_be_right_is_said_with_its_place() {
         assert_eq!(ZonesConfig::default().problems(), []);
         assert_eq!(ZonesConfig::default().remarks(), []);
-        let assign = |zone: &str| RuleAction::AssignToZone { zone: ZoneId::new(zone) };
-        let rule = |action: RuleAction| Rule { action, ..Rule::default() };
+        let assign = |zone: &str| RuleAction::AssignToZone {
+            zone: ZoneId::new(zone),
+        };
+        let rule = |action: RuleAction| Rule {
+            action,
+            ..Rule::default()
+        };
         let mut config = ZonesConfig {
             zones: vec![
                 ZoneDefinition::manual("a", "A"),
@@ -1020,9 +1125,14 @@ mod tests {
                 ZoneDefinition::manual(" ", "Nameless"),
                 ZoneDefinition {
                     icon_size: 4,
-                    kind: ZoneKind::Portal { directory: String::new() },
+                    kind: ZoneKind::Portal {
+                        directory: String::new(),
+                    },
                     tab_group: Some(String::new()),
-                    look: ZoneLook { opacity: Some(101), ..ZoneLook::default() },
+                    look: ZoneLook {
+                        opacity: Some(101),
+                        ..ZoneLook::default()
+                    },
                     ..ZoneDefinition::manual("b", "B")
                 },
             ],
@@ -1030,7 +1140,9 @@ mod tests {
                 rule(assign("a")),
                 rule(assign("")),
                 rule(assign("gone")),
-                rule(RuleAction::MoveToFolder { folder: " ".to_string() }),
+                rule(RuleAction::MoveToFolder {
+                    folder: " ".to_string(),
+                }),
             ],
             catch_all: Some(assign("nowhere")),
             loose_icon_size: 1000,
@@ -1039,7 +1151,11 @@ mod tests {
         config.look.opacity = Some(200);
         config.snap.distance = -1;
         config.snap.grid = 5000;
-        let places: Vec<String> = config.problems().into_iter().map(|(path, _)| path).collect();
+        let places: Vec<String> = config
+            .problems()
+            .into_iter()
+            .map(|(path, _)| path)
+            .collect();
         assert_eq!(
             places,
             [
@@ -1059,25 +1175,51 @@ mod tests {
         );
         // A rule for a zone that is not there is said, and stops nothing.
         let places: Vec<String> = config.remarks().into_iter().map(|(path, _)| path).collect();
-        assert_eq!(places, ["desktop.zones.rules[2].action.zone", "desktop.zones.catch_all.zone"]);
+        assert_eq!(
+            places,
+            [
+                "desktop.zones.rules[2].action.zone",
+                "desktop.zones.catch_all.zone"
+            ]
+        );
     }
 
     #[test]
     fn what_milestones_three_to_five_set_reads_with_its_defaults_and_is_checked() {
         let config: ZonesConfig = serde_json::from_str("{}").unwrap();
         assert_eq!(config.roll_up.expand_on, ExpandOn::Hover);
-        assert_eq!((config.roll_up.expand_delay_ms, config.roll_up.collapse_delay_ms), (150, 400));
+        assert_eq!(
+            (
+                config.roll_up.expand_delay_ms,
+                config.roll_up.collapse_delay_ms
+            ),
+            (150, 400)
+        );
         assert_eq!(config.lock, Lock::default());
         assert_eq!(config.privacy.when_shared, WhenShared::Private);
-        assert_eq!((config.timed_rules.every_minutes, config.timed_rules.move_files), (60, false));
+        assert_eq!(
+            (
+                config.timed_rules.every_minutes,
+                config.timed_rules.move_files
+            ),
+            (60, false)
+        );
         let zone: ZoneDefinition = serde_json::from_str(
             r##"{"id": "a", "kind": {"type": "smart", "query": []}, "source": {"from": "folder", "directory": "/d"},
                 "limit": 12, "private": true, "reserves_space": true, "workspaces": ["2"], "expand_on": "click",
                 "look": {"title_bar": "plain", "labels": false, "icon_tint": "#10203040", "icon_saturation": 40}}"##,
         )
         .unwrap();
-        assert_eq!(zone.source, SmartSource::Folder { directory: "/d".to_string() });
-        assert_eq!((zone.limit, zone.private, zone.reserves_space), (12, true, true));
+        assert_eq!(
+            zone.source,
+            SmartSource::Folder {
+                directory: "/d".to_string()
+            }
+        );
+        assert_eq!(
+            (zone.limit, zone.private, zone.reserves_space),
+            (12, true, true)
+        );
         assert_eq!(zone.expand_on, Some(ExpandOn::Click));
         assert_eq!(zone.look.title_bar, Some(TitleBar::Plain));
         assert_eq!(
@@ -1087,7 +1229,9 @@ mod tests {
         // What cannot be right is said with its place.
         let mut wrong = ZonesConfig {
             zones: vec![ZoneDefinition {
-                source: SmartSource::Folder { directory: " ".to_string() },
+                source: SmartSource::Folder {
+                    directory: " ".to_string(),
+                },
                 workspaces: vec![String::new()],
                 look: ZoneLook {
                     background: Some("red".to_string()),
@@ -1118,12 +1262,27 @@ mod tests {
                 "desktop.zones.zones[0].workspaces",
             ]
         );
-        for (text, colour) in [("#a0B1c2", true), ("#a0b1c2d3", true), ("a0b1c2", false), ("#abc", false)] {
+        for (text, colour) in [
+            ("#a0B1c2", true),
+            ("#a0b1c2d3", true),
+            ("a0b1c2", false),
+            ("#abc", false),
+        ] {
             assert_eq!(is_colour(text), colour, "{text}");
         }
         assert_eq!(
-            Lock { geometry: true, members: false }.or(Lock { geometry: false, members: true }),
-            Lock { geometry: true, members: true }
+            Lock {
+                geometry: true,
+                members: false
+            }
+            .or(Lock {
+                geometry: false,
+                members: true
+            }),
+            Lock {
+                geometry: true,
+                members: true
+            }
         );
     }
 
@@ -1132,21 +1291,49 @@ mod tests {
         let config: ZonesConfig = serde_json::from_str("{}").unwrap();
         assert_eq!(config.gestures.double_middle_click, DeskGesture::GreyIcons);
         assert_eq!((config.auto.min_items, config.auto.add_rules), (2, true));
-        let ids: Vec<&str> = config.auto.categories.iter().map(|category| category.id.as_str()).collect();
+        let ids: Vec<&str> = config
+            .auto
+            .categories
+            .iter()
+            .map(|category| category.id.as_str())
+            .collect();
         assert_eq!(
             ids,
-            ["folders", "programs", "documents", "pictures", "video", "audio", "archives", "code", "other"]
+            [
+                "folders",
+                "programs",
+                "documents",
+                "pictures",
+                "video",
+                "audio",
+                "archives",
+                "code",
+                "other"
+            ]
         );
         // The last takes the rest, and it alone.
-        let rest: Vec<bool> = config.auto.categories.iter().map(AutoCategory::takes_the_rest).collect();
+        let rest: Vec<bool> = config
+            .auto
+            .categories
+            .iter()
+            .map(AutoCategory::takes_the_rest)
+            .collect();
         assert_eq!(rest.iter().filter(|rest| **rest).count(), 1);
         assert_eq!(rest.last(), Some(&true));
         // No extension is of two types, and each is written as an item's
         // extension is: small letters, no dot.
         let mut seen = BTreeSet::new();
-        for extension in config.auto.categories.iter().flat_map(|category| &category.extensions) {
+        for extension in config
+            .auto
+            .categories
+            .iter()
+            .flat_map(|category| &category.extensions)
+        {
             assert!(seen.insert(extension), "{extension} is of two types");
-            assert!(!extension.starts_with('.') && *extension == extension.to_lowercase(), "{extension}");
+            assert!(
+                !extension.starts_with('.') && *extension == extension.to_lowercase(),
+                "{extension}"
+            );
         }
         // Each gesture by the word it is written with.
         for (gesture, word) in [
@@ -1155,7 +1342,10 @@ mod tests {
             (DeskGesture::GreyIcons, "grey_icons"),
             (DeskGesture::Peek, "peek"),
         ] {
-            assert_eq!(serde_json::to_value(gesture).unwrap(), serde_json::json!(word));
+            assert_eq!(
+                serde_json::to_value(gesture).unwrap(),
+                serde_json::json!(word)
+            );
         }
         let set: ZonesConfig = serde_json::from_str(
             r#"{"gestures": {"double_middle_click": "none", "later": 2},
@@ -1165,7 +1355,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(set.gestures.double_middle_click, DeskGesture::None);
-        assert_eq!((set.auto.min_items, set.auto.add_rules, set.auto.categories.len()), (4, false, 1));
+        assert_eq!(
+            (
+                set.auto.min_items,
+                set.auto.add_rules,
+                set.auto.categories.len()
+            ),
+            (4, false, 1)
+        );
         assert_eq!(set.auto.categories[0].kinds, [ItemKind::Launcher]);
         assert_eq!(set.zones[0].auto.as_deref(), Some("notes"));
         assert_eq!(set.problems(), []);

@@ -210,7 +210,10 @@ pub enum Ask {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Answer {
     /// `hears`: the helper has its hooks, and tells what they hear.
-    Hello { version: u32, hears: bool },
+    Hello {
+        version: u32,
+        hears: bool,
+    },
     Done,
     /// Not done, and why.
     Refused(String),
@@ -238,10 +241,20 @@ pub fn pipe_name(instance: &str) -> String {
     let user = std::env::var("USERNAME").unwrap_or_default();
     let plain = |text: &str| -> String {
         text.chars()
-            .map(|letter| if letter.is_ascii_alphanumeric() { letter } else { '-' })
+            .map(|letter| {
+                if letter.is_ascii_alphanumeric() {
+                    letter
+                } else {
+                    '-'
+                }
+            })
             .collect()
     };
-    format!(r"\\.\pipe\gevrek-elevated-{}-{}", plain(&user), plain(instance))
+    format!(
+        r"\\.\pipe\gevrek-elevated-{}-{}",
+        plain(&user),
+        plain(instance)
+    )
 }
 
 /// The desktop as the helper touches it: every call that changes
@@ -520,7 +533,9 @@ pub fn carry_out_on(desk: &mut impl Desk, ask: &Ask, hidden: &mut HashSet<isize>
             value,
         } => done(desk.may_be_asked_of(window).and_then(|()| {
             if !DWM_ATTRIBUTES.contains(&attribute) {
-                return Err(format!("{attribute} is nothing gevrek tells the compositor"));
+                return Err(format!(
+                    "{attribute} is nothing gevrek tells the compositor"
+                ));
             }
             desk.dwm(window, attribute, value)
         })),
@@ -805,7 +820,10 @@ pub mod server {
     /// it goes. An error where a pipe cannot be made (another helper has
     /// it) or the one that opened it may not ask.
     pub fn serve_once(pipe: &str, serve: Serve<impl Fn(u32) -> bool>) -> anyhow::Result<()> {
-        let also = serve.also_for.as_deref().filter(|person| is_a_person(person));
+        let also = serve
+            .also_for
+            .as_deref()
+            .filter(|person| is_a_person(person));
         // (The second pipe first: it is there when the first is answered.)
         let heard_pipe = make_pipe(&heard_pipe(pipe), also)?;
         let asked_pipe = make_pipe(pipe, also)?;
@@ -933,7 +951,9 @@ pub mod client {
     }
 
     /// The bindings are these now.
-    pub fn set_bindings(registrations: &std::collections::HashMap<i32, gevrek_engine::input::Hotkey>) {
+    pub fn set_bindings(
+        registrations: &std::collections::HashMap<i32, gevrek_engine::input::Hotkey>,
+    ) {
         let mut sorted: Vec<_> = registrations
             .iter()
             .map(|(id, hotkey)| (*id, hotkey.clone()))
@@ -984,7 +1004,11 @@ pub mod client {
     fn hear(pipe: &str) -> bool {
         let name = heard_pipe(pipe);
         let opened = (0..50).find_map(|_| {
-            match std::fs::OpenOptions::new().read(true).write(true).open(&name) {
+            match std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&name)
+            {
                 Ok(file) => Some(file),
                 Err(_) => {
                     std::thread::sleep(std::time::Duration::from_millis(20));
@@ -1010,9 +1034,9 @@ pub mod client {
                     Ok(Heard::DragStarted(window)) => crate::windows_key::push_event(
                         crate::windows_key::DragEvent::Started(window),
                     ),
-                    Ok(Heard::DragEnded(window)) => crate::windows_key::push_event(
-                        crate::windows_key::DragEvent::Ended(window),
-                    ),
+                    Ok(Heard::DragEnded(window)) => {
+                        crate::windows_key::push_event(crate::windows_key::DragEvent::Ended(window))
+                    }
                     Err(error) => log::debug!("what the helper told was not understood: {error}"),
                 }
             }
@@ -1030,7 +1054,11 @@ pub mod client {
             if held.is_some() {
                 return true;
             }
-            let Ok(file) = std::fs::OpenOptions::new().read(true).write(true).open(pipe) else {
+            let Ok(file) = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(pipe)
+            else {
                 return false;
             };
             let Ok(writer) = file.try_clone() else {
@@ -1319,7 +1347,11 @@ mod tests {
                 value: 2,
             },
             Ask::Input {
-                registrations: vec![(1, key("J", true)), (2, key("A", false)), (3, key("F5", false))],
+                registrations: vec![
+                    (1, key("J", true)),
+                    (2, key("A", false)),
+                    (3, key("F5", false)),
+                ],
                 suspended: false,
                 own_windows_key: true,
                 drag_with_windows_key: true,
@@ -1345,7 +1377,10 @@ mod tests {
             flags: u32::MAX,
         };
         assert_eq!(ask(&mut desk, all), Answer::Done);
-        assert_eq!(desk.did.pop(), Some(Did::Place(10, After::Top, PLACE_FLAGS)));
+        assert_eq!(
+            desk.did.pop(),
+            Some(Did::Place(10, After::Top, PLACE_FLAGS))
+        );
         assert_eq!(PLACE_FLAGS & (0x0040 | 0x0080), 0);
 
         // Below a window that may not be asked about: not at all.
@@ -1367,7 +1402,10 @@ mod tests {
                 command,
                 posted: false,
             };
-            assert!(matches!(ask(&mut desk, show), Answer::Refused(_)), "{command}");
+            assert!(
+                matches!(ask(&mut desk, show), Answer::Refused(_)),
+                "{command}"
+            );
         }
         assert!(desk.did.is_empty(), "{:?}", desk.did);
 
@@ -1397,8 +1435,7 @@ mod tests {
         for ask_of_another in one_of_each() {
             let mut desk = Written::with(&[]);
             let answer = carry_out_on(&mut desk, &ask_of_another, &mut HashSet::new());
-            let about_no_window =
-                matches!(ask_of_another, Ask::Hello { .. } | Ask::Input { .. });
+            let about_no_window = matches!(ask_of_another, Ask::Hello { .. } | Ask::Input { .. });
             assert_eq!(
                 matches!(answer, Answer::Refused(_)),
                 !about_no_window,
@@ -1547,7 +1584,10 @@ mod tests {
         assert_eq!(After::of(Some(After::Bottom.hwnd())), After::Bottom);
         assert_eq!(After::of(Some(HWND(-1isize as *mut _))), After::Topmost);
         assert_eq!(After::of(Some(HWND(-2isize as *mut _))), After::NotTopmost);
-        assert_eq!(After::of(Some(HWND(0x50isize as *mut _))), After::Below(0x50));
+        assert_eq!(
+            After::of(Some(HWND(0x50isize as *mut _))),
+            After::Below(0x50)
+        );
         assert_eq!(After::Below(0x50).hwnd().0 as isize, 0x50);
         assert_eq!(After::Topmost.hwnd().0 as isize, -1);
     }
@@ -1565,7 +1605,12 @@ mod tests {
         assert!(hidden.is_empty());
         // A helper of another version.
         assert!(matches!(
-            carry_out(&Ask::Hello { version: VERSION + 1 }, &mut hidden),
+            carry_out(
+                &Ask::Hello {
+                    version: VERSION + 1
+                },
+                &mut hidden
+            ),
             Answer::Refused(_)
         ));
         assert_eq!(
@@ -1603,12 +1648,20 @@ mod tests {
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
         assert!(matches!(lines[0], Answer::Refused(_)));
-        assert!(matches!(lines[1], Answer::Hello { version: VERSION, .. }));
+        assert!(matches!(
+            lines[1],
+            Answer::Hello {
+                version: VERSION,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn only_a_person_as_windows_writes_them_is_put_into_the_pipes_rights() {
-        assert!(server::is_a_person("S-1-5-21-1004336348-1177238915-682003330-1001"));
+        assert!(server::is_a_person(
+            "S-1-5-21-1004336348-1177238915-682003330-1001"
+        ));
         assert!(!server::is_a_person("S-1-5-21)(A;;GA;;;WD"));
         assert!(!server::is_a_person("everyone"));
         assert!(!server::is_a_person(""));
@@ -1654,7 +1707,9 @@ mod tests {
         }
         assert!(client::connected());
         // A window that is not there: asked, and refused, over the pipe.
-        let answer = client::ask(&Ask::Close { window: 0x7FFF_FFF0 });
+        let answer = client::ask(&Ask::Close {
+            window: 0x7FFF_FFF0,
+        });
         assert!(matches!(answer, Some(Answer::Refused(_))));
         client::disconnect();
         assert!(!client::connected());

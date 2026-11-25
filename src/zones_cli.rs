@@ -12,8 +12,8 @@ pub mod ask;
 pub mod auto;
 
 use gevrek_protocol::proto;
-use gevrek_zones::ipc::{ZoneSnapshot, ZonesSnapshot, RESTORE_SYSTEM_ICONS};
 use gevrek_zones::config::ZoneKind;
+use gevrek_zones::ipc::{ZoneSnapshot, ZonesSnapshot, RESTORE_SYSTEM_ICONS};
 use serde_json::Value;
 
 /// The command that puts the system's own desktop icons back.
@@ -44,7 +44,10 @@ pub struct Failure {
 
 impl Failure {
     pub fn refused(message: impl Into<String>) -> Self {
-        Self { code: exit::REFUSED, message: message.into() }
+        Self {
+            code: exit::REFUSED,
+            message: message.into(),
+        }
     }
 
     /// As a reply would say it, for `--json`: a script reads one shape
@@ -90,11 +93,17 @@ pub fn zones_for_asking(state: &proto::ZonesStateResponse) -> Result<ZonesSnapsh
     if !state.running {
         // (What a shell that is gone last told is of no use to a command.)
         let sentence = state.message.split(". This is").next().unwrap_or_default();
-        return Err(Failure { code: exit::NOT_RUNNING, message: sentence.to_string() });
+        return Err(Failure {
+            code: exit::NOT_RUNNING,
+            message: sentence.to_string(),
+        });
     }
     match snapshot_of(state) {
         Ok(Some(snapshot)) => Ok(snapshot),
-        Ok(None) => Err(Failure { code: exit::NO_ANSWER, message: state.message.clone() }),
+        Ok(None) => Err(Failure {
+            code: exit::NO_ANSWER,
+            message: state.message.clone(),
+        }),
         Err(why) => Err(Failure::refused(why)),
     }
 }
@@ -247,7 +256,14 @@ pub fn list_text(state: &proto::ZonesStateResponse) -> Result<String, String> {
     let (id, title, display, rect) = (
         width(|zone| zone.id.to_string(), 2),
         width(|zone| zone.title.clone(), 5),
-        width(|zone| zone.display.as_ref().map_or("-".to_string(), ToString::to_string), 7),
+        width(
+            |zone| {
+                zone.display
+                    .as_ref()
+                    .map_or("-".to_string(), ToString::to_string)
+            },
+            7,
+        ),
         width(place, 4),
     );
     if !snapshot.zones.is_empty() {
@@ -263,7 +279,9 @@ pub fn list_text(state: &proto::ZonesStateResponse) -> Result<String, String> {
                 zone.id.to_string(),
                 zone.title,
                 kind_word(&zone.kind),
-                zone.display.as_ref().map_or("-".to_string(), ToString::to_string),
+                zone.display
+                    .as_ref()
+                    .map_or("-".to_string(), ToString::to_string),
                 place(zone),
                 zone.item_count,
                 flags(zone)
@@ -302,18 +320,28 @@ fn anchored(geometry: &gevrek_zones::geometry::ZoneGeometry) -> String {
 }
 
 /// The zone of an answer by its id, or why it cannot be shown.
-fn zone_of(state: &proto::ZonesStateResponse, id: &str) -> Result<(ZonesSnapshot, ZoneSnapshot), String> {
+fn zone_of(
+    state: &proto::ZonesStateResponse,
+    id: &str,
+) -> Result<(ZonesSnapshot, ZoneSnapshot), String> {
     let Some(snapshot) = snapshot_of(state)? else {
         return Err(state.message.clone());
     };
     match snapshot.zone(id).cloned() {
         Some(zone) => Ok((snapshot, zone)),
         None => {
-            let known: Vec<String> = snapshot.zones.iter().map(|zone| zone.id.to_string()).collect();
+            let known: Vec<String> = snapshot
+                .zones
+                .iter()
+                .map(|zone| zone.id.to_string())
+                .collect();
             Err(if known.is_empty() {
                 format!("There is no zone '{id}': there are no zones")
             } else {
-                format!("There is no zone '{id}'. The zones are: {}", known.join(", "))
+                format!(
+                    "There is no zone '{id}'. The zones are: {}",
+                    known.join(", ")
+                )
             })
         }
     }
@@ -324,7 +352,12 @@ pub fn show_text(state: &proto::ZonesStateResponse, id: &str) -> Result<String, 
     let (snapshot, zone) = zone_of(state, id)?;
     let mut lines = standing(state, &snapshot);
     let yes = |value: bool| if value { "yes" } else { "no" };
-    lines.push(format!("{}  \"{}\"  {}", zone.id, zone.title, kind_word(&zone.kind)));
+    lines.push(format!(
+        "{}  \"{}\"  {}",
+        zone.id,
+        zone.title,
+        kind_word(&zone.kind)
+    ));
     match &zone.kind {
         ZoneKind::Portal { directory } => lines.push(format!("  folder     {directory}")),
         ZoneKind::Smart { query } => lines.push(format!(
@@ -335,7 +368,9 @@ pub fn show_text(state: &proto::ZonesStateResponse, id: &str) -> Result<String, 
     }
     lines.push(format!(
         "  display    {}",
-        zone.display.as_ref().map_or("-".to_string(), ToString::to_string)
+        zone.display
+            .as_ref()
+            .map_or("-".to_string(), ToString::to_string)
     ));
     lines.push(format!("  rect       {}", place(&zone)));
     if let Some(geometry) = &zone.geometry {
@@ -345,7 +380,11 @@ pub fn show_text(state: &proto::ZonesStateResponse, id: &str) -> Result<String, 
     lines.push(format!(
         "  rolled up  {}{}",
         yes(zone.rolled_up),
-        if zone.rolled_up && zone.expanded { " (open for now)" } else { "" }
+        if zone.rolled_up && zone.expanded {
+            " (open for now)"
+        } else {
+            ""
+        }
     ));
     lines.push(format!(
         "  view       {}, icons {}",
@@ -359,7 +398,14 @@ pub fn show_text(state: &proto::ZonesStateResponse, id: &str) -> Result<String, 
         lines.push("  stays      when the zones are hidden".to_string());
     }
     if zone.private {
-        lines.push(format!("  private    yes ({})", if zone.masked { "covered" } else { "uncovered for now" }));
+        lines.push(format!(
+            "  private    yes ({})",
+            if zone.masked {
+                "covered"
+            } else {
+                "uncovered for now"
+            }
+        ));
     } else if zone.masked {
         lines.push("  covered    yes".to_string());
     }
@@ -411,7 +457,12 @@ pub fn show_text(state: &proto::ZonesStateResponse, id: &str) -> Result<String, 
     } else {
         format!("  items ({} of {}):", zone.items.len(), zone.item_count)
     });
-    let name = zone.items.iter().map(|item| item.name.chars().count()).max().unwrap_or(0);
+    let name = zone
+        .items
+        .iter()
+        .map(|item| item.name.chars().count())
+        .max()
+        .unwrap_or(0);
     for item in &zone.items {
         let kind = serde_json::to_value(item.kind)
             .ok()
@@ -587,10 +638,19 @@ pub fn plan_of(reply: &proto::ZonesCommandReply) -> Option<Value> {
 /// items were looked at.
 pub fn plan_text(event: Option<&Value>, applied: bool, asked_of: &str) -> String {
     let empty = Vec::new();
-    let lines = event.and_then(|event| event["lines"].as_array()).unwrap_or(&empty);
-    let (held, steps): (Vec<&Value>, Vec<&Value>) =
-        lines.iter().partition(|line| line.get("held").is_some_and(|held| !held.is_null()));
-    let count = |count: usize| if count == 1 { "1 item".to_string() } else { format!("{count} items") };
+    let lines = event
+        .and_then(|event| event["lines"].as_array())
+        .unwrap_or(&empty);
+    let (held, steps): (Vec<&Value>, Vec<&Value>) = lines
+        .iter()
+        .partition(|line| line.get("held").is_some_and(|held| !held.is_null()));
+    let count = |count: usize| {
+        if count == 1 {
+            "1 item".to_string()
+        } else {
+            format!("{count} items")
+        }
+    };
     let from = |line: &Value| match line["from"].as_str() {
         Some(zone) => format!("zone {zone}"),
         None => "loose".to_string(),
@@ -608,9 +668,17 @@ pub fn plan_text(event: Option<&Value>, applied: bool, asked_of: &str) -> String
             if applied { "sorted" } else { "would sort" },
             count(steps.len())
         ));
-        let mut rows = vec![vec!["ITEM", "FROM", "GOES TO", "BY"].into_iter().map(str::to_string).collect()];
+        let mut rows = vec![vec!["ITEM", "FROM", "GOES TO", "BY"]
+            .into_iter()
+            .map(str::to_string)
+            .collect()];
         rows.extend(steps.iter().map(|line| {
-            vec![name(line), from(line), destination_words(&line["destination"]), decided_words(line)]
+            vec![
+                name(line),
+                from(line),
+                destination_words(&line["destination"]),
+                decided_words(line),
+            ]
         }));
         text.extend(table(&rows));
     }
@@ -620,7 +688,10 @@ pub fn plan_text(event: Option<&Value>, applied: bool, asked_of: &str) -> String
             if held.len() == 1 { "it is" } else { "they are" },
             held.len()
         ));
-        let mut rows = vec![vec!["ITEM", "FROM", "BECAUSE", "BY"].into_iter().map(str::to_string).collect()];
+        let mut rows = vec![vec!["ITEM", "FROM", "BECAUSE", "BY"]
+            .into_iter()
+            .map(str::to_string)
+            .collect()];
         rows.extend(held.iter().map(|line| {
             vec![
                 name(line),
@@ -681,7 +752,11 @@ fn matcher_words(matcher: &Value) -> String {
                     bounds.push(words.replace("{}", &number.to_string()));
                 }
             }
-            format!("{} {}", matcher["field"].as_str().unwrap_or("modified"), bounds.join(", "))
+            format!(
+                "{} {}",
+                matcher["field"].as_str().unwrap_or("modified"),
+                bounds.join(", ")
+            )
         }
         _ => matcher.to_string(),
     }
@@ -696,7 +771,13 @@ pub fn rules_text(zones: &Value, snapshot: Option<&ZonesSnapshot>) -> String {
     let snapshot = snapshot.unwrap_or(&none);
     let empty = Vec::new();
     let rules = zones["rules"].as_array().unwrap_or(&empty);
-    let yes = |value: &Value, otherwise: bool| if value.as_bool().unwrap_or(otherwise) { "yes" } else { "no" };
+    let yes = |value: &Value, otherwise: bool| {
+        if value.as_bool().unwrap_or(otherwise) {
+            "yes"
+        } else {
+            "no"
+        }
+    };
     let mut head = format!(
         "Rules: {} · on arrival: {}",
         rules.len(),
@@ -707,30 +788,47 @@ pub fn rules_text(zones: &Value, snapshot: Option<&ZonesSnapshot>) -> String {
             0 => head.push_str(" · by age: never by themselves"),
             minutes => head.push_str(&format!(
                 " · by age: every {minutes} min{}",
-                if timed["move_files"].as_bool().unwrap_or(false) { ", files moved too" } else { "" }
+                if timed["move_files"].as_bool().unwrap_or(false) {
+                    ", files moved too"
+                } else {
+                    ""
+                }
             )),
         }
     }
     let mut lines = vec![head];
     if !rules.is_empty() {
-        let mut rows = vec![vec!["#", "NAME", "ON", "WHEN", "THEN"].into_iter().map(str::to_string).collect()];
+        let mut rows = vec![vec!["#", "NAME", "ON", "WHEN", "THEN"]
+            .into_iter()
+            .map(str::to_string)
+            .collect()];
         rows.extend(rules.iter().enumerate().map(|(index, rule)| {
-            let asks: Vec<String> =
-                rule["matchers"].as_array().into_iter().flatten().map(matcher_words).collect();
+            let asks: Vec<String> = rule["matchers"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(matcher_words)
+                .collect();
             vec![
                 (index + 1).to_string(),
                 rule["name"].as_str().unwrap_or_default().to_string(),
                 yes(&rule["enabled"], true).to_string(),
-                if asks.is_empty() { "(asks nothing: matches nothing)".to_string() } else { asks.join(" and ") },
+                if asks.is_empty() {
+                    "(asks nothing: matches nothing)".to_string()
+                } else {
+                    asks.join(" and ")
+                },
                 action_words(snapshot, &rule["action"]),
             ]
         }));
         lines.extend(table(&rows));
     }
-    lines.push(match zones.get("catch_all").filter(|action| !action.is_null()) {
-        Some(action) => format!("What no rule matches: {}", action_words(snapshot, action)),
-        None => "What no rule matches stays where it is".to_string(),
-    });
+    lines.push(
+        match zones.get("catch_all").filter(|action| !action.is_null()) {
+            Some(action) => format!("What no rule matches: {}", action_words(snapshot, action)),
+            None => "What no rule matches stays where it is".to_string(),
+        },
+    );
     lines.join("\n")
 }
 
@@ -746,10 +844,18 @@ pub fn search_text(found: &Value, snapshot: &ZonesSnapshot) -> String {
     let zone_title = |id: &str| snapshot.zone(id).map_or("", |zone| zone.title.as_str());
     let mut lines = vec![format!(
         "{} fit{} '{typed}':",
-        if hits.len() == 1 { "1 item".to_string() } else { format!("{} items", hits.len()) },
+        if hits.len() == 1 {
+            "1 item".to_string()
+        } else {
+            format!("{} items", hits.len())
+        },
         if hits.len() == 1 { "s" } else { "" }
     )];
-    let mut rows = vec![vec!["NAME".to_string(), "WHERE".to_string(), "ID".to_string()]];
+    let mut rows = vec![vec![
+        "NAME".to_string(),
+        "WHERE".to_string(),
+        "ID".to_string(),
+    ]];
     rows.extend(hits.iter().map(|hit| {
         vec![
             hit["name"].as_str().unwrap_or_default().to_string(),
@@ -785,7 +891,11 @@ fn time_words(seconds: u64) -> String {
     let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_from_march = (5 * day_of_year + 2) / 153;
     let day = day_of_year - (153 * month_from_march + 2) / 5 + 1;
-    let month = if month_from_march < 10 { month_from_march + 3 } else { month_from_march - 9 };
+    let month = if month_from_march < 10 {
+        month_from_march + 3
+    } else {
+        month_from_march - 9
+    };
     let year = year_of_era + era * 400 + i64::from(month <= 2);
     format!(
         "{year:04}-{month:02}-{day:02} {:02}:{:02} UTC",
@@ -815,18 +925,33 @@ pub fn snapshots_text(state: &proto::ZonesStateResponse) -> Result<String, Strin
     let empty = Vec::new();
     let copies = value["snapshots"].as_array().unwrap_or(&empty);
     if copies.is_empty() {
-        lines.push("No copies of the layout are saved (`gevrek zones snapshot save <name>`)".to_string());
+        lines.push(
+            "No copies of the layout are saved (`gevrek zones snapshot save <name>`)".to_string(),
+        );
         return Ok(lines.join("\n"));
     }
     lines.push(format!("Saved copies of the layout: {}", copies.len()));
-    let mut rows = vec![vec!["NAME".to_string(), "TAKEN".to_string(), "ZONES".to_string(), String::new()]];
+    let mut rows = vec![vec![
+        "NAME".to_string(),
+        "TAKEN".to_string(),
+        "ZONES".to_string(),
+        String::new(),
+    ]];
     rows.extend(copies.iter().map(|copy| {
         vec![
             copy["name"].as_str().unwrap_or_default().to_string(),
-            copy["taken_at"].as_u64().map_or("-".to_string(), time_words),
-            copy["zones"].as_u64().map_or("-".to_string(), |zones| zones.to_string()),
+            copy["taken_at"]
+                .as_u64()
+                .map_or("-".to_string(), time_words),
+            copy["zones"]
+                .as_u64()
+                .map_or("-".to_string(), |zones| zones.to_string()),
             // Taken by the zones themselves before a layout was replaced.
-            if copy["automatic"].as_bool().unwrap_or(false) { "(automatic)".to_string() } else { String::new() },
+            if copy["automatic"].as_bool().unwrap_or(false) {
+                "(automatic)".to_string()
+            } else {
+                String::new()
+            },
         ]
     }));
     lines.extend(table(&rows));
@@ -850,7 +975,11 @@ fn profile_words(key: &Value) -> String {
             )
         })
         .collect();
-    let displays = if displays.is_empty() { "no displays".to_string() } else { displays.join(" + ") };
+    let displays = if displays.is_empty() {
+        "no displays".to_string()
+    } else {
+        displays.join(" + ")
+    };
     match key["workspace"].as_str() {
         Some(workspace) => format!("{displays} · workspace {workspace}"),
         None => displays,
@@ -869,7 +998,10 @@ pub fn profiles_json(state: &proto::ZonesStateResponse, all: bool) -> Value {
         "current": value.get("profile").cloned().unwrap_or(Value::Null),
     });
     if all {
-        answer["profiles"] = value.get("profiles").cloned().unwrap_or_else(|| serde_json::json!([]));
+        answer["profiles"] = value
+            .get("profiles")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!([]));
     } else {
         let zones: Vec<Value> = value["zones"]
             .as_array()
@@ -898,7 +1030,10 @@ pub fn profiles_text(state: &proto::ZonesStateResponse, all: bool) -> Result<Str
     if all {
         let empty = Vec::new();
         let profiles = value["profiles"].as_array().unwrap_or(&empty);
-        lines.push(format!("Arrangements remembered: {}", profiles.len().max(usize::from(current.is_some()))));
+        lines.push(format!(
+            "Arrangements remembered: {}",
+            profiles.len().max(usize::from(current.is_some()))
+        ));
         if profiles.is_empty() {
             // (A shell that tells only of the one in use.)
             if let Some(key) = current {
@@ -914,22 +1049,35 @@ pub fn profiles_text(state: &proto::ZonesStateResponse, all: bool) -> Result<Str
                 profile_words(&profile["key"])
             );
             if let Some(zones) = profile["zones"].as_u64() {
-                line.push_str(&format!(" · {zones} zone{} placed", if zones == 1 { "" } else { "s" }));
+                line.push_str(&format!(
+                    " · {zones} zone{} placed",
+                    if zones == 1 { "" } else { "s" }
+                ));
             }
             lines.push(line);
         }
-        lines.push("(* is the one in use; `gevrek zones profile copy <number>` takes another over)".to_string());
+        lines.push(
+            "(* is the one in use; `gevrek zones profile copy <number>` takes another over)"
+                .to_string(),
+        );
         return Ok(lines.join("\n"));
     }
     match current {
         Some(key) => lines.push(format!("In use: {}", profile_words(key))),
         None => lines.push("No arrangement is in use: no displays are known yet".to_string()),
     }
-    let mut rows = vec![vec!["ZONE".to_string(), "DISPLAY".to_string(), "RECT".to_string(), "ANCHORED".to_string()]];
+    let mut rows = vec![vec![
+        "ZONE".to_string(),
+        "DISPLAY".to_string(),
+        "RECT".to_string(),
+        "ANCHORED".to_string(),
+    ]];
     rows.extend(snapshot.zones.iter().map(|zone| {
         vec![
             zone.id.to_string(),
-            zone.display.as_ref().map_or("-".to_string(), ToString::to_string),
+            zone.display
+                .as_ref()
+                .map_or("-".to_string(), ToString::to_string),
             place(zone) + if zone.visible { "" } else { " (hidden)" },
             zone.geometry.as_ref().map_or("-".to_string(), anchored),
         ]
@@ -959,8 +1107,14 @@ pub fn operations_text(operations: &[Value]) -> String {
                 `zones.operation_begun`, and called off with `gevrek zones cancel <number>`)"
             .to_string();
     }
-    let mut lines = vec![format!("Under way: {}. Say which: `gevrek zones cancel <number>`", operations.len())];
-    let mut rows = vec![vec!["NUMBER", "WHAT", "OF", "DONE"].into_iter().map(str::to_string).collect()];
+    let mut lines = vec![format!(
+        "Under way: {}. Say which: `gevrek zones cancel <number>`",
+        operations.len()
+    )];
+    let mut rows = vec![vec!["NUMBER", "WHAT", "OF", "DONE"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()];
     rows.extend(operations.iter().map(|operation| {
         let what = &operation["operation"];
         // Whatever the operation names of files and folders, in the
@@ -972,13 +1126,18 @@ pub fn operations_text(operations: &[Value]) -> String {
             .filter(|(key, _)| key.as_str() != "operation")
             .filter_map(|(_, value)| value.as_str().map(str::to_string))
             .collect();
-        let (done, total) = (operation["done"].as_u64().unwrap_or(0), operation["total"].as_u64().unwrap_or(0));
+        let (done, total) = (
+            operation["done"].as_u64().unwrap_or(0),
+            operation["total"].as_u64().unwrap_or(0),
+        );
         vec![
             operation["request"].to_string(),
             what["operation"].as_str().unwrap_or_default().to_string(),
             of.join(" -> "),
             // (A total of 0 is "not known".)
-            done.saturating_mul(100).checked_div(total).map_or("-".to_string(), |part| format!("{part}%")),
+            done.saturating_mul(100)
+                .checked_div(total)
+                .map_or("-".to_string(), |part| format!("{part}%")),
         ]
     }));
     lines.extend(table(&rows));
@@ -996,7 +1155,8 @@ pub fn exported(reply: &proto::ZonesCommandReply) -> Option<Value> {
 /// the document over themselves before anything is touched, and say what
 /// is wrong with it.
 pub fn import_command(text: &str, apply: bool) -> Result<Value, String> {
-    let document: Value = serde_json::from_str(text).map_err(|error| format!("it is not JSON: {error}"))?;
+    let document: Value =
+        serde_json::from_str(text).map_err(|error| format!("it is not JSON: {error}"))?;
     Ok(serde_json::json!({ "command": "import_layout", "apply": apply, "document": document }))
 }
 
@@ -1013,10 +1173,18 @@ pub fn event_line(event: &proto::RuntimeEvent, json: bool) -> Option<String> {
             "event": event.kind,
             "timestamp_ms": event.timestamp_ms,
         });
-        if let Some(sequence) = event.fields.get("sequence").and_then(|text| text.parse::<u64>().ok()) {
+        if let Some(sequence) = event
+            .fields
+            .get("sequence")
+            .and_then(|text| text.parse::<u64>().ok())
+        {
             line["sequence"] = sequence.into();
         }
-        if let Some(session) = event.fields.get("session").and_then(|text| text.parse::<u64>().ok()) {
+        if let Some(session) = event
+            .fields
+            .get("session")
+            .and_then(|text| text.parse::<u64>().ok())
+        {
             line["session"] = session.into();
         }
         if let Some(data) = data {
@@ -1049,7 +1217,9 @@ mod tests {
             zones: vec![
                 ZoneDefinition::manual("work", "Work"),
                 ZoneDefinition {
-                    kind: ZoneKind::Portal { directory: "/home/ada/Downloads".to_string() },
+                    kind: ZoneKind::Portal {
+                        directory: "/home/ada/Downloads".to_string(),
+                    },
                     ..ZoneDefinition::manual("dl", "Downloads")
                 },
             ],
@@ -1086,9 +1256,19 @@ mod tests {
                 },
                 NOW,
             );
-            core.command(Command::RollUp { zone: ZoneId::new("work"), rolled_up: Some(true) }, NOW);
             core.command(
-                Command::Lock { zone: ZoneId::new("work"), geometry: Some(true), members: None },
+                Command::RollUp {
+                    zone: ZoneId::new("work"),
+                    rolled_up: Some(true),
+                },
+                NOW,
+            );
+            core.command(
+                Command::Lock {
+                    zone: ZoneId::new("work"),
+                    geometry: Some(true),
+                    members: None,
+                },
                 NOW,
             );
         }
@@ -1126,7 +1306,10 @@ mod tests {
         assert!(lines[1].trim_start().starts_with("ID"), "{text}");
         let work: Vec<&str> = lines[2].split_whitespace().collect();
         assert_eq!(&work[..4], ["work", "Work", "manual", "DEL-A1B2-77"]);
-        assert_eq!(work[work.len() - 3..], ["1", "rolled-up", "locked(geometry)"]);
+        assert_eq!(
+            work[work.len() - 3..],
+            ["1", "rolled-up", "locked(geometry)"]
+        );
         assert!(lines[3].contains("portal"), "{text}");
         assert_eq!(*lines.last().unwrap(), "Loose items: 1");
     }
@@ -1134,8 +1317,12 @@ mod tests {
     #[test]
     fn what_is_old_switched_off_or_not_there_is_said() {
         // No shell, and never one: the one sentence, as the reason.
-        assert!(list_text(&not_running()).unwrap_err().starts_with("Zones are not running"));
-        assert!(show_text(&not_running(), "work").unwrap_err().starts_with("Zones are not running"));
+        assert!(list_text(&not_running())
+            .unwrap_err()
+            .starts_with("Zones are not running"));
+        assert!(show_text(&not_running(), "work")
+            .unwrap_err()
+            .starts_with("Zones are not running"));
         let json = state_json(&not_running());
         assert_eq!(json["running"], false);
         assert!(json["state"].is_null());
@@ -1144,7 +1331,8 @@ mod tests {
         let mut old = answer(&zones(true));
         old.running = false;
         old.stale = true;
-        old.message = "Zones are not running. This is what the shell that ran them last reported".to_string();
+        old.message =
+            "Zones are not running. This is what the shell that ran them last reported".to_string();
         let text = list_text(&old).unwrap();
         assert!(text.starts_with("Stale: Zones are not running"), "{text}");
         assert!(text.contains("Zones: 2"));
@@ -1152,7 +1340,10 @@ mod tests {
         assert_eq!(state_json(&old)["state"]["zones"][0]["id"], "work");
 
         let off = list_text(&answer(&zones(false))).unwrap();
-        assert!(off.starts_with("Zones are switched off (desktop.zones.enabled)"), "{off}");
+        assert!(
+            off.starts_with("Zones are switched off (desktop.zones.enabled)"),
+            "{off}"
+        );
 
         // A snapshot of a newer shape is not shown as if it were read.
         let mut newer = answer(&zones(true));
@@ -1169,8 +1360,13 @@ mod tests {
         assert!(text.contains("  locked     geometry: yes, members: no"));
         assert!(text.contains("  anchored   top_left"), "{text}");
         assert!(text.contains("  items (1):"));
-        assert!(text.contains("    file      report.pdf  /home/ada/Desktop/report.pdf"), "{text}");
-        assert!(show_text(&state, "dl").unwrap().contains("  folder     /home/ada/Downloads"));
+        assert!(
+            text.contains("    file      report.pdf  /home/ada/Desktop/report.pdf"),
+            "{text}"
+        );
+        assert!(show_text(&state, "dl")
+            .unwrap()
+            .contains("  folder     /home/ada/Downloads"));
 
         let json = show_json(&state, "work").unwrap();
         assert_eq!(json["zone"]["items"][0]["name"], "report.pdf");
@@ -1205,7 +1401,10 @@ mod tests {
             "zones are switched off (desktop.zones.enabled)"
         );
         assert_eq!(reply_json(&refused)["success"], false);
-        assert_eq!(restore_explorer_command(), r#"{"command":"restore_system_icons"}"#);
+        assert_eq!(
+            restore_explorer_command(),
+            r#"{"command":"restore_system_icons"}"#
+        );
     }
 
     #[test]
@@ -1222,7 +1421,10 @@ mod tests {
         assert_eq!(event_line(&event("window.created", &[]), false), None);
         let created = event(
             "zones.zone_created",
-            &[("json", r#"{"event":"zone_created","zone":"a"}"#), ("sequence", "3")],
+            &[
+                ("json", r#"{"event":"zone_created","zone":"a"}"#),
+                ("sequence", "3"),
+            ],
         );
         assert_eq!(
             event_line(&created, false).unwrap(),
@@ -1239,7 +1441,12 @@ mod tests {
         );
     }
 
-    fn reply(success: bool, delivered: bool, error: Option<&str>, events: &[&str]) -> proto::ZonesCommandReply {
+    fn reply(
+        success: bool,
+        delivered: bool,
+        error: Option<&str>,
+        events: &[&str],
+    ) -> proto::ZonesCommandReply {
         proto::ZonesCommandReply {
             success,
             delivered,
@@ -1269,7 +1476,10 @@ mod tests {
         ] {
             assert_eq!(failure_of(&reply).unwrap().code, code, "{:?}", reply.error);
         }
-        assert_eq!((exit::REFUSED, exit::NOT_RUNNING, exit::NO_ANSWER), (1, 3, 4));
+        assert_eq!(
+            (exit::REFUSED, exit::NOT_RUNNING, exit::NO_ANSWER),
+            (1, 3, 4)
+        );
 
         // Before a command: no shell is "not running", also where an
         // old shell's zones are still told.
@@ -1278,10 +1488,19 @@ mod tests {
         let mut old = answer(&zones(true));
         old.running = false;
         old.stale = true;
-        old.message = format!("{}. This is what the shell that ran them last reported", not_running().message);
+        old.message = format!(
+            "{}. This is what the shell that ran them last reported",
+            not_running().message
+        );
         let gone = zones_for_asking(&old).unwrap_err();
-        assert_eq!((gone.code, gone.message), (exit::NOT_RUNNING, not_running().message));
-        assert_eq!(zones_for_asking(&answer(&zones(true))).unwrap().zones.len(), 2);
+        assert_eq!(
+            (gone.code, gone.message),
+            (exit::NOT_RUNNING, not_running().message)
+        );
+        assert_eq!(
+            zones_for_asking(&answer(&zones(true))).unwrap().zones.len(),
+            2
+        );
         // Said to a script as an answer is.
         assert_eq!(
             Failure::refused("There is no zone 'x'").json().to_string(),
@@ -1304,7 +1523,10 @@ mod tests {
         let text = list_text(&state).unwrap();
         assert!(text.ends_with("Loose items: 4000"), "{text}");
         let work: Vec<&str> = text.lines().nth(2).unwrap().split_whitespace().collect();
-        assert_eq!(work[work.len() - 3..], ["1", "rolled-up", "locked(geometry)"]);
+        assert_eq!(
+            work[work.len() - 3..],
+            ["1", "rolled-up", "locked(geometry)"]
+        );
     }
 
     #[test]
@@ -1320,14 +1542,35 @@ mod tests {
         snapshot.zones[1].workspaces = vec!["2".to_string(), "dev".to_string()];
         let state = answer(&snapshot);
         let text = list_text(&state).unwrap();
-        assert!(text.starts_with(
-            "What the zones hold is covered (privacy)\nThe screen is shared or recorded\n"
-        ), "{text}");
-        assert!(text.lines().nth(4).unwrap().ends_with("rolled-up locked(geometry) covered focused"), "{text}");
-        assert!(text.lines().nth(5).unwrap().ends_with("private reserves-space"), "{text}");
+        assert!(
+            text.starts_with(
+                "What the zones hold is covered (privacy)\nThe screen is shared or recorded\n"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.lines()
+                .nth(4)
+                .unwrap()
+                .ends_with("rolled-up locked(geometry) covered focused"),
+            "{text}"
+        );
+        assert!(
+            text.lines()
+                .nth(5)
+                .unwrap()
+                .ends_with("private reserves-space"),
+            "{text}"
+        );
         let shown = show_text(&state, "dl").unwrap();
-        assert!(shown.contains("  private    yes (uncovered for now)"), "{shown}");
-        assert!(shown.contains("  reserves   tiled windows keep off its place"), "{shown}");
+        assert!(
+            shown.contains("  private    yes (uncovered for now)"),
+            "{shown}"
+        );
+        assert!(
+            shown.contains("  reserves   tiled windows keep off its place"),
+            "{shown}"
+        );
         assert!(shown.contains("  workspaces 2, dev"), "{shown}");
         assert!(shown.contains("  view       grid, icons 48"), "{shown}");
         let shown = show_text(&state, "work").unwrap();
@@ -1370,10 +1613,12 @@ mod tests {
              Nothing was changed. `gevrek zones rules apply` carries it out."
         );
         let applied = plan_text(Some(&event), true, "the items that are in no zone");
-        assert!(applied.starts_with("The rules sorted 3 items (asked of the items that are in no zone):"));
+        assert!(applied
+            .starts_with("The rules sorted 3 items (asked of the items that are in no zone):"));
         assert!(applied.ends_with("`gevrek zones rules undo` takes it back."));
         // Nothing to do, and nothing said at all (the timed rules).
-        let nothing: Value = serde_json::from_str(r#"{"event":"rules_previewed","plan":{},"lines":[]}"#).unwrap();
+        let nothing: Value =
+            serde_json::from_str(r#"{"event":"rules_previewed","plan":{},"lines":[]}"#).unwrap();
         assert_eq!(
             plan_text(Some(&nothing), false, "every item of the desktop"),
             "The rules would change nothing (asked of every item of the desktop)"
@@ -1383,7 +1628,12 @@ mod tests {
             "The rules changed nothing (asked of every item, by the rules that go by age)"
         );
         // The event is found in a reply under either of its names.
-        let told = reply(true, true, None, &[r#"{"event":"layout_changed"}"#, &nothing.to_string()]);
+        let told = reply(
+            true,
+            true,
+            None,
+            &[r#"{"event":"layout_changed"}"#, &nothing.to_string()],
+        );
         assert_eq!(plan_of(&told).unwrap()["event"], "rules_previewed");
         assert_eq!(plan_of(&reply(true, true, None, &[])), None);
     }
@@ -1410,13 +1660,31 @@ mod tests {
         let text = rules_text(&section, Some(&zones(true)));
         println!("{text}");
         let lines: Vec<&str> = text.lines().collect();
-        assert_eq!(lines[0], "Rules: 3 · on arrival: yes · by age: every 60 min");
-        assert_eq!(lines[1].split_whitespace().collect::<Vec<_>>(), ["#", "NAME", "ON", "WHEN", "THEN"]);
-        assert!(lines[2].contains("1  Documents        yes  extension pdf, docx"), "{text}");
+        assert_eq!(
+            lines[0],
+            "Rules: 3 · on arrival: yes · by age: every 60 min"
+        );
+        assert_eq!(
+            lines[1].split_whitespace().collect::<Vec<_>>(),
+            ["#", "NAME", "ON", "WHEN", "THEN"]
+        );
+        assert!(
+            lines[2].contains("1  Documents        yes  extension pdf, docx"),
+            "{text}"
+        );
         assert!(lines[2].ends_with("zone work (Work)"), "{text}");
-        assert!(lines[3].contains("no   untouched for 30 days and size at least 1000000 bytes"), "{text}");
-        assert!(lines[3].ends_with("folder /home/ada/Archive (the file is moved)"), "{text}");
-        assert!(lines[4].contains("type image/* and modified in the last 7 days"), "{text}");
+        assert!(
+            lines[3].contains("no   untouched for 30 days and size at least 1000000 bytes"),
+            "{text}"
+        );
+        assert!(
+            lines[3].ends_with("folder /home/ada/Archive (the file is moved)"),
+            "{text}"
+        );
+        assert!(
+            lines[4].contains("type image/* and modified in the last 7 days"),
+            "{text}"
+        );
         assert!(lines[4].ends_with("zone gone"), "{text}");
         assert_eq!(lines[5], "What no rule matches: zone dl (Downloads)");
         // Without rules, and without a shell to ask for the titles.
@@ -1476,23 +1744,36 @@ mod tests {
              \x20 Before restoring  2027-01-15 08:00 UTC  2      (automatic)"
         );
         assert_eq!(snapshots_json(&state)["snapshots"][1]["automatic"], true);
-        assert!(snapshots_text(&answer(&zones(true))).unwrap().starts_with("No copies of the layout are saved"));
-        assert!(snapshots_text(&not_running()).unwrap_err().starts_with("Zones are not running"));
+        assert!(snapshots_text(&answer(&zones(true)))
+            .unwrap()
+            .starts_with("No copies of the layout are saved"));
+        assert!(snapshots_text(&not_running())
+            .unwrap_err()
+            .starts_with("Zones are not running"));
 
         let text = profiles_text(&state, true).unwrap();
         println!("{text}");
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines[0], "Arrangements remembered: 2");
-        assert_eq!(lines[1], "  * 1  DEL-A1B2-77 1920x1080@1.00 · 2 zones placed");
+        assert_eq!(
+            lines[1],
+            "  * 1  DEL-A1B2-77 1920x1080@1.00 · 2 zones placed"
+        );
         assert_eq!(
             lines[2],
             "    2  DEL-A1B2-77 1920x1080@1.00 + LG-0042 2560x1440@1.25 · workspace dev · 1 zone placed"
         );
-        assert_eq!(profiles_json(&state, true)["profiles"][1]["key"]["workspace"], "dev");
+        assert_eq!(
+            profiles_json(&state, true)["profiles"][1]["key"]["workspace"],
+            "dev"
+        );
 
         let text = profiles_text(&state, false).unwrap();
         println!("{text}");
-        assert!(text.starts_with("In use: DEL-A1B2-77 1920x1080@1.00\n"), "{text}");
+        assert!(
+            text.starts_with("In use: DEL-A1B2-77 1920x1080@1.00\n"),
+            "{text}"
+        );
         assert!(text.contains("  work  DEL-A1B2-77  "), "{text}");
         assert!(text.contains("top_left"), "{text}");
         assert_eq!(profiles_json(&state, false)["zones"][0]["id"], "work");
@@ -1537,12 +1818,15 @@ mod tests {
 
     #[test]
     fn a_layout_goes_to_a_file_and_comes_from_one() {
-        let document = r#"{"format":"gevrek-zones-layout","version":1,"layout":{"name":"Work","zones":[]}}"#;
+        let document =
+            r#"{"format":"gevrek-zones-layout","version":1,"layout":{"name":"Work","zones":[]}}"#;
         let told = reply(
             true,
             true,
             None,
-            &[&format!(r#"{{"event":"layout_exported","document":{document}}}"#)],
+            &[&format!(
+                r#"{{"event":"layout_exported","document":{document}}}"#
+            )],
         );
         assert_eq!(exported(&told).unwrap().to_string(), document);
         assert_eq!(exported(&reply(true, true, None, &[])), None);
@@ -1553,6 +1837,8 @@ mod tests {
         );
         // The zones read it as theirs.
         gevrek_zones::ipc::Request::from_value(import_command(document, true).unwrap()).unwrap();
-        assert!(import_command("not a layout", false).unwrap_err().starts_with("it is not JSON"));
+        assert!(import_command("not a layout", false)
+            .unwrap_err()
+            .starts_with("it is not JSON"));
     }
 }

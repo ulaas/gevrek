@@ -339,11 +339,14 @@ impl Page {
             ),
             // (Room kept free at one display's edges, and its place
             // among the displays: of a display, not of its workspaces.)
-            card("Space kept free, display by display", "/desktop/monitors", Show::Place),
+            card(
+                "Space kept free, display by display",
+                "/desktop/monitors",
+                Show::Place,
+            ),
         ];
         // (Drawn by the page of its own, `crate::workspaces`.)
-        const WORKSPACES: &[Card] =
-            &[card("Workspaces", "/desktop/workspaces", Show::Place)];
+        const WORKSPACES: &[Card] = &[card("Workspaces", "/desktop/workspaces", Show::Place)];
         const ANIMATIONS: &[Card] = &[card("Animations", "/desktop/animations", Show::AllBut(&[]))];
         const BAR: &[Card] = &[
             // (What stands on it is placed by dragging, in the card above.)
@@ -400,15 +403,27 @@ impl Page {
         // section holds that the others do not name, so that a setting
         // the model gains is on the page at once.)
         const ZONES: &[Card] = &[
-            card("Zones on the desktop", "/desktop/zones", Show::Only(&["enabled"])),
+            card(
+                "Zones on the desktop",
+                "/desktop/zones",
+                Show::Only(&["enabled"]),
+            ),
             card("The zones", "/desktop/zones/zones", Show::Place),
             card(
                 "Rules that sort the desktop",
                 "/desktop/zones",
                 Show::Only(&["rules", "catch_all", "rules_on_arrival", "timed_rules"]),
             ),
-            card("How every zone looks", "/desktop/zones/look", Show::AllBut(&[])),
-            card("Moving and sizing a zone", "/desktop/zones/snap", Show::AllBut(&[])),
+            card(
+                "How every zone looks",
+                "/desktop/zones/look",
+                Show::AllBut(&[]),
+            ),
+            card(
+                "Moving and sizing a zone",
+                "/desktop/zones/snap",
+                Show::AllBut(&[]),
+            ),
             card(
                 "How they behave",
                 "/desktop/zones",

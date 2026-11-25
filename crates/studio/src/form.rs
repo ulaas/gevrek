@@ -783,10 +783,16 @@ pub fn workspace_line(name: &str, shown: &str) -> String {
 /// others on a press. A name that none of them has is shown as it is,
 /// and said to be none of them (a workspace of the moment may have it:
 /// those go by their numbers). The pencil beside it is for such a name.
-fn workspace_control(ui: &mut Ui, workspaces: &[(String, String)], current: &Value) -> Option<Value> {
+fn workspace_control(
+    ui: &mut Ui,
+    workspaces: &[(String, String)],
+    current: &Value,
+) -> Option<Value> {
     let name = current.as_str().unwrap_or("").to_string();
     let typed = ui.scope_id().with("a workspace's name is typed");
-    let mut typing = ui.data(|data| data.get_temp::<bool>(typed)).unwrap_or(false);
+    let mut typing = ui
+        .data(|data| data.get_temp::<bool>(typed))
+        .unwrap_or(false);
     let mut new = None;
     ui.horizontal(|ui| {
         if typing {
@@ -905,7 +911,8 @@ fn control(ui: &mut Ui, pointer: &str, kind: &Kind<'_>, current: &Value) -> Opti
                 // A place on the machine: said whether it is there.
                 Some(kind) => {
                     let home = dirs::home_dir();
-                    if kind == widgets::PathKind::File && pointer.starts_with("/desktop/wallpaper") {
+                    if kind == widgets::PathKind::File && pointer.starts_with("/desktop/wallpaper")
+                    {
                         // (Its browser shows pictures.)
                         widgets::path_field_of(
                             ui,
@@ -1132,7 +1139,10 @@ mod tests {
         );
         // Where no entry is numbered, and where the first has no place
         // written down, the hint is what it always was.
-        assert_eq!(hint_at("/desktop/shell/panel/height"), hint("/desktop/shell/panel/height"));
+        assert_eq!(
+            hint_at("/desktop/shell/panel/height"),
+            hint("/desktop/shell/panel/height")
+        );
         assert_eq!(
             hint_at("/desktop/window_rules/3/no_such_number"),
             hint("/desktop/window_rules/3/no_such_number")
@@ -1141,17 +1151,22 @@ mod tests {
 
     fn document() -> Document {
         let mut config = Config::default();
-        let workspace = |name: &str, title: Option<&str>, monitor: MonitorSelector| WorkspaceProfile {
-            name: name.to_string(),
-            title: title.map(str::to_string),
-            monitor,
-            ..WorkspaceProfile::default()
-        };
+        let workspace =
+            |name: &str, title: Option<&str>, monitor: MonitorSelector| WorkspaceProfile {
+                name: name.to_string(),
+                title: title.map(str::to_string),
+                monitor,
+                ..WorkspaceProfile::default()
+            };
         config.desktop.workspaces = vec![
             workspace("web", None, MonitorSelector::Any),
             workspace("code", Some("Work"), MonitorSelector::Any),
             // A display's own entry of one that is there already.
-            workspace("web", Some("Browsing"), MonitorSelector::Name("DELL".to_string())),
+            workspace(
+                "web",
+                Some("Browsing"),
+                MonitorSelector::Name("DELL".to_string()),
+            ),
         ];
         config.desktop.bindings = vec![
             BindingProfile {

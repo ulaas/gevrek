@@ -45,10 +45,15 @@ pub fn plan_text(event: Option<&Value>, snapshot: &ZonesSnapshot, asked_of: &str
     let left = plan["left"].as_array().unwrap_or(&empty);
     let mut text = Vec::new();
     if zones.is_empty() {
-        text.push(format!("There are no zones to make by type (asked of {asked_of})"));
+        text.push(format!(
+            "There are no zones to make by type (asked of {asked_of})"
+        ));
     } else {
         let new = zones.iter().filter(|zone| zone["zone"].is_null()).count() as u64;
-        let items: u64 = zones.iter().map(|zone| zone["items"].as_array().map_or(0, Vec::len) as u64).sum();
+        let items: u64 = zones
+            .iter()
+            .map(|zone| zone["items"].as_array().map_or(0, Vec::len) as u64)
+            .sum();
         let on = match plan["display"].as_str() {
             Some(display) if new > 0 => format!(" on display {display}"),
             _ => String::new(),
@@ -58,7 +63,10 @@ pub fn plan_text(event: Option<&Value>, snapshot: &ZonesSnapshot, asked_of: &str
             counted(new, "zone", "zones"),
             counted(items, "item", "items"),
         ));
-        let mut rows = vec![vec!["ZONE", "IS", "ITEMS", "AT", "SIZE", "RULE"].into_iter().map(str::to_string).collect()];
+        let mut rows = vec![vec!["ZONE", "IS", "ITEMS", "AT", "SIZE", "RULE"]
+            .into_iter()
+            .map(str::to_string)
+            .collect()];
         rows.extend(zones.iter().map(|zone| {
             let rect = &zone["rect"];
             let number = |key: &str| rect[key].as_i64().unwrap_or(0);
@@ -71,15 +79,23 @@ pub fn plan_text(event: Option<&Value>, snapshot: &ZonesSnapshot, asked_of: &str
                 zone["items"].as_array().map_or(0, Vec::len).to_string(),
                 format!("{},{}", number("x"), number("y")),
                 format!("{}x{}", number("width"), number("height")),
-                if zone["rule"].as_bool().unwrap_or(false) { "a rule for what comes later" } else { "" }.to_string(),
+                if zone["rule"].as_bool().unwrap_or(false) {
+                    "a rule for what comes later"
+                } else {
+                    ""
+                }
+                .to_string(),
             ]
         }));
         text.extend(table(&rows));
     }
     if !left.is_empty() {
         const NAMED: usize = 8;
-        let mut names: Vec<String> =
-            left.iter().take(NAMED).map(|item| item_name(snapshot, item.as_str().unwrap_or_default())).collect();
+        let mut names: Vec<String> = left
+            .iter()
+            .take(NAMED)
+            .map(|item| item_name(snapshot, item.as_str().unwrap_or_default()))
+            .collect();
         if left.len() > NAMED {
             names.push(format!("and {} more", left.len() - NAMED));
         }
@@ -102,7 +118,12 @@ pub fn created_text(event: Option<&Value>) -> String {
     let Some(event) = event else {
         return "Done".to_string();
     };
-    let zones: Vec<&str> = event["zones"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    let zones: Vec<&str> = event["zones"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
     let items = event["items"].as_u64().unwrap_or(0);
     let rules = event["rules"].as_u64().unwrap_or(0);
     if zones.is_empty() && items == 0 {
@@ -110,7 +131,10 @@ pub fn created_text(event: Option<&Value>) -> String {
             .to_string();
     }
     let mut said = match zones.len() {
-        0 => format!("{} sorted into the zones made by type before", counted(items, "item was", "items were")),
+        0 => format!(
+            "{} sorted into the zones made by type before",
+            counted(items, "item was", "items were")
+        ),
         count => format!(
             "{} made ({}), and {} sorted by type",
             counted(count as u64, "zone was", "zones were"),
@@ -119,7 +143,10 @@ pub fn created_text(event: Option<&Value>) -> String {
         ),
     };
     if rules > 0 {
-        said.push_str(&format!("; {} added for what comes later", counted(rules, "rule was", "rules were")));
+        said.push_str(&format!(
+            "; {} added for what comes later",
+            counted(rules, "rule was", "rules were")
+        ));
     }
     said.push_str(". `gevrek zones auto-undo` takes it back.");
     said
@@ -135,7 +162,11 @@ pub fn undone_text(event: Option<&Value>) -> String {
         "Taken back: {} taken away, {} put back where {}, {} taken out",
         counted(count("zones"), "zone", "zones"),
         counted(count("items"), "item", "items"),
-        if count("items") == 1 { "it was" } else { "they were" },
+        if count("items") == 1 {
+            "it was"
+        } else {
+            "they were"
+        },
         counted(count("rules"), "rule", "rules"),
     )
 }
@@ -187,22 +218,27 @@ mod tests {
              Nothing was changed. `gevrek zones auto-create` carries it out."
         );
         // Nothing to make is said so, with what is left and why.
-        let nothing: Value =
-            serde_json::from_str(r#"{"event": "auto_planned", "plan": {"zones": [], "left": ["/desk/song.mp3"]}}"#)
-                .unwrap();
+        let nothing: Value = serde_json::from_str(
+            r#"{"event": "auto_planned", "plan": {"zones": [], "left": ["/desk/song.mp3"]}}"#,
+        )
+        .unwrap();
         assert_eq!(
             plan_text(Some(&nothing), &desk(), "every item of the desktop"),
             "There are no zones to make by type (asked of every item of the desktop)\n\
              Left where it is (1; too few of a type for a zone of its own, or its zone is locked): song.mp3"
         );
-        let bare: Value = serde_json::from_str(r#"{"event": "auto_planned", "plan": {"zones": []}}"#).unwrap();
+        let bare: Value =
+            serde_json::from_str(r#"{"event": "auto_planned", "plan": {"zones": []}}"#).unwrap();
         assert_eq!(
             plan_text(Some(&bare), &desk(), "the items that are in no zone"),
             "There are no zones to make by type (asked of the items that are in no zone)"
         );
         // Many that are left are counted, not all named.
-        let many: Vec<String> = (0..12).map(|number| format!("/desk/f{number}.bin")).collect();
-        let event = serde_json::json!({"event": "auto_planned", "plan": {"zones": [], "left": many}});
+        let many: Vec<String> = (0..12)
+            .map(|number| format!("/desk/f{number}.bin"))
+            .collect();
+        let event =
+            serde_json::json!({"event": "auto_planned", "plan": {"zones": [], "left": many}});
         let text = plan_text(Some(&event), &desk(), "x");
         assert!(text.ends_with("f6.bin, f7.bin, and 4 more"), "{text}");
         // A shell that does not say (an older one) is not guessed around.
@@ -213,7 +249,9 @@ mod tests {
     fn what_was_made_by_type_and_what_was_taken_back_is_said_in_a_sentence() {
         let event = |text: &str| serde_json::from_str::<Value>(text).unwrap();
         assert_eq!(
-            created_text(Some(&event(r#"{"event":"auto_created","zones":["zone-4","zone-5"],"items":7,"rules":2}"#))),
+            created_text(Some(&event(
+                r#"{"event":"auto_created","zones":["zone-4","zone-5"],"items":7,"rules":2}"#
+            ))),
             "2 zones were made (zone-4, zone-5), and 7 items sorted by type; \
              2 rules were added for what comes later. `gevrek zones auto-undo` takes it back."
         );
@@ -225,11 +263,15 @@ mod tests {
             created_text(Some(&event(r#"{"event":"auto_created","zones":[],"items":1,"rules":0}"#))),
             "1 item was sorted into the zones made by type before. `gevrek zones auto-undo` takes it back."
         );
-        assert!(created_text(Some(&event(r#"{"event":"auto_created","zones":[],"items":0,"rules":0}"#)))
-            .starts_with("There was nothing to do"));
+        assert!(created_text(Some(&event(
+            r#"{"event":"auto_created","zones":[],"items":0,"rules":0}"#
+        )))
+        .starts_with("There was nothing to do"));
         assert_eq!(created_text(None), "Done");
         assert_eq!(
-            undone_text(Some(&event(r#"{"event":"auto_undone","zones":3,"items":1,"rules":2}"#))),
+            undone_text(Some(&event(
+                r#"{"event":"auto_undone","zones":3,"items":1,"rules":2}"#
+            ))),
             "Taken back: 3 zones taken away, 1 item put back where it was, 2 rules taken out"
         );
         assert_eq!(undone_text(None), "The zones made by type were taken back");

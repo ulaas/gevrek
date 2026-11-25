@@ -168,7 +168,10 @@ impl Pictures {
                     if let Some(bytes) = found {
                         self.note(handle, bytes, now);
                     }
-                    ready.push(BackendEvent::IconReady { request, icon: found.map(|_| handle) });
+                    ready.push(BackendEvent::IconReady {
+                        request,
+                        icon: found.map(|_| handle),
+                    });
                 }
                 None => self.waiting.push((request, handle)),
             }
@@ -219,7 +222,14 @@ impl Pictures {
         match self.held.get_mut(&handle) {
             Some(held) => held.used = now,
             None => {
-                self.held.insert(handle, Held { bytes, used: now, taken: false });
+                self.held.insert(
+                    handle,
+                    Held {
+                        bytes,
+                        used: now,
+                        taken: false,
+                    },
+                );
                 self.bytes += bytes;
             }
         }
@@ -277,7 +287,11 @@ mod tests {
     }
 
     /// Wait for the answers to `count` requests and give them by request.
-    fn answers(pictures: &mut Pictures, wakes: &mpsc::Receiver<()>, count: usize) -> HashMap<IconRequest, Option<IconHandle>> {
+    fn answers(
+        pictures: &mut Pictures,
+        wakes: &mpsc::Receiver<()>,
+        count: usize,
+    ) -> HashMap<IconRequest, Option<IconHandle>> {
         let mut handles = HashMap::new();
         while handles.len() < count {
             wakes.recv_timeout(Duration::from_secs(10)).expect("woken");
@@ -293,7 +307,10 @@ mod tests {
 
     #[test]
     fn a_key_says_what_it_is_a_picture_of() {
-        assert_eq!(parts(&key(false, 0, "C:\\a|b.txt")), Some((false, "C:\\a|b.txt")));
+        assert_eq!(
+            parts(&key(false, 0, "C:\\a|b.txt")),
+            Some((false, "C:\\a|b.txt"))
+        );
         assert_eq!(parts(&key(true, 12, "::{X}")), Some((true, "::{X}")));
         assert_eq!(parts("nothing"), None);
     }
@@ -310,8 +327,18 @@ mod tests {
         let icon = handles[&icon].expect("an icon");
         let thumbnail = handles[&thumbnail].expect("a thumbnail");
         assert_ne!(icon, thumbnail);
-        assert_eq!(icons.picture(icon).map(|picture| (picture.width, picture.pixels[0])), Some((32, 1)));
-        assert_eq!(icons.picture(thumbnail).map(|picture| (picture.width, picture.pixels[0])), Some((16, 2)));
+        assert_eq!(
+            icons
+                .picture(icon)
+                .map(|picture| (picture.width, picture.pixels[0])),
+            Some((32, 1))
+        );
+        assert_eq!(
+            icons
+                .picture(thumbnail)
+                .map(|picture| (picture.width, picture.pixels[0])),
+            Some((16, 2))
+        );
         assert!(icons.drain().is_empty());
         assert_eq!(icons.held_bytes(), 32 * 32 * 4 + 16 * 16 * 4);
 
@@ -351,7 +378,10 @@ mod tests {
         let request = icons.request(&item(3), 16, false);
         let fourth = answers(&mut icons, &wakes, 1)[&request].expect("a picture");
         assert_eq!(icons.held_bytes(), 3 * ONE);
-        assert!(icons.picture(handle_of[1]).is_none(), "the one taken longest ago was kept");
+        assert!(
+            icons.picture(handle_of[1]).is_none(),
+            "the one taken longest ago was kept"
+        );
         for kept in [handle_of[0], handle_of[2], fourth] {
             assert!(icons.picture(kept).is_some());
         }
@@ -376,15 +406,24 @@ mod tests {
         // where that is more than the bound; the next drain lets go.
         icons.set_budget(ONE);
         assert_eq!(icons.held_bytes(), ONE);
-        let requests: Vec<IconRequest> = (5000..5004).map(|number| icons.request(&item(number), 16, false)).collect();
+        let requests: Vec<IconRequest> = (5000..5004)
+            .map(|number| icons.request(&item(number), 16, false))
+            .collect();
         let mut told = HashMap::new();
         while told.len() < requests.len() {
             wakes.recv_timeout(Duration::from_secs(10)).expect("woken");
             for event in icons.drain() {
-                let BackendEvent::IconReady { request, icon: Some(handle) } = event else {
+                let BackendEvent::IconReady {
+                    request,
+                    icon: Some(handle),
+                } = event
+                else {
                     panic!("a picture for each");
                 };
-                assert!(icons.picture(handle).is_some(), "told of a picture that is not there");
+                assert!(
+                    icons.picture(handle).is_some(),
+                    "told of a picture that is not there"
+                );
                 told.insert(request, handle);
             }
         }

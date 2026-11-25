@@ -71,6 +71,9 @@ mod tests {
         assert_eq!(places.state, Path::new("C:\\state"));
         let pretend = Places::under(Path::new("C:\\t"));
         assert_eq!(pretend.recent.as_deref(), Some(Path::new("C:\\t\\Recent")));
-        assert_eq!(pretend.downloads.as_deref(), Some(Path::new("C:\\t\\Downloads")));
+        assert_eq!(
+            pretend.downloads.as_deref(),
+            Some(Path::new("C:\\t\\Downloads"))
+        );
     }
 }

@@ -112,7 +112,10 @@ pub fn to_pixels(found: &[Found], at: Point, pointer: Option<(i32, i32)>) -> (i3
         .iter()
         .min_by_key(|display| (far(display), !under_pointer(display)))
         .map_or(1.0, Found::scale);
-    ((f64::from(at.x) * scale).round() as i32, (f64::from(at.y) * scale).round() as i32)
+    (
+        (f64::from(at.x) * scale).round() as i32,
+        (f64::from(at.y) * scale).round() as i32,
+    )
 }
 
 /// The displays the zones know, and who said so.
@@ -183,7 +186,10 @@ impl Displays {
         displays
             .iter()
             .map(|display| {
-                let known = self.found.iter().find(|found| found.id == display.id.as_str());
+                let known = self
+                    .found
+                    .iter()
+                    .find(|found| found.id == display.id.as_str());
                 let scaled = |units: i32| (f64::from(units) * display.scale).round() as i32;
                 let pixels = known.map_or(
                     (
@@ -244,10 +250,11 @@ pub fn displays_of_state(state: &serde_json::Value) -> (Vec<Display>, Vec<Reserv
     let mut reserved = Vec::new();
     for monitor in state["monitors"].as_array().into_iter().flatten() {
         let said = |key: &str| monitor[key].as_str().filter(|text| !text.is_empty());
-        let Some(id) = said("stable_id")
-            .map(str::to_string)
-            .or_else(|| said("connector").or_else(|| said("name")).map(|port| format!("port:{port}")))
-        else {
+        let Some(id) = said("stable_id").map(str::to_string).or_else(|| {
+            said("connector")
+                .or_else(|| said("name"))
+                .map(|port| format!("port:{port}"))
+        }) else {
             continue;
         };
         let pixels = (
@@ -283,7 +290,10 @@ pub fn displays_of_state(state: &serde_json::Value) -> (Vec<Display>, Vec<Reserv
             name: said("name").unwrap_or_default().to_string(),
             pixels,
             work,
-            scale: monitor["scale"].as_f64().filter(|scale| *scale > 0.0).unwrap_or(1.0),
+            scale: monitor["scale"]
+                .as_f64()
+                .filter(|scale| *scale > 0.0)
+                .unwrap_or(1.0),
             primary: monitor["is_primary"].as_bool().unwrap_or(false),
         };
         displays.push(found.display());
@@ -307,16 +317,31 @@ pub fn from_system() -> Vec<Found> {
     // SAFETY: the list lives until the call returns, and is only touched
     // by the function it is handed to.
     unsafe {
-        let _ = EnumDisplayMonitors(None, None, Some(each), LPARAM(&mut seen as *mut Vec<Seen> as isize));
+        let _ = EnumDisplayMonitors(
+            None,
+            None,
+            Some(each),
+            LPARAM(&mut seen as *mut Vec<Seen> as isize),
+        );
     }
     let places: Vec<(String, i32, i32, isize)> = seen
         .iter()
-        .map(|display| (display.path.clone(), display.found.pixels.0, display.found.pixels.1, display.handle))
+        .map(|display| {
+            (
+                display.path.clone(),
+                display.found.pixels.0,
+                display.found.pixels.1,
+                display.handle,
+            )
+        })
         .collect();
     let ids = crate::display_ids::stable_ids(&places);
     seen.into_iter()
         .zip(ids)
-        .map(|(display, id)| Found { id, ..display.found })
+        .map(|(display, id)| Found {
+            id,
+            ..display.found
+        })
         .collect()
 }
 
@@ -354,7 +379,14 @@ unsafe extern "system" fn each(monitor: HMONITOR, _: HDC, _: *mut RECT, seen: LP
     let (whole, work) = (said.monitorInfo.rcMonitor, said.monitorInfo.rcWork);
     let (mut across, mut down) = (96u32, 96u32);
     let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut across, &mut down);
-    let area = |rect: RECT| (rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+    let area = |rect: RECT| {
+        (
+            rect.left,
+            rect.top,
+            rect.right - rect.left,
+            rect.bottom - rect.top,
+        )
+    };
     seen.push(Seen {
         path: crate::display_ids::device_path_of(&name),
         handle: monitor.0 as isize,
@@ -377,41 +409,90 @@ unsafe extern "system" fn each(monitor: HMONITOR, _: HDC, _: *mut RECT, seen: LP
 mod tests {
     use super::*;
 
-    fn found(id: &str, pixels: (i32, i32, i32, i32), work: (i32, i32, i32, i32), scale: f64) -> Found {
-        Found { id: id.to_string(), name: String::new(), pixels, work, scale, primary: false }
+    fn found(
+        id: &str,
+        pixels: (i32, i32, i32, i32),
+        work: (i32, i32, i32, i32),
+        scale: f64,
+    ) -> Found {
+        Found {
+            id: id.to_string(),
+            name: String::new(),
+            pixels,
+            work,
+            scale,
+            primary: false,
+        }
     }
 
     #[test]
     fn a_display_is_counted_in_logical_units_and_its_pixels_are_those_times_the_scale() {
-        let plain = found("GSM-5B7F-0004E2A1", (0, 0, 1920, 1080), (0, 0, 1920, 1040), 1.0);
+        let plain = found(
+            "GSM-5B7F-0004E2A1",
+            (0, 0, 1920, 1080),
+            (0, 0, 1920, 1040),
+            1.0,
+        );
         assert_eq!(plain.display().rect, Rect::new(0, 0, 1920, 1080));
         assert_eq!(
             plain.reserved(),
-            [ReservedArea { display: DisplayId::new("GSM-5B7F-0004E2A1"), edge: Edge::Bottom, thickness: 40 }]
+            [ReservedArea {
+                display: DisplayId::new("GSM-5B7F-0004E2A1"),
+                edge: Edge::Bottom,
+                thickness: 40
+            }]
         );
         // A display of 3840 by 2160 at 150 %, to the right of the first,
         // with a panel of 72 pixels at its top and a strip at its left.
-        let fine = found("DEL-A0F1-noserial", (1920, 0, 3840, 2160), (1980, 72, 3780, 2088), 1.5);
+        let fine = found(
+            "DEL-A0F1-noserial",
+            (1920, 0, 3840, 2160),
+            (1980, 72, 3780, 2088),
+            1.5,
+        );
         let display = fine.display();
-        assert_eq!((display.rect, display.scale), (Rect::new(1280, 0, 2560, 1440), 1.5));
         assert_eq!(
-            fine.reserved().iter().map(|kept| (kept.edge, kept.thickness)).collect::<Vec<_>>(),
+            (display.rect, display.scale),
+            (Rect::new(1280, 0, 2560, 1440), 1.5)
+        );
+        assert_eq!(
+            fine.reserved()
+                .iter()
+                .map(|kept| (kept.edge, kept.thickness))
+                .collect::<Vec<_>>(),
             [(Edge::Left, 40), (Edge::Top, 48)]
         );
         // A scale that is none counts as one.
-        assert_eq!(found("x", (0, 0, 800, 600), (0, 0, 800, 600), 0.0).display().scale, 1.0);
+        assert_eq!(
+            found("x", (0, 0, 800, 600), (0, 0, 800, 600), 0.0)
+                .display()
+                .scale,
+            1.0
+        );
 
         let both = [plain, fine];
         assert_eq!(to_pixels(&both, Point { x: 100, y: 50 }, None), (100, 50));
         // Units both displays cover: the display the pointer is on.
-        let at = Point { x: 1280 + 100, y: 50 };
-        assert_eq!(to_pixels(&both, at, Some((1920 + 150, 75))), (1920 + 150, 75));
+        let at = Point {
+            x: 1280 + 100,
+            y: 50,
+        };
+        assert_eq!(
+            to_pixels(&both, at, Some((1920 + 150, 75))),
+            (1920 + 150, 75)
+        );
         assert_eq!(to_pixels(&both, at, Some((1380, 50))), (1380, 50));
         assert_eq!(to_pixels(&both, at, None), (1380, 50));
         // Units only the second covers.
-        assert_eq!(to_pixels(&both, Point { x: 2000, y: 100 }, Some((5, 5))), (3000, 150));
+        assert_eq!(
+            to_pixels(&both, Point { x: 2000, y: 100 }, Some((5, 5))),
+            (3000, 150)
+        );
         // Off every display: by the nearest one.
-        assert_eq!(to_pixels(&both, Point { x: -10, y: 2000 }, None), (-10, 2000));
+        assert_eq!(
+            to_pixels(&both, Point { x: -10, y: 2000 }, None),
+            (-10, 2000)
+        );
         assert_eq!(to_pixels(&[], Point { x: 7, y: 9 }, None), (7, 9));
     }
 
@@ -420,7 +501,11 @@ mod tests {
         let mut displays = Displays::default();
         let mut told = Display::new("no display of this machine", Rect::new(1280, 0, 2560, 1440));
         told.scale = 1.5;
-        let kept = vec![ReservedArea { display: told.id.clone(), edge: Edge::Top, thickness: 48 }];
+        let kept = vec![ReservedArea {
+            display: told.id.clone(),
+            edge: Edge::Top,
+            thickness: 48,
+        }];
         assert!(displays.tell(vec![told.clone()], kept.clone()));
         assert!(!displays.tell(vec![told.clone()], kept.clone()));
         // Windows changing its mind is no news then.
@@ -429,7 +514,10 @@ mod tests {
         assert_eq!(displays.reserved(), kept);
         // Windows does not know it: its pixels are its units at its scale.
         assert_eq!(displays.pixels_of(&told.id), Some((1920, 0, 3840, 2160)));
-        assert_eq!(displays.to_pixels(Point { x: 1380, y: 50 }, None), (2070, 75));
+        assert_eq!(
+            displays.to_pixels(Point { x: 1380, y: 50 }, None),
+            (2070, 75)
+        );
         assert!(displays.tell(Vec::new(), Vec::new()));
         assert!(displays.displays().is_empty());
         assert_eq!(displays.pixels_of(&told.id), None);
@@ -456,19 +544,43 @@ mod tests {
         let (displays, reserved) = displays_of_state(&state);
         assert_eq!(displays.len(), 2);
         assert_eq!(
-            (displays[0].id.as_str(), displays[0].rect, displays[0].scale, displays[0].primary),
-            ("GSM-5B7F-0004E2A1", Rect::new(1280, 0, 2560, 1440), 1.5, true)
+            (
+                displays[0].id.as_str(),
+                displays[0].rect,
+                displays[0].scale,
+                displays[0].primary
+            ),
+            (
+                "GSM-5B7F-0004E2A1",
+                Rect::new(1280, 0, 2560, 1440),
+                1.5,
+                true
+            )
         );
         // No id of its own: its port. No scale said: one.
         assert_eq!(
-            (displays[1].id.as_str(), displays[1].rect, displays[1].scale, displays[1].primary),
+            (
+                displays[1].id.as_str(),
+                displays[1].rect,
+                displays[1].scale,
+                displays[1].primary
+            ),
             ("port:HDMI-1", Rect::new(0, 0, 1920, 1080), 1.0, false)
         );
         assert_eq!(
-            reserved.iter().map(|kept| (kept.display.as_str(), kept.edge, kept.thickness)).collect::<Vec<_>>(),
-            [("GSM-5B7F-0004E2A1", Edge::Top, 48), ("port:HDMI-1", Edge::Bottom, 40)]
+            reserved
+                .iter()
+                .map(|kept| (kept.display.as_str(), kept.edge, kept.thickness))
+                .collect::<Vec<_>>(),
+            [
+                ("GSM-5B7F-0004E2A1", Edge::Top, 48),
+                ("port:HDMI-1", Edge::Bottom, 40)
+            ]
         );
-        assert_eq!(displays_of_state(&serde_json::json!({})), (Vec::new(), Vec::new()));
+        assert_eq!(
+            displays_of_state(&serde_json::json!({})),
+            (Vec::new(), Vec::new())
+        );
     }
 
     #[test]
@@ -483,7 +595,11 @@ mod tests {
         let mut ids: Vec<&str> = found.iter().map(|display| display.id.as_str()).collect();
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len(), found.len(), "two displays have one id: {found:?}");
+        assert_eq!(
+            ids.len(),
+            found.len(),
+            "two displays have one id: {found:?}"
+        );
         assert!(found.iter().filter(|display| display.primary).count() <= 1);
     }
 }

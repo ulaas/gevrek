@@ -254,13 +254,8 @@ impl Executor {
             return Ok(());
         }
         self.running_deep += 1;
-        let result = self.execute_node_counted(
-            window_manager,
-            monitor_manager,
-            node_id,
-            node_type,
-            visited,
-        );
+        let result =
+            self.execute_node_counted(window_manager, monitor_manager, node_id, node_type, visited);
         self.running_deep -= 1;
         result
     }
@@ -839,11 +834,7 @@ impl Executor {
 
         // Execute matching nodes
         for node_id in matching_nodes {
-            log::trace!(
-                "the node {} runs for the shortcut {}",
-                node_id,
-                hotkey.key
-            );
+            log::trace!("the node {} runs for the shortcut {}", node_id, hotkey.key);
 
             // Set output values for the hotkey data
             self.set_output_value(node_id, 1, Value::String(hotkey.key.clone()));
@@ -1015,7 +1006,8 @@ impl Executor {
                 // was given it by a command) floats or tiles where it is.
                 // It used to be put on the workspace that is shown as
                 // well, and was on two workspaces from then on.
-                if let Some((its_monitor, its_workspace)) = monitor_manager.find_window(window_handle)
+                if let Some((its_monitor, its_workspace)) =
+                    monitor_manager.find_window(window_handle)
                 {
                     let shown = monitor_manager
                         .get_workspaces(its_monitor)

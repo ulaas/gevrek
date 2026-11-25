@@ -180,15 +180,40 @@ mod tests {
         // The same pattern with and without regard to case: two
         // expressions, kept apart, each the same every time it is asked.
         for _ in 0..3 {
-            assert!(text_matches("REPORT-2026.txt", r"^report-\d{4}", &Regex, false));
-            assert!(!text_matches("REPORT-2026.txt", r"^report-\d{4}", &Regex, true));
-            assert!(text_matches("report-2026.txt", r"^report-\d{4}", &Regex, true));
+            assert!(text_matches(
+                "REPORT-2026.txt",
+                r"^report-\d{4}",
+                &Regex,
+                false
+            ));
+            assert!(!text_matches(
+                "REPORT-2026.txt",
+                r"^report-\d{4}",
+                &Regex,
+                true
+            ));
+            assert!(text_matches(
+                "report-2026.txt",
+                r"^report-\d{4}",
+                &Regex,
+                true
+            ));
         }
         // More patterns than are kept: the early ones still match.
         for index in 0..1200 {
             let pattern = format!("^window {index}$");
-            assert!(text_matches(&format!("window {index}"), &pattern, &Regex, true));
-            assert!(!text_matches(&format!("window {}", index + 1), &pattern, &Regex, true));
+            assert!(text_matches(
+                &format!("window {index}"),
+                &pattern,
+                &Regex,
+                true
+            ));
+            assert!(!text_matches(
+                &format!("window {}", index + 1),
+                &pattern,
+                &Regex,
+                true
+            ));
         }
         assert!(text_matches("window 0", "^window 0$", &Regex, true));
         assert!(regex_for("(unclosed", true).is_none());

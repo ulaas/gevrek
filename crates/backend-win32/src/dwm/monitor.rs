@@ -89,7 +89,9 @@ pub fn set_unmanaged_outputs(outputs: &[gevrek_model::outputs::OutputProfile]) -
         (&UNMANAGED_NAMES, names_where(false)),
         (&WANTED_NAMES, names_where(true)),
     ] {
-        let mut current = kept.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut current = kept
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if *current != names {
             *current = names;
             changed = true;
@@ -133,8 +135,8 @@ fn displays_that_are_no_screens() -> Vec<String> {
 
 // Who a display is wherever it is plugged in is read where the shell can
 // read it too (it needs the same ids for what it keeps per display).
-pub use gevrek_system::display_ids::{edid_of, ids_by_makers_and_models};
 use gevrek_system::display_ids::active_paths;
+pub use gevrek_system::display_ids::{edid_of, ids_by_makers_and_models};
 
 /// Give every display the id it has wherever it is plugged in
 /// (`MonitorInfo::stable_id`). All displays of the desktop at once: twins
@@ -144,7 +146,10 @@ fn give_stable_ids(all: &mut [MonitorInfo]) {
         .iter()
         .map(|info| (info.device_path.clone(), info.x, info.y, info.handle.0))
         .collect();
-    for (info, id) in all.iter_mut().zip(gevrek_system::display_ids::stable_ids(&places)) {
+    for (info, id) in all
+        .iter_mut()
+        .zip(gevrek_system::display_ids::stable_ids(&places))
+    {
         info.stable_id = id;
     }
 }
@@ -202,7 +207,8 @@ fn split_unmanaged(
     if names.is_empty() && no_screens.is_empty() {
         return (all, Vec::new());
     }
-    let named = |info: &MonitorInfo, names: &[String]| names.iter().any(|name| is_named(info, name));
+    let named =
+        |info: &MonitorInfo, names: &[String]| names.iter().any(|name| is_named(info, name));
     let (unmanaged, managed): (Vec<_>, Vec<_>) = all.into_iter().partition(|info| {
         named(info, names) || (no_screens.contains(&info.handle) && !named(info, wanted))
     });
@@ -286,8 +292,11 @@ pub fn enumerate_monitors() -> Vec<MonitorInfo> {
     } else {
         all.iter()
             .filter(|info| {
-                system_name(info.handle)
-                    .is_some_and(|name| made_up.iter().any(|other| other.eq_ignore_ascii_case(&name)))
+                system_name(info.handle).is_some_and(|name| {
+                    made_up
+                        .iter()
+                        .any(|other| other.eq_ignore_ascii_case(&name))
+                })
             })
             .map(|info| info.handle)
             .collect()
@@ -532,7 +541,10 @@ mod tests {
         }
     }
 
-    fn split_unmanaged(all: Vec<MonitorInfo>, names: &[String]) -> (Vec<MonitorInfo>, Vec<MonitorInfo>) {
+    fn split_unmanaged(
+        all: Vec<MonitorInfo>,
+        names: &[String],
+    ) -> (Vec<MonitorInfo>, Vec<MonitorInfo>) {
         super::split_unmanaged(all, names, &[], &[])
     }
 

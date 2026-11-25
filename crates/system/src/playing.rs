@@ -203,7 +203,10 @@ mod tests {
             ("Chrome", "Chrome"),
             ("firefox.exe", "Firefox"),
             ("308046B0AF4A39CB", "308046B0AF4A39CB"),
-            ("Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic", "Media Player"),
+            (
+                "Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic",
+                "Media Player",
+            ),
             ("Microsoft.ZuneMusic_8wekyb3d8bbwe!App", "Media Player"),
             (r"C:\Program Files\VideoLAN\VLC\vlc.exe", "Vlc"),
             ("com.squirrel.TIDAL.TIDAL", "TIDAL"),

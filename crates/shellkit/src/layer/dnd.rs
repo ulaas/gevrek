@@ -19,8 +19,8 @@
 
 use super::{Host, SurfaceId};
 use crate::dnd::{
-    self, mime, DragAction, DragActions, DragEvent, DragImage, DragOutcome, DragPayload,
-    DragStart, DropAnswer, Held, Offered, PathStyle,
+    self, mime, DragAction, DragActions, DragEvent, DragImage, DragOutcome, DragPayload, DragStart,
+    DropAnswer, Held, Offered, PathStyle,
 };
 use smithay_client_toolkit::data_device_manager::{
     data_device::{DataDevice, DataDeviceHandler},
@@ -593,7 +593,10 @@ impl DataDeviceHandler for Host {
         wl_surface: &WlSurface,
     ) {
         self.dnd.over = None;
-        let Some(id) = self.index_of(wl_surface).map(|index| self.surfaces[index].id) else {
+        let Some(id) = self
+            .index_of(wl_surface)
+            .map(|index| self.surfaces[index].id)
+        else {
             return;
         };
         // (A drag with nothing to offer is one the program keeps to
@@ -643,14 +646,7 @@ impl DataDeviceHandler for Host {
         }
     }
 
-    fn motion(
-        &mut self,
-        _: &Connection,
-        _: &QueueHandle<Self>,
-        _: &WlDataDevice,
-        x: f64,
-        y: f64,
-    ) {
+    fn motion(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice, x: f64, y: f64) {
         let at = egui::pos2(x as f32, y as f32);
         let Some(over) = self.dnd.over.as_mut() else {
             return;

@@ -341,7 +341,10 @@ impl Outputs {
                 )
                 .unwrap_or(visible_index);
                 for window in workspace.all_windows() {
-                    let floating = workspace.floating_windows.iter().any(|other| *other == window);
+                    let floating = workspace
+                        .floating_windows
+                        .iter()
+                        .any(|other| *other == window);
                     let Some(target) = cached.workspaces.get_mut(index) else {
                         continue;
                     };
@@ -482,7 +485,9 @@ mod tests {
         manager.reconcile_with(vec![display(7, EXTERNAL, true, 0)]);
         for window in [1, 2, 3, 9] {
             assert_eq!(
-                manager.find_window(WindowHandle(window)).map(|(monitor, _)| monitor),
+                manager
+                    .find_window(WindowHandle(window))
+                    .map(|(monitor, _)| monitor),
                 Some(MonitorHandle(7)),
                 "window {window} is known on the display that is left"
             );

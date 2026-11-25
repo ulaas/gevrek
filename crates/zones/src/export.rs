@@ -45,7 +45,10 @@ impl LayoutDocument {
             format: LAYOUT_FORMAT.to_string(),
             version: LAYOUT_VERSION,
             exported_at: now,
-            layout: Snapshot { automatic: false, ..layout },
+            layout: Snapshot {
+                automatic: false,
+                ..layout
+            },
             extra: Extra::new(),
         }
     }
@@ -60,7 +63,9 @@ impl LayoutDocument {
 pub fn read(document: &Value) -> Result<LayoutDocument, String> {
     let format = document.get("format").and_then(Value::as_str);
     if format != Some(LAYOUT_FORMAT) {
-        return Err(format!("this is no layout of the zones (its \"format\" is not \"{LAYOUT_FORMAT}\")"));
+        return Err(format!(
+            "this is no layout of the zones (its \"format\" is not \"{LAYOUT_FORMAT}\")"
+        ));
     }
     let version = document
         .get("version")
@@ -71,8 +76,8 @@ pub fn read(document: &Value) -> Result<LayoutDocument, String> {
             "the layout is of version {version}, and this gevrek reads version {LAYOUT_VERSION}"
         ));
     }
-    let read: LayoutDocument =
-        serde_json::from_value(document.clone()).map_err(|error| format!("the layout cannot be read: {error}"))?;
+    let read: LayoutDocument = serde_json::from_value(document.clone())
+        .map_err(|error| format!("the layout cannot be read: {error}"))?;
     if read.layout.name.trim().is_empty() {
         return Err("the layout has no name".to_string());
     }
@@ -84,7 +89,10 @@ pub fn read(document: &Value) -> Result<LayoutDocument, String> {
         ..ZonesConfig::default()
     };
     if let Some((path, message)) = as_configured.problems().into_iter().next() {
-        let path = path.strip_prefix("desktop.zones.").unwrap_or(&path).to_string();
+        let path = path
+            .strip_prefix("desktop.zones.")
+            .unwrap_or(&path)
+            .to_string();
         return Err(format!("the layout cannot be right at {path}: {message}"));
     }
     if let Some(broken) = read.layout.placements.broken() {
@@ -107,7 +115,12 @@ mod tests {
             automatic: true,
             ..Snapshot::default()
         };
-        layout.placements.assign(&ItemId::new("/desk/a.pdf"), &ZoneId::new("papers"), None, None);
+        layout.placements.assign(
+            &ItemId::new("/desk/a.pdf"),
+            &ZoneId::new("papers"),
+            None,
+            None,
+        );
         layout
     }
 
@@ -133,7 +146,9 @@ mod tests {
             change(&mut value);
             read(&value).unwrap_err()
         };
-        assert!(read(&serde_json::json!({"zones": []})).unwrap_err().contains("no layout"));
+        assert!(read(&serde_json::json!({"zones": []}))
+            .unwrap_err()
+            .contains("no layout"));
         assert!(with(&|value| value["format"] = "something-else".into()).contains("no layout"));
         assert!(with(&|value| value["version"] = 2.into()).contains("version 2"));
         assert!(with(&|value| value["version"] = 0.into()).contains("version 0"));
@@ -146,12 +161,16 @@ mod tests {
         });
         assert!(twice.contains("zones[1].id"), "{twice}");
         let two_places = with(&|value| {
-            value["layout"]["placements"]["zones"]["other"] = serde_json::json!({"items": ["/desk/a.pdf"]});
+            value["layout"]["placements"]["zones"]["other"] =
+                serde_json::json!({"items": ["/desk/a.pdf"]});
         });
         assert!(two_places.contains("/desk/a.pdf"), "{two_places}");
         // A key of a newer gevrek is carried along, not refused.
         let mut newer = good.clone();
         newer["remark"] = "from the future".into();
-        assert_eq!(read(&newer).unwrap().to_value()["remark"], "from the future");
+        assert_eq!(
+            read(&newer).unwrap().to_value()["remark"],
+            "from the future"
+        );
     }
 }

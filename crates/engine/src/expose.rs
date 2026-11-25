@@ -49,11 +49,7 @@ pub fn arrange(windows: &[(WindowId, Rect)], area: Rect) -> Moves {
     }
     // From the top, and from the left where two are as high.
     ordered.sort_by_key(|(window, rect)| {
-        (
-            rect.y + rect.height / 2,
-            rect.x + rect.width / 2,
-            window.0,
-        )
+        (rect.y + rect.height / 2, rect.x + rect.width / 2, window.0)
     });
     let margin = ((area.width / 14).max(24), (area.height / 14).max(24));
     let room = Rect::new(
@@ -110,7 +106,10 @@ pub fn arrange(windows: &[(WindowId, Rect)], area: Rect) -> Moves {
     for count in 1..=ordered.len() {
         let rows = rows_of(count);
         let measure = measure_of(&rows).min(largest);
-        if best.as_ref().is_none_or(|(so_far, _)| measure > *so_far + 1e-9) {
+        if best
+            .as_ref()
+            .is_none_or(|(so_far, _)| measure > *so_far + 1e-9)
+        {
             best = Some((measure, rows));
         }
     }
@@ -140,7 +139,10 @@ pub fn arrange(windows: &[(WindowId, Rect)], area: Rect) -> Moves {
             (rect.x + rect.width / 2, rect.y, ordered[*at].0 .0)
         });
         let height = row_height(row);
-        let width: i32 = row.iter().map(|at| small(ordered[*at].1.width)).sum::<i32>()
+        let width: i32 = row
+            .iter()
+            .map(|at| small(ordered[*at].1.width))
+            .sum::<i32>()
             + PICTURE_GAP * (row.len() as i32 - 1);
         let mut left = room.x + (room.width - width) / 2;
         for at in row.iter() {
@@ -462,7 +464,10 @@ mod tests {
             assert!(place.width < was.width && place.height < was.height);
             let shape = f64::from(was.width) / f64::from(was.height);
             let shown = f64::from(place.width) / f64::from(place.height);
-            assert!((shape - shown).abs() < 0.02, "{was:?} is shown as {place:?}");
+            assert!(
+                (shape - shown).abs() < 0.02,
+                "{was:?} is shown as {place:?}"
+            );
         }
         // By the same measure: the small one stays the smallest.
         let width = |window| places.iter().find(|(id, _)| *id == window).unwrap().1.width;
@@ -512,7 +517,13 @@ mod tests {
         let places = arrange(&windows, AREA);
         assert_eq!(places.len(), 9);
         assert!(places.iter().all(|(_, place)| within(*place, AREA)));
-        let place = |window| places.iter().find(|(id, _)| *id == WindowId(window)).unwrap().1;
+        let place = |window| {
+            places
+                .iter()
+                .find(|(id, _)| *id == WindowId(window))
+                .unwrap()
+                .1
+        };
         // The one at the top left is shown at the top left, the one at
         // the bottom right at the bottom right.
         assert!(place(1).x < place(3).x && place(1).y < place(9).y);

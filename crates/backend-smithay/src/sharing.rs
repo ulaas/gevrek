@@ -135,7 +135,10 @@ impl<K: Copy + Eq + std::hash::Hash + Ord> Sharing<K> {
 /// `"exclude_from_capture": true`. (Read from the rule's own keys that
 /// the configuration's model does not name yet; it keeps them as they
 /// are written.)
-pub fn kept_out_of_captures(rules: &[gevrek_model::layer_rules::LayerRule], namespace: &str) -> bool {
+pub fn kept_out_of_captures(
+    rules: &[gevrek_model::layer_rules::LayerRule],
+    namespace: &str,
+) -> bool {
     gevrek_model::layer_rules::rule_for(rules, namespace).is_some_and(|rule| {
         rule.extra.0.get("exclude_from_capture") == Some(&serde_json::Value::Bool(true))
     })
@@ -287,14 +290,13 @@ mod tests {
 
     #[test]
     fn a_rule_keeps_surfaces_of_its_name_out_of_pictures() {
-        let rules: Vec<gevrek_model::layer_rules::LayerRule> = serde_json::from_value(
-            serde_json::json!([
+        let rules: Vec<gevrek_model::layer_rules::LayerRule> =
+            serde_json::from_value(serde_json::json!([
                 { "namespace": "gevrek-zones*", "exclude_from_capture": true },
                 { "namespace": "gevrek-panel", "blur": true },
                 { "namespace": "waybar", "exclude_from_capture": "yes" },
-            ]),
-        )
-        .expect("rules");
+            ]))
+            .expect("rules");
         assert!(kept_out_of_captures(&rules, "gevrek-zones"));
         assert!(kept_out_of_captures(&rules, "gevrek-zones.dev"));
         assert!(!kept_out_of_captures(&rules, "gevrek-panel"));

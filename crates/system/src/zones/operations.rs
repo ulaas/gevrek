@@ -41,13 +41,21 @@ impl Watched {
     /// it is a hundredth further than last told (or, with the whole not
     /// known, four million further), and at its end.
     pub fn progress(&self, done: u64, total: u64) {
-        let step = if total == 0 { 4_000_000 } else { (total / 100).max(1) };
+        let step = if total == 0 {
+            4_000_000
+        } else {
+            (total / 100).max(1)
+        };
         let last = self.told_at.load(Ordering::Relaxed);
         if done < last.saturating_add(step) && !(done == total && done != last) {
             return;
         }
         self.told_at.store(done, Ordering::Relaxed);
-        (self.tell)(vec![BackendEvent::OperationProgress { request: self.request, done, total }]);
+        (self.tell)(vec![BackendEvent::OperationProgress {
+            request: self.request,
+            done,
+            total,
+        }]);
     }
 }
 
@@ -57,7 +65,12 @@ impl Watched {
     /// not: for trying what carries operations out without a thread.
     pub(crate) fn alone(request: u64, tell: Tell, called_off: bool) -> Arc<Self> {
         let off: HashSet<u64> = called_off.then_some(request).into_iter().collect();
-        Arc::new(Self { request, tell, called_off: Arc::new(Mutex::new(off)), told_at: AtomicU64::new(0) })
+        Arc::new(Self {
+            request,
+            tell,
+            called_off: Arc::new(Mutex::new(off)),
+            told_at: AtomicU64::new(0),
+        })
     }
 }
 
@@ -65,7 +78,9 @@ impl Watched {
 pub type Carry = Box<dyn FnOnce(&Arc<Watched>) -> Result<FileOperation, BackendError> + Send>;
 
 fn locked<T>(shared: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    shared.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    shared
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// The operations that end later.
@@ -81,7 +96,12 @@ pub struct Operations {
 impl Operations {
     /// `tell` hands events to the backend (and wakes the host).
     pub fn new(tell: Tell) -> Self {
-        Self { tell, jobs: None, pending: Arc::default(), called_off: Arc::default() }
+        Self {
+            tell,
+            jobs: None,
+            pending: Arc::default(),
+            called_off: Arc::default(),
+        }
     }
 
     /// Have an operation carried out after those asked for before it.
@@ -90,38 +110,61 @@ impl Operations {
     pub fn begin(&mut self, request: u64, carry: Carry) -> bool {
         if self.jobs.is_none() {
             let (jobs, asked) = mpsc::channel::<(u64, Carry)>();
-            let (tell, pending, called_off) = (Arc::clone(&self.tell), Arc::clone(&self.pending), Arc::clone(&self.called_off));
-            let started = std::thread::Builder::new().name("gevrek-zones-files".to_string()).spawn(move || {
-                // (Ends when nobody can ask any more: the backend went.)
-                for (request, carry) in asked {
-                    let watched = Arc::new(Watched {
-                        request,
-                        tell: Arc::clone(&tell),
-                        called_off: Arc::clone(&called_off),
-                        told_at: AtomicU64::new(0),
-                    });
-                    let outcome = if watched.called_off() {
-                        Err(BackendError::Cancelled)
-                    } else {
-                        // What failed after it was called off failed
-                        // for that; what was done all the same is done.
-                        carry(&watched).map_err(|error| if watched.called_off() { BackendError::Cancelled } else { error })
-                    };
-                    locked(&pending).remove(&request);
-                    locked(&called_off).remove(&request);
-                    tell(vec![match outcome {
-                        Ok(undo) => BackendEvent::OperationDone { request, undo: Some(undo), error: None },
-                        Err(error) => BackendEvent::OperationDone { request, undo: None, error: Some(error) },
-                    }]);
-                }
-            });
+            let (tell, pending, called_off) = (
+                Arc::clone(&self.tell),
+                Arc::clone(&self.pending),
+                Arc::clone(&self.called_off),
+            );
+            let started = std::thread::Builder::new()
+                .name("gevrek-zones-files".to_string())
+                .spawn(move || {
+                    // (Ends when nobody can ask any more: the backend went.)
+                    for (request, carry) in asked {
+                        let watched = Arc::new(Watched {
+                            request,
+                            tell: Arc::clone(&tell),
+                            called_off: Arc::clone(&called_off),
+                            told_at: AtomicU64::new(0),
+                        });
+                        let outcome = if watched.called_off() {
+                            Err(BackendError::Cancelled)
+                        } else {
+                            // What failed after it was called off failed
+                            // for that; what was done all the same is done.
+                            carry(&watched).map_err(|error| {
+                                if watched.called_off() {
+                                    BackendError::Cancelled
+                                } else {
+                                    error
+                                }
+                            })
+                        };
+                        locked(&pending).remove(&request);
+                        locked(&called_off).remove(&request);
+                        tell(vec![match outcome {
+                            Ok(undo) => BackendEvent::OperationDone {
+                                request,
+                                undo: Some(undo),
+                                error: None,
+                            },
+                            Err(error) => BackendEvent::OperationDone {
+                                request,
+                                undo: None,
+                                error: Some(error),
+                            },
+                        }]);
+                    }
+                });
             if started.is_err() {
                 return false;
             }
             self.jobs = Some(jobs);
         }
         locked(&self.pending).insert(request);
-        let sent = self.jobs.as_ref().is_some_and(|jobs| jobs.send((request, carry)).is_ok());
+        let sent = self
+            .jobs
+            .as_ref()
+            .is_some_and(|jobs| jobs.send((request, carry)).is_ok());
         if !sent {
             locked(&self.pending).remove(&request);
         }
@@ -152,8 +195,14 @@ mod tests {
             }
         });
         let mut operations = Operations::new(tell);
-        let next = || tellings.recv_timeout(Duration::from_secs(20)).expect("told");
-        let back = |name: &str| FileOperation::Trash { path: name.to_string() };
+        let next = || {
+            tellings
+                .recv_timeout(Duration::from_secs(20))
+                .expect("told")
+        };
+        let back = |name: &str| FileOperation::Trash {
+            path: name.to_string(),
+        };
 
         // The first waits until the test lets it go on; it says how far
         // it is, and stops when it is called off.
@@ -167,7 +216,9 @@ mod tests {
                 watched.progress(500, 1000);
                 let _ = gate.recv();
                 if watched.called_off() {
-                    return Err(BackendError::Refused { what: "stopped half way".to_string() });
+                    return Err(BackendError::Refused {
+                        what: "stopped half way".to_string(),
+                    });
                 }
                 Ok(back("one"))
             }),
@@ -176,27 +227,73 @@ mod tests {
         assert!(operations.begin(3, Box::new(move |_| Ok(back("three")))));
         assert!(asked.elapsed() < Duration::from_millis(100));
         // (Told when a hundredth further: not for the step from 0 to 5.)
-        assert_eq!(next(), BackendEvent::OperationProgress { request: 1, done: 500, total: 1000 });
+        assert_eq!(
+            next(),
+            BackendEvent::OperationProgress {
+                request: 1,
+                done: 500,
+                total: 1000
+            }
+        );
         // Called off: the one under way and one that waits. One that
         // was never asked for is nobody's.
         operations.cancel(1);
         operations.cancel(3);
         operations.cancel(99);
         drop(go_on);
-        assert_eq!(next(), BackendEvent::OperationDone { request: 1, undo: None, error: Some(BackendError::Cancelled) });
-        assert_eq!(next(), BackendEvent::OperationDone { request: 2, undo: Some(back("two")), error: None });
-        assert_eq!(next(), BackendEvent::OperationDone { request: 3, undo: None, error: Some(BackendError::Cancelled) });
+        assert_eq!(
+            next(),
+            BackendEvent::OperationDone {
+                request: 1,
+                undo: None,
+                error: Some(BackendError::Cancelled)
+            }
+        );
+        assert_eq!(
+            next(),
+            BackendEvent::OperationDone {
+                request: 2,
+                undo: Some(back("two")),
+                error: None
+            }
+        );
+        assert_eq!(
+            next(),
+            BackendEvent::OperationDone {
+                request: 3,
+                undo: None,
+                error: Some(BackendError::Cancelled)
+            }
+        );
         // Called off when it has ended: nothing more is told, and the
         // next one is carried out as any.
         operations.cancel(2);
-        assert!(operations.begin(4, Box::new(move |watched| {
-            watched.progress(7, 7);
-            Err(BackendError::NotFound { what: "four".to_string() })
-        })));
-        assert_eq!(next(), BackendEvent::OperationProgress { request: 4, done: 7, total: 7 });
+        assert!(operations.begin(
+            4,
+            Box::new(move |watched| {
+                watched.progress(7, 7);
+                Err(BackendError::NotFound {
+                    what: "four".to_string(),
+                })
+            })
+        ));
         assert_eq!(
             next(),
-            BackendEvent::OperationDone { request: 4, undo: None, error: Some(BackendError::NotFound { what: "four".to_string() }) }
+            BackendEvent::OperationProgress {
+                request: 4,
+                done: 7,
+                total: 7
+            }
+        );
+        assert_eq!(
+            next(),
+            BackendEvent::OperationDone {
+                request: 4,
+                undo: None,
+                error: Some(BackendError::NotFound {
+                    what: "four".to_string()
+                })
+            }
         );
         assert!(tellings.recv_timeout(Duration::from_millis(200)).is_err());
     }

@@ -11,9 +11,9 @@ use egui::{pos2, vec2, Pos2, Rect};
 use gevrek_zones::config::{DeskGesture, ExpandOn, Sort, TitleBar, View, ZoneKind, ZoneLook};
 use gevrek_zones::core::ZonesCore;
 use gevrek_zones::item::ItemKind;
-use gevrek_zones::portal::{Listing, PortalScene};
 use gevrek_zones::layout::{self, Metrics};
 use gevrek_zones::placement::Cell;
+use gevrek_zones::portal::{Listing, PortalScene};
 use gevrek_zones::snap::Edges;
 use gevrek_zones::{DisplayId, ItemId, ZoneId};
 use std::collections::BTreeMap;
@@ -128,7 +128,12 @@ fn way(portal: &PortalScene, head: Rect, left: f32, right: f32) -> Vec<NavBox> {
     let top = head.center().y - high / 2.0;
     for (can, nav) in [(portal.can_go_back, Nav::Back), (portal.can_go_up, Nav::Up)] {
         if can {
-            boxes.push(NavBox { rect: Rect::from_min_size(pos2(at, top), vec2(20.0, high)), nav, label: String::new(), here: false });
+            boxes.push(NavBox {
+                rect: Rect::from_min_size(pos2(at, top), vec2(20.0, high)),
+                nav,
+                label: String::new(),
+                here: false,
+            });
             at += 22.0;
         }
     }
@@ -179,7 +184,14 @@ pub enum Button {
 impl Button {
     /// In the order they stand, from the left. The ones a narrow zone
     /// keeps are the last: its menu, and rolling it up.
-    pub const ALL: [Button; 6] = [Button::Cover, Button::Sort, Button::View, Button::Lock, Button::Roll, Button::More];
+    pub const ALL: [Button; 6] = [
+        Button::Cover,
+        Button::Sort,
+        Button::View,
+        Button::Lock,
+        Button::Roll,
+        Button::More,
+    ];
 }
 
 /// One button of a title, where it is.
@@ -224,16 +236,24 @@ const NAME_LEAST: f32 = 76.0;
 fn buttons(head: Rect) -> Vec<ButtonBox> {
     let high = (head.height() - 4.0).clamp(8.0, BUTTON);
     let room = head.width() - NAME_LEAST - 8.0;
-    let fit = ((room + BUTTON_GAP) / (BUTTON + BUTTON_GAP)).floor().max(0.0) as usize;
+    let fit = ((room + BUTTON_GAP) / (BUTTON + BUTTON_GAP))
+        .floor()
+        .max(0.0) as usize;
     let shown = &Button::ALL[Button::ALL.len() - fit.min(Button::ALL.len())..];
     let mut right = head.right() - 8.0;
     let mut boxes: Vec<ButtonBox> = shown
         .iter()
         .rev()
         .map(|button| {
-            let rect = Rect::from_min_size(pos2(right - BUTTON, head.center().y - high / 2.0), vec2(BUTTON, high));
+            let rect = Rect::from_min_size(
+                pos2(right - BUTTON, head.center().y - high / 2.0),
+                vec2(BUTTON, high),
+            );
             right -= BUTTON + BUTTON_GAP;
-            ButtonBox { rect, button: *button }
+            ButtonBox {
+                rect,
+                button: *button,
+            }
         })
         .collect();
     boxes.reverse();
@@ -254,7 +274,13 @@ pub struct Progress {
 impl Progress {
     fn of(operation: &gevrek_zones::core::OperationScene) -> Self {
         use gevrek_zones::backend::FileOperation;
-        let name = |path: &str| path.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or(path).to_string();
+        let name = |path: &str| {
+            path.trim_end_matches(['/', '\\'])
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(path)
+                .to_string()
+        };
         let what = match &operation.operation {
             FileOperation::Copy { from, .. } => format!("Copying {}", name(from)),
             FileOperation::Move { from, .. } => format!("Moving {}", name(from)),
@@ -265,7 +291,8 @@ impl Progress {
         };
         Self {
             request: operation.request,
-            part: (operation.total > 0).then(|| (operation.done as f32 / operation.total as f32).clamp(0.0, 1.0)),
+            part: (operation.total > 0)
+                .then(|| (operation.done as f32 / operation.total as f32).clamp(0.0, 1.0)),
             what,
         }
     }
@@ -397,7 +424,10 @@ pub struct Layout {
 /// What lies at a point.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Hit {
-    Item { item: ItemId, zone: Option<ZoneId> },
+    Item {
+        item: ItemId,
+        zone: Option<ZoneId>,
+    },
     /// A zone's title bar.
     Head(ZoneId),
     /// A part of a portal's way in its title.
@@ -433,7 +463,10 @@ pub enum Target {
         /// there goes into that folder.
         into: Option<ItemId>,
     },
-    Desk { display: DisplayId, origin: Pos2 },
+    Desk {
+        display: DisplayId,
+        origin: Pos2,
+    },
     Nowhere,
 }
 
@@ -450,7 +483,12 @@ impl Layout {
             twice_middle: core.config().gestures.double_middle_click,
             ..Layout::default()
         };
-        let shown_zone = |zone: &ZoneId| scene.zones.iter().any(|shown| &shown.zone == zone && shown.shown && shown.front);
+        let shown_zone = |zone: &ZoneId| {
+            scene
+                .zones
+                .iter()
+                .any(|shown| &shown.zone == zone && shown.shown && shown.front)
+        };
         layout.under_way = scene
             .operations
             .iter()
@@ -462,24 +500,38 @@ impl Layout {
         let put_away = scene.quick_hidden && !scene.peeking;
         // (Only of zones that belong to what is shown here at all: not
         // hidden on these displays, and of the workspace that is shown.)
-        for zone in scene.zones.iter().filter(|zone| put_away && !zone.shown && zone.front && zone.here) {
+        for zone in scene
+            .zones
+            .iter()
+            .filter(|zone| put_away && !zone.shown && zone.front && zone.here)
+        {
             // (Where it would be if its zone were there: not scrolled.)
             let content = rect_of(zone.content);
             let seen = |placed: &&gevrek_zones::layout::PlacedItem| {
-                placed.always_visible && !zone.rolled_up && placed.rect.y + placed.rect.height <= zone.content.height
+                placed.always_visible
+                    && !zone.rolled_up
+                    && placed.rect.y + placed.rect.height <= zone.content.height
             };
-            stays.entry(zone.display.clone()).or_default().extend(zone.items.items.iter().filter(seen).map(|placed| Stay {
-                shown: ItemBox::of(placed, rect_of(placed.rect).translate(content.min.to_vec2())),
-                zone: zone.zone.clone(),
-                view: zone.view,
-                icon_size: zone.icon_size,
-            }));
+            stays.entry(zone.display.clone()).or_default().extend(
+                zone.items.items.iter().filter(seen).map(|placed| Stay {
+                    shown: ItemBox::of(
+                        placed,
+                        rect_of(placed.rect).translate(content.min.to_vec2()),
+                    ),
+                    zone: zone.zone.clone(),
+                    view: zone.view,
+                    icon_size: zone.icon_size,
+                }),
+            );
         }
         // Of zones that lie over each other, one that is open for now is
         // on top: it opened over what is under it.
         let floating = |zone: &&gevrek_zones::core::ZoneScene| zone.rolled_up && zone.expanded;
         let resting = scene.zones.iter().filter(|zone| !floating(zone));
-        for zone in resting.chain(scene.zones.iter().filter(floating)).filter(|zone| zone.shown && zone.front) {
+        for zone in resting
+            .chain(scene.zones.iter().filter(floating))
+            .filter(|zone| zone.shown && zone.front)
+        {
             let Some(definition) = core.config().zone(&zone.zone) else {
                 continue;
             };
@@ -487,7 +539,10 @@ impl Layout {
             let tabbed = zone.tab_group.is_some();
             let head = Rect::from_min_size(
                 rect.min,
-                vec2(rect.width(), (metrics.title_height as f32).min(rect.height())),
+                vec2(
+                    rect.width(),
+                    (metrics.title_height as f32).min(rect.height()),
+                ),
             );
             // Rolled up and not open for now: the title is all there is.
             let shut = zone.rolled_up && !zone.expanded;
@@ -522,13 +577,26 @@ impl Layout {
             } else {
                 rect_of(layout::content_area(zone.rect, tabbed, &metrics))
             };
-            let extent = if shut { 0.0 } else { zone.items.scroll_extent as f32 };
-            let scroll = scrolls.get(&zone.zone).copied().unwrap_or(0.0).clamp(0.0, extent);
+            let extent = if shut {
+                0.0
+            } else {
+                zone.items.scroll_extent as f32
+            };
+            let scroll = scrolls
+                .get(&zone.zone)
+                .copied()
+                .unwrap_or(0.0)
+                .clamp(0.0, extent);
             let (cell_width, cell_height) =
                 metrics.cell(zone.view, zone.icon_size, content.width() as i32);
             let step = vec2(
                 (cell_width + metrics.spacing) as f32,
-                (cell_height + if zone.view == View::Grid { metrics.spacing } else { 0 }) as f32,
+                (cell_height
+                    + if zone.view == View::Grid {
+                        metrics.spacing
+                    } else {
+                        0
+                    }) as f32,
             );
             let items = if shut {
                 Vec::new()
@@ -537,7 +605,11 @@ impl Layout {
                     .items
                     .iter()
                     .map(|placed| {
-                        ItemBox::of(placed, rect_of(placed.rect).translate(content.min.to_vec2() - vec2(0.0, scroll)))
+                        ItemBox::of(
+                            placed,
+                            rect_of(placed.rect)
+                                .translate(content.min.to_vec2() - vec2(0.0, scroll)),
+                        )
                     })
                     .collect()
             };
@@ -576,15 +648,25 @@ impl Layout {
                     .portal
                     .as_ref()
                     .map(|portal| {
-                        let kept = buttons(head).first().map_or(96.0, |first| (rect.right() - first.rect.left() + 8.0).max(96.0));
+                        let kept = buttons(head).first().map_or(96.0, |first| {
+                            (rect.right() - first.rect.left() + 8.0).max(96.0)
+                        });
                         way(portal, head, rect.left() + 22.0, rect.right() - kept)
                     })
                     .unwrap_or_default(),
-                busy: scene.operations.iter().find(|operation| operation.zones.contains(&zone.zone)).map(Progress::of),
+                busy: scene
+                    .operations
+                    .iter()
+                    .find(|operation| operation.zones.contains(&zone.zone))
+                    .map(Progress::of),
                 outside: matches!(definition.kind, ZoneKind::Portal { .. })
                     || (matches!(definition.kind, ZoneKind::Smart { .. })
                         && definition.source != gevrek_zones::config::SmartSource::Desktop),
-                listing: zone.portal.as_ref().map(|portal| portal.listing.clone()).or_else(|| zone.source.clone()),
+                listing: zone
+                    .portal
+                    .as_ref()
+                    .map(|portal| portal.listing.clone())
+                    .or_else(|| zone.source.clone()),
                 title_bar: zone.look.title_bar.unwrap_or_default(),
                 view: zone.view,
                 by_hand: definition.kind == ZoneKind::Manual && definition.sort == Sort::Manual,
@@ -614,7 +696,12 @@ impl Layout {
                             // there still; and all of them where only the
                             // zones are put away.)
                             .filter(|placed| !scene.loose_hidden || placed.always_visible)
-                            .map(|placed| ItemBox::of(placed, rect_of(placed.rect).translate(area.min.to_vec2())))
+                            .map(|placed| {
+                                ItemBox::of(
+                                    placed,
+                                    rect_of(placed.rect).translate(area.min.to_vec2()),
+                                )
+                            })
                             .collect()
                     })
                     .unwrap_or_default(),
@@ -646,7 +733,11 @@ impl Layout {
                     return Hit::Button(zone.zone.clone(), pressed.button);
                 }
                 // (Where it stands is no way to go: that part is its title.)
-                return match zone.nav.iter().find(|part| !part.here && part.rect.contains(at)) {
+                return match zone
+                    .nav
+                    .iter()
+                    .find(|part| !part.here && part.rect.contains(at))
+                {
                     Some(part) => Hit::Nav(zone.zone.clone(), part.nav.clone()),
                     None => Hit::Head(zone.zone.clone()),
                 };
@@ -656,7 +747,10 @@ impl Layout {
             }
             if zone.content.contains(at) {
                 if let Some(item) = zone.items.iter().find(|item| item.rect.contains(at)) {
-                    return Hit::Item { item: item.item.clone(), zone: Some(zone.zone.clone()) };
+                    return Hit::Item {
+                        item: item.item.clone(),
+                        zone: Some(zone.zone.clone()),
+                    };
                 }
             }
             return Hit::Body(zone.zone.clone());
@@ -666,10 +760,16 @@ impl Layout {
                 continue;
             }
             if let Some(item) = desk.items.iter().find(|item| item.rect.contains(at)) {
-                return Hit::Item { item: item.item.clone(), zone: None };
+                return Hit::Item {
+                    item: item.item.clone(),
+                    zone: None,
+                };
             }
             if let Some(stay) = desk.stays.iter().find(|stay| stay.shown.rect.contains(at)) {
-                return Hit::Item { item: stay.shown.item.clone(), zone: Some(stay.zone.clone()) };
+                return Hit::Item {
+                    item: stay.shown.item.clone(),
+                    zone: Some(stay.zone.clone()),
+                };
             }
             return Hit::Desk(desk.display.clone());
         }
@@ -679,11 +779,19 @@ impl Layout {
     /// Where something dropped at a point would go.
     pub fn target(&self, at: Pos2) -> Target {
         // (Of zones that overlap, the one drawn last.)
-        let over = self.zones.iter().rev().find(|zone| zone.rect.expand(GRIP_OUTSIDE).contains(at));
+        let over = self
+            .zones
+            .iter()
+            .rev()
+            .find(|zone| zone.rect.expand(GRIP_OUTSIDE).contains(at));
         if let Some(zone) = over {
             let within = zone.content.contains(at);
-            let column = ((at.x - zone.content.left()) / zone.step.x).floor().max(0.0) as u32;
-            let row = ((at.y - zone.content.top() + zone.scroll) / zone.step.y).floor().max(0.0) as u32;
+            let column = ((at.x - zone.content.left()) / zone.step.x)
+                .floor()
+                .max(0.0) as u32;
+            let row = ((at.y - zone.content.top() + zone.scroll) / zone.step.y)
+                .floor()
+                .max(0.0) as u32;
             let by_hand = zone.by_hand && within;
             return Target::Zone {
                 zone: zone.zone.clone(),
@@ -695,7 +803,12 @@ impl Layout {
                 into: zone
                     .items
                     .iter()
-                    .find(|item| within && zone.fills == Fills::Folder && item.kind == ItemKind::Folder && item.rect.contains(at))
+                    .find(|item| {
+                        within
+                            && zone.fills == Fills::Folder
+                            && item.kind == ItemKind::Folder
+                            && item.rect.contains(at)
+                    })
                     .map(|item| item.item.clone()),
             };
         }
@@ -733,10 +846,16 @@ impl Layout {
     /// another zone over it.
     fn covered(&self, at: Pos2, under: Option<&ZoneId>) -> bool {
         let above = match under {
-            Some(zone) => self.zones.iter().position(|shown| &shown.zone == zone).map_or(0, |at| at + 1),
+            Some(zone) => self
+                .zones
+                .iter()
+                .position(|shown| &shown.zone == zone)
+                .map_or(0, |at| at + 1),
             None => 0,
         };
-        self.zones[above..].iter().any(|zone| zone.rect.contains(at))
+        self.zones[above..]
+            .iter()
+            .any(|zone| zone.rect.contains(at))
     }
 
     /// The items that are shown together with an item, in their order:
@@ -763,29 +882,46 @@ impl Layout {
             .iter()
             .flat_map(|zone| zone.items.iter())
             .chain(self.desks.iter().flat_map(|desk| desk.items.iter()))
-            .chain(self.desks.iter().flat_map(|desk| desk.stays.iter().map(|stay| &stay.shown)))
+            .chain(
+                self.desks
+                    .iter()
+                    .flat_map(|desk| desk.stays.iter().map(|stay| &stay.shown)),
+            )
     }
 
     /// The chosen items, in the order they are shown.
     pub fn selected(&self) -> Vec<ItemId> {
-        self.every_item().filter(|shown| shown.selected).map(|shown| shown.item.clone()).collect()
+        self.every_item()
+            .filter(|shown| shown.selected)
+            .map(|shown| shown.item.clone())
+            .collect()
     }
 
     /// The zone an item is shown in; none for a loose one.
     pub fn zone_of(&self, item: &ItemId) -> Option<&ZoneBox> {
-        self.zones.iter().find(|zone| zone.items.iter().any(|shown| &shown.item == item))
+        self.zones
+            .iter()
+            .find(|zone| zone.items.iter().any(|shown| &shown.item == item))
     }
 
     /// The zone drawn at a zone's place: itself, or the tab in front of
     /// the tabs it is one of.
     pub fn shown_for(&self, zone: &ZoneId) -> Option<&ZoneBox> {
-        self.zones.iter().find(|shown| &shown.zone == zone || shown.tabs.iter().any(|tab| &tab.zone == zone))
+        self.zones
+            .iter()
+            .find(|shown| &shown.zone == zone || shown.tabs.iter().any(|tab| &tab.zone == zone))
     }
 
     /// The zones that share a zone's place, itself among them.
     pub fn together(&self, zone: &ZoneId) -> Vec<ZoneId> {
         self.shown_for(zone)
-            .map(|shown| shown.tabs.iter().map(|tab| tab.zone.clone()).collect::<Vec<_>>())
+            .map(|shown| {
+                shown
+                    .tabs
+                    .iter()
+                    .map(|tab| tab.zone.clone())
+                    .collect::<Vec<_>>()
+            })
             .filter(|tabs| !tabs.is_empty())
             .unwrap_or_else(|| vec![zone.clone()])
     }
@@ -799,7 +935,9 @@ impl Layout {
             .iter()
             .rev()
             .filter(|zone| !but.contains(&zone.zone))
-            .find(|zone| zone.head.contains(at) || zone.tabs.iter().any(|tab| tab.rect.contains(at)))
+            .find(|zone| {
+                zone.head.contains(at) || zone.tabs.iter().any(|tab| tab.rect.contains(at))
+            })
             .filter(|zone| !zone.locked_place)
     }
 
@@ -837,7 +975,13 @@ impl Layout {
     /// pressed like a button has the hand.
     pub fn pointer_at(&self, at: Pos2) -> egui::CursorIcon {
         match self.hit(at) {
-            Hit::Edge(zone, edges) if self.shown_for(&zone).is_some_and(|shown| !shown.locked_place) => pointer_for_edges(edges),
+            Hit::Edge(zone, edges)
+                if self
+                    .shown_for(&zone)
+                    .is_some_and(|shown| !shown.locked_place) =>
+            {
+                pointer_for_edges(edges)
+            }
             Hit::Button(..) | Hit::Nav(..) => egui::CursorIcon::PointingHand,
             _ => egui::CursorIcon::Default,
         }
@@ -871,7 +1015,12 @@ fn grip(zone: &ZoneBox, at: Pos2) -> Option<Edges> {
         }
     }
     // (Too small to tell its sides apart: the far ones.)
-    let edges = Edges { left: left && !right, top: top && !bottom, right, bottom };
+    let edges = Edges {
+        left: left && !right,
+        top: top && !bottom,
+        right,
+        bottom,
+    };
     (edges != Edges::default()).then_some(edges)
 }
 
@@ -879,14 +1028,21 @@ fn grip(zone: &ZoneBox, at: Pos2) -> Option<Edges> {
 /// most. Lines break between words; a word that is too long alone breaks
 /// where it must. What does not fit ends in an ellipsis. `measure` says
 /// how wide a letter is.
-pub fn label_lines(text: &str, width: f32, most: usize, measure: &mut dyn FnMut(char) -> f32) -> Vec<String> {
+pub fn label_lines(
+    text: &str,
+    width: f32,
+    most: usize,
+    measure: &mut dyn FnMut(char) -> f32,
+) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     let mut line = String::new();
     let mut line_width = 0.0;
     let mut rest = text.trim().chars().peekable();
     let mut word = String::new();
     let mut cut = false;
-    let width_of = |text: &str, measure: &mut dyn FnMut(char) -> f32| text.chars().map(&mut *measure).sum::<f32>();
+    let width_of = |text: &str, measure: &mut dyn FnMut(char) -> f32| {
+        text.chars().map(&mut *measure).sum::<f32>()
+    };
     'words: loop {
         // The next word, with the room before it.
         word.clear();
@@ -915,7 +1071,11 @@ pub fn label_lines(text: &str, width: f32, most: usize, measure: &mut dyn FnMut(
             line_width = 0.0;
         }
         // (A new line does not begin with the room between words.)
-        let word_now = if line.is_empty() { word.trim_start() } else { word.as_str() };
+        let word_now = if line.is_empty() {
+            word.trim_start()
+        } else {
+            word.as_str()
+        };
         for letter in word_now.chars() {
             let wide = measure(letter);
             if line_width + wide > width && !line.is_empty() {
@@ -962,7 +1122,11 @@ pub fn guides(rect: Rect, area: Rect, display: Rect, others: &[Rect], gap: f32) 
         let upright = guide.from.x == guide.to.x;
         let same_line = |other: &&mut Guide| {
             (other.from.x == other.to.x) == upright
-                && if upright { on(other.from.x, guide.from.x) } else { on(other.from.y, guide.from.y) }
+                && if upright {
+                    on(other.from.x, guide.from.x)
+                } else {
+                    on(other.from.y, guide.from.y)
+                }
         };
         match found.iter_mut().find(same_line) {
             Some(other) => {
@@ -973,9 +1137,11 @@ pub fn guides(rect: Rect, area: Rect, display: Rect, others: &[Rect], gap: f32) 
         }
     };
     // (the thing met, how far its lines lie outside it)
-    let met = [(area, 0.0), (display, 0.0)]
-        .into_iter()
-        .chain(others.iter().flat_map(|other| [(*other, 0.0), (*other, gap)]));
+    let met = [(area, 0.0), (display, 0.0)].into_iter().chain(
+        others
+            .iter()
+            .flat_map(|other| [(*other, 0.0), (*other, gap)]),
+    );
     for (other, out) in met {
         let top = rect.top().min(other.top());
         let bottom = rect.bottom().max(other.bottom());
@@ -983,12 +1149,16 @@ pub fn guides(rect: Rect, area: Rect, display: Rect, others: &[Rect], gap: f32) 
             // Beside another zone only the facing sides meet across the gap.
             let across = out > 0.0;
             let meets = if across {
-                (on(rect.right(), x) && x < other.left()) || (on(rect.left(), x) && x > other.right())
+                (on(rect.right(), x) && x < other.left())
+                    || (on(rect.left(), x) && x > other.right())
             } else {
                 on(rect.left(), x) || on(rect.right(), x)
             };
             if meets {
-                add(Guide { from: pos2(x, top), to: pos2(x, bottom) });
+                add(Guide {
+                    from: pos2(x, top),
+                    to: pos2(x, bottom),
+                });
             }
         }
         let left = rect.left().min(other.left());
@@ -996,12 +1166,16 @@ pub fn guides(rect: Rect, area: Rect, display: Rect, others: &[Rect], gap: f32) 
         for y in [other.top() - out, other.bottom() + out] {
             let across = out > 0.0;
             let meets = if across {
-                (on(rect.bottom(), y) && y < other.top()) || (on(rect.top(), y) && y > other.bottom())
+                (on(rect.bottom(), y) && y < other.top())
+                    || (on(rect.top(), y) && y > other.bottom())
             } else {
                 on(rect.top(), y) || on(rect.bottom(), y)
             };
             if meets {
-                add(Guide { from: pos2(left, y), to: pos2(right, y) });
+                add(Guide {
+                    from: pos2(left, y),
+                    to: pos2(right, y),
+                });
             }
         }
     }
@@ -1035,7 +1209,12 @@ pub fn grid_marks(rect: Rect, area: Rect, grid: f32) -> Vec<Pos2> {
 pub fn metrics_for(density: gevrek_ui::Density) -> Metrics {
     let usual = Metrics::default();
     match density {
-        gevrek_ui::Density::Compact => Metrics { padding: 6, spacing: 2, title_height: 26, ..usual },
+        gevrek_ui::Density::Compact => Metrics {
+            padding: 6,
+            spacing: 2,
+            title_height: 26,
+            ..usual
+        },
         _ => usual,
     }
 }
@@ -1060,7 +1239,10 @@ pub(crate) mod tests {
 
     impl Desk {
         pub fn new() -> Self {
-            let config = ZonesConfig { enabled: true, ..ZonesConfig::default() };
+            let config = ZonesConfig {
+                enabled: true,
+                ..ZonesConfig::default()
+            };
             let mut desk = Self {
                 core: ZonesCore::new(config, ZonesState::default()),
                 backend: FakeBackend::new(),
@@ -1071,9 +1253,14 @@ pub(crate) mod tests {
         }
 
         pub fn does(&mut self, command: Command) {
-            let effects = self.host.command(&mut self.core, &mut self.backend, command.clone(), NOW);
+            let effects =
+                self.host
+                    .command(&mut self.core, &mut self.backend, command.clone(), NOW);
             let refused = effects.iter().any(|effect| {
-                matches!(effect, gevrek_zones::Effect::Notify(gevrek_zones::ZonesEvent::Refused { .. }))
+                matches!(
+                    effect,
+                    gevrek_zones::Effect::Notify(gevrek_zones::ZonesEvent::Refused { .. })
+                )
             });
             assert!(!refused, "{command:?}: {effects:?}");
         }
@@ -1081,7 +1268,8 @@ pub(crate) mod tests {
         /// Carry out what a gesture asked for, as the zones do: a
         /// refusal is the core's answer, not a fault of the test.
         pub fn tries(&mut self, command: Command) {
-            self.host.command(&mut self.core, &mut self.backend, command, NOW);
+            self.host
+                .command(&mut self.core, &mut self.backend, command, NOW);
         }
 
         pub fn zone(&mut self, title: &str, rect: (i32, i32, i32, i32)) -> ZoneId {
@@ -1100,7 +1288,12 @@ pub(crate) mod tests {
             self.host.pump(&mut self.core, &mut self.backend, NOW);
             match zone {
                 Some(zone) => {
-                    self.does(Command::AddItem { zone: zone.clone(), item: item.clone(), index: None, cell: None });
+                    self.does(Command::AddItem {
+                        zone: zone.clone(),
+                        item: item.clone(),
+                        index: None,
+                        cell: None,
+                    });
                 }
                 None if self.core.zone_of(&item).is_some() => {
                     self.does(Command::RemoveItem { item: item.clone() });
@@ -1128,17 +1321,40 @@ pub(crate) mod tests {
         assert_eq!(first.min, pos2(108.0, 136.0));
         for (what, at, expected) in [
             ("the title", pos2(250.0, 112.0), Hit::Head(zone.clone())),
-            ("an item in the zone", first.center(), Hit::Item { item: inside.clone(), zone: Some(zone.clone()) }),
-            ("the zone beside its items", pos2(400.0, 300.0), Hit::Body(zone.clone())),
+            (
+                "an item in the zone",
+                first.center(),
+                Hit::Item {
+                    item: inside.clone(),
+                    zone: Some(zone.clone()),
+                },
+            ),
+            (
+                "the zone beside its items",
+                pos2(400.0, 300.0),
+                Hit::Body(zone.clone()),
+            ),
             (
                 "the right side",
                 pos2(499.0, 250.0),
-                Hit::Edge(zone.clone(), Edges { right: true, ..Edges::default() }),
+                Hit::Edge(
+                    zone.clone(),
+                    Edges {
+                        right: true,
+                        ..Edges::default()
+                    },
+                ),
             ),
             (
                 "just outside the left side",
                 pos2(98.0, 250.0),
-                Hit::Edge(zone.clone(), Edges { left: true, ..Edges::default() }),
+                Hit::Edge(
+                    zone.clone(),
+                    Edges {
+                        left: true,
+                        ..Edges::default()
+                    },
+                ),
             ),
             (
                 "the bottom right corner",
@@ -1153,39 +1369,92 @@ pub(crate) mod tests {
             (
                 "the top left corner",
                 pos2(101.0, 101.0),
-                Hit::Edge(zone.clone(), Edges { left: true, top: true, ..Edges::default() }),
+                Hit::Edge(
+                    zone.clone(),
+                    Edges {
+                        left: true,
+                        top: true,
+                        ..Edges::default()
+                    },
+                ),
             ),
             (
                 "the top side, which is not the title",
                 pos2(300.0, 102.0),
-                Hit::Edge(zone.clone(), Edges { top: true, ..Edges::default() }),
+                Hit::Edge(
+                    zone.clone(),
+                    Edges {
+                        top: true,
+                        ..Edges::default()
+                    },
+                ),
             ),
-            ("a loose item", pos2(20.0, 20.0), Hit::Item { item: loose.clone(), zone: None }),
-            ("the bare desktop", pos2(900.0, 900.0), Hit::Desk(display.clone())),
+            (
+                "a loose item",
+                pos2(20.0, 20.0),
+                Hit::Item {
+                    item: loose.clone(),
+                    zone: None,
+                },
+            ),
+            (
+                "the bare desktop",
+                pos2(900.0, 900.0),
+                Hit::Desk(display.clone()),
+            ),
             ("beyond every display", pos2(5000.0, 10.0), Hit::Nothing),
         ] {
             assert_eq!(layout.hit(at), expected, "{what}");
         }
         // A zone that is held where it is has its rim all the same (taken
         // by it, it says that it is held), and is known to be held.
-        desk.does(Command::Lock { zone: zone.clone(), geometry: Some(true), members: None });
-        assert!(matches!(desk.layout().hit(pos2(499.0, 250.0)), Hit::Edge(..)));
+        desk.does(Command::Lock {
+            zone: zone.clone(),
+            geometry: Some(true),
+            members: None,
+        });
+        assert!(matches!(
+            desk.layout().hit(pos2(499.0, 250.0)),
+            Hit::Edge(..)
+        ));
         assert!(desk.layout().zone(&zone).unwrap().locked_place);
         // Rolled up, there is the title and nothing under it.
-        desk.does(Command::Lock { zone: zone.clone(), geometry: Some(false), members: None });
-        desk.does(Command::RollUp { zone: zone.clone(), rolled_up: Some(true) });
+        desk.does(Command::Lock {
+            zone: zone.clone(),
+            geometry: Some(false),
+            members: None,
+        });
+        desk.does(Command::RollUp {
+            zone: zone.clone(),
+            rolled_up: Some(true),
+        });
         let layout = desk.layout();
         assert_eq!(layout.hit(pos2(250.0, 112.0)), Hit::Head(zone.clone()));
         assert_eq!(layout.hit(pos2(250.0, 250.0)), Hit::Desk(display.clone()));
         assert!(layout.zone(&zone).unwrap().items.is_empty());
         // Open for now, all of it is there again, and it is rolled up still.
-        desk.does(Command::Expand { zone: zone.clone(), expanded: Some(true) });
+        desk.does(Command::Expand {
+            zone: zone.clone(),
+            expanded: Some(true),
+        });
         let layout = desk.layout();
         let open = layout.zone(&zone).unwrap();
         assert!(open.rolled_up && open.expanded && open.items.len() == 1);
-        assert_eq!(layout.hit(first.center()), Hit::Item { item: inside.clone(), zone: Some(zone.clone()) });
-        assert_eq!(layout.hit(pos2(498.0, 398.0)), Hit::Edge(zone.clone(), Edges::BOTTOM_RIGHT));
-        desk.does(Command::Expand { zone: zone.clone(), expanded: Some(false) });
+        assert_eq!(
+            layout.hit(first.center()),
+            Hit::Item {
+                item: inside.clone(),
+                zone: Some(zone.clone())
+            }
+        );
+        assert_eq!(
+            layout.hit(pos2(498.0, 398.0)),
+            Hit::Edge(zone.clone(), Edges::BOTTOM_RIGHT)
+        );
+        desk.does(Command::Expand {
+            zone: zone.clone(),
+            expanded: Some(false),
+        });
         assert_eq!(desk.layout().hit(pos2(250.0, 250.0)), Hit::Desk(display));
     }
 
@@ -1198,13 +1467,31 @@ pub(crate) mod tests {
         let layout = desk.layout();
         assert_eq!(layout.hit(pos2(400.0, 300.0)), Hit::Body(over.clone()));
         assert_eq!(layout.hit(pos2(200.0, 300.0)), Hit::Body(under.clone()));
-        assert!(matches!(layout.target(pos2(400.0, 300.0)), Target::Zone { zone, .. } if zone == over));
+        assert!(
+            matches!(layout.target(pos2(400.0, 300.0)), Target::Zone { zone, .. } if zone == over)
+        );
         // An item of the lower zone under the upper one is not taken by a band over it.
-        desk.does(Command::MoveZone { zone: over.clone(), x: 90, y: 120, snap: false });
+        desk.does(Command::MoveZone {
+            zone: over.clone(),
+            x: 90,
+            y: 120,
+            snap: false,
+        });
         let layout = desk.layout();
-        assert!(layout.items_in(Rect::from_min_size(pos2(0.0, 0.0), vec2(1900.0, 1000.0))).is_empty());
-        desk.does(Command::MoveZone { zone: over, x: 900, y: 600, snap: false });
-        assert_eq!(desk.layout().items_in(Rect::from_min_size(pos2(0.0, 0.0), vec2(1900.0, 1000.0))), [hidden]);
+        assert!(layout
+            .items_in(Rect::from_min_size(pos2(0.0, 0.0), vec2(1900.0, 1000.0)))
+            .is_empty());
+        desk.does(Command::MoveZone {
+            zone: over,
+            x: 900,
+            y: 600,
+            snap: false,
+        });
+        assert_eq!(
+            desk.layout()
+                .items_in(Rect::from_min_size(pos2(0.0, 0.0), vec2(1900.0, 1000.0))),
+            [hidden]
+        );
     }
 
     #[test]
@@ -1212,13 +1499,19 @@ pub(crate) mod tests {
         let mut desk = Desk::new();
         let one = desk.zone("One", (100, 100, 400, 300));
         let two = desk.zone("Two", (600, 100, 300, 200));
-        desk.does(Command::Tab { zone: two.clone(), with: one.clone() });
+        desk.does(Command::Tab {
+            zone: two.clone(),
+            with: one.clone(),
+        });
         let layout = desk.layout();
         assert_eq!(layout.zones.len(), 1, "only the tab in front is drawn");
         let shown = &layout.zones[0];
         assert_eq!(shown.zone, two);
         assert_eq!(shown.tabs.len(), 2);
-        assert_eq!(shown.tabs[0].rect, Rect::from_min_size(pos2(100.0, 128.0), vec2(150.0, 26.0)));
+        assert_eq!(
+            shown.tabs[0].rect,
+            Rect::from_min_size(pos2(100.0, 128.0), vec2(150.0, 26.0))
+        );
         assert!(shown.tabs[1].front && !shown.tabs[0].front);
         assert_eq!(layout.hit(pos2(120.0, 140.0)), Hit::Tab(one));
         // The items begin below the tabs.
@@ -1244,19 +1537,52 @@ pub(crate) mod tests {
             }
         );
         // On the title: into the zone, at no place in particular.
-        assert!(matches!(layout.target(pos2(200.0, 110.0)), Target::Zone { cell: None, index: None, .. }));
+        assert!(matches!(
+            layout.target(pos2(200.0, 110.0)),
+            Target::Zone {
+                cell: None,
+                index: None,
+                ..
+            }
+        ));
         // A list in the person's order knows the line.
-        desk.does(Command::SetView { zone: zone.clone(), view: Some(View::List), sort: None, descending: None, icon_size: None });
+        desk.does(Command::SetView {
+            zone: zone.clone(),
+            view: Some(View::List),
+            sort: None,
+            descending: None,
+            icon_size: None,
+        });
         assert!(matches!(
             desk.layout().target(pos2(200.0, 136.0 + 24.0 * 3.0 + 2.0)),
-            Target::Zone { index: Some(3), cell: None, .. }
+            Target::Zone {
+                index: Some(3),
+                cell: None,
+                ..
+            }
         ));
         // Sorted by name, a drop has no place of its own.
-        desk.does(Command::SetView { zone, view: None, sort: Some(Sort::Name), descending: None, icon_size: None });
-        assert!(matches!(desk.layout().target(pos2(200.0, 200.0)), Target::Zone { index: None, cell: None, .. }));
+        desk.does(Command::SetView {
+            zone,
+            view: None,
+            sort: Some(Sort::Name),
+            descending: None,
+            icon_size: None,
+        });
+        assert!(matches!(
+            desk.layout().target(pos2(200.0, 200.0)),
+            Target::Zone {
+                index: None,
+                cell: None,
+                ..
+            }
+        ));
         assert_eq!(
             desk.layout().target(pos2(900.0, 900.0)),
-            Target::Desk { display: DisplayId::new("fake-1"), origin: pos2(0.0, 0.0) }
+            Target::Desk {
+                display: DisplayId::new("fake-1"),
+                origin: pos2(0.0, 0.0)
+            }
         );
         assert_eq!(desk.layout().target(pos2(-50.0, 10.0)), Target::Nowhere);
     }
@@ -1265,7 +1591,10 @@ pub(crate) mod tests {
     fn the_way_of_a_portal_is_laid_out_in_its_title_and_the_first_folders_give_way() {
         use gevrek_zones::portal::Crumb;
         let head = Rect::from_min_size(pos2(100.0, 100.0), vec2(400.0, 28.0));
-        let crumb = |name: &str, directory: &str| Crumb { name: name.to_string(), directory: directory.to_string() };
+        let crumb = |name: &str, directory: &str| Crumb {
+            name: name.to_string(),
+            directory: directory.to_string(),
+        };
         let mut portal = PortalScene {
             root: "/d".to_string(),
             directory: "/d".to_string(),
@@ -1283,13 +1612,26 @@ pub(crate) mod tests {
         (portal.can_go_up, portal.can_go_back) = (true, true);
         let parts = way(&portal, head, 122.0, 404.0);
         let navs: Vec<&Nav> = parts.iter().map(|part| &part.nav).collect();
-        assert_eq!(navs, [&Nav::Back, &Nav::Up, &Nav::To("/d".to_string()), &Nav::To("/d/2026".to_string())]);
-        assert_eq!(parts.iter().map(|part| part.here).collect::<Vec<_>>(), [false, false, false, true]);
+        assert_eq!(
+            navs,
+            [
+                &Nav::Back,
+                &Nav::Up,
+                &Nav::To("/d".to_string()),
+                &Nav::To("/d/2026".to_string())
+            ]
+        );
+        assert_eq!(
+            parts.iter().map(|part| part.here).collect::<Vec<_>>(),
+            [false, false, false, true]
+        );
         // One after the other, none over another, all within the title.
         for pair in parts.windows(2) {
             assert!(pair[0].rect.right() <= pair[1].rect.left(), "{pair:?}");
         }
-        assert!(parts.iter().all(|part| head.contains_rect(part.rect) && part.rect.right() <= 404.0));
+        assert!(parts
+            .iter()
+            .all(|part| head.contains_rect(part.rect) && part.rect.right() <= 404.0));
         // Deep in: the folders nearest to where it stands are kept.
         for name in ["Invoices", "Paid in the first quarter", "From the council"] {
             let directory = format!("{}/{name}", portal.directory);
@@ -1297,16 +1639,29 @@ pub(crate) mod tests {
             portal.directory = directory;
         }
         let parts = way(&portal, head, 122.0, 404.0);
-        let shown: Vec<&str> = parts.iter().filter(|part| matches!(part.nav, Nav::To(_))).map(|part| part.label.as_str()).collect();
+        let shown: Vec<&str> = parts
+            .iter()
+            .filter(|part| matches!(part.nav, Nav::To(_)))
+            .map(|part| part.label.as_str())
+            .collect();
         assert_eq!(shown.last(), Some(&"From the council"));
-        assert!(shown.len() < 5 && !shown.contains(&"Downloads"), "{shown:?}");
-        assert!(parts.iter().all(|part| part.rect.right() <= 404.5), "{parts:?}");
+        assert!(
+            shown.len() < 5 && !shown.contains(&"Downloads"),
+            "{shown:?}"
+        );
+        assert!(
+            parts.iter().all(|part| part.rect.right() <= 404.5),
+            "{parts:?}"
+        );
         // Back again at its own folder, with a way back: only that.
         portal.crumbs.truncate(1);
         portal.directory = "/d".to_string();
         portal.can_go_up = false;
         let parts = way(&portal, head, 122.0, 404.0);
-        assert_eq!(parts.iter().map(|part| &part.nav).collect::<Vec<_>>(), [&Nav::Back, &Nav::To("/d".to_string())]);
+        assert_eq!(
+            parts.iter().map(|part| &part.nav).collect::<Vec<_>>(),
+            [&Nav::Back, &Nav::To("/d".to_string())]
+        );
     }
 
     #[test]
@@ -1323,11 +1678,20 @@ pub(crate) mod tests {
         let scrolled = Layout::of(&desk.core, &far, NOW);
         let last = scrolled.zone(&zone).unwrap();
         assert_eq!(last.scroll, shown.scroll_extent);
-        assert_eq!(last.items[0].rect.top(), shown.items[0].rect.top() - shown.scroll_extent);
+        assert_eq!(
+            last.items[0].rect.top(),
+            shown.items[0].rect.top() - shown.scroll_extent
+        );
         // What is scrolled out of sight is not hit.
-        assert_eq!(scrolled.hit(shown.items[0].rect.center()), scrolled.hit(shown.items[0].rect.center()));
+        assert_eq!(
+            scrolled.hit(shown.items[0].rect.center()),
+            scrolled.hit(shown.items[0].rect.center())
+        );
         let first_seen = scrolled.hit(pos2(120.0, 150.0));
-        assert!(matches!(first_seen, Hit::Item { ref item, .. } if item != &shown.items[0].item), "{first_seen:?}");
+        assert!(
+            matches!(first_seen, Hit::Item { ref item, .. } if item != &shown.items[0].item),
+            "{first_seen:?}"
+        );
     }
 
     #[test]
@@ -1338,20 +1702,39 @@ pub(crate) mod tests {
             ("notes.txt", 76.0, vec!["notes.txt"]),
             ("Annual report 2026.pdf", 76.0, vec!["Annual", "report 20…"]),
             ("Annual report", 76.0, vec!["Annual", "report"]),
-            ("Screenshot_2026-11-19_at_10.30.png", 70.0, vec!["Screenshot", "_2026-11-…"]),
+            (
+                "Screenshot_2026-11-19_at_10.30.png",
+                70.0,
+                vec!["Screenshot", "_2026-11-…"],
+            ),
             ("a b", 76.0, vec!["a b"]),
             ("", 76.0, vec![]),
             ("   spaced   out   ", 76.0, vec!["spaced out"]),
             ("ab", 5.0, vec!["a", "b"]),
             ("abc", 5.0, vec!["a", "…"]),
         ] {
-            assert_eq!(label_lines(name, width, 2, &mut seven), expected, "{name:?} in {width}");
+            assert_eq!(
+                label_lines(name, width, 2, &mut seven),
+                expected,
+                "{name:?} in {width}"
+            );
         }
-        assert_eq!(label_lines("one two three four", 40.0, 1, &mut seven), ["one…"]);
+        assert_eq!(
+            label_lines("one two three four", 40.0, 1, &mut seven),
+            ["one…"]
+        );
         // No line is wider than it may be.
         for width in [20.0, 33.0, 50.0, 76.0, 120.0] {
-            for line in label_lines("The quick brown fox jumps over the lazy dog.txt", width, 2, &mut seven) {
-                assert!(line.chars().count() as f32 * 7.0 <= width.max(7.0), "{line:?} in {width}");
+            for line in label_lines(
+                "The quick brown fox jumps over the lazy dog.txt",
+                width,
+                2,
+                &mut seven,
+            ) {
+                assert!(
+                    line.chars().count() as f32 * 7.0 <= width.max(7.0),
+                    "{line:?} in {width}"
+                );
             }
         }
     }
@@ -1366,13 +1749,25 @@ pub(crate) mod tests {
         // In the middle of nowhere: none.
         assert_eq!(lines(at(1200.0, 700.0)), []);
         // At the free room's top: one line along it.
-        assert_eq!(lines(at(1200.0, 40.0)), [Guide { from: pos2(0.0, 40.0), to: pos2(1920.0, 40.0) }]);
+        assert_eq!(
+            lines(at(1200.0, 40.0)),
+            [Guide {
+                from: pos2(0.0, 40.0),
+                to: pos2(1920.0, 40.0)
+            }]
+        );
         // Right of the other zone with the gap, in a line with its top:
         // the gap's line, and the line along both tops.
         let both = lines(at(908.0, 300.0));
         assert_eq!(both.len(), 2, "{both:?}");
-        assert!(both.contains(&Guide { from: pos2(908.0, 300.0), to: pos2(908.0, 500.0) }));
-        assert!(both.contains(&Guide { from: pos2(600.0, 300.0), to: pos2(1108.0, 300.0) }));
+        assert!(both.contains(&Guide {
+            from: pos2(908.0, 300.0),
+            to: pos2(908.0, 500.0)
+        }));
+        assert!(both.contains(&Guide {
+            from: pos2(600.0, 300.0),
+            to: pos2(1108.0, 300.0)
+        }));
         // The gap's line counts only between the two: a zone whose left
         // side happens to be at the other's left minus the gap meets nothing.
         assert_eq!(lines(at(592.0, 700.0)), []);
@@ -1388,33 +1783,74 @@ pub(crate) mod tests {
         let narrow = desk.zone("N", (600, 100, 150, 200));
         let tiny = desk.zone("T", (800, 100, 100, 200));
         let layout = desk.layout();
-        let buttons = |zone: &ZoneId| -> Vec<Button> { layout.zone(zone).unwrap().buttons.iter().map(|placed| placed.button).collect() };
+        let buttons = |zone: &ZoneId| -> Vec<Button> {
+            layout
+                .zone(zone)
+                .unwrap()
+                .buttons
+                .iter()
+                .map(|placed| placed.button)
+                .collect()
+        };
         // All of them, from the left, the last at the title's end.
         assert_eq!(buttons(&wide), Button::ALL);
         let shown = layout.zone(&wide).unwrap();
         let last = shown.buttons.last().unwrap();
         assert_eq!(last.rect.right(), shown.head.right() - 8.0);
-        assert!(shown.buttons.windows(2).all(|pair| pair[0].rect.right() < pair[1].rect.left()), "none over another");
-        assert!(shown.buttons.iter().all(|placed| shown.head.contains_rect(placed.rect)));
+        assert!(
+            shown
+                .buttons
+                .windows(2)
+                .all(|pair| pair[0].rect.right() < pair[1].rect.left()),
+            "none over another"
+        );
+        assert!(shown
+            .buttons
+            .iter()
+            .all(|placed| shown.head.contains_rect(placed.rect)));
         // The name keeps its room: what does not fit is left out from the
         // left, so that the menu and rolling up are the last to go.
         assert_eq!(buttons(&narrow), [Button::Roll, Button::More]);
-        assert!(layout.zone(&narrow).unwrap().buttons[0].rect.left() - layout.zone(&narrow).unwrap().head.left() >= NAME_LEAST);
+        assert!(
+            layout.zone(&narrow).unwrap().buttons[0].rect.left()
+                - layout.zone(&narrow).unwrap().head.left()
+                >= NAME_LEAST
+        );
         // (As small as a zone can be made: its menu at most.)
-        assert!(matches!(buttons(&tiny).as_slice(), [] | [Button::More]), "{:?}", buttons(&tiny));
+        assert!(
+            matches!(buttons(&tiny).as_slice(), [] | [Button::More]),
+            "{:?}",
+            buttons(&tiny)
+        );
         // A press on one is that button; beside them, the title.
-        let roll = shown.buttons.iter().find(|placed| placed.button == Button::Roll).unwrap().rect.center();
+        let roll = shown
+            .buttons
+            .iter()
+            .find(|placed| placed.button == Button::Roll)
+            .unwrap()
+            .rect
+            .center();
         assert_eq!(layout.hit(roll), Hit::Button(wide.clone(), Button::Roll));
         assert_eq!(layout.hit(pos2(250.0, 114.0)), Hit::Head(wide.clone()));
         // The rim is still the rim where a button reaches it.
-        assert!(matches!(layout.hit(pos2(last.rect.center().x, 101.0)), Hit::Edge(..)));
+        assert!(matches!(
+            layout.hit(pos2(last.rect.center().x, 101.0)),
+            Hit::Edge(..)
+        ));
         // What each says it does goes by how the zone stands.
         assert_eq!(button_says(shown, Button::Roll), "Roll up");
         assert_eq!(button_says(shown, Button::View), "Show as a list");
         assert_eq!(button_says(shown, Button::Lock), "Hold it where it is");
         assert_eq!(button_says(shown, Button::Cover), "Cover what it holds");
-        desk.does(Command::RollUp { zone: wide.clone(), rolled_up: Some(true) });
-        desk.does(Command::Lock { zone: wide.clone(), geometry: Some(true), members: None });
+        desk.does(Command::RollUp {
+            zone: wide.clone(),
+            rolled_up: Some(true),
+        });
+        desk.does(Command::Lock {
+            zone: wide.clone(),
+            geometry: Some(true),
+            members: None,
+        });
         let layout = desk.layout();
         let shown = layout.zone(&wide).unwrap();
         assert_eq!(button_says(shown, Button::Roll), "Roll down");
@@ -1428,15 +1864,21 @@ pub(crate) mod tests {
         let mut desk = Desk::new();
         desk.backend.add_folder("/work");
         desk.backend.add_folder("/work/a-folder-with-a-long-name");
-        desk.backend.add_folder("/work/a-folder-with-a-long-name/and-another-long-one");
+        desk.backend
+            .add_folder("/work/a-folder-with-a-long-name/and-another-long-one");
         desk.does(Command::CreateZone {
             title: "Work".to_string(),
-            kind: ZoneKind::Portal { directory: "/work".to_string() },
+            kind: ZoneKind::Portal {
+                directory: "/work".to_string(),
+            },
             rect: Some(gevrek_zones::Rect::new(100, 100, 420, 300)),
         });
         let zone = desk.core.config().zones.last().unwrap().id.clone();
         desk.host.pump(&mut desk.core, &mut desk.backend, NOW);
-        desk.does(Command::NavigateTo { zone: zone.clone(), directory: "/work/a-folder-with-a-long-name/and-another-long-one".to_string() });
+        desk.does(Command::NavigateTo {
+            zone: zone.clone(),
+            directory: "/work/a-folder-with-a-long-name/and-another-long-one".to_string(),
+        });
         desk.host.pump(&mut desk.core, &mut desk.backend, NOW);
         let layout = desk.layout();
         let shown = layout.zone(&zone).unwrap();
@@ -1444,8 +1886,16 @@ pub(crate) mod tests {
         let first = shown.buttons.first().unwrap().rect.left();
         // (The way's last part may be cut short when it is drawn; where
         // it begins is what must be clear of the buttons.)
-        assert!(shown.nav.iter().all(|part| part.rect.left() < first), "{:?} / {first}", shown.nav);
-        assert!(shown.nav.iter().filter(|part| !part.here).all(|part| part.rect.right() <= first));
+        assert!(
+            shown.nav.iter().all(|part| part.rect.left() < first),
+            "{:?} / {first}",
+            shown.nav
+        );
+        assert!(shown
+            .nav
+            .iter()
+            .filter(|part| !part.here)
+            .all(|part| part.rect.right() <= first));
     }
 
     #[test]
@@ -1467,35 +1917,84 @@ pub(crate) mod tests {
         }
         // (where, the pointer there)
         for (what, at, shape) in [
-            ("the right side", pos2(498.0, 250.0), CursorIcon::ResizeHorizontal),
-            ("the left side", pos2(101.0, 250.0), CursorIcon::ResizeHorizontal),
+            (
+                "the right side",
+                pos2(498.0, 250.0),
+                CursorIcon::ResizeHorizontal,
+            ),
+            (
+                "the left side",
+                pos2(101.0, 250.0),
+                CursorIcon::ResizeHorizontal,
+            ),
             ("the bottom", pos2(300.0, 398.0), CursorIcon::ResizeVertical),
             ("the top", pos2(300.0, 101.0), CursorIcon::ResizeVertical),
-            ("the lower right corner", pos2(498.0, 398.0), CursorIcon::ResizeNwSe),
-            ("the upper left corner", pos2(101.0, 101.0), CursorIcon::ResizeNwSe),
-            ("the upper right corner", pos2(498.0, 101.0), CursorIcon::ResizeNeSw),
-            ("the lower left corner", pos2(101.0, 398.0), CursorIcon::ResizeNeSw),
-            ("along the bottom, within the corner's reach", pos2(480.0, 398.0), CursorIcon::ResizeNwSe),
+            (
+                "the lower right corner",
+                pos2(498.0, 398.0),
+                CursorIcon::ResizeNwSe,
+            ),
+            (
+                "the upper left corner",
+                pos2(101.0, 101.0),
+                CursorIcon::ResizeNwSe,
+            ),
+            (
+                "the upper right corner",
+                pos2(498.0, 101.0),
+                CursorIcon::ResizeNeSw,
+            ),
+            (
+                "the lower left corner",
+                pos2(101.0, 398.0),
+                CursorIcon::ResizeNeSw,
+            ),
+            (
+                "along the bottom, within the corner's reach",
+                pos2(480.0, 398.0),
+                CursorIcon::ResizeNwSe,
+            ),
             ("the title", pos2(250.0, 114.0), CursorIcon::Default),
             ("the zone", pos2(300.0, 250.0), CursorIcon::Default),
             ("the bare desktop", pos2(900.0, 900.0), CursorIcon::Default),
         ] {
             assert_eq!(layout.pointer_at(at), shape, "{what}");
         }
-        let more = layout.zone(&zone).unwrap().buttons.last().unwrap().rect.center();
+        let more = layout
+            .zone(&zone)
+            .unwrap()
+            .buttons
+            .last()
+            .unwrap()
+            .rect
+            .center();
         assert_eq!(layout.pointer_at(more), CursorIcon::PointingHand);
         // A zone held where it is promises nothing: taken by its rim it
         // says that it is held.
-        desk.does(Command::Lock { zone: zone.clone(), geometry: Some(true), members: None });
+        desk.does(Command::Lock {
+            zone: zone.clone(),
+            geometry: Some(true),
+            members: None,
+        });
         let layout = desk.layout();
         assert!(matches!(layout.hit(pos2(498.0, 250.0)), Hit::Edge(..)));
         assert_eq!(layout.pointer_at(pos2(498.0, 250.0)), CursorIcon::Default);
         // Rolled up, only its sides: wider or narrower.
-        desk.does(Command::Lock { zone: zone.clone(), geometry: Some(false), members: None });
-        desk.does(Command::RollUp { zone: zone.clone(), rolled_up: Some(true) });
+        desk.does(Command::Lock {
+            zone: zone.clone(),
+            geometry: Some(false),
+            members: None,
+        });
+        desk.does(Command::RollUp {
+            zone: zone.clone(),
+            rolled_up: Some(true),
+        });
         let layout = desk.layout();
         let head = layout.zone(&zone).unwrap().head;
-        assert_eq!(layout.pointer_at(pos2(head.right() - 1.0, head.center().y)), CursorIcon::ResizeHorizontal);
+        assert_eq!(
+            layout.pointer_at(pos2(head.right() - 1.0, head.center().y)),
+            CursorIcon::ResizeHorizontal
+        );
         assert_eq!(pointer_for_edges(Edges::default()), CursorIcon::Default);
     }
 
@@ -1506,10 +2005,15 @@ pub(crate) mod tests {
         let mut desk = Desk::new();
         desk.file("a.txt", None);
         let layout = desk.layout();
-        assert_eq!((layout.twice_middle, layout.grey), (DeskGesture::GreyIcons, false));
+        assert_eq!(
+            (layout.twice_middle, layout.grey),
+            (DeskGesture::GreyIcons, false)
+        );
         desk.does(Command::GreyIcons { on: None });
         assert!(desk.layout().grey);
-        desk.does(Command::ModifySettings { changes: json!({"gestures": {"double_middle_click": "peek"}}) });
+        desk.does(Command::ModifySettings {
+            changes: json!({"gestures": {"double_middle_click": "peek"}}),
+        });
         assert_eq!(desk.layout().twice_middle, DeskGesture::Peek);
         // Put away, the loose items go with the zones.
         desk.does(Command::QuickHide { hidden: Some(true) });

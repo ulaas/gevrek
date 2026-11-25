@@ -119,7 +119,11 @@ fn main() -> anyhow::Result<()> {
     if safe {
         logging.without_setting().init();
     } else {
-        logging.config(Some(gevrek_model::paths::resolve_config(config_path.clone()).0)).init();
+        logging
+            .config(Some(
+                gevrek_model::paths::resolve_config(config_path.clone()).0,
+            ))
+            .init();
     }
     if test_input {
         log::warn!("--test-input: this window manager takes made-up keys and mouse input from its control endpoint");

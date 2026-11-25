@@ -18,7 +18,10 @@ const PRACTICE: [&str; 6] = ["Notes", "Browser", "Music", "Mail", "Files", "Phot
 /// this one is a practice window when it is asked to be.
 pub fn open_practice(windows: &mut Vec<std::process::Child>, count: usize) {
     let program = std::env::current_exe().ok().and_then(|own| {
-        Some(own.parent()?.join(format!("gevrek-studio{}", std::env::consts::EXE_SUFFIX)))
+        Some(
+            own.parent()?
+                .join(format!("gevrek-studio{}", std::env::consts::EXE_SUFFIX)),
+        )
     });
     let Some(program) = program.filter(|program| program.is_file()) else {
         log::warn!("no practice window: gevrek-studio is not beside the shell");
@@ -120,7 +123,10 @@ pub fn welcome_if_due(
 /// welcome's program is gone, and its window with it.
 pub fn open_welcome(tell: impl Fn(gevrek_link::Request) + Send + 'static) {
     let program = std::env::current_exe().ok().and_then(|own| {
-        Some(own.parent()?.join(format!("gevrek-studio{}", std::env::consts::EXE_SUFFIX)))
+        Some(
+            own.parent()?
+                .join(format!("gevrek-studio{}", std::env::consts::EXE_SUFFIX)),
+        )
     });
     let Some(program) = program.filter(|program| program.is_file()) else {
         log::warn!("no welcome: gevrek-studio is not beside the shell");

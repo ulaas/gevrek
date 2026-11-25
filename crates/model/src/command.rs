@@ -1773,7 +1773,10 @@ mod command_line_tests {
         assert_eq!(fields[0], ("action".to_string(), SHELL_ZONES.to_string()));
         assert_eq!(
             fields[1],
-            ("json".to_string(), r#"{"command":"peek","on":true}"#.to_string())
+            (
+                "json".to_string(),
+                r#"{"command":"peek","on":true}"#.to_string()
+            )
         );
         // Without what is asked it is no command, as any that is mistyped.
         assert!(matches!(

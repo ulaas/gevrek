@@ -192,11 +192,18 @@ pub fn install(ctx: &egui::Context, settings: &Settings, area: Option<Area>) {
     let mut fonts = egui::FontDefinitions::default();
     for (family, choice, query) in [
         (FontFamily::Proportional, text, "sans-serif:style=Regular"),
-        (FontFamily::Monospace, &chosen.mono, "monospace:style=Regular"),
+        (
+            FontFamily::Monospace,
+            &chosen.mono,
+            "monospace:style=Regular",
+        ),
     ] {
         let bytes = match choice {
             Choice::File(path) => file(path).or_else(|| {
-                log::warn!("the font {} is not there: gevrek's own is used", path.display());
+                log::warn!(
+                    "the font {} is not there: gevrek's own is used",
+                    path.display()
+                );
                 system(settings.system_font, query)
             }),
             Choice::Default => system(settings.system_font, query),
@@ -353,8 +360,11 @@ pub fn installed() -> &'static [Installed] {
             files.iter().filter_map(|path| read_names(path)).collect()
         });
         list.sort_by(|a, b| {
-            (a.family.to_lowercase(), style_rank(&a.style), &a.style)
-                .cmp(&(b.family.to_lowercase(), style_rank(&b.style), &b.style))
+            (a.family.to_lowercase(), style_rank(&a.style), &a.style).cmp(&(
+                b.family.to_lowercase(),
+                style_rank(&b.style),
+                &b.style,
+            ))
         });
         list.dedup_by(|a, b| a.family == b.family && a.style == b.style);
         list
@@ -394,9 +404,10 @@ pub fn shown_name(choice: &Choice, default: &str) -> String {
         Choice::File(path) => match describe(path) {
             Some(font) if is_regular(&font.style) => font.family,
             Some(font) => format!("{} {}", font.family, font.style),
-            None => path
-                .file_name()
-                .map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned()),
+            None => path.file_name().map_or_else(
+                || path.display().to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            ),
         },
     }
 }
@@ -558,7 +569,11 @@ pub fn read_names(path: &Path) -> Option<Installed> {
                     .iter()
                     .map(|pair| u16::from_be_bytes(*pair))
                     .collect();
-                let rank = if language == 0x409 || platform == 0 { 3 } else { 2 };
+                let rank = if language == 0x409 || platform == 0 {
+                    3
+                } else {
+                    2
+                };
                 (rank, String::from_utf16_lossy(&units))
             }
             (1, 0) => (1, bytes.iter().map(|&byte| byte as char).collect()),
@@ -620,13 +635,19 @@ mod tests {
             system_font: false,
             ..Settings::default()
         };
-        settings.fonts.set_area(Area::Panel, Choice::File(other.path.clone()));
+        settings
+            .fonts
+            .set_area(Area::Panel, Choice::File(other.path.clone()));
         let words = "The quick brown fox jumps";
         let own = widths(&settings, Some(Area::Panel), words);
         let others = widths(&settings, Some(Area::Launcher), words);
         let interface = widths(&settings, None, words);
         assert_eq!(others, interface);
-        assert_ne!(own, interface, "{} looks as the built-in font", other.family);
+        assert_ne!(
+            own, interface,
+            "{} looks as the built-in font",
+            other.family
+        );
     }
 
     #[test]
@@ -642,7 +663,10 @@ mod tests {
                 .find(|font| font.family == "Segoe UI")
                 .expect("Segoe UI is listed");
             assert_eq!(segoe.style, "Regular");
-            assert_eq!(shown_name(&Choice::File(segoe.path.clone()), ""), "Segoe UI");
+            assert_eq!(
+                shown_name(&Choice::File(segoe.path.clone()), ""),
+                "Segoe UI"
+            );
         }
     }
 

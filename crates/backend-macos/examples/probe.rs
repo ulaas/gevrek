@@ -65,7 +65,10 @@ mod mac {
                     .into_iter()
                     .filter(|window| all || window.layer == window_list::NORMAL_LAYER)
                 {
-                    println!("{:>7} {:<20} layer {:<4} {:?}", window.id, window.owner, window.layer, window.bounds);
+                    println!(
+                        "{:>7} {:<20} layer {:<4} {:?}",
+                        window.id, window.owner, window.layer, window.bounds
+                    );
                 }
             }
             Some("scroll") => post_scroll(
@@ -110,7 +113,9 @@ mod mac {
                 };
                 let names: Vec<String> = (0x00..=0x32u16)
                     .filter_map(|code| {
-                        let named = layout.virtual_key(code).and_then(gevrek_model::keys::vk_to_key_name);
+                        let named = layout
+                            .virtual_key(code)
+                            .and_then(gevrek_model::keys::vk_to_key_name);
                         let placed = gevrek_macos::keys::key_name(code);
                         (named != placed).then(|| format!("{code:#04x}: {placed:?} -> {named:?}"))
                     })
@@ -122,7 +127,10 @@ mod mac {
             }
             Some("touchpad") => {
                 // The touchpads' contacts for a few seconds.
-                let seconds = args.get(1).and_then(|text| text.parse().ok()).unwrap_or(5.0);
+                let seconds = args
+                    .get(1)
+                    .and_then(|text| text.parse().ok())
+                    .unwrap_or(5.0);
                 let Some(touchpad) = gevrek_macos::touchpad::Touchpad::start() else {
                     println!("no touchpad to listen to");
                     return;
@@ -156,7 +164,9 @@ mod mac {
                 // shows them.
                 for app in gevrek_macos::apps::running() {
                     let element = ax::Element::application(app.pid);
-                    let Ok(bar) = element.element("AXExtrasMenuBar") else { continue };
+                    let Ok(bar) = element.element("AXExtrasMenuBar") else {
+                        continue;
+                    };
                     for item in bar.elements("AXChildren").unwrap_or_default() {
                         println!(
                             "{:<36} {:?} title {:?} description {:?} help {:?} {:?}",
@@ -230,7 +240,14 @@ mod mac {
     fn post_scroll(up: bool, held: &str) {
         // SAFETY: an event made, given its flags, posted and released.
         unsafe {
-            let event = CGEventCreateScrollWheelEvent2(std::ptr::null(), 1, 1, if up { 1 } else { -1 }, 0, 0);
+            let event = CGEventCreateScrollWheelEvent2(
+                std::ptr::null(),
+                1,
+                1,
+                if up { 1 } else { -1 },
+                0,
+                0,
+            );
             CGEventSetFlags(event, flags_of(held));
             CGEventPost(0, event);
             CFRelease(event);
@@ -240,7 +257,11 @@ mod mac {
 
     /// Press a button at one place, move to another in steps, release.
     fn post_drag(from: (i32, i32), to: (i32, i32), held: &str, right: bool) {
-        let (down, dragged, up, button) = if right { (3u32, 7u32, 4u32, 1u32) } else { (1, 6, 2, 0) };
+        let (down, dragged, up, button) = if right {
+            (3u32, 7u32, 4u32, 1u32)
+        } else {
+            (1, 6, 2, 0)
+        };
         let flags = flags_of(held);
         let post = |kind: u32, (x, y): (i32, i32)| {
             // SAFETY: an event made, given its flags, posted and released.
@@ -248,7 +269,10 @@ mod mac {
                 let event = CGEventCreateMouseEvent(
                     std::ptr::null(),
                     kind,
-                    Point { x: f64::from(x), y: f64::from(y) },
+                    Point {
+                        x: f64::from(x),
+                        y: f64::from(y),
+                    },
                     button,
                 );
                 CGEventSetFlags(event, flags);
@@ -269,7 +293,10 @@ mod mac {
         }
         std::thread::sleep(Duration::from_millis(100));
         post(up, to);
-        println!("dragged from {from:?} to {to:?} with {held:?}{}", if right { " (right)" } else { "" });
+        println!(
+            "dragged from {from:?} to {to:?} with {held:?}{}",
+            if right { " (right)" } else { "" }
+        );
     }
 
     /// Click the left button at a place on the screen (points from the
@@ -505,13 +532,27 @@ mod mac {
     fn tree(element: &gevrek_macos::ax::Element, depth: usize) {
         let words: Vec<String> = ["AXTitle", "AXDescription", "AXValue"]
             .iter()
-            .filter_map(|name| element.string(name).filter(|text| !text.is_empty()).map(|text| format!("{name}={text:?}")))
+            .filter_map(|name| {
+                element
+                    .string(name)
+                    .filter(|text| !text.is_empty())
+                    .map(|text| format!("{name}={text:?}"))
+            })
             .collect();
-        println!("{}{} {}", "  ".repeat(depth), element.role(), words.join(" "));
+        println!(
+            "{}{} {}",
+            "  ".repeat(depth),
+            element.role(),
+            words.join(" ")
+        );
         if depth >= 8 {
             return;
         }
-        let children = if depth == 0 { element.windows() } else { element.elements("AXChildren") };
+        let children = if depth == 0 {
+            element.windows()
+        } else {
+            element.elements("AXChildren")
+        };
         for child in children.unwrap_or_default() {
             tree(&child, depth + 1);
         }

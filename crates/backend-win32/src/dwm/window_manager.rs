@@ -2103,9 +2103,15 @@ impl WindowManager {
             return;
         }
         if self.get_window_rect(handle).is_ok_and(|now| now != place) {
-            log::debug!("Window {} is shown again where it belongs: {place:?}", handle.0);
+            log::debug!(
+                "Window {} is shown again where it belongs: {place:?}",
+                handle.0
+            );
             if let Err(error) = self.batch_move_resize(&[(handle, place)]) {
-                log::debug!("window {} was not put back where it belongs: {error:#}", handle.0);
+                log::debug!(
+                    "window {} was not put back where it belongs: {error:#}",
+                    handle.0
+                );
             }
             let _ = self.update_border_position_explicit(
                 handle,
@@ -2546,15 +2552,19 @@ impl WindowManager {
 
         unsafe {
             use windows::Win32::UI::WindowsAndMessaging::{
-                GetWindowLongW, GWL_EXSTYLE, SWP_FRAMECHANGED,
-                SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_LAYERED,
+                GetWindowLongW, GWL_EXSTYLE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+                SWP_NOSIZE, SWP_NOZORDER, WS_EX_LAYERED,
             };
 
             let hwnd = handle.to_hwnd();
             if IsWindow(hwnd).as_bool() {
                 let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
                 if (ex_style & WS_EX_LAYERED.0 as i32) != 0 {
-                    super::reach::set_window_long(hwnd, GWL_EXSTYLE, ex_style & !(WS_EX_LAYERED.0 as i32));
+                    super::reach::set_window_long(
+                        hwnd,
+                        GWL_EXSTYLE,
+                        ex_style & !(WS_EX_LAYERED.0 as i32),
+                    );
                     super::reach::set_window_pos(
                         hwnd,
                         None,
@@ -2586,8 +2596,12 @@ impl WindowManager {
     /// they would else stay away until the window's program is started
     /// again.)
     pub fn restore_all_window_frames(&mut self) {
-        let without_buttons: Vec<WindowHandle> =
-            self.caption_buttons_removed.borrow().keys().copied().collect();
+        let without_buttons: Vec<WindowHandle> = self
+            .caption_buttons_removed
+            .borrow()
+            .keys()
+            .copied()
+            .collect();
         for handle in without_buttons {
             let _ = self.restore_min_max_buttons(handle);
         }
@@ -2663,8 +2677,7 @@ impl WindowManager {
 
         unsafe {
             use windows::Win32::UI::WindowsAndMessaging::{
-                GetWindowLongW, GWL_EXSTYLE,
-                WS_EX_LAYERED,
+                GetWindowLongW, GWL_EXSTYLE, WS_EX_LAYERED,
             };
 
             let hwnd = handle.to_hwnd();
@@ -2689,7 +2702,11 @@ impl WindowManager {
                 }
 
                 if (ex_style & WS_EX_LAYERED.0 as i32) == 0 {
-                    super::reach::set_window_long(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED.0 as i32);
+                    super::reach::set_window_long(
+                        hwnd,
+                        GWL_EXSTYLE,
+                        ex_style | WS_EX_LAYERED.0 as i32,
+                    );
                     self.gevrek_layered_windows.insert(handle);
                 }
 
@@ -3180,11 +3197,15 @@ impl WindowManager {
             return false;
         }
         self.window_alphas.insert(handle, alpha);
-        let _ = self.update_border_position_explicit(handle, from.x, from.y, from.width, from.height);
-        if !self
-            .animation_scheduler
-            .schedule_rect(handle, from, to, TransitionScope::Workspace, now)
-        {
+        let _ =
+            self.update_border_position_explicit(handle, from.x, from.y, from.width, from.height);
+        if !self.animation_scheduler.schedule_rect(
+            handle,
+            from,
+            to,
+            TransitionScope::Workspace,
+            now,
+        ) {
             self.end_stand_in(handle);
             return false;
         }
@@ -3194,7 +3215,11 @@ impl WindowManager {
     /// The shadow and glow of a window are left out while it slides with
     /// its workspace, where the configuration says so.
     fn rest_effects(&mut self, handle: WindowHandle) {
-        if !self.animation_scheduler.profile().workspace_slides_without_shadows {
+        if !self
+            .animation_scheduler
+            .profile()
+            .workspace_slides_without_shadows
+        {
             return;
         }
         self.effects_resting.insert(handle);
@@ -3240,8 +3265,7 @@ impl WindowManager {
         // SAFETY: plain questions about a window that may be gone.
         let (exists, ex_style) =
             unsafe { (IsWindow(hwnd).as_bool(), GetWindowLongW(hwnd, GWL_EXSTYLE)) };
-        if !exists || is_hung(hwnd) || !self.animation_scheduler.moves(TransitionScope::Explicit)
-        {
+        if !exists || is_hung(hwnd) || !self.animation_scheduler.moves(TransitionScope::Explicit) {
             return false;
         }
         // A window its program makes see-through itself cannot be made
@@ -3302,7 +3326,10 @@ impl WindowManager {
         // (Its movement was the picture's: the window is already there.)
         self.animation_scheduler.cancel_rect(handle);
         if let Err(error) = self.apply_window_alpha(handle, alpha) {
-            log::debug!("Window {} not seen again after coming in: {error}", handle.0);
+            log::debug!(
+                "Window {} not seen again after coming in: {error}",
+                handle.0
+            );
         }
         let _ = self.update_border_position(handle);
     }
@@ -3401,8 +3428,8 @@ impl WindowManager {
         // SAFETY: a plain question.
         let foreground = unsafe { GetForegroundWindow() };
         // (Not in a test: the keyboard is whoever runs it's, and stays.)
-        let before = (!cfg!(test) && !foreground.is_invalid())
-            .then(|| WindowHandle::from_hwnd(foreground));
+        let before =
+            (!cfg!(test) && !foreground.is_invalid()).then(|| WindowHandle::from_hwnd(foreground));
         // The pictures first, each where its window is; then what is
         // behind them, and the pictures over that.
         let mut items = Vec::new();
@@ -3444,7 +3471,8 @@ impl WindowManager {
         }
         // The window that had the keyboard is the one pointed at first:
         // Enter goes back to it, the arrows go on from it.
-        let marked = before.and_then(|before| items.iter().position(|(handle, _)| *handle == before));
+        let marked =
+            before.and_then(|before| items.iter().position(|(handle, _)| *handle == before));
         backdrop.mark(marked);
         self.overview.0 = Some(Overview {
             backdrop,
@@ -3493,10 +3521,13 @@ impl WindowManager {
             return false;
         }
         self.window_alphas.insert(handle, alpha);
-        if !self
-            .animation_scheduler
-            .schedule_rect(handle, from, to, TransitionScope::Workspace, now)
-        {
+        if !self.animation_scheduler.schedule_rect(
+            handle,
+            from,
+            to,
+            TransitionScope::Workspace,
+            now,
+        ) {
             // (No movement is asked for: it is there at once.)
             self.stand_ins.place(handle, to, part);
         }
@@ -3564,7 +3595,8 @@ impl WindowManager {
         use super::overview::Said;
         if !self.overview_leaving.is_empty() {
             let stand_ins = &self.stand_ins;
-            self.overview_leaving.retain(|handle| stand_ins.has(*handle));
+            self.overview_leaving
+                .retain(|handle| stand_ins.has(*handle));
             if self.overview_leaving.is_empty() && self.overview.0.is_none() {
                 self.window_overview_is_over();
             }
@@ -3633,7 +3665,8 @@ impl WindowManager {
                                 0x27 => (1, 0),
                                 _ => (0, 1),
                             };
-                            gevrek_engine::expose::towards(&places, from, across, down).unwrap_or(from)
+                            gevrek_engine::expose::towards(&places, from, across, down)
+                                .unwrap_or(from)
                         }
                     });
                 }
@@ -3792,13 +3825,14 @@ impl WindowManager {
                 .into_iter()
                 .filter(|(handle, _)| !operations.iter().any(|(coming, _)| coming == handle))
                 .collect();
-        let hide_at_once = |manager: &mut Self, windows: &[(WindowHandle, crate::dwm::container::Rect)]| {
-            for (handle, _) in windows {
-                // (A plain call on a window that may be gone.)
-                super::reach::show_window_async(handle.to_hwnd(), SW_HIDE);
-                manager.going_out.leaving.remove(handle);
-            }
-        };
+        let hide_at_once =
+            |manager: &mut Self, windows: &[(WindowHandle, crate::dwm::container::Rect)]| {
+                for (handle, _) in windows {
+                    // (A plain call on a window that may be gone.)
+                    super::reach::show_window_async(handle.to_hwnd(), SW_HIDE);
+                    manager.going_out.leaving.remove(handle);
+                }
+            };
         // (With motion reduced the windows are put in their places at once:
         // nothing may be moved aside first that is then not brought in.)
         //
@@ -3836,9 +3870,18 @@ impl WindowManager {
         let now = Instant::now();
         let until = now
             + Duration::from_millis(
-                u64::from(self.animation_scheduler.profile().workspace.duration_ms.max(16)) + 60,
+                u64::from(
+                    self.animation_scheduler
+                        .profile()
+                        .workspace
+                        .duration_ms
+                        .max(16),
+                ) + 60,
             );
-        let pictures = self.animation_scheduler.profile().workspace_slides_as_pictures;
+        let pictures = self
+            .animation_scheduler
+            .profile()
+            .workspace_slides_as_pictures;
 
         // The old one's windows go: aside, or fainter, and are hidden
         // when they have gone (`finish_going_out`).
@@ -3860,8 +3903,8 @@ impl WindowManager {
                         );
                         // As a picture of itself where that is asked for
                         // and can be had; else the window itself is moved.
-                        let pictured = pictures
-                            && self.slide_as_picture(*handle, *home, away, None, now);
+                        let pictured =
+                            pictures && self.slide_as_picture(*handle, *home, away, None, now);
                         if pictured {
                             self.pictures_going
                                 .insert(*handle, until + Duration::from_millis(1500));
@@ -3884,7 +3927,9 @@ impl WindowManager {
             };
             match going {
                 Some(alpha) => {
-                    self.going_out.leaving.insert(*handle, (*home, alpha, until));
+                    self.going_out
+                        .leaving
+                        .insert(*handle, (*home, alpha, until));
                     went = true;
                 }
                 None => hide_at_once(self, &[(*handle, *home)]),
@@ -4261,9 +4306,9 @@ impl WindowManager {
         // (And a window that was sent a move by post before, which it may
         // not have carried out yet, is sent this one by post as well: see
         // `move_must_be_posted`.)
-        let (hung, targets): (Vec<_>, Vec<_>) = targets.into_iter().partition(|target| {
-            move_must_be_posted(target.1) || super::reach::by_helper(target.1)
-        });
+        let (hung, targets): (Vec<_>, Vec<_>) = targets
+            .into_iter()
+            .partition(|target| move_must_be_posted(target.1) || super::reach::by_helper(target.1));
         for (handle, hwnd, x, y, width, height) in &hung {
             log::trace!(
                 "Window {} is not responding; positioning it asynchronously",
@@ -5142,8 +5187,11 @@ impl WindowManager {
                     border_offset,
                 );
             // (Around the strip of tabs too, where the window has one.)
-            let (border_y, border_height_total) =
-                border_rect_with_strip(border_y, border_height_total, self.strip_above(target_handle));
+            let (border_y, border_height_total) = border_rect_with_strip(
+                border_y,
+                border_height_total,
+                self.strip_above(target_handle),
+            );
 
             // Move and resize border window, keeping it behind its target window.
             // No SWP_NOCOPYBITS: let Windows copy old content and only invalidate new areas.
@@ -5212,9 +5260,9 @@ impl WindowManager {
                 }
 
                 if IsIconic(target_hwnd).as_bool()
-                || !IsWindowVisible(target_hwnd).as_bool()
-                || self.kept_out_of_sight(target_handle)
-            {
+                    || !IsWindowVisible(target_hwnd).as_bool()
+                    || self.kept_out_of_sight(target_handle)
+                {
                     let _ = ShowWindow(border_hwnd, SW_HIDE);
                     self.auras.borrow().set_visible(target_hwnd, false);
                     return Ok(());
@@ -5227,8 +5275,11 @@ impl WindowManager {
                 let (border_x, border_y, border_width_total, border_height_total) =
                     border_rect_around_frame((x, y, width, height), border_width, border_offset);
                 // (Around the strip of tabs too, where the window has one.)
-                let (border_y, border_height_total) =
-                    border_rect_with_strip(border_y, border_height_total, self.strip_above(target_handle));
+                let (border_y, border_height_total) = border_rect_with_strip(
+                    border_y,
+                    border_height_total,
+                    self.strip_above(target_handle),
+                );
 
                 log::trace!(
                     "🎨 Border position explicit: window at ({},{}) {}x{}, border at ({},{}) {}x{}",
@@ -6420,7 +6471,6 @@ impl WindowManager {
             }
         }
     }
-
 }
 
 impl Default for WindowManager {
@@ -6741,9 +6791,7 @@ fn thread_windows(window: HWND) -> Vec<HWND> {
     unsafe {
         let thread = GetWindowThreadProcessId(window, None);
         let shell = GetShellWindow();
-        if thread == 0
-            || (!shell.is_invalid() && GetWindowThreadProcessId(shell, None) == thread)
-        {
+        if thread == 0 || (!shell.is_invalid() && GetWindowThreadProcessId(shell, None) == thread) {
             return Vec::new();
         }
         let _ = EnumThreadWindows(
@@ -6967,9 +7015,7 @@ fn companions_on_screen(window: HWND, in_sight: impl Fn(HWND) -> bool) -> Vec<HW
         let thread = GetWindowThreadProcessId(window, None);
         // (Nothing of the program that is the desktop itself.)
         let shell = GetShellWindow();
-        if thread == 0
-            || (!shell.is_invalid() && GetWindowThreadProcessId(shell, None) == thread)
-        {
+        if thread == 0 || (!shell.is_invalid() && GetWindowThreadProcessId(shell, None) == thread) {
             return Vec::new();
         }
         let _ = EnumThreadWindows(
@@ -7546,7 +7592,10 @@ mod restore_tests {
     fn the_window_a_console_keeps_is_not_hidden_with_its_terminal() {
         assert!(!goes_with_its_owner("PseudoConsoleWindow"));
         assert!(!goes_with_its_owner("Gevrek_Border"));
-        assert!(goes_with_its_owner("#32770"), "a dialog goes with its window");
+        assert!(
+            goes_with_its_owner("#32770"),
+            "a dialog goes with its window"
+        );
     }
 
     #[test]
@@ -7742,8 +7791,8 @@ mod stackbar_geometry_tests {
 
     #[test]
     fn a_workspace_gives_way_as_its_style_says_where_the_displays_allow() {
-        use gevrek_model::settings::WorkspaceTransitionStyle as Style;
         use super::super::window_manager::{workspace_ways, WorkspaceWays};
+        use gevrek_model::settings::WorkspaceTransitionStyle as Style;
         let one = [(0, 0, 1920, 1080)];
         let incoming = [(10, 10, 900, 1000)];
         let outgoing = [(10, 10, 1900, 1000)];
@@ -7801,8 +7850,16 @@ mod stackbar_geometry_tests {
         );
         // To a workspace without windows, beside another display: the old
         // one still goes (out the way that is clear, or else downwards).
-        assert!(workspace_ways(Style::Slide, &two, &[], &outgoing, (1920, 0)).go.is_some());
-        assert!(workspace_ways(Style::Slide, &two, &[], &outgoing, (-1920, 0)).go.is_some());
+        assert!(
+            workspace_ways(Style::Slide, &two, &[], &outgoing, (1920, 0))
+                .go
+                .is_some()
+        );
+        assert!(
+            workspace_ways(Style::Slide, &two, &[], &outgoing, (-1920, 0))
+                .go
+                .is_some()
+        );
         // A display on every side but above: upwards.
         let around = [
             (0, 0, 1920, 1080),
@@ -8172,7 +8229,9 @@ mod exit_animation_tests {
         let tile = Rect::new(-30000, -30000, 600, 400);
         window_manager.batch_move_resize(&[(window, tile)]).unwrap();
 
-        assert!(window_manager.start_configured_window_enter(window).unwrap());
+        assert!(window_manager
+            .start_configured_window_enter(window)
+            .unwrap());
         assert!(window_manager.stand_ins.has(window));
         // The window is in its place at once, at its size, and unseen.
         assert_eq!(window_manager.get_window_rect(window).unwrap(), tile);
@@ -8352,7 +8411,9 @@ mod exit_animation_tests {
             ),
             ..workspace_slide_profile(false, false)
         });
-        assert!(!window_manager.animation_scheduler.moves(super::TransitionScope::Workspace));
+        assert!(!window_manager
+            .animation_scheduler
+            .moves(super::TransitionScope::Workspace));
         let window = shown_window_out_of_sight();
         let home = Rect::new(-30000, -30000, 600, 400);
         window_manager.batch_move_resize(&[(window, home)]).unwrap();
@@ -8417,7 +8478,11 @@ mod exit_animation_tests {
         assert!(!posted_move_stands(asked, None, short));
         // A program that put its window elsewhere than asked is not
         // waited for without end.
-        assert!(!posted_move_stands(asked, Some((0, 0, 300, 200)), POSTED_MOVE_LIMIT));
+        assert!(!posted_move_stands(
+            asked,
+            Some((0, 0, 300, 200)),
+            POSTED_MOVE_LIMIT
+        ));
     }
 
     /// A window that was sent a move by post gets its next move by post
@@ -8607,8 +8672,14 @@ mod exit_animation_tests {
             assert_eq!(layered_alpha(window), Some(0));
         }
         let deadline = Instant::now() + Duration::from_secs(4);
-        while (window_manager.animation_scheduler.rect_target(one).is_some()
-            || window_manager.animation_scheduler.rect_target(two).is_some())
+        while (window_manager
+            .animation_scheduler
+            .rect_target(one)
+            .is_some()
+            || window_manager
+                .animation_scheduler
+                .rect_target(two)
+                .is_some())
             && Instant::now() < deadline
         {
             window_manager.tick_runtime_animations().unwrap();
@@ -8757,7 +8828,9 @@ mod exit_animation_tests {
         let tile = Rect::new(-30000, -30000, 600, 400);
         let new_tile = Rect::new(-30000, -30000, 300, 400);
         window_manager.batch_move_resize(&[(window, tile)]).unwrap();
-        assert!(window_manager.start_configured_window_enter(window).unwrap());
+        assert!(window_manager
+            .start_configured_window_enter(window)
+            .unwrap());
 
         window_manager
             .apply_animated_rectangles(&[(window, new_tile)], crate::dwm::TransitionScope::Layout)
@@ -8783,7 +8856,9 @@ mod exit_animation_tests {
         let window = shown_window_out_of_sight();
         let tile = Rect::new(-30000, -30000, 600, 400);
         window_manager.batch_move_resize(&[(window, tile)]).unwrap();
-        assert!(window_manager.start_configured_window_enter(window).unwrap());
+        assert!(window_manager
+            .start_configured_window_enter(window)
+            .unwrap());
 
         unsafe {
             use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};

@@ -6,12 +6,12 @@
 //! changes of the outputs, the pointer and the session, matching the keys
 //! that come from the input devices).
 
-use gevrek_host::wm::published::Published as _;
-use gevrek_host::wm::commands::Commands as _;
-use gevrek_host::wm::configuration::Configuration as _;
 use crate::state::State;
 use gevrek_engine::executor::RuntimeEventKind;
 use gevrek_engine::WindowHandle;
+use gevrek_host::wm::commands::Commands as _;
+use gevrek_host::wm::configuration::Configuration as _;
+use gevrek_host::wm::published::Published as _;
 use gevrek_model::config::Config;
 use gevrek_model::settings::{BindingDevice, BindingTrigger};
 
@@ -440,7 +440,12 @@ impl gevrek_host::wm::WmHost for State {
             event_loop_fps: self.host_pace.passes_per_second,
             active_animations: self.desktop.animations.active_count(),
             gestures_available: self.gestures_available,
-            gesture_backend: if self.gestures_available { "libinput" } else { "none" }.to_string(),
+            gesture_backend: if self.gestures_available {
+                "libinput"
+            } else {
+                "none"
+            }
+            .to_string(),
             gesture_devices: 0,
             gesture: self.gesture_progress.clone(),
             gesture_error: None,
@@ -486,7 +491,10 @@ impl gevrek_host::wm::WmHost for State {
         self.toggle_workspace_overview()
     }
 
-    fn keyboard_layout(&mut self, target: gevrek_model::command::LayoutTarget) -> anyhow::Result<()> {
+    fn keyboard_layout(
+        &mut self,
+        target: gevrek_model::command::LayoutTarget,
+    ) -> anyhow::Result<()> {
         self.switch_keyboard_layout(target)
     }
 
@@ -521,7 +529,9 @@ impl gevrek_host::wm::WmHost for State {
         self.night_preview = Some((
             gevrek_model::night_light::within(temperature),
             std::time::Instant::now()
-                + std::time::Duration::from_secs(gevrek_model::night_light::preview_seconds(seconds)),
+                + std::time::Duration::from_secs(gevrek_model::night_light::preview_seconds(
+                    seconds,
+                )),
         ));
         self.desktop.needs_redraw = true;
         Ok(())

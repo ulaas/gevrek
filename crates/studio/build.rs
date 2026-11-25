@@ -14,7 +14,8 @@ fn main() {
     });
     println!("cargo:rerun-if-changed={}", icon.display());
     if std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|system| system == "windows") {
-        let script = std::path::Path::new(&std::env::var("OUT_DIR").expect("OUT_DIR")).join("icon.rc");
+        let script =
+            std::path::Path::new(&std::env::var("OUT_DIR").expect("OUT_DIR")).join("icon.rc");
         // (The resource compiler reads backslashes as marks.)
         let path = icon.display().to_string().replace('\\', "/");
         std::fs::write(&script, format!("1 ICON \"{path}\"\n")).expect("the resource script");

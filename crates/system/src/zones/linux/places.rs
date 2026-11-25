@@ -42,7 +42,11 @@ impl Places {
         };
         let list = |name: &str, otherwise: &str| -> Vec<PathBuf> {
             let said = std::env::var(name).unwrap_or_default();
-            let said = if said.is_empty() { otherwise.to_string() } else { said };
+            let said = if said.is_empty() {
+                otherwise.to_string()
+            } else {
+                said
+            };
             said.split(':')
                 .map(PathBuf::from)
                 .filter(|path| path.is_absolute())
@@ -190,7 +194,10 @@ mod tests {
             Some(PathBuf::from("/mnt/desk top"))
         );
         // The home itself: desktops are switched off this way.
-        assert_eq!(read("XDG_DESKTOP_DIR=\"$HOME/\""), Some(PathBuf::from("/home/ada")));
+        assert_eq!(
+            read("XDG_DESKTOP_DIR=\"$HOME/\""),
+            Some(PathBuf::from("/home/ada"))
+        );
         assert_eq!(
             read("XDG_DESKTOP_DIR=\"$HOME/a \\\"quoted\\\" name\""),
             Some(PathBuf::from("/home/ada/a \"quoted\" name"))

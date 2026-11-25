@@ -12,14 +12,25 @@ fn main() {
     println!("microphone: {:?}", sound::level(sound::Device::Microphone));
     println!("wifi: {:?}", gevrek_system::wifi::read());
     println!("bluetooth: {:?}", gevrek_system::bluetooth::read());
-    println!("brightness: {:?}", gevrek_system::brightness::read().map(|now| now.percent()));
+    println!(
+        "brightness: {:?}",
+        gevrek_system::brightness::read().map(|now| now.percent())
+    );
     // (By nothing: the call is tried, the display stays as it is.)
-    println!("brightness changed by 0: {:?}", gevrek_system::brightness::change(0).map(|now| now.percent()));
+    println!(
+        "brightness changed by 0: {:?}",
+        gevrek_system::brightness::change(0).map(|now| now.percent())
+    );
     let installed = apps::installed();
     println!(
         "applications: {} ({})",
         installed.len(),
-        installed.iter().take(5).map(|app| app.name.as_str()).collect::<Vec<_>>().join(", ")
+        installed
+            .iter()
+            .take(5)
+            .map(|app| app.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
     );
     if let Some(keeper) = gevrek_system::clipboard::start() {
         std::thread::sleep(std::time::Duration::from_millis(800));

@@ -49,7 +49,10 @@ mod mac_keeper {
     use std::sync::{Arc, Mutex};
 
     /// What password managers put on the pasteboard to say: not to be kept.
-    const NOT_KEPT: &[&str] = &["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType"];
+    const NOT_KEPT: &[&str] = &[
+        "org.nspasteboard.ConcealedType",
+        "org.nspasteboard.TransientType",
+    ];
 
     /// How often the pasteboard is looked at.
     const LOOK: std::time::Duration = std::time::Duration::from_millis(500);
@@ -70,7 +73,9 @@ mod mac_keeper {
                     }
                     seen = count;
                     let concealed = board.types().is_some_and(|types| {
-                        types.iter().any(|kind| NOT_KEPT.contains(&kind.to_string().as_str()))
+                        types
+                            .iter()
+                            .any(|kind| NOT_KEPT.contains(&kind.to_string().as_str()))
                     });
                     if concealed {
                         continue;
@@ -144,7 +149,9 @@ mod windows_keeper {
         IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
     };
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
+    use windows::Win32::System::Memory::{
+        GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostMessageW,
         RegisterClassExW, HWND_MESSAGE, MSG, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WNDCLASSEXW,
@@ -166,14 +173,8 @@ mod windows_keeper {
         pub fn put(&self, text: &str) {
             if self.texts.send(text.to_string()).is_ok() {
                 // SAFETY: a message to the keeper's own window.
-                let _ = unsafe {
-                    PostMessageW(
-                        HWND(self.window as *mut _),
-                        PUT,
-                        WPARAM(0),
-                        LPARAM(0),
-                    )
-                };
+                let _ =
+                    unsafe { PostMessageW(HWND(self.window as *mut _), PUT, WPARAM(0), LPARAM(0)) };
             }
         }
     }
@@ -249,7 +250,9 @@ mod windows_keeper {
                                         own = None;
                                     }
                                     remember(
-                                        &mut kept.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+                                        &mut kept
+                                            .lock()
+                                            .unwrap_or_else(|poisoned| poisoned.into_inner()),
                                         &text,
                                     );
                                 }

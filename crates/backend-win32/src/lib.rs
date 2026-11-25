@@ -19,17 +19,17 @@ pub mod display_settings;
 pub mod dwm;
 pub mod elevated;
 pub mod elevated_helper;
-/// (What spoils what is read from outside: the engine's, taken in as it is.)
-#[cfg(test)]
-#[path = "../../engine/src/spoil.rs"]
-mod spoil;
 pub mod hotkey;
-mod input_watch;
 pub mod idle;
+mod input_watch;
 pub mod night_light;
 pub mod persistence;
 pub mod pick;
 pub mod runtime;
+/// (What spoils what is read from outside: the engine's, taken in as it is.)
+#[cfg(test)]
+#[path = "../../engine/src/spoil.rs"]
+mod spoil;
 pub mod system_look;
 pub mod taskbar;
 pub mod wallpaper;

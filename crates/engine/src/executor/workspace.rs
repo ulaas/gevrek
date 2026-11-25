@@ -98,9 +98,12 @@ impl Executor {
     ) -> Result<usize> {
         // A display has one workspace of a name: the one that is there is
         // it.
-        if let Some(index) = monitor_manager.get_workspaces(monitor).and_then(|workspaces| {
-            crate::workspace::Workspace::position_called(workspaces.elements(), &name)
-        }) {
+        if let Some(index) = monitor_manager
+            .get_workspaces(monitor)
+            .and_then(|workspaces| {
+                crate::workspace::Workspace::position_called(workspaces.elements(), &name)
+            })
+        {
             return Ok(index);
         }
         let profile = self.profile_on(monitor_manager, monitor, &name);
@@ -172,14 +175,19 @@ impl Executor {
                     return None;
                 }
                 there.iter().position(|profile| {
-                    profile.name.trim().eq_ignore_ascii_case(workspace.name.trim())
+                    profile
+                        .name
+                        .trim()
+                        .eq_ignore_ascii_case(workspace.name.trim())
                 })
             });
         }
         let index = monitor_manager
             .get_workspaces(monitor)
             .and_then(|workspaces| {
-                workspaces.iter().position(|workspace| Some(workspace.id) == made)
+                workspaces
+                    .iter()
+                    .position(|workspace| Some(workspace.id) == made)
             })
             .unwrap_or(index);
         Ok(index)
@@ -195,9 +203,9 @@ impl Executor {
     }
 
     pub fn has_workspace_profile(&self, name: &str) -> bool {
-        self.workspace_profiles.iter().any(|profile| {
-            profile.enabled && profile.name.trim().eq_ignore_ascii_case(name.trim())
-        })
+        self.workspace_profiles
+            .iter()
+            .any(|profile| profile.enabled && profile.name.trim().eq_ignore_ascii_case(name.trim()))
     }
 
     /// The workspaces the configuration gives a display, in their order
@@ -277,9 +285,12 @@ impl Executor {
             .unwrap_or_default();
         let profiles = self.profiles_on(monitor_manager, monitor);
         if let Some(waiting) = profiles.iter().find(|profile| {
-            !there
-                .iter()
-                .any(|workspace| workspace.name.trim().eq_ignore_ascii_case(profile.name.trim()))
+            !there.iter().any(|workspace| {
+                workspace
+                    .name
+                    .trim()
+                    .eq_ignore_ascii_case(profile.name.trim())
+            })
         }) {
             return waiting.name.trim().to_string();
         }
@@ -288,9 +299,9 @@ impl Executor {
                 let text = number.to_string();
                 !there.iter().any(|workspace| {
                     workspace.is_called(&text) || workspace.number() == Some(*number)
-                }) && !profiles.iter().any(|profile| {
-                    profile.name.trim() == text || profile.label() == text
-                })
+                }) && !profiles
+                    .iter()
+                    .any(|profile| profile.name.trim() == text || profile.label() == text)
             })
             .map(|number| number.to_string())
             .unwrap_or_default()
@@ -1315,15 +1326,21 @@ impl Executor {
                 let rect = if displays.iter().any(|display| reaches(display, &rect)) {
                     rect
                 } else {
-                    let width = rect.width.clamp(work_area.width / 3, work_area.width.max(1));
-                    let height = rect.height.clamp(work_area.height / 3, work_area.height.max(1));
+                    let width = rect
+                        .width
+                        .clamp(work_area.width / 3, work_area.width.max(1));
+                    let height = rect
+                        .height
+                        .clamp(work_area.height / 3, work_area.height.max(1));
                     let found = gevrek_model::geometry::Rect {
                         x: work_area.x + (work_area.width - width) / 2,
                         y: work_area.y + (work_area.height - height) / 2,
                         width,
                         height,
                     };
-                    log::info!("Window {window:?} was on no display ({rect:?}): it is put at {found:?}");
+                    log::info!(
+                        "Window {window:?} was on no display ({rect:?}): it is put at {found:?}"
+                    );
                     try_effect(
                         window_manager,
                         Effect::Configure {
@@ -1630,7 +1647,9 @@ impl Executor {
                 let changed = monitor_manager
                     .get_workspaces_mut(monitor)
                     .and_then(|workspaces| {
-                        workspaces.iter_mut().find(|workspace| workspace.is_called(name))
+                        workspaces
+                            .iter_mut()
+                            .find(|workspace| workspace.is_called(name))
                     })
                     .is_some_and(|workspace| {
                         let changed = workspace.layout != layout;

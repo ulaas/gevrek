@@ -39,7 +39,9 @@ mod macos_main {
     pub fn main() -> anyhow::Result<()> {
         let args = Args::parse();
         gevrek_logging::Logging::new("gevrek-wm", log::LevelFilter::Info)
-            .config(Some(gevrek_model::paths::resolve_config(args.config.clone()).0))
+            .config(Some(
+                gevrek_model::paths::resolve_config(args.config.clone()).0,
+            ))
             .init();
         log::info!("=== Gevrek Window Manager Runtime Starting (macOS) ===");
         gevrek_model::paths::claim_process("wm");
@@ -211,7 +213,9 @@ mod windows_main {
         let args = Args::parse();
 
         gevrek_logging::Logging::new("gevrek-wm", log::LevelFilter::Info)
-            .config(Some(gevrek_model::paths::resolve_config(args.config.clone()).0))
+            .config(Some(
+                gevrek_model::paths::resolve_config(args.config.clone()).0,
+            ))
             .init();
 
         log::info!("=== Gevrek Window Manager Runtime Starting ===");
@@ -241,8 +245,7 @@ mod windows_main {
         {
             let pipe = gevrek_protocol::endpoint::pipe_name(&instance);
             // (Busy counts as there: 231 is ERROR_PIPE_BUSY.)
-            let answered = match tokio::net::windows::named_pipe::ClientOptions::new().open(&pipe)
-            {
+            let answered = match tokio::net::windows::named_pipe::ClientOptions::new().open(&pipe) {
                 Ok(_) => true,
                 Err(error) => error.raw_os_error() == Some(231),
             };

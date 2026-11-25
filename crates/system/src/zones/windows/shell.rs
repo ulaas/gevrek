@@ -24,8 +24,8 @@ use windows::core::{w, Interface, GUID, HSTRING, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{HANDLE, HWND};
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::Registry::{
-    RegCloseKey, RegGetValueW, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ,
-    RRF_RT_REG_DWORD,
+    RegCloseKey, RegGetValueW, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE,
+    KEY_READ, RRF_RT_REG_DWORD,
 };
 use windows::Win32::System::SystemServices::{
     SFGAO_FILESYSTEM, SFGAO_FOLDER, SFGAO_LINK, SFGAO_STREAM,
@@ -42,9 +42,8 @@ use windows::Win32::UI::Shell::{
     SHCreateItemFromIDList, SHCreateItemFromParsingName, SHCreateItemWithParent,
     SHGetDesktopFolder, SHGetKnownFolderPath, SHGetNameFromIDList, SHGetSetSettings,
     SHParseDisplayName, ASSOCF_INIT_IGNOREUNKNOWN, ASSOCSTR_CONTENTTYPE, KF_FLAG_DEFAULT,
-    SHCONTF_FOLDERS,
-    SHCONTF_INCLUDEHIDDEN, SHCONTF_NONFOLDERS, SHELLSTATEA, SIGDN_DESKTOPABSOLUTEPARSING,
-    SIGDN_NORMALDISPLAY, SSF_SHOWALLOBJECTS,
+    SHCONTF_FOLDERS, SHCONTF_INCLUDEHIDDEN, SHCONTF_NONFOLDERS, SHELLSTATEA,
+    SIGDN_DESKTOPABSOLUTEPARSING, SIGDN_NORMALDISPLAY, SSF_SHOWALLOBJECTS,
 };
 
 /// Where a shortcut leads, as the shell's property of that name
@@ -135,7 +134,10 @@ pub struct Types {
 impl Types {
     /// With a record of opened files that is shared.
     pub fn knowing(opened: super::recent::Opened) -> Self {
-        Self { known: HashMap::new(), opened }
+        Self {
+            known: HashMap::new(),
+            opened,
+        }
     }
 
     /// The type of files that end in `extension` (without the dot, in
@@ -145,7 +147,11 @@ impl Types {
             return known.clone();
         }
         let dotted = HSTRING::from(format!(".{extension}"));
-        let found = type_of(extension, content_type(&dotted).as_deref(), perceived(&dotted));
+        let found = type_of(
+            extension,
+            content_type(&dotted).as_deref(),
+            perceived(&dotted),
+        );
         self.known.insert(extension.to_string(), found.clone());
         found
     }
@@ -169,7 +175,10 @@ fn content_type(dotted: &HSTRING) -> Option<String> {
     if answered.is_err() {
         return None;
     }
-    let end = buffer.iter().position(|unit| *unit == 0).unwrap_or(buffer.len());
+    let end = buffer
+        .iter()
+        .position(|unit| *unit == 0)
+        .unwrap_or(buffer.len());
     let text = String::from_utf16_lossy(&buffer[..end]);
     (!text.is_empty()).then_some(text)
 }
@@ -194,7 +203,9 @@ fn perceived(dotted: &HSTRING) -> Option<&'static str> {
 }
 
 fn missing(what: &str) -> BackendError {
-    BackendError::NotFound { what: what.to_string() }
+    BackendError::NotFound {
+        what: what.to_string(),
+    }
 }
 
 /// The shell's item of a parsing name.
@@ -236,7 +247,10 @@ unsafe fn children(folder: &IShellFolder) -> Vec<Pidl> {
     let mut list: Option<IEnumIDList> = None;
     // (A folder with nothing to list answers "no" without an error and
     // gives no list.)
-    if folder.EnumObjects(HWND::default(), wanted as u32, &mut list).is_err() {
+    if folder
+        .EnumObjects(HWND::default(), wanted as u32, &mut list)
+        .is_err()
+    {
         return Vec::new();
     }
     let Some(list) = list else {
@@ -280,7 +294,10 @@ pub fn list(location: &Location, types: &mut Types) -> Result<Vec<Item>, Backend
             let Some(item) = item_of(&shell_item, types) else {
                 continue;
             };
-            if desktop.as_ref().is_none_or(|folders| on_the_desktop(item.id.as_str(), folders)) {
+            if desktop
+                .as_ref()
+                .is_none_or(|folders| on_the_desktop(item.id.as_str(), folders))
+            {
                 items.push(item);
             }
         }
@@ -295,7 +312,8 @@ pub fn desktop_folders() -> Vec<String> {
         .into_iter()
         .filter_map(|folder| {
             // SAFETY: the text is the shell's to give and ours to free.
-            let path = unsafe { SHGetKnownFolderPath(folder, KF_FLAG_DEFAULT, HANDLE::default()) }.ok()?;
+            let path =
+                unsafe { SHGetKnownFolderPath(folder, KF_FLAG_DEFAULT, HANDLE::default()) }.ok()?;
             let path = unsafe { taken(path) };
             (!path.is_empty()).then_some(path)
         })
@@ -314,7 +332,8 @@ pub fn on_the_desktop(id: &str, folders: &[String]) -> bool {
     let Some(class) = class_of(id) else {
         return false;
     };
-    let registered = registered_on_desktop(HKEY_CURRENT_USER, class) || registered_on_desktop(HKEY_LOCAL_MACHINE, class);
+    let registered = registered_on_desktop(HKEY_CURRENT_USER, class)
+        || registered_on_desktop(HKEY_LOCAL_MACHINE, class);
     shown_on_desktop(
         id,
         hidden_on_desktop(HKEY_CURRENT_USER, class),
@@ -378,7 +397,9 @@ pub fn item_by_id(id: &ItemId, types: &mut Types) -> Option<Item> {
 /// file system tells of every file.
 pub fn item_if_listed(id: &ItemId, types: &mut Types) -> Option<Item> {
     use std::os::windows::fs::MetadataExt;
-    let attributes = std::fs::symlink_metadata(plain(id.as_str())).ok()?.file_attributes();
+    let attributes = std::fs::symlink_metadata(plain(id.as_str()))
+        .ok()?
+        .file_attributes();
     if !listed(attributes, hidden_shown()) {
         return None;
     }
@@ -397,7 +418,11 @@ pub fn item_by_pidl(pidl: &Pidl, types: &mut Types) -> Option<Item> {
 
 /// An item as the core knows it, of the shell's item.
 unsafe fn item_of(shell_item: &IShellItem, types: &mut Types) -> Option<Item> {
-    let id = taken(shell_item.GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING).ok()?);
+    let id = taken(
+        shell_item
+            .GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING)
+            .ok()?,
+    );
     if id.is_empty() {
         return None;
     }
@@ -431,7 +456,13 @@ unsafe fn item_of(shell_item: &IShellItem, types: &mut Types) -> Option<Item> {
             .map(|target| taken(target))
             .filter(|target| !target.is_empty());
     }
-    Some(Item { id: ItemId::new(id), kind, name, path, facts })
+    Some(Item {
+        id: ItemId::new(id),
+        kind,
+        name,
+        path,
+        facts,
+    })
 }
 
 /// What the file system says of a file or folder, and the type its
@@ -452,7 +483,10 @@ fn facts_of_path(path: &str, kind: ItemKind, types: &mut Types) -> ItemFacts {
         facts.mime = Some(FOLDER_TYPE.to_string());
     } else {
         facts.extension = extension_of(gevrek_zones::paths::file_name(path));
-        facts.mime = facts.extension.as_deref().and_then(|extension| types.of(extension));
+        facts.mime = facts
+            .extension
+            .as_deref()
+            .and_then(|extension| types.of(extension));
     }
     if let Ok(said) = std::fs::metadata(path) {
         if said.is_file() {

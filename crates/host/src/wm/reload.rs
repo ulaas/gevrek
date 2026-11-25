@@ -114,20 +114,27 @@ pub trait Reload: WmHost {
                 ReloadStep::PruneWindows => {
                     self.prune_windows();
                     let parts = self.parts();
-                    parts.core.monitor_manager.cleanup_stale_windows(parts.desktop);
+                    parts
+                        .core
+                        .monitor_manager
+                        .cleanup_stale_windows(parts.desktop);
                 }
                 ReloadStep::SnapshotBorders => {
-                    borders_before = Some(plan::border_snapshot(&self.parts().core.monitor_manager));
+                    borders_before =
+                        Some(plan::border_snapshot(&self.parts().core.monitor_manager));
                 }
                 ReloadStep::Graph => {
                     let rerun = {
                         let parts = self.parts();
-                        parts.core.executor.set_graph(parts.config.node_graph.clone());
-                        parts.core.executor.clear_state();
                         parts
                             .core
                             .executor
-                            .rerun_startup_for_reload(parts.desktop, &mut parts.core.monitor_manager)
+                            .set_graph(parts.config.node_graph.clone());
+                        parts.core.executor.clear_state();
+                        parts.core.executor.rerun_startup_for_reload(
+                            parts.desktop,
+                            &mut parts.core.monitor_manager,
+                        )
                     };
                     match rerun {
                         Ok(dropped) => {
@@ -141,11 +148,10 @@ pub trait Reload: WmHost {
                 }
                 ReloadStep::DynamicRules => {
                     let parts = self.parts();
-                    if let Err(error) = parts
-                        .core
-                        .executor
-                        .reevaluate_all_dynamic_rules(parts.desktop, &mut parts.core.monitor_manager)
-                    {
+                    if let Err(error) = parts.core.executor.reevaluate_all_dynamic_rules(
+                        parts.desktop,
+                        &mut parts.core.monitor_manager,
+                    ) {
                         log::error!("Dynamic rule re-evaluation failed during reload: {error}");
                     }
                 }

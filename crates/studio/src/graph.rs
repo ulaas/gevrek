@@ -265,10 +265,7 @@ impl GraphPage {
             .or_else(|| crate::bindings::heard_now(ui, &mut self.super_down));
         if let Some(heard) = heard {
             if let crate::bindings::Heard::Key(name, modifiers) = heard {
-                log::info!(
-                    "recorded for node {}: {name} with {modifiers:?}",
-                    node.id
-                );
+                log::info!("recorded for node {}: {name} with {modifiers:?}", node.id);
                 document.set(&format!("{inside}/key"), serde_json::Value::String(name));
                 // With every key the studio's, the modifiers that are
                 // held are the node's too.

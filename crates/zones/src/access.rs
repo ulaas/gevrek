@@ -112,7 +112,11 @@ fn counted(count: usize) -> String {
 }
 
 fn item(placed: &PlacedItem, within: &str, origin: (i32, i32), hidden: bool) -> AccessNode {
-    let mut node = AccessNode::new(format!("{within}/item:{}", placed.item), Role::Item, placed.name.clone());
+    let mut node = AccessNode::new(
+        format!("{within}/item:{}", placed.item),
+        Role::Item,
+        placed.name.clone(),
+    );
     node.rect = Some(Rect::new(
         origin.0 + placed.rect.x,
         origin.1 + placed.rect.y,
@@ -131,7 +135,11 @@ fn item(placed: &PlacedItem, within: &str, origin: (i32, i32), hidden: bool) -> 
 fn describe(zone: &ZoneScene) -> String {
     let mut parts = Vec::new();
     if let Some(portal) = &zone.portal {
-        let way: Vec<&str> = portal.crumbs.iter().map(|crumb| crumb.name.as_str()).collect();
+        let way: Vec<&str> = portal
+            .crumbs
+            .iter()
+            .map(|crumb| crumb.name.as_str())
+            .collect();
         parts.push(format!("folder {}", way.join(", ")));
         match &portal.listing {
             crate::portal::Listing::Loading => parts.push("loading".to_string()),
@@ -146,9 +154,11 @@ fn describe(zone: &ZoneScene) -> String {
         parts.push("covered".to_string());
     }
     match &zone.filter {
-        Some(_) if !zone.masked => {
-            parts.push(format!("{} of {} shown", zone.items.items.len(), counted(zone.item_count)))
-        }
+        Some(_) if !zone.masked => parts.push(format!(
+            "{} of {} shown",
+            zone.items.items.len(),
+            counted(zone.item_count)
+        )),
         _ => parts.push(counted(zone.item_count)),
     }
     if zone.lock.geometry || zone.lock.members {
@@ -161,10 +171,18 @@ fn describe(zone: &ZoneScene) -> String {
 /// scene and the loose items of each display, in them the items.
 pub fn tree(scene: &Scene) -> AccessNode {
     let mut root = AccessNode::new("desktop".to_string(), Role::Desktop, "Desktop".to_string());
-    let reachable: Vec<&ZoneScene> = scene.zones.iter().filter(|zone| zone.shown && zone.front).collect();
+    let reachable: Vec<&ZoneScene> = scene
+        .zones
+        .iter()
+        .filter(|zone| zone.shown && zone.front)
+        .collect();
     for zone in &scene.zones {
         let id = format!("zone:{}", zone.zone);
-        let name = if zone.title.trim().is_empty() { "Untitled zone".to_string() } else { zone.title.clone() };
+        let name = if zone.title.trim().is_empty() {
+            "Untitled zone".to_string()
+        } else {
+            zone.title.clone()
+        };
         let mut node = AccessNode::new(id.clone(), Role::Zone, name);
         node.description = describe(zone);
         node.value = zone.filter.clone();
@@ -185,14 +203,25 @@ pub fn tree(scene: &Scene) -> AccessNode {
             .items
             .items
             .iter()
-            .map(|placed| item(placed, &id, (zone.content.x, zone.content.y), node.hidden || closed))
+            .map(|placed| {
+                item(
+                    placed,
+                    &id,
+                    (zone.content.x, zone.content.y),
+                    node.hidden || closed,
+                )
+            })
             .collect();
         root.children.push(node);
     }
     for loose in &scene.loose {
         let id = format!("loose:{}", loose.display);
         let mut node = AccessNode::new(id.clone(), Role::Loose, "Desktop items".to_string());
-        node.description = if loose.masked { format!("covered, {}", counted(loose.item_count)) } else { counted(loose.item_count) };
+        node.description = if loose.masked {
+            format!("covered, {}", counted(loose.item_count))
+        } else {
+            counted(loose.item_count)
+        };
         node.rect = Some(loose.area);
         node.masked = loose.masked;
         node.focused = loose.focused;
@@ -201,7 +230,14 @@ pub fn tree(scene: &Scene) -> AccessNode {
         node.children = loose
             .items
             .iter()
-            .map(|placed| item(placed, &id, (loose.area.x, loose.area.y), away && !placed.always_visible))
+            .map(|placed| {
+                item(
+                    placed,
+                    &id,
+                    (loose.area.x, loose.area.y),
+                    away && !placed.always_visible,
+                )
+            })
             .collect();
         root.children.push(node);
     }

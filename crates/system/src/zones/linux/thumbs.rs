@@ -88,7 +88,11 @@ fn crc(parts: &[&[u8]]) -> u32 {
     for &byte in parts.iter().copied().flatten() {
         crc ^= u32::from(byte);
         for _ in 0..8 {
-            crc = if crc & 1 == 1 { (crc >> 1) ^ 0xedb8_8320 } else { crc >> 1 };
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xedb8_8320
+            } else {
+                crc >> 1
+            };
         }
     }
     !crc
@@ -111,7 +115,8 @@ pub fn texts_of(png: &[u8]) -> Vec<(String, String)> {
         if kind == b"tEXt" {
             if let Some(end) = data.iter().position(|&byte| byte == 0) {
                 // (Latin-1 by the PNG standard: each byte is one letter.)
-                let latin = |bytes: &[u8]| bytes.iter().map(|&byte| byte as char).collect::<String>();
+                let latin =
+                    |bytes: &[u8]| bytes.iter().map(|&byte| byte as char).collect::<String>();
                 texts.push((latin(&data[..end]), latin(&data[end + 1..])));
             }
         } else if kind == b"IDAT" || kind == b"IEND" {
@@ -162,7 +167,12 @@ pub fn is_current(path: &Path, uri: &str, modified: u64, size: u64) -> bool {
         return false;
     }
     let texts = texts_of(&start);
-    let said = |key: &str| texts.iter().find(|(name, _)| name == key).map(|(_, value)| value.as_str());
+    let said = |key: &str| {
+        texts
+            .iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value.as_str())
+    };
     said("Thumb::URI") == Some(uri)
         && said("Thumb::MTime").and_then(|time| time.parse::<u64>().ok()) == Some(modified)
         && said("Thumb::Size").is_none_or(|said| said.parse::<u64>().ok() == Some(size))
@@ -237,8 +247,14 @@ pub fn picture(places: &Places, source: &Source<'_>, pixels: u32) -> Option<Pict
                 // It can still be shown; only the store goes without.
                 log::debug!("thumbnail of {} not kept: {error}", source.uri);
             }
-            let shown = small.resize(pixels, pixels, image::imageops::FilterType::Triangle).to_rgba8();
-            Some(Picture { width: shown.width(), height: shown.height(), pixels: shown.into_raw() })
+            let shown = small
+                .resize(pixels, pixels, image::imageops::FilterType::Triangle)
+                .to_rgba8();
+            Some(Picture {
+                width: shown.width(),
+                height: shown.height(),
+                pixels: shown.into_raw(),
+            })
         }
         None => {
             // Written down, so that a picture that cannot be read is not
@@ -246,7 +262,10 @@ pub fn picture(places: &Places, source: &Source<'_>, pixels: u32) -> Option<Pict
             let empty = image::DynamicImage::new_rgba8(1, 1);
             if let Some(png) = encode(&empty, source) {
                 if let Err(error) = put(&failure, &png) {
-                    log::debug!("zones: that no thumbnail could be made of {} is not kept: {error}", source.uri);
+                    log::debug!(
+                        "zones: that no thumbnail could be made of {} is not kept: {error}",
+                        source.uri
+                    );
                 }
             }
             kept(&folders[enough..])
@@ -322,7 +341,13 @@ mod tests {
 
     fn source<'a>(path: &'a Path, uri: &'a str, mime: &'a str) -> Source<'a> {
         let data = std::fs::metadata(path).expect("there");
-        Source { path, uri, mime, modified: super::super::seconds(data.modified().ok()).unwrap_or(0), size: data.len() }
+        Source {
+            path,
+            uri,
+            mime,
+            modified: super::super::seconds(data.modified().ok()).unwrap_or(0),
+            size: data.len(),
+        }
     }
 
     #[test]
@@ -333,7 +358,13 @@ mod tests {
             path_in(&places, "normal", "file:///home/jens/photos/me.png"),
             PathBuf::from("/x/home/.cache/thumbnails/normal/c6ee772d9e49320e97ec29a7eb5b1697.png")
         );
-        let folders = |pixels| folders_for(pixels).0.into_iter().map(|(folder, _)| folder).collect::<Vec<_>>();
+        let folders = |pixels| {
+            folders_for(pixels)
+                .0
+                .into_iter()
+                .map(|(folder, _)| folder)
+                .collect::<Vec<_>>()
+        };
         assert_eq!(folders(48), ["normal", "large", "x-large", "xx-large"]);
         assert_eq!(folders(200), ["large", "x-large", "xx-large", "normal"]);
         assert_eq!(folders(4000), ["xx-large", "x-large", "large", "normal"]);
@@ -359,14 +390,23 @@ mod tests {
         // It is in the store, in the folder for that size, for the person
         // alone, and says whose it is.
         let kept = path_in(&places, "normal", &uri);
-        assert_eq!(find(&places, &uri, of.modified, of.size, 96), Some(kept.clone()));
-        let rights = |path: &Path| std::fs::metadata(path).expect("there").permissions().mode() & 0o777;
+        assert_eq!(
+            find(&places, &uri, of.modified, of.size, 96),
+            Some(kept.clone())
+        );
+        let rights =
+            |path: &Path| std::fs::metadata(path).expect("there").permissions().mode() & 0o777;
         assert_eq!(rights(&kept), 0o600);
         assert_eq!(rights(kept.parent().expect("a folder")), 0o700);
         assert_eq!(rights(&store(&places)), 0o700);
         let bytes = std::fs::read(&kept).expect("read");
         let texts = texts_of(&bytes);
-        let said = |key: &str| texts.iter().find(|(name, _)| name == key).map(|(_, value)| value.clone());
+        let said = |key: &str| {
+            texts
+                .iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, value)| value.clone())
+        };
         assert_eq!(said("Thumb::URI"), Some(uri.clone()));
         assert_eq!(said("Thumb::MTime"), Some(of.modified.to_string()));
         assert_eq!(said("Thumb::Size"), Some(of.size.to_string()));
@@ -384,7 +424,15 @@ mod tests {
 
         // The second time it comes from the store: the file itself may be
         // unreadable by now.
-        let again = picture(&places, &Source { mime: "application/x-unknown", ..of.clone() }, 96).expect("kept");
+        let again = picture(
+            &places,
+            &Source {
+                mime: "application/x-unknown",
+                ..of.clone()
+            },
+            96,
+        )
+        .expect("kept");
         assert_eq!((again.width, again.height), (96, 24));
 
         // The file changed: the kept one is not its picture any more.
@@ -394,7 +442,15 @@ mod tests {
         assert_eq!(find(&places, &uri, of.modified + 1, of.size, 96), None);
 
         // A film's thumbnail that is too small is still shown, larger.
-        let blown = picture(&places, &Source { mime: "video/x-matroska", ..of.clone() }, 200).expect("the small one");
+        let blown = picture(
+            &places,
+            &Source {
+                mime: "video/x-matroska",
+                ..of.clone()
+            },
+            200,
+        )
+        .expect("the small one");
         assert_eq!((blown.width, blown.height), (200, 50));
         // A larger size goes into its own folder; a picture smaller than
         // that folder's side is kept as large as it is.
@@ -421,7 +477,10 @@ mod tests {
         let plain = std::fs::read(&small).expect("read");
         let theirs = with_texts(
             &plain,
-            &[("Thumb::URI", uri.clone()), ("Thumb::MTime", of.modified.to_string())],
+            &[
+                ("Thumb::URI", uri.clone()),
+                ("Thumb::MTime", of.modified.to_string()),
+            ],
         )
         .expect("a PNG");
         let kept = path_in(&places, "large", &uri);
@@ -433,8 +492,14 @@ mod tests {
         // One that names another file, or no file, is not used.
         std::fs::write(&kept, &plain).expect("written");
         assert!(picture(&places, &of, 64).is_none());
-        let stale = with_texts(&plain, &[("Thumb::URI", uri.clone()), ("Thumb::MTime", "1".to_string())])
-            .expect("a PNG");
+        let stale = with_texts(
+            &plain,
+            &[
+                ("Thumb::URI", uri.clone()),
+                ("Thumb::MTime", "1".to_string()),
+            ],
+        )
+        .expect("a PNG");
         std::fs::write(&kept, stale).expect("written");
         assert!(picture(&places, &of, 64).is_none());
         assert!(texts_of(b"no png at all").is_empty());
@@ -456,8 +521,20 @@ mod tests {
         // It is a good file now, but as long as it has not changed it is
         // not tried again; once it has, it is.
         picture_file(&file, 10, 10);
-        assert!(picture(&places, &Source { size: of.size, ..of.clone() }, 64).is_none());
-        let changed = Source { modified: of.modified + 5, size: 99, ..of.clone() };
+        assert!(picture(
+            &places,
+            &Source {
+                size: of.size,
+                ..of.clone()
+            },
+            64
+        )
+        .is_none());
+        let changed = Source {
+            modified: of.modified + 5,
+            size: 99,
+            ..of.clone()
+        };
         assert!(picture(&places, &changed, 64).is_some());
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -89,7 +89,11 @@ fn scene(demo: Demo) -> Option<Scene> {
             ],
             (0, 0),
         ),
-        Demo::Monocle => plain(tiled, vec![[0.0, 0.0, 1.0, 1.0], TILED[1], TILED[2]], (0, 0)),
+        Demo::Monocle => plain(
+            tiled,
+            vec![[0.0, 0.0, 1.0, 1.0], TILED[1], TILED[2]],
+            (0, 0),
+        ),
         Demo::Float => plain(
             tiled,
             vec![TILED[0], [0.5, 0.0, 0.5, 1.0], [0.30, 0.22, 0.42, 0.52]],
@@ -98,13 +102,20 @@ fn scene(demo: Demo) -> Option<Scene> {
         // (Out at the left; the workspace that comes is empty.)
         Demo::Workspace => plain(
             tiled,
-            TILED.iter().map(|at| [at[0] - 1.1, at[1], at[2], at[3]]).collect(),
+            TILED
+                .iter()
+                .map(|at| [at[0] - 1.1, at[1], at[2], at[3]])
+                .collect(),
             (0, 0),
         ),
         // (The one that has the keyboard stays in sight, alone.)
         Demo::Carry => plain(
             tiled,
-            vec![[-1.1, 0.0, 0.5, 1.0], [-0.6, 0.0, 0.5, 0.5], [0.0, 0.0, 1.0, 1.0]],
+            vec![
+                [-1.1, 0.0, 0.5, 1.0],
+                [-0.6, 0.0, 0.5, 0.5],
+                [0.0, 0.0, 1.0, 1.0],
+            ],
             (2, 2),
         ),
         Demo::Overview => plain(
@@ -160,14 +171,23 @@ fn drawing(ui: &mut egui::Ui, palette: &theme::Palette, demo: Demo, t: f32, size
         .shrink(2.0)
     };
     let lerp = |a: f32, b: f32| a + (b - a) * t;
-    let focused = if t < 0.5 { scene.focus.0 } else { scene.focus.1 };
+    let focused = if t < 0.5 {
+        scene.focus.0
+    } else {
+        scene.focus.1
+    };
     // (The one with the keyboard last: it lies over the others where
     // they overlap.)
     let mut order: Vec<usize> = (0..scene.before.len()).collect();
     order.sort_by_key(|index| *index == focused);
     for index in order {
         let (a, b) = (scene.before[index], scene.after[index]);
-        let at = place([lerp(a[0], b[0]), lerp(a[1], b[1]), lerp(a[2], b[2]), lerp(a[3], b[3])]);
+        let at = place([
+            lerp(a[0], b[0]),
+            lerp(a[1], b[1]),
+            lerp(a[2], b[2]),
+            lerp(a[3], b[3]),
+        ]);
         if at.width() < 3.0 || at.height() < 3.0 {
             continue;
         }
@@ -277,15 +297,22 @@ pub fn draw(ui: &mut egui::Ui, palette: &theme::Palette, view: &View<'_>) -> Vec
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
-                    if widgets::small_icon_button(ui, icons::X, "Leave the tutorial. It can be taken up again where it was left.")
-                        .clicked()
+                    if widgets::small_icon_button(
+                        ui,
+                        icons::X,
+                        "Leave the tutorial. It can be taken up again where it was left.",
+                    )
+                    .clicked()
                     {
                         asked.push(Input::Leave);
                     }
                     let (sign, says) = if view.paused {
                         (icons::PLAY, "Go on")
                     } else {
-                        (icons::PAUSE, "Pause: the keys are yours, nothing is counted")
+                        (
+                            icons::PAUSE,
+                            "Pause: the keys are yours, nothing is counted",
+                        )
                     };
                     if widgets::small_icon_button(ui, sign, says).clicked() {
                         asked.push(Input::Pause(!view.paused));
@@ -308,7 +335,9 @@ pub fn draw(ui: &mut egui::Ui, palette: &theme::Palette, view: &View<'_>) -> Vec
                     ui.spacing_mut().item_spacing.y = 5.0;
                     ui.add(
                         egui::Label::new(
-                            egui::RichText::new(view.step.say).size(16.5).color(palette.text),
+                            egui::RichText::new(view.step.say)
+                                .size(16.5)
+                                .color(palette.text),
                         )
                         .wrap(),
                     );
@@ -322,7 +351,9 @@ pub fn draw(ui: &mut egui::Ui, palette: &theme::Palette, view: &View<'_>) -> Vec
                         );
                     } else if view.paused {
                         ui.label(
-                            egui::RichText::new("Paused.").size(13.5).color(palette.muted),
+                            egui::RichText::new("Paused.")
+                                .size(13.5)
+                                .color(palette.muted),
                         );
                     } else if !view.keys.is_empty() {
                         let (row, _) = ui.allocate_exact_size(
@@ -357,7 +388,9 @@ pub fn draw(ui: &mut egui::Ui, palette: &theme::Palette, view: &View<'_>) -> Vec
                     if !view.step.why.is_empty() {
                         ui.add(
                             egui::Label::new(
-                                egui::RichText::new(view.step.why).size(12.5).color(palette.muted),
+                                egui::RichText::new(view.step.why)
+                                    .size(12.5)
+                                    .color(palette.muted),
                             )
                             .wrap(),
                         );
@@ -368,7 +401,8 @@ pub fn draw(ui: &mut egui::Ui, palette: &theme::Palette, view: &View<'_>) -> Vec
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
-                    if view.at > 0 && widgets::text_button(ui, icons::ARROW_LEFT, "Back").clicked() {
+                    if view.at > 0 && widgets::text_button(ui, icons::ARROW_LEFT, "Back").clicked()
+                    {
                         asked.push(Input::Back);
                     }
                     let waits = view.step.goal != gevrek_tutorial::Goal::Read
@@ -379,8 +413,12 @@ pub fn draw(ui: &mut egui::Ui, palette: &theme::Palette, view: &View<'_>) -> Vec
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if !waits {
                             let last = view.at + 1 == view.lesson.steps.len();
-                            if widgets::primary_button(ui, true, if last { "Finish" } else { "Next" })
-                                .clicked()
+                            if widgets::primary_button(
+                                ui,
+                                true,
+                                if last { "Finish" } else { "Next" },
+                            )
+                            .clicked()
                             {
                                 asked.push(Input::Next);
                             }
@@ -390,15 +428,14 @@ pub fn draw(ui: &mut egui::Ui, palette: &theme::Palette, view: &View<'_>) -> Vec
                             // Shown how: offered plainly once the step
                             // has waited long, there quietly before.
                             let shown = if view.help == Help::Offer {
-                                widgets::secondary_button(
-                                    ui,
-                                    format!("{}  Show me", icons::PLAY),
-                                )
+                                widgets::secondary_button(ui, format!("{}  Show me", icons::PLAY))
                             } else {
                                 widgets::text_button(ui, icons::PLAY, "Show me")
                             };
                             if shown
-                                .on_hover_text("gevrek does it once, to be watched; then it is yours to do.")
+                                .on_hover_text(
+                                    "gevrek does it once, to be watched; then it is yours to do.",
+                                )
                                 .clicked()
                             {
                                 asked.push(Input::ShowMe);
@@ -409,7 +446,8 @@ pub fn draw(ui: &mut egui::Ui, palette: &theme::Palette, view: &View<'_>) -> Vec
             });
         });
     if moving || view.state == StepState::Done {
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(33));
     }
     asked
 }
@@ -438,19 +476,31 @@ pub fn draw_setting(ui: &mut egui::Ui, palette: &theme::Palette, lesson: &Lesson
                 });
             });
             ui.add_space(14.0);
-            ui.label(egui::RichText::new(lesson.title).size(20.0).strong().color(palette.text));
-            ui.label(egui::RichText::new(lesson.summary).size(13.5).color(palette.muted));
+            ui.label(
+                egui::RichText::new(lesson.title)
+                    .size(20.0)
+                    .strong()
+                    .color(palette.text),
+            );
+            ui.label(
+                egui::RichText::new(lesson.summary)
+                    .size(13.5)
+                    .color(palette.muted),
+            );
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 widgets::busy(ui);
                 ui.label(
-                    egui::RichText::new("Practice windows are opened on a workspace of the tutorial's own…")
-                        .size(12.5)
-                        .color(palette.faint),
+                    egui::RichText::new(
+                        "Practice windows are opened on a workspace of the tutorial's own…",
+                    )
+                    .size(12.5)
+                    .color(palette.faint),
                 );
             });
         });
-    ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_millis(100));
     asked
 }
 
@@ -581,7 +631,11 @@ mod tests {
         for lesson in lessons() {
             for at in 0..lesson.steps.len() {
                 for (state, paused, keys) in [
-                    (StepState::Waiting, false, vec!["Win+RIGHT".to_string(), "Win+L".to_string()]),
+                    (
+                        StepState::Waiting,
+                        false,
+                        vec!["Win+RIGHT".to_string(), "Win+L".to_string()],
+                    ),
                     (StepState::Waiting, true, Vec::new()),
                     (StepState::Done, false, Vec::new()),
                 ] {
@@ -612,12 +666,19 @@ mod tests {
     #[ignore = "draws a picture to look at: GEVREK_LOOK_OUT=<file>"]
     fn the_coach_is_drawn_to_be_looked_at() {
         let said = |name: &str| std::env::var(name).ok().filter(|text| !text.is_empty());
-        let out = std::path::PathBuf::from(said("GEVREK_LOOK_OUT").expect("GEVREK_LOOK_OUT: a file"));
+        let out =
+            std::path::PathBuf::from(said("GEVREK_LOOK_OUT").expect("GEVREK_LOOK_OUT: a file"));
         let which = said("GEVREK_LOOK").unwrap_or_else(|| "focus:1".to_string());
         let (id, step) = which.split_once(':').unwrap_or((which.as_str(), "1"));
         let shown = lesson(id).expect("a lesson of that name");
-        let at = step.parse::<usize>().unwrap_or(1).clamp(1, shown.steps.len()) - 1;
-        let moment: f64 = said("GEVREK_LOOK_AT").and_then(|text| text.parse().ok()).unwrap_or(2.0);
+        let at = step
+            .parse::<usize>()
+            .unwrap_or(1)
+            .clamp(1, shown.steps.len())
+            - 1;
+        let moment: f64 = said("GEVREK_LOOK_AT")
+            .and_then(|text| text.parse().ok())
+            .unwrap_or(2.0);
         let state = said("GEVREK_LOOK_STATE").unwrap_or_default();
         let config = gevrek_model::examples::starting_configuration();
         let keys = match shown.steps[at].act {
@@ -635,16 +696,21 @@ mod tests {
         theme::apply(&context, &palette, &settings);
         let mut pixels = Vec::new();
         for frame in 0..3 {
-            pixels = painter.frame_of(&context, moment + f64::from(frame) * 0.001, Vec::new(), |ui| {
-                let mut card = view(shown, at, keys.clone());
-                match state.as_str() {
-                    "done" => card.state = StepState::Done,
-                    "offer" => card.help = Help::Offer,
-                    "paused" => card.paused = true,
-                    _ => {}
-                }
-                draw(ui, &palette, &card);
-            });
+            pixels = painter.frame_of(
+                &context,
+                moment + f64::from(frame) * 0.001,
+                Vec::new(),
+                |ui| {
+                    let mut card = view(shown, at, keys.clone());
+                    match state.as_str() {
+                        "done" => card.state = StepState::Done,
+                        "offer" => card.help = Help::Offer,
+                        "paused" => card.paused = true,
+                        _ => {}
+                    }
+                    draw(ui, &palette, &card);
+                },
+            );
         }
         painter.save(&pixels, &out).expect("the picture is written");
     }

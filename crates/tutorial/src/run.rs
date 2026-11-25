@@ -152,7 +152,11 @@ impl Run {
             return;
         };
         if met(self.step().goal, before, &self.now, &self.carried_out) {
-            log::debug!("the tutorial's step {} of {} is done", self.at + 1, self.lesson.id);
+            log::debug!(
+                "the tutorial's step {} of {} is done",
+                self.at + 1,
+                self.lesson.id
+            );
             self.done = Some(now);
         }
     }
@@ -282,7 +286,9 @@ mod tests {
         run.take(Input::Facts(desk(2)), then);
         assert_eq!(run.state(), StepState::Done);
         // It stays a moment, then the next step comes.
-        assert!(run.take(Input::Tick, then + Duration::from_millis(300)).is_empty());
+        assert!(run
+            .take(Input::Tick, then + Duration::from_millis(300))
+            .is_empty());
         assert_eq!(run.take(Input::Tick, then + DONE_FOR), [Effect::Step]);
         assert_eq!((run.at(), run.state()), (1, StepState::Waiting));
         // The next step is measured from where the desktop is now: the
@@ -302,8 +308,13 @@ mod tests {
         // Shown: the command the step teaches is handed over, and the
         // offer is not made a second time.
         let effects = run.take(Input::ShowMe, start + OFFER_AFTER);
-        assert!(matches!(&effects[..], [Effect::Dispatch(command)] if command.contains("focus_direction")));
-        assert_eq!(run.help(start + OFFER_AFTER + Duration::from_secs(60)), Help::Ring);
+        assert!(
+            matches!(&effects[..], [Effect::Dispatch(command)] if command.contains("focus_direction"))
+        );
+        assert_eq!(
+            run.help(start + OFFER_AFTER + Duration::from_secs(60)),
+            Help::Ring
+        );
         // Paused: no help, nothing is done, and the pause is not waiting.
         let mut run = Run::begin(lesson("focus").expect("the lesson"), 0, start);
         run.take(Input::Facts(desk(1)), start);
@@ -312,7 +323,11 @@ mod tests {
         assert_eq!(run.state(), StepState::Waiting);
         assert_eq!(run.help(start + Duration::from_secs(100)), Help::Quiet);
         run.take(Input::Pause(false), start + Duration::from_secs(100));
-        assert_eq!(run.state(), StepState::Done, "what was done meanwhile counts when it goes on");
+        assert_eq!(
+            run.state(),
+            StepState::Done,
+            "what was done meanwhile counts when it goes on"
+        );
         // A practice window is asked of the one who draws.
         let mut run = Run::begin(lesson("tiling").expect("the lesson"), 3, start);
         assert_eq!(run.take(Input::ShowMe, start), [Effect::OpenPractice]);
@@ -325,7 +340,9 @@ mod tests {
         let mut run = Run::begin(tiling, 0, start);
         run.take(Input::Facts(desk(1)), start);
         // A step that is read is gone on from by hand, and not by itself.
-        assert!(run.take(Input::Tick, start + Duration::from_secs(60)).is_empty());
+        assert!(run
+            .take(Input::Tick, start + Duration::from_secs(60))
+            .is_empty());
         assert_eq!(run.take(Input::Next, start), [Effect::Step]);
         // One that waits is not gone on from with Next, but past with Skip.
         assert!(run.take(Input::Next, start).is_empty());
@@ -334,7 +351,10 @@ mod tests {
         assert_eq!(run.take(Input::Back, start), [Effect::Step]);
         assert_eq!(run.at(), 1);
         run.take(Input::Back, start);
-        assert!(run.take(Input::Back, start).is_empty(), "before the first there is none");
+        assert!(
+            run.take(Input::Back, start).is_empty(),
+            "before the first there is none"
+        );
         // Past the last: finished. And out at any time.
         let mut run = Run::begin(tiling, tiling.steps.len() - 1, start);
         assert_eq!(run.take(Input::Next, start), [Effect::Finished]);

@@ -48,7 +48,11 @@ extern "C" {
 extern "C" {
     pub fn AXIsProcessTrusted() -> bool;
     pub fn AXUIElementCreateApplication(pid: i32) -> CFTypeRef;
-    pub fn AXUIElementCopyAttributeValue(element: CFTypeRef, attribute: CFTypeRef, value: *mut CFTypeRef) -> i32;
+    pub fn AXUIElementCopyAttributeValue(
+        element: CFTypeRef,
+        attribute: CFTypeRef,
+        value: *mut CFTypeRef,
+    ) -> i32;
     pub fn AXUIElementPerformAction(element: CFTypeRef, action: CFTypeRef) -> i32;
     pub fn AXValueGetValue(value: CFTypeRef, kind: u32, out: *mut c_void) -> bool;
 }
@@ -103,7 +107,13 @@ impl Cf {
     pub fn string(text: &str) -> Self {
         // SAFETY: valid UTF-8 for the length given; an owned result.
         Self(unsafe {
-            CFStringCreateWithBytes(std::ptr::null(), text.as_ptr(), text.len() as isize, UTF8, false)
+            CFStringCreateWithBytes(
+                std::ptr::null(),
+                text.as_ptr(),
+                text.len() as isize,
+                UTF8,
+                false,
+            )
         })
     }
 
@@ -132,7 +142,10 @@ pub unsafe fn string_of(cf: CFTypeRef) -> Option<String> {
     if !CFStringGetCString(cf, buffer.as_mut_ptr(), size, UTF8) {
         return None;
     }
-    let end = buffer.iter().position(|&byte| byte == 0).unwrap_or(buffer.len());
+    let end = buffer
+        .iter()
+        .position(|&byte| byte == 0)
+        .unwrap_or(buffer.len());
     Some(String::from_utf8_lossy(&buffer[..end]).into_owned())
 }
 

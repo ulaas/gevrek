@@ -188,7 +188,10 @@ mod tests {
         assert_eq!(rounded(&region(5.0, 5.0, 10.0, -3.0, 4.0), 1.0), None);
         assert_eq!(rounded(&region(5.0, 5.0, 0.2, 10.0, 0.0), 1.0), None);
         assert_eq!(rounded(&region(f32::NAN, 5.0, 10.0, 10.0, 0.0), 1.0), None);
-        assert_eq!(rounded(&region(5.0, 5.0, f32::INFINITY, 10.0, 0.0), 1.0), None);
+        assert_eq!(
+            rounded(&region(5.0, 5.0, f32::INFINITY, 10.0, 0.0), 1.0),
+            None
+        );
         assert_eq!(rounded(&region(5.0, 5.0, 10.0, 10.0, 0.0), 0.0), None);
         // A radius that is no number is no radius.
         let plain = rounded(&region(0.0, 0.0, 10.0, 10.0, f32::NAN), 1.0).expect("a part");

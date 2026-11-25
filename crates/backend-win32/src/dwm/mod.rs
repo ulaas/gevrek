@@ -7,8 +7,8 @@ mod aura;
 pub mod hidden_journal;
 pub mod hwnd_map;
 pub mod monitor;
-pub mod reach;
 mod overview;
+pub mod reach;
 mod stand_in;
 pub mod veil;
 use gevrek_engine::overlay_data;
@@ -35,13 +35,14 @@ pub use rules::{
     FloatRule, IgnoreRule, ManageRule, MatchKind, MatchStrategy, RuleEngine, RulePosition,
     RuleResolution, WindowRule,
 };
-pub use window_manager::{
-    invisible_border_content_rect, stackbar_content_rect, HwndExt, IgnoreReason, RuleResolutionScope,
-    StackbarContainerState, SystemBackdrop, WindowCorner, WindowHandle, WindowInfo, WindowManager,
-};
-pub use window_monitor::{WindowEvent, WindowMonitor};
-pub use workspace::{ExposeState, WindowContainerBehaviour, Workspace};
 pub use snap_zones::{
     presets as snap_zone_presets, SnapZone, SnapZoneConfig, SnapZoneHit, SnapZoneLayout,
     SnapZoneManager, SnapZoneModifier,
 };
+pub use window_manager::{
+    invisible_border_content_rect, stackbar_content_rect, HwndExt, IgnoreReason,
+    RuleResolutionScope, StackbarContainerState, SystemBackdrop, WindowCorner, WindowHandle,
+    WindowInfo, WindowManager,
+};
+pub use window_monitor::{WindowEvent, WindowMonitor};
+pub use workspace::{ExposeState, WindowContainerBehaviour, Workspace};

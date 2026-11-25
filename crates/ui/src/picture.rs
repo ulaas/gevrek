@@ -21,17 +21,14 @@ impl Painter {
     pub fn sized(size: (u32, u32)) -> Option<Self> {
         let picture = size;
         use egui_wgpu::wgpu;
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let adapter =
-            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                force_fallback_adapter: true,
-                ..Default::default()
-            }))
-            .ok()?;
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            force_fallback_adapter: true,
+            ..Default::default()
+        }))
+        .ok()?;
         let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-                .ok()?;
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("a page's picture"),
@@ -98,13 +95,9 @@ impl Painter {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        let before = self.renderer.update_buffers(
-            &self.device,
-            &self.queue,
-            &mut encoder,
-            &jobs,
-            &screen,
-        );
+        let before =
+            self.renderer
+                .update_buffers(&self.device, &self.queue, &mut encoder, &jobs, &screen);
         {
             let mut pass = encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -177,6 +170,12 @@ impl Painter {
 
     /// Write a frame's pixels as a PNG file.
     pub fn save(&self, pixels: &[u8], file: &std::path::Path) -> image::ImageResult<()> {
-        image::save_buffer(file, pixels, self.size.0, self.size.1, image::ColorType::Rgba8)
+        image::save_buffer(
+            file,
+            pixels,
+            self.size.0,
+            self.size.1,
+            image::ColorType::Rgba8,
+        )
     }
 }

@@ -90,10 +90,10 @@ pub use displays::displays_of_state;
 pub use icons::pixels;
 
 use crate::icons::Picture;
-use explorer::{Explorer, Keeper, ShellDesktop};
-use gevrek_model::geometry::Point;
 use crate::zones::smart::Smart;
 use crate::zones::sources::Source;
+use explorer::{Explorer, Keeper, ShellDesktop};
+use gevrek_model::geometry::Point;
 use gevrek_zones::backend::{
     BackendError, BackendEvent, DragActions, DropPayload, FileOperation, IconHandle, IconRequest,
     IconSize, Location, WatchId, ZonesBackend,
@@ -175,7 +175,11 @@ impl SystemBackend {
     /// call `drain_events`, which is `Host::pump`.
     pub fn new(wake: impl Fn() + Send + Sync + 'static) -> Self {
         let state = gevrek_model::paths::state_dir();
-        Self::with(places::Places::of_session(&state), Box::new(ShellDesktop::new()), wake)
+        Self::with(
+            places::Places::of_session(&state),
+            Box::new(ShellDesktop::new()),
+            wake,
+        )
     }
 
     /// A backend that keeps its journal under another folder and talks to
@@ -188,7 +192,11 @@ impl SystemBackend {
         explorer: Box<dyn Explorer>,
         wake: impl Fn() + Send + Sync + 'static,
     ) -> Self {
-        let places = places::Places { downloads: None, recent: None, state: state_dir.to_path_buf() };
+        let places = places::Places {
+            downloads: None,
+            recent: None,
+            state: state_dir.to_path_buf(),
+        };
         Self::with(places, explorer, wake)
     }
 
@@ -214,7 +222,8 @@ impl SystemBackend {
         );
         let state_dir = &places.state;
         let telling = Arc::clone(&news);
-        let operations = crate::zones::operations::Operations::new(Arc::new(move |events| telling.tell(events)));
+        let operations =
+            crate::zones::operations::Operations::new(Arc::new(move |events| telling.tell(events)));
         Self {
             news,
             types: shell::Types::knowing(opened.clone()),
@@ -225,7 +234,10 @@ impl SystemBackend {
             window: None,
             desktop: None,
             folders: BTreeMap::new(),
-            how: Arc::new(portal::How { opened: opened.clone(), ..portal::How::default() }),
+            how: Arc::new(portal::How {
+                opened: opened.clone(),
+                ..portal::How::default()
+            }),
             opened,
             smart,
             shown: Shown::default(),
@@ -266,8 +278,13 @@ impl SystemBackend {
     /// to the pixel).
     pub fn set_displays(&mut self, displays: Vec<Display>, reserved: Vec<ReservedArea>) {
         if self.displays.tell(displays.clone(), reserved.clone()) {
-            log::debug!("zones: the displays or the room kept on them changed: {} displays, {} areas kept", displays.len(), reserved.len());
-            self.events.push(BackendEvent::Displays { displays, reserved });
+            log::debug!(
+                "zones: the displays or the room kept on them changed: {} displays, {} areas kept",
+                displays.len(),
+                reserved.len()
+            );
+            self.events
+                .push(BackendEvent::Displays { displays, reserved });
             self.news.wake();
         }
     }
@@ -333,7 +350,10 @@ impl SystemBackend {
     /// plays a machine which does not answer). For folders watched from
     /// now on.
     pub fn set_reach(&mut self, how: portal::How) {
-        self.how = Arc::new(portal::How { opened: self.opened.clone(), ..how });
+        self.how = Arc::new(portal::How {
+            opened: self.opened.clone(),
+            ..how
+        });
     }
 
     /// The window manager's state is this now (the JSON the shell has
@@ -378,7 +398,10 @@ impl SystemBackend {
     }
 
     /// Read the installed programs another way (a test's own list).
-    pub fn set_programs(&mut self, installed: impl Fn() -> Vec<crate::apps::App> + Send + Sync + 'static) {
+    pub fn set_programs(
+        &mut self,
+        installed: impl Fn() -> Vec<crate::apps::App> + Send + Sync + 'static,
+    ) {
         self.smart.set_installed(Arc::new(installed));
     }
 
@@ -400,7 +423,11 @@ impl SystemBackend {
         let Some(folder) = self.places.recent.clone() else {
             return;
         };
-        let (opened, shown, news) = (self.opened.clone(), self.shown.clone(), Arc::clone(&self.news));
+        let (opened, shown, news) = (
+            self.opened.clone(),
+            self.shown.clone(),
+            Arc::clone(&self.news),
+        );
         let from = folder.clone();
         let mut reader = recent::Reader::default();
         let mut types = shell::Types::knowing(opened.clone());
@@ -428,7 +455,10 @@ impl SystemBackend {
             crate::zones::smart::told_as(SmartSource::Recent, &self.smart.recent_wanted),
             read,
             std::slice::from_ref(&folder),
-            |path| path.extension().is_some_and(|ending| ending.eq_ignore_ascii_case("lnk")),
+            |path| {
+                path.extension()
+                    .is_some_and(|ending| ending.eq_ignore_ascii_case("lnk"))
+            },
             self.smart_tell(),
         ));
     }
@@ -441,9 +471,15 @@ impl SystemBackend {
         let Some(folder) = self.places.downloads.clone() else {
             return;
         };
-        let location = Location::Directory { path: folder.to_string_lossy().into_owned() };
+        let location = Location::Directory {
+            path: folder.to_string_lossy().into_owned(),
+        };
         let mut types = shell::Types::knowing(self.opened.clone());
-        let read = move || crate::zones::smart::newest_first(shell::list(&location, &mut types).unwrap_or_default());
+        let read = move || {
+            crate::zones::smart::newest_first(
+                shell::list(&location, &mut types).unwrap_or_default(),
+            )
+        };
         self.smart.downloads = Some(Source::new(
             crate::zones::smart::told_as(SmartSource::Downloads, &self.smart.downloads_wanted),
             read,
@@ -473,7 +509,10 @@ impl SystemBackend {
     /// zones still show; they are only not told of changes.
     fn window(&mut self) -> Option<&watch::Window> {
         if self.window.is_none() {
-            match watch::Window::open(Arc::clone(&self.news), shell::Types::knowing(self.opened.clone())) {
+            match watch::Window::open(
+                Arc::clone(&self.news),
+                shell::Types::knowing(self.opened.clone()),
+            ) {
                 Ok(window) => self.window = Some(window),
                 Err(error) => log::warn!("zones: {error}"),
             }
@@ -503,7 +542,10 @@ impl SystemBackend {
 }
 
 /// How a file operation came out, said in the log.
-fn performed(operation: &FileOperation, done: Result<FileOperation, BackendError>) -> Result<FileOperation, BackendError> {
+fn performed(
+    operation: &FileOperation,
+    done: Result<FileOperation, BackendError>,
+) -> Result<FileOperation, BackendError> {
     match &done {
         Ok(undo) => log::debug!("zones: {operation}: done (taken back by {undo})"),
         Err(BackendError::Cancelled) => log::debug!("zones: {operation}: called off"),
@@ -542,7 +584,10 @@ impl ZonesBackend for SystemBackend {
         match location {
             Location::Desktop => {
                 if let Some(desktop) = &mut self.desktop {
-                    log::debug!("zones: the desktop is watched once more (watch {})", watch.0);
+                    log::debug!(
+                        "zones: the desktop is watched once more (watch {})",
+                        watch.0
+                    );
                     desktop.watches.push(watch);
                     return Ok(watch);
                 }
@@ -560,7 +605,8 @@ impl ZonesBackend for SystemBackend {
                 let mut folders = Vec::new();
                 for folder in shell::desktop_folders() {
                     let types = shell::Types::knowing(self.opened.clone());
-                    match watch::watch_desktop_folder(&folder, &seen, Arc::clone(&self.news), types) {
+                    match watch::watch_desktop_folder(&folder, &seen, Arc::clone(&self.news), types)
+                    {
                         Ok(watching) => folders.push(watching),
                         Err(error) => log::warn!("zones: {error}"),
                     }
@@ -578,13 +624,21 @@ impl ZonesBackend for SystemBackend {
                     folders.len()
                 );
                 self.shown.add(&seen);
-                self.desktop = Some(DesktopWatch { seen, watches: vec![watch], _folders: folders });
+                self.desktop = Some(DesktopWatch {
+                    seen,
+                    watches: vec![watch],
+                    _folders: folders,
+                });
             }
             Location::Directory { path } => {
                 // Answered at once: the folder is gone to on a thread of
                 // its own, and told when it was read (or as away).
-                log::debug!("zones: {path} is watched (watch {}), gone to on a thread of its own", watch.0);
-                let portal = portal::Portal::open(path, Arc::clone(&self.news), Arc::clone(&self.how));
+                log::debug!(
+                    "zones: {path} is watched (watch {}), gone to on a thread of its own",
+                    watch.0
+                );
+                let portal =
+                    portal::Portal::open(path, Arc::clone(&self.news), Arc::clone(&self.how));
                 self.shown.add(&portal.seen);
                 self.folders.insert(watch, portal);
             }
@@ -594,7 +648,11 @@ impl ZonesBackend for SystemBackend {
 
     fn unwatch(&mut self, watch: WatchId) {
         if let Some(portal) = self.folders.remove(&watch) {
-            log::debug!("zones: {} is no longer watched (watch {})", portal.path(), watch.0);
+            log::debug!(
+                "zones: {} is no longer watched (watch {})",
+                portal.path(),
+                watch.0
+            );
             return;
         }
         match self.smart.unwatch(watch) {
@@ -663,16 +721,20 @@ impl ZonesBackend for SystemBackend {
             return self.smart.focus(item);
         }
         if Smart::is_program(item) {
-            let app = self.smart.app(item).ok_or_else(|| BackendError::NotFound { what: item.to_string() })?;
+            let app = self.smart.app(item).ok_or_else(|| BackendError::NotFound {
+                what: item.to_string(),
+            })?;
             // (On a thread of its own: the shell may take its time to
             // start a program, and says itself what goes wrong.)
-            let started = std::thread::Builder::new().name("gevrek-zones-start".to_string()).spawn(move || {
-                match crate::apps::start(&app) {
+            let started = std::thread::Builder::new()
+                .name("gevrek-zones-start".to_string())
+                .spawn(move || match crate::apps::start(&app) {
                     Ok(_) => log::debug!("zones: {} was started", app.name),
                     Err(error) => log::warn!("zones: {} did not start: {error}", app.name),
-                }
+                });
+            return started.map(|_| ()).map_err(|error| BackendError::Refused {
+                what: error.to_string(),
             });
-            return started.map(|_| ()).map_err(|error| BackendError::Refused { what: error.to_string() });
         }
         launch::open(item)
     }
@@ -734,7 +796,11 @@ impl ZonesBackend for SystemBackend {
             return Err(BackendError::Unsupported);
         }
         let object = dnd::data_object(items)?;
-        self.dragged_out = Some(DragOut { object, items: items.to_vec(), allowed });
+        self.dragged_out = Some(DragOut {
+            object,
+            items: items.to_vec(),
+            allowed,
+        });
         Ok(())
     }
 
@@ -780,15 +846,21 @@ impl ZonesBackend for SystemBackend {
         if !watched {
             log::debug!("zones: {path} is read once, on a thread of its own");
             // Not watched: read once, on a thread of its own, and told.
-            let (news, location, how) = (Arc::clone(&self.news), location.clone(), Arc::clone(&self.how));
-            let started = std::thread::Builder::new().name("gevrek-zones-list".to_string()).spawn(move || {
-                let _com = crate::com::Com::new();
-                let mut types = shell::Types::knowing(how.opened.clone());
-                news.tell(vec![match shell::list(&location, &mut types) {
-                    Ok(items) => BackendEvent::Listed { location, items },
-                    Err(error) => BackendEvent::ListingFailed { location, error },
-                }]);
-            });
+            let (news, location, how) = (
+                Arc::clone(&self.news),
+                location.clone(),
+                Arc::clone(&self.how),
+            );
+            let started = std::thread::Builder::new()
+                .name("gevrek-zones-list".to_string())
+                .spawn(move || {
+                    let _com = crate::com::Com::new();
+                    let mut types = shell::Types::knowing(how.opened.clone());
+                    news.tell(vec![match shell::list(&location, &mut types) {
+                        Ok(items) => BackendEvent::Listed { location, items },
+                        Err(error) => BackendEvent::ListingFailed { location, error },
+                    }]);
+                });
             return started.is_ok();
         }
         true
@@ -803,13 +875,17 @@ impl ZonesBackend for SystemBackend {
             SmartSource::Recent => {
                 self.read_recent();
                 if self.smart.recent.is_none() {
-                    return Err(BackendError::NotFound { what: "the folder of recent files".to_string() });
+                    return Err(BackendError::NotFound {
+                        what: "the folder of recent files".to_string(),
+                    });
                 }
             }
             SmartSource::Downloads => {
                 self.read_downloads();
                 if self.smart.downloads.is_none() {
-                    return Err(BackendError::NotFound { what: "the folder of downloads".to_string() });
+                    return Err(BackendError::NotFound {
+                        what: "the folder of downloads".to_string(),
+                    });
                 }
             }
             _ => {}
@@ -828,7 +904,10 @@ struct Shown(Arc<Mutex<Vec<Weak<Mutex<seen::Seen>>>>>);
 
 impl Shown {
     fn add(&self, seen: &watch::Shared) {
-        let mut places = self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut places = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         places.retain(|place| place.strong_count() > 0);
         places.push(Arc::downgrade(seen));
     }
@@ -837,7 +916,10 @@ impl Shown {
     /// is what the core is to be told.
     fn reread(&self, paths: &[String], types: &mut shell::Types) -> Vec<BackendEvent> {
         let places: Vec<watch::Shared> = {
-            let places = self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let places = self
+                .0
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             places.iter().filter_map(Weak::upgrade).collect()
         };
         let mut events = Vec::new();

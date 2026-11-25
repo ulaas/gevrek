@@ -137,7 +137,9 @@ impl Taskbar {
     /// hidden left a note: the taskbar is shown first.
     pub fn show_what_was_left_hidden() {
         if note().exists() {
-            log::info!("The taskbar was left hidden by a window manager that was ended: shown again");
+            log::info!(
+                "The taskbar was left hidden by a window manager that was ended: shown again"
+            );
             for window in windows() {
                 show(window, true);
             }

@@ -164,8 +164,10 @@ impl Wm {
         wm.configure_monitors();
         wm.apply_appearance();
         // The first workspace is shown, as when gevrek starts.
-        wm.dispatch(r#"{"command":"switch_workspace_selector","selector":{"kind":"name","value":"1"}}"#)
-            .expect("the first workspace");
+        wm.dispatch(
+            r#"{"command":"switch_workspace_selector","selector":{"kind":"name","value":"1"}}"#,
+        )
+        .expect("the first workspace");
         wm.take_carried_out();
         wm
     }
@@ -206,7 +208,9 @@ impl Wm {
     fn dispatch(&mut self, json: &str) -> Result<(), String> {
         let command: DispatchCommand =
             serde_json::from_str(json).map_err(|error| format!("{json}: {error}"))?;
-        let result = self.run_command(command).map_err(|error| format!("{json}: {error}"));
+        let result = self
+            .run_command(command)
+            .map_err(|error| format!("{json}: {error}"));
         self.hear_of_closed();
         result
     }
@@ -239,7 +243,11 @@ fn standing(state: &serde_json::Value, apps: &[&str]) -> Vec<(String, String, St
     let mut all = Vec::new();
     for monitor in state["monitors"].as_array().into_iter().flatten() {
         for workspace in monitor["workspaces"].as_array().into_iter().flatten() {
-            for window in workspace["detailed_windows"].as_array().into_iter().flatten() {
+            for window in workspace["detailed_windows"]
+                .as_array()
+                .into_iter()
+                .flatten()
+            {
                 let app = window["class"].as_str().unwrap_or_default();
                 if apps.contains(&app) {
                     all.push((
@@ -311,12 +319,12 @@ impl Desk {
         match self.wm.dispatch(json) {
             Ok(()) => {
                 let surface = match asked {
-                    Some(DispatchCommand::Shell { action: ShellAction::Launcher }) => {
-                        Some("gevrek-launcher")
-                    }
-                    Some(DispatchCommand::Shell { action: ShellAction::ControlCenter }) => {
-                        Some("gevrek-control-centre")
-                    }
+                    Some(DispatchCommand::Shell {
+                        action: ShellAction::Launcher,
+                    }) => Some("gevrek-launcher"),
+                    Some(DispatchCommand::Shell {
+                        action: ShellAction::ControlCenter,
+                    }) => Some("gevrek-control-centre"),
                     _ => None,
                 };
                 if let Some(surface) = surface {
@@ -414,7 +422,9 @@ fn play(
         let lesson: &'static Lesson = tutoring.lesson();
         let shown = match tutoring.shown(desk.now) {
             Shown::Setting(_) => None,
-            Shown::Step { at, step, state, .. } => Some(Ok((at, step, state))),
+            Shown::Step {
+                at, step, state, ..
+            } => Some(Ok((at, step, state))),
             Shown::Between { done, next, .. } => Some(Err((done.id, next.map(|next| next.id)))),
         };
         check(desk, lesson.id);
@@ -526,9 +536,13 @@ fn the_tour_is_played_from_its_first_step_to_its_last() {
     let mut desk = Desk::new();
     // The person's own desktop: two windows on the first workspace, one
     // on the second, and the first shown.
-    desk.command(r#"{"command":"switch_workspace_selector","selector":{"kind":"name","value":"2"}}"#);
+    desk.command(
+        r#"{"command":"switch_workspace_selector","selector":{"kind":"name","value":"2"}}"#,
+    );
     desk.wm.open("Mail", "mail");
-    desk.command(r#"{"command":"switch_workspace_selector","selector":{"kind":"name","value":"1"}}"#);
+    desk.command(
+        r#"{"command":"switch_workspace_selector","selector":{"kind":"name","value":"1"}}"#,
+    );
     desk.wm.open("Editor", "editor");
     desk.wm.open("Browser", "browser");
     assert!(desk.refused.is_empty(), "{:?}", desk.refused);
@@ -553,7 +567,8 @@ fn the_tour_is_played_from_its_first_step_to_its_last() {
         );
         let on = practice_on(&state);
         assert!(
-            on.iter().all(|name| name.starts_with(gevrek_tutorial::WORKSPACE)),
+            on.iter()
+                .all(|name| name.starts_with(gevrek_tutorial::WORKSPACE)),
             "a practice window is on {on:?} during {lesson}"
         );
     });
@@ -583,8 +598,18 @@ fn every_lesson_is_played_by_itself() {
         // (Taken by itself, a lesson of the tour goes on to the next: the
         // one asked for is the first that was finished.)
         assert_eq!(finished.first(), Some(&lesson.id));
-        assert!(desk.refused.is_empty(), "{}: refused: {:?}", lesson.id, desk.refused);
-        assert_eq!(standing(&desk.wm.state(), &["editor"]), at_first, "{}", lesson.id);
+        assert!(
+            desk.refused.is_empty(),
+            "{}: refused: {:?}",
+            lesson.id,
+            desk.refused
+        );
+        assert_eq!(
+            standing(&desk.wm.state(), &["editor"]),
+            at_first,
+            "{}",
+            lesson.id
+        );
         let _ = std::fs::remove_dir_all(file.parent().unwrap());
     }
 }
@@ -601,7 +626,11 @@ fn a_surface_put_away_early_does_not_hold_a_lesson_up() {
         let file = memory(&format!("hasty-{lesson}"));
         let finished = play(&mut desk, Some(lesson), &file, |_, _| {});
         assert_eq!(finished.first(), Some(&lesson));
-        assert!(desk.refused.is_empty(), "{lesson}: refused: {:?}", desk.refused);
+        assert!(
+            desk.refused.is_empty(),
+            "{lesson}: refused: {:?}",
+            desk.refused
+        );
         let _ = std::fs::remove_dir_all(file.parent().unwrap());
     }
 }

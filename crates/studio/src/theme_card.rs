@@ -144,7 +144,11 @@ pub fn show(ui: &mut Ui, document: &mut Document) {
             } else {
                 gevrek_ui::icons::CARET_DOWN
             },
-            if open { "Put the others away" } else { "Choose another" },
+            if open {
+                "Put the others away"
+            } else {
+                "Choose another"
+            },
         )
         .clicked()
         {
@@ -199,7 +203,8 @@ pub fn show(ui: &mut Ui, document: &mut Document) {
             for (index, colours) in palette.colors.iter().enumerate() {
                 let is = slot == Some(index);
                 let usual = slot.is_none() && !from_wallpaper && index == DEFAULT_ACCENT_INDEX;
-                let (rect, response) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), Sense::click());
+                let (rect, response) =
+                    ui.allocate_exact_size(egui::vec2(26.0, 26.0), Sense::click());
                 let painter = ui.painter();
                 painter.circle_filled(rect.center(), 10.0, colour(*colours));
                 if is || usual {
@@ -241,7 +246,14 @@ pub fn show(ui: &mut Ui, document: &mut Document) {
             2
         };
         let options = [
-            (0, if palette.is_some() { "The palette's usual" } else { "None" }),
+            (
+                0,
+                if palette.is_some() {
+                    "The palette's usual"
+                } else {
+                    "None"
+                },
+            ),
             (1, "The wallpaper's colour"),
         ];
         // (A colour of the palette is chosen above: neither of these two.)
@@ -300,7 +312,11 @@ mod tests {
     fn the_card_draws_and_changes_nothing_by_itself() {
         let mut document = Document::new(&gevrek_model::Config::default());
         let context = egui::Context::default();
-        for palette in [Value::Null, Value::String("Ocean".into()), Value::String("no such".into())] {
+        for palette in [
+            Value::Null,
+            Value::String("Ocean".into()),
+            Value::String("no such".into()),
+        ] {
             document.set("/desktop/appearance/theme/palette", palette.clone());
             for _ in 0..2 {
                 let mut drawn = context.run_ui(egui::RawInput::default(), |ui| {
@@ -309,7 +325,10 @@ mod tests {
                 drawn.textures_delta.clear();
             }
             assert_eq!(
-                document.get("/desktop/appearance/theme/palette").cloned().unwrap_or(Value::Null),
+                document
+                    .get("/desktop/appearance/theme/palette")
+                    .cloned()
+                    .unwrap_or(Value::Null),
                 palette
             );
         }

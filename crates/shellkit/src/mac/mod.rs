@@ -499,7 +499,11 @@ fn make_panel(
     id: SurfaceId,
     level: Level,
     popped: Option<Popped>,
-) -> (Retained<NSWindow>, Retained<view::SurfaceView>, Retained<NSView>) {
+) -> (
+    Retained<NSWindow>,
+    Retained<view::SurfaceView>,
+    Retained<NSView>,
+) {
     let rect = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(10.0, 10.0));
     let style = NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel;
     // SAFETY: the panel class's own initializer, with plain arguments.
@@ -1370,7 +1374,9 @@ impl Host {
                     surface.redraw = true;
                     return true;
                 }
-                let written = event.charactersIgnoringModifiers().map(|text| text.to_string());
+                let written = event
+                    .charactersIgnoringModifiers()
+                    .map(|text| text.to_string());
                 if let Some(key) = input::logical_key(event.keyCode(), written.as_deref()) {
                     // Command and a key: what egui knows as copy, cut and
                     // paste are its own events.

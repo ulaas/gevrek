@@ -166,7 +166,9 @@ impl BindingsPage {
                         });
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if widgets::secondary_button(ui, format!("{}  New binding", icons::PLUS)).clicked() {
+                    if widgets::secondary_button(ui, format!("{}  New binding", icons::PLUS))
+                        .clicked()
+                    {
                         let new = gevrek_schema::schema()
                             .at(LIST)
                             .and_then(|node| node.child("0"))
@@ -319,51 +321,51 @@ impl BindingsPage {
             .id_salt("the binding that is open")
             .auto_shrink([false, false])
             .show(ui, |ui| {
-        widgets::card(ui, binding["name"].as_str().unwrap_or("Binding"), |ui| {
-            if let Some(others) = clashes.get(&index) {
-                let names: Vec<&str> = others
-                    .iter()
-                    .filter_map(|other| bindings[*other]["name"].as_str())
-                    .collect();
-                ui.colored_label(
-                    palette.warn,
-                    format!(
-                        "{}  The same keys, in the same mode, also do: {}",
-                        icons::WARNING,
-                        names.join(", ")
-                    ),
-                );
-                ui.add_space(4.0);
-            }
-            // The keys: the modifiers as switches, the key by pressing it.
-            let ((), _) = widgets::row(
-                ui,
-                "Keys",
-                "Hold these, then press the key",
-                false,
-                false,
-                |ui| {
-                    for (field, label) in [
-                        ("super", "Super"),
-                        ("ctrl", "Ctrl"),
-                        ("alt", "Alt"),
-                        ("shift", "Shift"),
-                    ] {
-                        let mut held = binding[field].as_bool().unwrap_or(false);
-                        if ui.toggle_value(&mut held, label).changed() {
-                            document.set(&format!("{place}/{field}"), Value::Bool(held));
-                        }
+                widgets::card(ui, binding["name"].as_str().unwrap_or("Binding"), |ui| {
+                    if let Some(others) = clashes.get(&index) {
+                        let names: Vec<&str> = others
+                            .iter()
+                            .filter_map(|other| bindings[*other]["name"].as_str())
+                            .collect();
+                        ui.colored_label(
+                            palette.warn,
+                            format!(
+                                "{}  The same keys, in the same mode, also do: {}",
+                                icons::WARNING,
+                                names.join(", ")
+                            ),
+                        );
+                        ui.add_space(4.0);
                     }
-                    ui.label("+");
-                    let key = binding["key"].as_str().unwrap_or("");
-                    let text = if self.recording {
-                        "press a key…".to_string()
-                    } else if key.is_empty() {
-                        "none".to_string()
-                    } else {
-                        key.to_string()
-                    };
-                    if ui
+                    // The keys: the modifiers as switches, the key by pressing it.
+                    let ((), _) = widgets::row(
+                        ui,
+                        "Keys",
+                        "Hold these, then press the key",
+                        false,
+                        false,
+                        |ui| {
+                            for (field, label) in [
+                                ("super", "Super"),
+                                ("ctrl", "Ctrl"),
+                                ("alt", "Alt"),
+                                ("shift", "Shift"),
+                            ] {
+                                let mut held = binding[field].as_bool().unwrap_or(false);
+                                if ui.toggle_value(&mut held, label).changed() {
+                                    document.set(&format!("{place}/{field}"), Value::Bool(held));
+                                }
+                            }
+                            ui.label("+");
+                            let key = binding["key"].as_str().unwrap_or("");
+                            let text = if self.recording {
+                                "press a key…".to_string()
+                            } else if key.is_empty() {
+                                "none".to_string()
+                            } else {
+                                key.to_string()
+                            };
+                            if ui
                         .add(
                             egui::Button::new(RichText::new(text).monospace())
                                 .selected(self.recording),
@@ -380,65 +382,71 @@ impl BindingsPage {
                         self.super_down = false;
                         self.heard = None;
                     }
-                    let mut typed = key.to_string();
-                    let field = ui.add(
-                        egui::TextEdit::singleline(&mut typed)
-                            .desired_width(110.0)
-                            .hint_text("or its name"),
-                    );
-                    if field.changed() {
-                        document.set(
-                            &format!("{place}/key"),
-                            Value::String(typed.trim().to_uppercase()),
-                        );
-                    }
-                },
-            );
-            if self.recording {
-                let heard = self
-                    .heard
-                    .take()
-                    .or_else(|| heard_now(ui, &mut self.super_down));
-                if let Some(heard) = heard {
-                    if let Heard::Key(name, modifiers) = heard {
-                        log::info!("recorded for binding {index}: {name} with {modifiers:?}");
-                        document.set(&format!("{place}/key"), Value::String(name));
-                        // With every key the studio's, the modifiers
-                        // that are held are the binding's too.
-                        if self.every_key {
-                            for (field, on) in modifiers {
-                                document.set(&format!("{place}/{field}"), Value::Bool(on));
+                            let mut typed = key.to_string();
+                            let field = ui.add(
+                                egui::TextEdit::singleline(&mut typed)
+                                    .desired_width(110.0)
+                                    .hint_text("or its name"),
+                            );
+                            if field.changed() {
+                                document.set(
+                                    &format!("{place}/key"),
+                                    Value::String(typed.trim().to_uppercase()),
+                                );
                             }
+                        },
+                    );
+                    if self.recording {
+                        let heard = self
+                            .heard
+                            .take()
+                            .or_else(|| heard_now(ui, &mut self.super_down));
+                        if let Some(heard) = heard {
+                            if let Heard::Key(name, modifiers) = heard {
+                                log::info!(
+                                    "recorded for binding {index}: {name} with {modifiers:?}"
+                                );
+                                document.set(&format!("{place}/key"), Value::String(name));
+                                // With every key the studio's, the modifiers
+                                // that are held are the binding's too.
+                                if self.every_key {
+                                    for (field, on) in modifiers {
+                                        document.set(&format!("{place}/{field}"), Value::Bool(on));
+                                    }
+                                }
+                            }
+                            self.recording = false;
+                            self.super_down = false;
                         }
                     }
-                    self.recording = false;
-                    self.super_down = false;
-                }
-            }
-            let mut form = Form::new(document);
-            form.highlight = highlight;
-            form.only(ui, &place, &["name", "enabled", "command", "trigger"]);
-            if binding["trigger"].as_str() == Some("long_press") {
-                form.only(ui, &place, &["long_press_ms"]);
-            }
-            form.only(ui, &place, &["submap", "device", "consume"]);
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui
-                    .button(format!("{}  Run now", icons::PLAY))
-                    .on_hover_text("Do what the binding does, once")
-                    .clicked()
-                {
-                    wish = Some(Wish::Run(binding["command"].to_string()));
-                }
-                if widgets::secondary_button(ui, format!("{}  Duplicate", icons::COPY)).clicked() {
-                    copy = true;
-                }
-                if widgets::secondary_button(ui, format!("{}  Remove", icons::TRASH)).clicked() {
-                    remove = true;
-                }
-            });
-        });
+                    let mut form = Form::new(document);
+                    form.highlight = highlight;
+                    form.only(ui, &place, &["name", "enabled", "command", "trigger"]);
+                    if binding["trigger"].as_str() == Some("long_press") {
+                        form.only(ui, &place, &["long_press_ms"]);
+                    }
+                    form.only(ui, &place, &["submap", "device", "consume"]);
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui
+                            .button(format!("{}  Run now", icons::PLAY))
+                            .on_hover_text("Do what the binding does, once")
+                            .clicked()
+                        {
+                            wish = Some(Wish::Run(binding["command"].to_string()));
+                        }
+                        if widgets::secondary_button(ui, format!("{}  Duplicate", icons::COPY))
+                            .clicked()
+                        {
+                            copy = true;
+                        }
+                        if widgets::secondary_button(ui, format!("{}  Remove", icons::TRASH))
+                            .clicked()
+                        {
+                            remove = true;
+                        }
+                    });
+                });
             });
         if copy {
             let mut twin = binding.clone();
@@ -763,7 +771,11 @@ mod tests {
         // Pressed on, then a key: that key's name.
         frame(press(button), &mut name, &mut changes);
         frame(Vec::new(), &mut name, &mut changes);
-        frame(vec![key(egui::Key::ArrowLeft, true)], &mut name, &mut changes);
+        frame(
+            vec![key(egui::Key::ArrowLeft, true)],
+            &mut name,
+            &mut changes,
+        );
         assert_eq!((name.as_str(), changes), ("LEFT", 1));
         // It listens no more.
         frame(vec![key(egui::Key::K, true)], &mut name, &mut changes);

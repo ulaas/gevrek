@@ -189,7 +189,9 @@ mod tests {
             ..Default::default()
         };
         // (The first frame only measures; the second is what is seen.)
-        let mut first = context.run_ui(input.clone(), |ui| draw(ui, &palette, Some(&list), &mut typed));
+        let mut first = context.run_ui(input.clone(), |ui| {
+            draw(ui, &palette, Some(&list), &mut typed)
+        });
         first.textures_delta.clear();
         let mut output = context.run_ui(input, |ui| draw(ui, &palette, Some(&list), &mut typed));
         output.textures_delta.clear();
@@ -204,13 +206,20 @@ mod tests {
                 // (Where it is seen: a galley set to the right reaches
                 // left of its place.)
                 let right = clipped.shape.visual_bounding_rect().right();
-                assert!(right <= SIZE.0 as f32, "drawn past the window: {right} {:?}", text.galley.job.text);
+                assert!(
+                    right <= SIZE.0 as f32,
+                    "drawn past the window: {right} {:?}",
+                    text.galley.job.text
+                );
                 if text.galley.job.text.starts_with("Move the chosen items") {
                     lines_of_it = text.galley.rows.len();
                 }
             }
         }
-        assert!(lines_of_it > 1, "the long description was not broken: {lines_of_it}");
+        assert!(
+            lines_of_it > 1,
+            "the long description was not broken: {lines_of_it}"
+        );
     }
 
     #[test]

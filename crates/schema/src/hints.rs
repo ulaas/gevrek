@@ -97,7 +97,10 @@ const PLACES: &[(&str, Hint)] = &[
         "/desktop/zones/zones/0/look/opacity",
         of(0.0, 100.0, 1.0, "%"),
     ),
-    ("/desktop/zones/look/corner_radius", of(0.0, 32.0, 1.0, "px")),
+    (
+        "/desktop/zones/look/corner_radius",
+        of(0.0, 32.0, 1.0, "px"),
+    ),
     (
         "/desktop/zones/zones/0/look/corner_radius",
         of(0.0, 32.0, 1.0, "px"),

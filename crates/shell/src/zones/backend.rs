@@ -32,7 +32,10 @@ pub struct Starter {
 impl Starter {
     /// One that starts nothing (where nothing will be opened).
     pub fn none() -> Self {
-        Self { dispatch: Box::new(|_| {}), terminal: String::new() }
+        Self {
+            dispatch: Box::new(|_| {}),
+            terminal: String::new(),
+        }
     }
 }
 
@@ -41,11 +44,17 @@ impl Starter {
 /// (as `launcher::start_command` does for an application). Nothing for
 /// what has no program to run.
 #[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
-pub fn exec_command(program: &str, args: &[String], terminal: Option<&str>) -> Option<serde_json::Value> {
+pub fn exec_command(
+    program: &str,
+    args: &[String],
+    terminal: Option<&str>,
+) -> Option<serde_json::Value> {
     if program.trim().is_empty() {
         return None;
     }
-    let mut words: Vec<String> = std::iter::once(program.to_string()).chain(args.iter().cloned()).collect();
+    let mut words: Vec<String> = std::iter::once(program.to_string())
+        .chain(args.iter().cloned())
+        .collect();
     if let Some(terminal) = terminal {
         if terminal.trim().is_empty() {
             return None;
@@ -65,7 +74,10 @@ fn launcher(starter: Starter) -> impl FnMut(&gevrek_system::zones::Launch) -> st
         let command = exec_command(&launch.program, &launch.args, terminal).ok_or_else(|| {
             // (Started only by a message on the session's bus, or it
             // wants a terminal and none is known.)
-            std::io::Error::new(std::io::ErrorKind::Unsupported, format!("{} has no program to run", launch.name))
+            std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                format!("{} has no program to run", launch.name),
+            )
         })?;
         (starter.dispatch)(command.to_string());
         Ok(())
@@ -84,10 +96,16 @@ pub fn desk(wake: impl Fn() + Send + Sync + 'static, starter: Starter) -> Option
     let ask = std::rc::Rc::clone(&dispatch);
     backend.set_commander(move |command: serde_json::Value| ask(command.to_string()));
     #[cfg(not(windows))]
-    backend.set_launcher(launcher(Starter { dispatch: Box::new(move |command| dispatch(command)), terminal }));
+    backend.set_launcher(launcher(Starter {
+        dispatch: Box::new(move |command| dispatch(command)),
+        terminal,
+    }));
     #[cfg(windows)]
     let _ = (dispatch, terminal);
-    Some(Box::new(System { backend, outputs: Vec::new() }))
+    Some(Box::new(System {
+        backend,
+        outputs: Vec::new(),
+    }))
 }
 
 #[cfg(not(windows))]
@@ -96,8 +114,16 @@ impl System {
     /// file and the programs that open it.
     fn menu_for(&mut self, items: &[ItemId]) -> gevrek_system::zones::ContextMenu {
         timed(
-            || format!("making the menu for {}", gevrek_zones::timed::count(items.len(), "item", "items")),
-            || self.backend.menu_for(items, gevrek_model::geometry::Point::default()),
+            || {
+                format!(
+                    "making the menu for {}",
+                    gevrek_zones::timed::count(items.len(), "item", "items")
+                )
+            },
+            || {
+                self.backend
+                    .menu_for(items, gevrek_model::geometry::Point::default())
+            },
             |menu| gevrek_zones::timed::count(menu.actions.len(), "entry", "entries"),
         )
     }
@@ -121,7 +147,9 @@ fn outputs_of(state: &serde_json::Value) -> Vec<(DisplayId, String)> {
         .filter_map(|monitor| {
             let said = |key: &str| monitor[key].as_str().filter(|text| !text.is_empty());
             let port = said("connector").or_else(|| said("name"));
-            let id = said("stable_id").map(str::to_string).or_else(|| port.map(|port| format!("port:{port}")))?;
+            let id = said("stable_id")
+                .map(str::to_string)
+                .or_else(|| port.map(|port| format!("port:{port}")))?;
             Some((DisplayId::new(id), port.unwrap_or_default().to_string()))
         })
         .collect()
@@ -130,9 +158,17 @@ fn outputs_of(state: &serde_json::Value) -> Vec<(DisplayId, String)> {
 impl Desk for System {
     fn picture(&mut self, icon: IconHandle) -> Option<Picture> {
         // (Asked for each icon drawn.)
-        timed_quietly(|| format!("taking picture {}", icon.0), || self.backend.picture(icon).cloned(), |picture| {
-            if picture.is_some() { "there".to_string() } else { "none".to_string() }
-        })
+        timed_quietly(
+            || format!("taking picture {}", icon.0),
+            || self.backend.picture(icon).cloned(),
+            |picture| {
+                if picture.is_some() {
+                    "there".to_string()
+                } else {
+                    "none".to_string()
+                }
+            },
+        )
     }
 
     fn told(&mut self, state: &serde_json::Value) {
@@ -149,39 +185,56 @@ impl Desk for System {
             |_| "told".to_string(),
         );
         // The programs that have a window, for the zones that show them.
-        timed_quietly(|| "telling the backend the window manager's state".to_string(), || self.backend.set_wm_state(state), |_| {
-            "told".to_string()
-        });
+        timed_quietly(
+            || "telling the backend the window manager's state".to_string(),
+            || self.backend.set_wm_state(state),
+            |_| "told".to_string(),
+        );
     }
 
     fn pinned(&self) -> Vec<String> {
-        timed(|| "asking for the pinned launchers".to_string(), || self.backend.pinned_launchers(), |pinned| {
-            gevrek_zones::timed::count(pinned.len(), "launcher", "launchers")
-        })
+        timed(
+            || "asking for the pinned launchers".to_string(),
+            || self.backend.pinned_launchers(),
+            |pinned| gevrek_zones::timed::count(pinned.len(), "launcher", "launchers"),
+        )
     }
 
     fn pin(&mut self, program: &str, pin: bool) -> Result<(), BackendError> {
         timed(
-            || format!("{} {program}", if pin { "pinning" } else { "letting go of" }),
+            || {
+                format!(
+                    "{} {program}",
+                    if pin { "pinning" } else { "letting go of" }
+                )
+            },
             || self.backend.pin_launcher(program, pin),
             done,
         )
     }
 
     fn spot_of(&mut self, display: &DisplayId) -> Option<Spot> {
-        let output = self.outputs.iter().find(|(known, _)| known == display).map(|(_, output)| output.clone())?;
+        let output = self
+            .outputs
+            .iter()
+            .find(|(known, _)| known == display)
+            .map(|(_, output)| output.clone())?;
         // (Windows places a surface by the display's own name, not by
         // the path the window manager's state has for it: asked for by
         // the path, no surface was opened at all.)
         #[cfg(windows)]
-        let output = timed_quietly(|| format!("asking the system's name of {display}"), || self.backend.name_of(display), |name| {
-            format!("{name:?}")
-        })
+        let output = timed_quietly(
+            || format!("asking the system's name of {display}"),
+            || self.backend.name_of(display),
+            |name| format!("{name:?}"),
+        )
         .unwrap_or(output);
         #[cfg(windows)]
-        let pixels = timed_quietly(|| format!("asking where {display} is in pixels"), || self.backend.pixels_of(display), |pixels| {
-            format!("{pixels:?}")
-        })?;
+        let pixels = timed_quietly(
+            || format!("asking where {display} is in pixels"),
+            || self.backend.pixels_of(display),
+            |pixels| format!("{pixels:?}"),
+        )?;
         // (A Wayland compositor places a surface by its output's name.)
         #[cfg(not(windows))]
         let pixels = (0, 0, 0, 0);
@@ -195,17 +248,30 @@ impl Desk for System {
         // (Until the backend says it itself.)
         #[cfg(windows)]
         {
-            gevrek_system::zones::shell::desktop_folders().into_iter().next()
+            gevrek_system::zones::shell::desktop_folders()
+                .into_iter()
+                .next()
         }
         #[cfg(not(windows))]
         {
-            Some(self.backend.system().places.desktop().to_string_lossy().into_owned())
+            Some(
+                self.backend
+                    .system()
+                    .places
+                    .desktop()
+                    .to_string_lossy()
+                    .into_owned(),
+            )
         }
     }
 
     #[cfg(windows)]
     fn hide_system_icons(&mut self) -> Result<(), BackendError> {
-        timed(|| "putting the system's icons away".to_string(), || self.backend.hide_system_icons(), done)
+        timed(
+            || "putting the system's icons away".to_string(),
+            || self.backend.hide_system_icons(),
+            done,
+        )
     }
 
     #[cfg(windows)]
@@ -216,10 +282,15 @@ impl Desk for System {
     #[cfg(windows)]
     fn online_only(&mut self, item: &ItemId) -> bool {
         // (Asked for each icon drawn.)
-        let state = timed_quietly(|| format!("asking whether {item} is online only"), || self.backend.cloud_state(item), |state| {
-            format!("{state:?}")
-        });
-        matches!(state, Some(gevrek_system::zones::cloud::CloudState::OnlineOnly))
+        let state = timed_quietly(
+            || format!("asking whether {item} is online only"),
+            || self.backend.cloud_state(item),
+            |state| format!("{state:?}"),
+        );
+        matches!(
+            state,
+            Some(gevrek_system::zones::cloud::CloudState::OnlineOnly)
+        )
     }
 
     #[cfg(windows)]
@@ -242,13 +313,20 @@ impl Desk for System {
     ) -> bool {
         use gevrek_zones::backend::DragActions;
         // (A link to something of the desktop is not ours to offer.)
-        let allowed = DragActions { copy: true, moving: true, link: false };
+        let allowed = DragActions {
+            copy: true,
+            moving: true,
+            link: false,
+        };
         if let Err(error) = ZonesBackend::start_drag(self, items, allowed) {
             log::warn!("the system's description of what is dragged could not be made: {error}");
             return false;
         }
         let Some(out) = self.backend.take_drag() else {
-            log::debug!("the system made nothing of the drag of {}", gevrek_zones::timed::count(items.len(), "item", "items"));
+            log::debug!(
+                "the system made nothing of the drag of {}",
+                gevrek_zones::timed::count(items.len(), "item", "items")
+            );
             return false;
         };
         let allowed = gevrek_shellkit::dnd::DragActions {
@@ -294,7 +372,12 @@ impl Desk for System {
     fn items_named(&mut self, kind: &str, bytes: &[u8]) -> Vec<ItemId> {
         if kind.contains("IDList") {
             timed(
-                || format!("reading the items of a list of shell ids ({} bytes)", bytes.len()),
+                || {
+                    format!(
+                        "reading the items of a list of shell ids ({} bytes)",
+                        bytes.len()
+                    )
+                },
                 || gevrek_system::zones::dnd::items_of_id_list(bytes),
                 |items| gevrek_zones::timed::count(items.len(), "item", "items"),
             )
@@ -307,7 +390,10 @@ impl Desk for System {
     fn own_menu(&mut self, items: &[ItemId]) -> Option<Vec<DeskAction>> {
         use gevrek_system::zones::MenuAction;
         let menu = self.menu_for(items);
-        let line = |id: &str, label: &str| DeskAction { id: id.to_string(), label: label.to_string() };
+        let line = |id: &str, label: &str| DeskAction {
+            id: id.to_string(),
+            label: label.to_string(),
+        };
         let mut lines = Vec::new();
         for action in menu.actions {
             match action {
@@ -316,7 +402,10 @@ impl Desk for System {
                     // The one it is opened with anyway, and the way to
                     // all the others: a menu of their own.
                     if let Some(usual) = programs.first() {
-                        lines.push(DeskAction { id: format!("with:{}", usual.id), label: format!("Open with {}", usual.name) });
+                        lines.push(DeskAction {
+                            id: format!("with:{}", usual.id),
+                            label: format!("Open with {}", usual.name),
+                        });
                     }
                     if programs.len() > 1 {
                         lines.push(line(super::CHOOSE, "Open with another program\u{2026}"));
@@ -325,9 +414,10 @@ impl Desk for System {
                 MenuAction::AllowLaunching => lines.push(line("allow", "Allow launching")),
                 MenuAction::Rename => lines.push(line(super::RENAME, "Rename\u{2026}")),
                 MenuAction::MoveToTrash => lines.push(line(super::TRASH, "Move to the bin")),
-                MenuAction::NewFolder { parent } => {
-                    lines.push(DeskAction { id: format!("{}{parent}", super::NEW_FOLDER), label: "New folder\u{2026}".to_string() })
-                }
+                MenuAction::NewFolder { parent } => lines.push(DeskAction {
+                    id: format!("{}{parent}", super::NEW_FOLDER),
+                    label: "New folder\u{2026}".to_string(),
+                }),
                 MenuAction::Properties => lines.push(line(super::PROPERTIES, "Properties")),
             }
         }
@@ -346,7 +436,10 @@ impl Desk for System {
             })
             .unwrap_or_default()
             .into_iter()
-            .map(|program| DeskAction { id: format!("with:{}", program.id), label: program.name })
+            .map(|program| DeskAction {
+                id: format!("with:{}", program.id),
+                label: program.name,
+            })
             .collect()
     }
 
@@ -361,7 +454,11 @@ impl Desk for System {
         for item in items {
             match action {
                 "open" => ZonesBackend::open(self, item)?,
-                "allow" => timed(|| format!("allowing {item} to be started"), || self.backend.allow_launching(item), done)?,
+                "allow" => timed(
+                    || format!("allowing {item} to be started"),
+                    || self.backend.allow_launching(item),
+                    done,
+                )?,
                 with => match with.strip_prefix("with:") {
                     Some(program) => ZonesBackend::open_with(self, item, Some(program))?,
                     None => {
@@ -400,30 +497,52 @@ impl Desk for System {
 /// nothing is copied.
 pub fn panels_state(state: &serde_json::Value) -> std::borrow::Cow<'_, serde_json::Value> {
     const SIDES: [&str; 4] = ["left", "top", "right", "bottom"];
-    let own = |monitor: &serde_json::Value, side: &str| monitor["zones_room"][side].as_f64().unwrap_or(0.0).max(0.0);
+    let own = |monitor: &serde_json::Value, side: &str| {
+        monitor["zones_room"][side].as_f64().unwrap_or(0.0).max(0.0)
+    };
     let any = |monitor: &serde_json::Value| SIDES.iter().any(|side| own(monitor, side) > 0.0);
-    if !state["monitors"].as_array().is_some_and(|monitors| monitors.iter().any(any)) {
+    if !state["monitors"]
+        .as_array()
+        .is_some_and(|monitors| monitors.iter().any(any))
+    {
         return std::borrow::Cow::Borrowed(state);
     }
     let mut without = state.clone();
     for monitor in without["monitors"].as_array_mut().into_iter().flatten() {
         let [left, top, right, bottom] = SIDES.map(|side| own(monitor, side));
         let number = |value: &serde_json::Value| value.as_f64().unwrap_or(0.0);
-        let (wide, high) = (number(&monitor["work_size"]["width"]), number(&monitor["work_size"]["height"]));
+        let (wide, high) = (
+            number(&monitor["work_size"]["width"]),
+            number(&monitor["work_size"]["height"]),
+        );
         if wide > 0.0 && high > 0.0 {
             // (Never beyond the display itself: more of the zones' room
             // named than is kept there leaves none for panels, not less.)
-            let (x, y) = (number(&monitor["position"]["x"]), number(&monitor["position"]["y"]));
-            let (full_wide, full_high) = (number(&monitor["size"]["width"]), number(&monitor["size"]["height"]));
+            let (x, y) = (
+                number(&monitor["position"]["x"]),
+                number(&monitor["position"]["y"]),
+            );
+            let (full_wide, full_high) = (
+                number(&monitor["size"]["width"]),
+                number(&monitor["size"]["height"]),
+            );
             let work_x = (number(&monitor["work_position"]["x"]) - left).max(x);
             let work_y = (number(&monitor["work_position"]["y"]) - top).max(y);
-            let work_right = (number(&monitor["work_position"]["x"]) + wide + right).min(x + full_wide);
-            let work_bottom = (number(&monitor["work_position"]["y"]) + high + bottom).min(y + full_high);
+            let work_right =
+                (number(&monitor["work_position"]["x"]) + wide + right).min(x + full_wide);
+            let work_bottom =
+                (number(&monitor["work_position"]["y"]) + high + bottom).min(y + full_high);
             monitor["work_position"] = serde_json::json!({ "x": work_x, "y": work_y });
-            monitor["work_size"] = serde_json::json!({ "width": work_right - work_x, "height": work_bottom - work_y });
+            monitor["work_size"] =
+                serde_json::json!({ "width": work_right - work_x, "height": work_bottom - work_y });
         }
         // (A state that names the sides themselves and no work area.)
-        for (key, taken) in [("reserved_left", left), ("reserved_top", top), ("reserved_right", right), ("reserved_bottom", bottom)] {
+        for (key, taken) in [
+            ("reserved_left", left),
+            ("reserved_top", top),
+            ("reserved_right", right),
+            ("reserved_bottom", bottom),
+        ] {
             if let Some(kept) = monitor[key].as_f64() {
                 monitor[key] = serde_json::json!((kept - taken).max(0.0));
             }
@@ -450,7 +569,11 @@ fn properties_of(properties: &gevrek_system::zones::Properties) -> Vec<(String, 
     if let Some(target) = &item.facts.shortcut_target {
         lines.push(line("Leads to", target.clone()));
     }
-    for (name, time) in [("Made", item.facts.created), ("Changed", item.facts.modified), ("Opened", item.facts.accessed)] {
+    for (name, time) in [
+        ("Made", item.facts.created),
+        ("Changed", item.facts.modified),
+        ("Opened", item.facts.accessed),
+    ] {
         if let Some(time) = time {
             lines.push(line(name, date_in_words(time)));
         }
@@ -460,7 +583,15 @@ fn properties_of(properties: &gevrek_system::zones::Properties) -> Vec<(String, 
         lines.push(line("Opens with", program.clone()));
     }
     if let Some(trusted) = properties.trusted {
-        lines.push(line("May be started", if trusted { "yes" } else { "no (allow launching first)" }.to_string()));
+        lines.push(line(
+            "May be started",
+            if trusted {
+                "yes"
+            } else {
+                "no (allow launching first)"
+            }
+            .to_string(),
+        ));
     }
     lines
 }
@@ -490,20 +621,35 @@ pub fn date_in_words(seconds: u64) -> String {
     let shifted = days + 719_468;
     let era = shifted.div_euclid(146_097);
     let day_of_era = shifted.rem_euclid(146_097);
-    let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
     let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_shifted = (5 * day_of_year + 2) / 153;
     let day = day_of_year - (153 * month_shifted + 2) / 5 + 1;
-    let month = if month_shifted < 10 { month_shifted + 3 } else { month_shifted - 9 };
+    let month = if month_shifted < 10 {
+        month_shifted + 3
+    } else {
+        month_shifted - 9
+    };
     let year = year_of_era + era * 400 + i64::from(month <= 2);
-    format!("{year:04}-{month:02}-{day:02} {:02}:{:02} UTC", of_day / 3600, of_day % 3600 / 60)
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02} UTC",
+        of_day / 3600,
+        of_day % 3600 / 60
+    )
 }
 
 /// A file's rights as letters and as the number they are set by.
 #[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
 pub fn rights_in_words(mode: u32) -> String {
     let letters: String = (0..9)
-        .map(|bit| if mode & (0o400 >> bit) != 0 { ['r', 'w', 'x'][bit % 3] } else { '-' })
+        .map(|bit| {
+            if mode & (0o400 >> bit) != 0 {
+                ['r', 'w', 'x'][bit % 3]
+            } else {
+                '-'
+            }
+        })
         .collect();
     format!("{letters} ({:03o})", mode & 0o777)
 }
@@ -516,124 +662,256 @@ impl ZonesBackend for System {
         timed(
             || format!("beginning to list {location}"),
             || self.backend.begin_listing(location),
-            |begun| if *begun { "begun, told later".to_string() } else { "to be listed at once".to_string() },
+            |begun| {
+                if *begun {
+                    "begun, told later".to_string()
+                } else {
+                    "to be listed at once".to_string()
+                }
+            },
         )
     }
-    fn list_source(&mut self, source: &gevrek_zones::config::SmartSource) -> Result<Vec<gevrek_zones::Item>, BackendError> {
-        timed(|| format!("listing the source {source:?}"), || self.backend.list_source(source), items)
+    fn list_source(
+        &mut self,
+        source: &gevrek_zones::config::SmartSource,
+    ) -> Result<Vec<gevrek_zones::Item>, BackendError> {
+        timed(
+            || format!("listing the source {source:?}"),
+            || self.backend.list_source(source),
+            items,
+        )
     }
-    fn watch_source(&mut self, source: &gevrek_zones::config::SmartSource) -> Result<gevrek_zones::backend::WatchId, BackendError> {
-        timed(|| format!("watching the source {source:?}"), || self.backend.watch_source(source), watch)
+    fn watch_source(
+        &mut self,
+        source: &gevrek_zones::config::SmartSource,
+    ) -> Result<gevrek_zones::backend::WatchId, BackendError> {
+        timed(
+            || format!("watching the source {source:?}"),
+            || self.backend.watch_source(source),
+            watch,
+        )
     }
-    fn begin_operation(&mut self, request: u64, operation: &gevrek_zones::backend::FileOperation) -> bool {
+    fn begin_operation(
+        &mut self,
+        request: u64,
+        operation: &gevrek_zones::backend::FileOperation,
+    ) -> bool {
         timed(
             || format!("beginning {operation} (request {request})"),
             || self.backend.begin_operation(request, operation),
-            |begun| if *begun { "begun, ends later".to_string() } else { "to be done at once".to_string() },
+            |begun| {
+                if *begun {
+                    "begun, ends later".to_string()
+                } else {
+                    "to be done at once".to_string()
+                }
+            },
         )
     }
     fn cancel_operation(&mut self, request: u64) {
-        timed(|| format!("calling off request {request}"), || self.backend.cancel_operation(request), |_| "asked".to_string())
+        timed(
+            || format!("calling off request {request}"),
+            || self.backend.cancel_operation(request),
+            |_| "asked".to_string(),
+        )
     }
     fn screen_shared(&mut self) -> Option<bool> {
-        timed(|| "asking whether the screen is shared".to_string(), || self.backend.screen_shared(), |shared| format!("{shared:?}"))
+        timed(
+            || "asking whether the screen is shared".to_string(),
+            || self.backend.screen_shared(),
+            |shared| format!("{shared:?}"),
+        )
     }
-    fn list(&mut self, location: &gevrek_zones::backend::Location) -> Result<Vec<gevrek_zones::Item>, BackendError> {
-        timed(|| format!("listing {location}"), || self.backend.list(location), items)
+    fn list(
+        &mut self,
+        location: &gevrek_zones::backend::Location,
+    ) -> Result<Vec<gevrek_zones::Item>, BackendError> {
+        timed(
+            || format!("listing {location}"),
+            || self.backend.list(location),
+            items,
+        )
     }
-    fn watch(&mut self, location: &gevrek_zones::backend::Location) -> Result<gevrek_zones::backend::WatchId, BackendError> {
-        timed(|| format!("watching {location}"), || self.backend.watch(location), watch)
+    fn watch(
+        &mut self,
+        location: &gevrek_zones::backend::Location,
+    ) -> Result<gevrek_zones::backend::WatchId, BackendError> {
+        timed(
+            || format!("watching {location}"),
+            || self.backend.watch(location),
+            watch,
+        )
     }
     fn unwatch(&mut self, watch: gevrek_zones::backend::WatchId) {
-        timed(|| format!("ending watch {}", watch.0), || self.backend.unwatch(watch), |_| "ended".to_string())
+        timed(
+            || format!("ending watch {}", watch.0),
+            || self.backend.unwatch(watch),
+            |_| "ended".to_string(),
+        )
     }
     fn drain_events(&mut self) -> Vec<gevrek_zones::BackendEvent> {
         // (Asked at each pass: said only when there was news, or it was slow.)
-        timed_quietly(|| "taking the backend's news".to_string(), || self.backend.drain_events(), |events| {
-            gevrek_zones::timed::count(events.len(), "event", "events")
-        })
+        timed_quietly(
+            || "taking the backend's news".to_string(),
+            || self.backend.drain_events(),
+            |events| gevrek_zones::timed::count(events.len(), "event", "events"),
+        )
     }
     fn facts(&mut self, item: &ItemId) -> Option<gevrek_zones::item::ItemFacts> {
-        timed(|| format!("reading the facts of {item}"), || self.backend.facts(item), |facts| {
-            if facts.is_some() { "read".to_string() } else { "none".to_string() }
-        })
+        timed(
+            || format!("reading the facts of {item}"),
+            || self.backend.facts(item),
+            |facts| {
+                if facts.is_some() {
+                    "read".to_string()
+                } else {
+                    "none".to_string()
+                }
+            },
+        )
     }
-    fn request_icon(&mut self, item: &ItemId, size: gevrek_zones::backend::IconSize) -> gevrek_zones::backend::IconRequest {
-        timed_quietly(|| format!("asking for the icon of {item}"), || self.backend.request_icon(item, size), |request| {
-            format!("request {}", request.0)
-        })
+    fn request_icon(
+        &mut self,
+        item: &ItemId,
+        size: gevrek_zones::backend::IconSize,
+    ) -> gevrek_zones::backend::IconRequest {
+        timed_quietly(
+            || format!("asking for the icon of {item}"),
+            || self.backend.request_icon(item, size),
+            |request| format!("request {}", request.0),
+        )
     }
-    fn request_thumbnail(&mut self, item: &ItemId, size: gevrek_zones::backend::IconSize) -> gevrek_zones::backend::IconRequest {
-        timed_quietly(|| format!("asking for the thumbnail of {item}"), || self.backend.request_thumbnail(item, size), |request| {
-            format!("request {}", request.0)
-        })
+    fn request_thumbnail(
+        &mut self,
+        item: &ItemId,
+        size: gevrek_zones::backend::IconSize,
+    ) -> gevrek_zones::backend::IconRequest {
+        timed_quietly(
+            || format!("asking for the thumbnail of {item}"),
+            || self.backend.request_thumbnail(item, size),
+            |request| format!("request {}", request.0),
+        )
     }
     fn open(&mut self, item: &ItemId) -> Result<(), BackendError> {
-        timed(|| format!("opening {item}"), || self.backend.open(item), done)
+        timed(
+            || format!("opening {item}"),
+            || self.backend.open(item),
+            done,
+        )
     }
     fn open_with(&mut self, item: &ItemId, program: Option<&str>) -> Result<(), BackendError> {
         timed(
-            || format!("opening {item} with {}", program.unwrap_or("a program chosen then")),
+            || {
+                format!(
+                    "opening {item} with {}",
+                    program.unwrap_or("a program chosen then")
+                )
+            },
             || self.backend.open_with(item, program),
             done,
         )
     }
-    fn context_menu(&mut self, items: &[ItemId], at: gevrek_model::geometry::Point) -> Result<(), BackendError> {
+    fn context_menu(
+        &mut self,
+        items: &[ItemId],
+        at: gevrek_model::geometry::Point,
+    ) -> Result<(), BackendError> {
         timed(
-            || format!("showing the system's menu for {}", gevrek_zones::timed::count(items.len(), "item", "items")),
+            || {
+                format!(
+                    "showing the system's menu for {}",
+                    gevrek_zones::timed::count(items.len(), "item", "items")
+                )
+            },
             || self.backend.context_menu(items, at),
             done,
         )
     }
-    fn perform(&mut self, operation: &gevrek_zones::backend::FileOperation) -> Result<gevrek_zones::backend::FileOperation, BackendError> {
-        timed(|| operation.to_string(), || self.backend.perform(operation), |done| {
-            result(done, |undo| format!("done (taken back by {undo})"))
-        })
+    fn perform(
+        &mut self,
+        operation: &gevrek_zones::backend::FileOperation,
+    ) -> Result<gevrek_zones::backend::FileOperation, BackendError> {
+        timed(
+            || operation.to_string(),
+            || self.backend.perform(operation),
+            |done| result(done, |undo| format!("done (taken back by {undo})")),
+        )
     }
     fn drop_payload(&mut self) -> Option<gevrek_zones::backend::DropPayload> {
-        timed(|| "reading what was dropped".to_string(), || self.backend.drop_payload(), |payload| match payload {
-            Some(payload) => payload.summary(),
-            None => "nothing".to_string(),
-        })
-    }
-    fn start_drag(&mut self, items: &[ItemId], allowed: gevrek_zones::backend::DragActions) -> Result<(), BackendError> {
         timed(
-            || format!("handing a drag of {} to the system", gevrek_zones::timed::count(items.len(), "item", "items")),
+            || "reading what was dropped".to_string(),
+            || self.backend.drop_payload(),
+            |payload| match payload {
+                Some(payload) => payload.summary(),
+                None => "nothing".to_string(),
+            },
+        )
+    }
+    fn start_drag(
+        &mut self,
+        items: &[ItemId],
+        allowed: gevrek_zones::backend::DragActions,
+    ) -> Result<(), BackendError> {
+        timed(
+            || {
+                format!(
+                    "handing a drag of {} to the system",
+                    gevrek_zones::timed::count(items.len(), "item", "items")
+                )
+            },
             || self.backend.start_drag(items, allowed),
             done,
         )
     }
     fn displays(&mut self) -> Vec<gevrek_zones::geometry::Display> {
-        timed(|| "asking for the displays".to_string(), || self.backend.displays(), |displays| {
-            gevrek_zones::timed::count(displays.len(), "display", "displays")
-        })
+        timed(
+            || "asking for the displays".to_string(),
+            || self.backend.displays(),
+            |displays| gevrek_zones::timed::count(displays.len(), "display", "displays"),
+        )
     }
     fn reserved_areas(&mut self) -> Vec<gevrek_zones::geometry::ReservedArea> {
-        timed(|| "asking for the room kept on the displays".to_string(), || self.backend.reserved_areas(), |areas| {
-            gevrek_zones::timed::count(areas.len(), "area", "areas")
-        })
+        timed(
+            || "asking for the room kept on the displays".to_string(),
+            || self.backend.reserved_areas(),
+            |areas| gevrek_zones::timed::count(areas.len(), "area", "areas"),
+        )
     }
     fn desktop_folder(&mut self) -> Option<String> {
-        timed(|| "asking for the desktop's folder".to_string(), || self.backend.desktop_folder(), |folder| {
-            folder.clone().unwrap_or_else(|| "none".to_string())
-        })
+        timed(
+            || "asking for the desktop's folder".to_string(),
+            || self.backend.desktop_folder(),
+            |folder| folder.clone().unwrap_or_else(|| "none".to_string()),
+        )
     }
     fn journal_system_icons(&mut self) -> Result<(), BackendError> {
-        timed(|| "writing down where the system's icons are".to_string(), || self.backend.journal_system_icons(), done)
+        timed(
+            || "writing down where the system's icons are".to_string(),
+            || self.backend.journal_system_icons(),
+            done,
+        )
     }
     fn system_icons_to_restore(&mut self) -> bool {
-        timed(|| "asking whether the system's icons are to be put back".to_string(), || self.backend.system_icons_to_restore(), |to| {
-            to.to_string()
-        })
+        timed(
+            || "asking whether the system's icons are to be put back".to_string(),
+            || self.backend.system_icons_to_restore(),
+            |to| to.to_string(),
+        )
     }
     fn restore_system_icons(&mut self) -> Result<(), BackendError> {
-        timed(|| "putting the system's icons back".to_string(), || self.backend.restore_system_icons(), done)
+        timed(
+            || "putting the system's icons back".to_string(),
+            || self.backend.restore_system_icons(),
+            done,
+        )
     }
 }
 
 /// How a listing came out, for the log.
 fn items(listed: &Result<Vec<gevrek_zones::Item>, BackendError>) -> String {
-    result(listed, |items| gevrek_zones::timed::count(items.len(), "item", "items"))
+    result(listed, |items| {
+        gevrek_zones::timed::count(items.len(), "item", "items")
+    })
 }
 
 /// How a watch came out, for the log.
@@ -726,22 +1004,57 @@ mod tests {
         use gevrek_zones::host::Host;
         use gevrek_zones::testing::FakeBackend;
         const NOW: u64 = 1_800_000_000;
-        let mut core = ZonesCore::new(ZonesConfig { enabled: true, ..ZonesConfig::default() }, Default::default());
+        let mut core = ZonesCore::new(
+            ZonesConfig {
+                enabled: true,
+                ..ZonesConfig::default()
+            },
+            Default::default(),
+        );
         let mut backend = FakeBackend::new();
         let mut host = Host::new();
         let none = std::collections::BTreeMap::new();
-        let tell = |core: &mut ZonesCore, backend: &mut FakeBackend, host: &mut Host, state: &serde_json::Value| {
-            let (displays, reserved) = if minded { displays_of_state(&panels_state(state)) } else { displays_of_state(state) };
+        let tell = |core: &mut ZonesCore,
+                    backend: &mut FakeBackend,
+                    host: &mut Host,
+                    state: &serde_json::Value| {
+            let (displays, reserved) = if minded {
+                displays_of_state(&panels_state(state))
+            } else {
+                displays_of_state(state)
+            };
             backend.set_displays(displays);
             backend.set_reserved(reserved);
             host.pump(core, backend, NOW);
         };
-        tell(&mut core, &mut backend, &mut host, &state_of(panel, &none, true, scale));
+        tell(
+            &mut core,
+            &mut backend,
+            &mut host,
+            &state_of(panel, &none, true, scale),
+        );
         host.start(&mut core, &mut backend, NOW);
-        tell(&mut core, &mut backend, &mut host, &state_of(panel, &none, true, scale));
-        host.command(&mut core, &mut backend, Command::CreateZone { title: "Dock".to_string(), kind: ZoneKind::Manual, rect: Some(zone) }, NOW);
+        tell(
+            &mut core,
+            &mut backend,
+            &mut host,
+            &state_of(panel, &none, true, scale),
+        );
+        host.command(
+            &mut core,
+            &mut backend,
+            Command::CreateZone {
+                title: "Dock".to_string(),
+                kind: ZoneKind::Manual,
+                rect: Some(zone),
+            },
+            NOW,
+        );
         let id = core.config().zones[0].id.clone();
-        let asked = Command::ModifyZone { zone: id.clone(), changes: serde_json::json!({ "reserves_space": true }) };
+        let asked = Command::ModifyZone {
+            zone: id.clone(),
+            changes: serde_json::json!({ "reserves_space": true }),
+        };
         host.command(&mut core, &mut backend, asked, NOW);
         // What the zones ask for, as the window manager is told it.
         let room_asked = |core: &ZonesCore| -> std::collections::BTreeMap<&'static str, i32> {
@@ -764,8 +1077,16 @@ mod tests {
         for _ in 0..10 {
             on_the_way.push(room_asked(&core));
             let in_force = on_the_way.remove(0);
-            tell(&mut core, &mut backend, &mut host, &state_of(panel, &in_force, minded, scale));
-            let asks: Vec<(String, i32)> = room_asked(&core).into_iter().map(|(side, depth)| (side.to_string(), depth)).collect();
+            tell(
+                &mut core,
+                &mut backend,
+                &mut host,
+                &state_of(panel, &in_force, minded, scale),
+            );
+            let asks: Vec<(String, i32)> = room_asked(&core)
+                .into_iter()
+                .map(|(side, depth)| (side.to_string(), depth))
+                .collect();
             seen.push((core.zone_rect(&id).expect("the zone has a place"), asks));
         }
         seen
@@ -776,11 +1097,36 @@ mod tests {
         use gevrek_zones::Rect;
         // (the panel, the zone, the room it keeps)
         let cases = [
-            ("at the top, under a panel", ("top", 40), Rect::new(300, 40, 600, 120), ("top", 120)),
-            ("at the top, no panel", ("none", 0), Rect::new(300, 0, 600, 120), ("top", 120)),
-            ("at the left, a panel at the top", ("top", 40), Rect::new(0, 200, 280, 500), ("left", 280)),
-            ("at the bottom, above a panel", ("bottom", 48), Rect::new(400, 912, 800, 120), ("bottom", 120)),
-            ("at the right, no panel", ("none", 0), Rect::new(1640, 300, 280, 400), ("right", 280)),
+            (
+                "at the top, under a panel",
+                ("top", 40),
+                Rect::new(300, 40, 600, 120),
+                ("top", 120),
+            ),
+            (
+                "at the top, no panel",
+                ("none", 0),
+                Rect::new(300, 0, 600, 120),
+                ("top", 120),
+            ),
+            (
+                "at the left, a panel at the top",
+                ("top", 40),
+                Rect::new(0, 200, 280, 500),
+                ("left", 280),
+            ),
+            (
+                "at the bottom, above a panel",
+                ("bottom", 48),
+                Rect::new(400, 912, 800, 120),
+                ("bottom", 120),
+            ),
+            (
+                "at the right, no panel",
+                ("none", 0),
+                Rect::new(1640, 300, 280, 400),
+                ("right", 280),
+            ),
         ];
         // The room is in force at once, a state later (the usual: one
         // round trip to the window manager on Windows, one configure of
@@ -792,7 +1138,10 @@ mod tests {
                 for (what, panel, zone, (side, depth)) in cases {
                     let seen = through_ten_states(panel, zone, lag, scale, true);
                     for (round, (rect, asks)) in seen.iter().enumerate() {
-                        assert_eq!(*rect, zone, "{what}, scale {scale}, lag {lag}, state {round}: the zone moved");
+                        assert_eq!(
+                            *rect, zone,
+                            "{what}, scale {scale}, lag {lag}, state {round}: the zone moved"
+                        );
                         assert_eq!(
                             asks,
                             &[(side.to_string(), depth)],
@@ -806,20 +1155,28 @@ mod tests {
         // zone finds its own room taken and does not stay where it was.
         let unminded = through_ten_states(("top", 40), Rect::new(300, 40, 600, 120), 1, 1.0, false);
         assert!(
-            unminded.iter().any(|(rect, _)| *rect != Rect::new(300, 40, 600, 120)),
+            unminded
+                .iter()
+                .any(|(rect, _)| *rect != Rect::new(300, 40, 600, 120)),
             "the window manager's state did not disturb the zone: this test would hold nothing"
         );
     }
 
     #[test]
     fn without_the_zones_own_room_the_state_keeps_what_the_panels_keep() {
-        let room = |side: &'static str, depth: i32| std::collections::BTreeMap::from([(side, depth)]);
+        let room =
+            |side: &'static str, depth: i32| std::collections::BTreeMap::from([(side, depth)]);
         let none = std::collections::BTreeMap::new();
         for scale in [1.0, 1.25, 1.5, 2.0] {
             for panel in [("top", 40), ("none", 0), ("bottom", 48), ("left", 64)] {
                 // What the panels alone keep: the state with no room for zones.
                 let panels_alone = displays_of_state(&state_of(panel, &none, true, scale));
-                for own in [room("top", 120), room("left", 280), room("bottom", 96), room("right", 333)] {
+                for own in [
+                    room("top", 120),
+                    room("left", 280),
+                    room("bottom", 96),
+                    room("right", 333),
+                ] {
                     let state = state_of(panel, &own, true, scale);
                     assert_eq!(
                         displays_of_state(&panels_state(&state)),
@@ -835,9 +1192,15 @@ mod tests {
         // A state that names no room of the zones' is taken as it is,
         // and is not copied to find that out.
         let plain = state_of(("top", 40), &room("top", 120), false, 1.0);
-        assert!(matches!(panels_state(&plain), std::borrow::Cow::Borrowed(_)));
+        assert!(matches!(
+            panels_state(&plain),
+            std::borrow::Cow::Borrowed(_)
+        ));
         let nothing_taken = state_of(("top", 40), &none, true, 1.0);
-        assert!(matches!(panels_state(&nothing_taken), std::borrow::Cow::Borrowed(_)));
+        assert!(matches!(
+            panels_state(&nothing_taken),
+            std::borrow::Cow::Borrowed(_)
+        ));
         // More named than is kept there: none is left for panels, and the
         // room for windows is never larger than the display.
         let mut odd = state_of(("top", 40), &room("top", 120), true, 1.0);
@@ -851,7 +1214,10 @@ mod tests {
             "reserved_top": 160, "zones_room": { "left": 0, "top": 120, "right": 0, "bottom": 0 },
         }]});
         let (_, kept) = displays_of_state(&panels_state(&sides));
-        assert_eq!(kept.iter().map(|area| area.thickness).collect::<Vec<_>>(), [40]);
+        assert_eq!(
+            kept.iter().map(|area| area.thickness).collect::<Vec<_>>(),
+            [40]
+        );
     }
 
     #[test]
@@ -873,9 +1239,21 @@ mod tests {
     #[test]
     fn nothing_the_core_asks_is_left_to_the_traits_own_answer() {
         let source = include_str!("backend.rs");
-        let passed_on = source.split("impl ZonesBackend for System").nth(1).unwrap().split("#[cfg(test)]").next().unwrap();
+        let passed_on = source
+            .split("impl ZonesBackend for System")
+            .nth(1)
+            .unwrap()
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
         let of_the_trait = include_str!("../../../zones/src/backend.rs");
-        let of_the_trait = of_the_trait.split("pub trait ZonesBackend").nth(1).unwrap().split("\n}\n").next().unwrap();
+        let of_the_trait = of_the_trait
+            .split("pub trait ZonesBackend")
+            .nth(1)
+            .unwrap()
+            .split("\n}\n")
+            .next()
+            .unwrap();
         let names: Vec<&str> = of_the_trait
             .lines()
             .filter_map(|line| line.trim().strip_prefix("fn "))
@@ -883,7 +1261,10 @@ mod tests {
             .collect();
         assert!(names.len() >= 25, "{names:?}");
         for name in names {
-            assert!(passed_on.contains(&format!("fn {name}(")), "{name} is not passed on to the system's backend");
+            assert!(
+                passed_on.contains(&format!("fn {name}(")),
+                "{name} is not passed on to the system's backend"
+            );
         }
     }
 
@@ -908,7 +1289,9 @@ mod tests {
         // What comes out is a command the window manager reads.
         let command = exec_command("top", &[], Some("kitty")).unwrap();
         let read: gevrek_model::command::DispatchCommand = serde_json::from_value(command).unwrap();
-        assert!(matches!(read, gevrek_model::command::DispatchCommand::Exec { program, .. } if program == "kitty"));
+        assert!(
+            matches!(read, gevrek_model::command::DispatchCommand::Exec { program, .. } if program == "kitty")
+        );
     }
 
     /// An item opened on Linux is started through the window manager: the
@@ -937,8 +1320,11 @@ mod tests {
         };
         start(&launch("/no/such/program-of-gevreks-test", false)).expect("asked, not started here");
         start(&launch("/no/such/program-of-gevreks-test", true)).expect("asked, in the terminal");
-        let commands: Vec<serde_json::Value> =
-            asked.borrow().iter().map(|text| serde_json::from_str(text).unwrap()).collect();
+        let commands: Vec<serde_json::Value> = asked
+            .borrow()
+            .iter()
+            .map(|text| serde_json::from_str(text).unwrap())
+            .collect();
         assert_eq!(
             commands,
             [

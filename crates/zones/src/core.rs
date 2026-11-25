@@ -44,11 +44,14 @@ pub use layouts::merge;
 use crate::auto::AutoPlan;
 use crate::backend::{BackendError, BackendEvent, BackendRequest, FileOperation, Location};
 use crate::config::{
-    ExpandOn, Lock, RuleAction, SmartSource, Sort, View, ZoneDefinition, ZoneKind, ZoneLook, ZonesConfig,
+    ExpandOn, Lock, RuleAction, SmartSource, Sort, View, ZoneDefinition, ZoneKind, ZoneLook,
+    ZonesConfig,
 };
 use crate::export::LayoutDocument;
 use crate::focus::{Direction, Focus, SelectMode, Step};
-use crate::geometry::{display_of, fallback_display, work_area, Display, ReservedArea, ZoneGeometry};
+use crate::geometry::{
+    display_of, fallback_display, work_area, Display, ReservedArea, ZoneGeometry,
+};
 use crate::ids::{DisplayId, ItemId, ZoneId};
 use crate::item::{Item, ItemKind};
 use crate::layout::{self, ItemLayout, Metrics, PlacedItem};
@@ -92,9 +95,14 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rect: Option<Rect>,
     },
-    RenameZone { zone: ZoneId, title: String },
+    RenameZone {
+        zone: ZoneId,
+        title: String,
+    },
     /// Take a zone away. Its items stay on the desktop, loose.
-    DeleteZone { zone: ZoneId },
+    DeleteZone {
+        zone: ZoneId,
+    },
     /// Put a zone's top left corner at a point of the desktop.
     MoveZone {
         zone: ZoneId,
@@ -122,9 +130,16 @@ pub enum Command {
         cell: Option<Cell>,
     },
     /// Take an item out of its zone; it is loose.
-    RemoveItem { item: ItemId },
+    RemoveItem {
+        item: ItemId,
+    },
     /// Put an item on the bare desktop, at a place of its own.
-    PlaceLooseItem { item: ItemId, display: DisplayId, x: i32, y: i32 },
+    PlaceLooseItem {
+        item: ItemId,
+        display: DisplayId,
+        x: i32,
+        y: i32,
+    },
     /// Roll a zone up to its title or down again; without a value, the
     /// other of what it is.
     RollUp {
@@ -140,11 +155,18 @@ pub enum Command {
         members: Option<bool>,
     },
     /// Make a zone a tab beside another: it takes that one's place.
-    Tab { zone: ZoneId, with: ZoneId },
+    Tab {
+        zone: ZoneId,
+        with: ZoneId,
+    },
     /// Take a zone out of its tabs; it stands beside them.
-    Untab { zone: ZoneId },
+    Untab {
+        zone: ZoneId,
+    },
     /// Bring a tab to the front.
-    ActivateTab { zone: ZoneId },
+    ActivateTab {
+        zone: ZoneId,
+    },
     /// How a zone shows its items; what is not given stays.
     SetView {
         zone: ZoneId,
@@ -158,7 +180,10 @@ pub enum Command {
         icon_size: Option<u32>,
     },
     /// Show or hide a zone on the displays as they are now.
-    ShowZone { zone: ZoneId, shown: bool },
+    ShowZone {
+        zone: ZoneId,
+        shown: bool,
+    },
     /// Say what the rules would do, and do nothing.
     PreviewRules {
         #[serde(default)]
@@ -175,10 +200,15 @@ pub enum Command {
     UndoFileOperation,
     /// Give an item's file another name. It can be taken back with
     /// `UndoFileOperation`.
-    RenameItem { item: ItemId, name: String },
+    RenameItem {
+        item: ItemId,
+        name: String,
+    },
     /// Put items into the system's bin (never deleted outright). It can
     /// be taken back with `UndoFileOperation`.
-    TrashItems { items: Vec<ItemId> },
+    TrashItems {
+        items: Vec<ItemId>,
+    },
     /// Bring files from elsewhere to the desktop: copied or moved into
     /// `folder` (the desktop's own, which the backend names), and each
     /// put into a zone or at a place of its own once it is there.
@@ -193,17 +223,27 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<LoosePosition>,
     },
-    SaveSnapshot { name: String },
-    RestoreSnapshot { name: String },
-    DeleteSnapshot { name: String },
+    SaveSnapshot {
+        name: String,
+    },
+    RestoreSnapshot {
+        name: String,
+    },
+    DeleteSnapshot {
+        name: String,
+    },
     /// Hide every zone that is not always visible, or show them again.
     QuickHide {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         hidden: Option<bool>,
     },
     /// Bring the zones above the windows while a key is held.
-    Peek { on: bool },
-    Search { typed: String },
+    Peek {
+        on: bool,
+    },
+    Search {
+        typed: String,
+    },
 
     // ---- roll-up ----
     /// The pointer is over a zone, or over none. A rolled-up zone it
@@ -226,11 +266,16 @@ pub enum Command {
         expanded: Option<bool>,
     },
     /// Time has passed: do what was waiting for it (`wake_at_ms`).
-    Tick { at_ms: u64 },
+    Tick {
+        at_ms: u64,
+    },
 
     // ---- tabs ----
     /// Put a tab at another place among its tabs, counted from 0.
-    MoveTab { zone: ZoneId, index: usize },
+    MoveTab {
+        zone: ZoneId,
+        index: usize,
+    },
     /// Take a tab out of its tabs and put its top left corner at a point
     /// of the desktop: what dragging a tab out does.
     SplitTab {
@@ -296,31 +341,56 @@ pub enum Command {
     /// zone's definition (a JSON merge patch; `null` puts a key back to
     /// its default). Its look, its kind, its source, whether it is
     /// private, the workspaces it is on. The id stays.
-    ModifyZone { zone: ZoneId, changes: serde_json::Value },
+    ModifyZone {
+        zone: ZoneId,
+        changes: serde_json::Value,
+    },
     /// The same for what is set for all zones (`look`, `snap`, `roll_up`,
     /// `lock`, `privacy`, `rules`...). The zones themselves are changed
     /// one by one, not here.
-    ModifySettings { changes: serde_json::Value },
+    ModifySettings {
+        changes: serde_json::Value,
+    },
 
     // ---- portals ----
     /// Go into a folder a portal shows, without leaving the zone.
-    EnterFolder { zone: ZoneId, item: ItemId },
+    EnterFolder {
+        zone: ZoneId,
+        item: ItemId,
+    },
     /// Go to a folder at or below the portal's own (a press on a part of
     /// the way shown above its items).
-    NavigateTo { zone: ZoneId, directory: String },
-    NavigateUp { zone: ZoneId },
-    NavigateBack { zone: ZoneId },
-    NavigateForward { zone: ZoneId },
+    NavigateTo {
+        zone: ZoneId,
+        directory: String,
+    },
+    NavigateUp {
+        zone: ZoneId,
+    },
+    NavigateBack {
+        zone: ZoneId,
+    },
+    NavigateForward {
+        zone: ZoneId,
+    },
     /// Ask again what a zone's folder or source has (it was not
     /// reachable, and may be now).
-    RefreshZone { zone: ZoneId },
+    RefreshZone {
+        zone: ZoneId,
+    },
     /// Make a folder in the folder a portal shows. It can be taken back
     /// with `UndoFileOperation`.
-    NewFolder { zone: ZoneId, name: String },
+    NewFolder {
+        zone: ZoneId,
+        name: String,
+    },
     /// Make a folder in any folder: on the desktop itself, with the
     /// desktop's own folder (which the backend names). It can be taken
     /// back with `UndoFileOperation` like the one above.
-    NewFolderIn { folder: String, name: String },
+    NewFolderIn {
+        folder: String,
+        name: String,
+    },
     /// Move files (or copy them) into a folder: an item of a portal onto
     /// a folder in it, or out of it onto the desktop. Each can be taken
     /// back with `UndoFileOperation`.
@@ -346,7 +416,10 @@ pub enum Command {
     CheckTimedRules,
 
     // ---- whole layouts ----
-    RenameSnapshot { name: String, to: String },
+    RenameSnapshot {
+        name: String,
+        to: String,
+    },
     /// Say a whole layout as one document (`ZonesEvent::LayoutExported`):
     /// the saved one of that name, or without a name the layout as it is.
     ExportLayout {
@@ -363,7 +436,9 @@ pub enum Command {
         apply: bool,
     },
     /// Arrange the zones as they are kept for another set of displays.
-    CopyArrangement { from: ProfileKey },
+    CopyArrangement {
+        from: ProfileKey,
+    },
 
     // ---- the keyboard ----
     /// Give a zone the keyboard; without a zone, let it go.
@@ -373,7 +448,9 @@ pub enum Command {
     },
     /// Give the keyboard to the zone that lies in a direction from the
     /// one that has it; from none, to the first.
-    FocusNeighbour { direction: Direction },
+    FocusNeighbour {
+        direction: Direction,
+    },
     /// Give an item the keyboard, in whichever zone shows it: its tab
     /// comes to the front and a rolled-up zone opens. Without an item,
     /// the zone keeps the keyboard and no item has it.
@@ -407,7 +484,9 @@ pub enum Command {
 
     /// Call off a file operation that has not ended (`Scene.operations`
     /// names them).
-    CancelOperation { request: u64 },
+    CancelOperation {
+        request: u64,
+    },
 
     // ---- privacy ----
     /// Cover what every zone holds, and the loose items; or stop doing
@@ -466,13 +545,22 @@ pub enum Command {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum ZonesEvent {
-    ZoneCreated { zone: ZoneId },
+    ZoneCreated {
+        zone: ZoneId,
+    },
     /// Something of the zone itself is other than it was (title, view,
     /// lock, rolled up, tabs, shown).
-    ZoneChanged { zone: ZoneId },
-    ZoneDeleted { zone: ZoneId },
+    ZoneChanged {
+        zone: ZoneId,
+    },
+    ZoneDeleted {
+        zone: ZoneId,
+    },
     /// The zone is at this rectangle of the desktop now.
-    ZonePlaced { zone: ZoneId, rect: Rect },
+    ZonePlaced {
+        zone: ZoneId,
+        rect: Rect,
+    },
     /// What a zone holds is other than it was; without a zone, what is
     /// loose.
     ItemsChanged {
@@ -485,7 +573,10 @@ pub enum ZonesEvent {
     /// Another arrangement is in use. `made`: it is new, for displays
     /// never seen in this set. `moved`: the zones whose display is not
     /// there and that went to another.
-    ProfileChanged { made: bool, moved: Vec<ZoneId> },
+    ProfileChanged {
+        made: bool,
+        moved: Vec<ZoneId>,
+    },
     /// What the rules would do. `lines` say the same as the plan in the
     /// words a person is shown: which item, from where, to where, by
     /// which rule; and what is held back, and why.
@@ -500,18 +591,38 @@ pub enum ZonesEvent {
         lines: Vec<PlanLine>,
     },
     RulesUndone,
-    SnapshotSaved { name: String },
-    SnapshotRestored { name: String },
-    SnapshotDeleted { name: String },
-    VisibilityChanged { quick_hidden: bool, peeking: bool },
-    Found { typed: String, hits: Vec<Hit> },
+    SnapshotSaved {
+        name: String,
+    },
+    SnapshotRestored {
+        name: String,
+    },
+    SnapshotDeleted {
+        name: String,
+    },
+    VisibilityChanged {
+        quick_hidden: bool,
+        peeking: bool,
+    },
+    Found {
+        typed: String,
+        hits: Vec<Hit>,
+    },
     /// The backend could not do what was asked of it.
-    OperationFailed { operation: FileOperation, error: BackendError },
+    OperationFailed {
+        operation: FileOperation,
+        error: BackendError,
+    },
     /// A command was not carried out, and why.
-    Refused { reason: String },
+    Refused {
+        reason: String,
+    },
     /// A rolled-up zone is open for now, or closed again. Its rectangle
     /// is the whole zone's while it is open.
-    ZoneExpanded { zone: ZoneId, expanded: bool },
+    ZoneExpanded {
+        zone: ZoneId,
+        expanded: bool,
+    },
     /// Items are to be opened; whoever runs the zones starts them.
     OpenRequested {
         items: Vec<ItemId>,
@@ -521,15 +632,29 @@ pub enum ZonesEvent {
     /// Something set for all zones is other than it was.
     SettingsChanged,
     /// A portal shows another folder.
-    Navigated { zone: ZoneId, directory: String },
+    Navigated {
+        zone: ZoneId,
+        directory: String,
+    },
     /// How far the listing of what a zone shows has come.
-    ListingChanged { zone: ZoneId, listing: Listing },
+    ListingChanged {
+        zone: ZoneId,
+        listing: Listing,
+    },
     /// What is typed into a zone's filter; empty when it shows all again.
-    FilterChanged { zone: ZoneId, typed: String },
-    SnapshotRenamed { name: String, to: String },
+    FilterChanged {
+        zone: ZoneId,
+        typed: String,
+    },
+    SnapshotRenamed {
+        name: String,
+        to: String,
+    },
     /// A whole layout, as a document to be written somewhere. (Boxed: it
     /// is far larger than anything else that is told.)
-    LayoutExported { document: Box<LayoutDocument> },
+    LayoutExported {
+        document: Box<LayoutDocument>,
+    },
     /// A layout was taken in under `name`. `kept_as`: the snapshot that
     /// holds the layout there was before it was put in force.
     LayoutImported {
@@ -546,16 +671,27 @@ pub enum ZonesEvent {
         item: Option<ItemId>,
     },
     /// Other items are chosen.
-    SelectionChanged { items: Vec<ItemId> },
+    SelectionChanged {
+        items: Vec<ItemId>,
+    },
     /// What is covered from view changed: everything was covered by hand
     /// or uncovered, or the screen is shared or no longer.
-    PrivacyChanged { masked: bool, screen_shared: bool },
+    PrivacyChanged {
+        masked: bool,
+        screen_shared: bool,
+    },
     /// The room tiled windows are to keep off is other than it was. For
     /// the window manager, by way of whoever runs the zones.
-    ReservedChanged { regions: Vec<ReservedRegion> },
+    ReservedChanged {
+        regions: Vec<ReservedRegion>,
+    },
     /// The command that was refused (the `Refused` before this) was
     /// refused by a lock of this zone: its own, or the one for all zones.
-    RefusedByLock { zone: ZoneId, geometry: bool, members: bool },
+    RefusedByLock {
+        zone: ZoneId,
+        geometry: bool,
+        members: bool,
+    },
     /// What the command that was refused was about: the zone and the item
     /// it named (for a lock's refusal, the zone that is locked), with the
     /// reason again. So that a refusal which came by a key or from
@@ -573,23 +709,44 @@ pub enum ZonesEvent {
     },
     /// A file operation takes long: it is carried out by the backend and
     /// ends later. It is in `Scene.operations` until then.
-    OperationBegun { request: u64, operation: FileOperation },
-    OperationProgress { request: u64, done: u64, total: u64 },
+    OperationBegun {
+        request: u64,
+        operation: FileOperation,
+    },
+    OperationProgress {
+        request: u64,
+        done: u64,
+        total: u64,
+    },
     /// An operation that took long has ended, well or not (an
     /// `OperationFailed` before this says if not).
-    OperationEnded { request: u64 },
+    OperationEnded {
+        request: u64,
+    },
     /// Every icon is drawn grey now, or in its colours again.
-    GreyIconsChanged { on: bool },
+    GreyIconsChanged {
+        on: bool,
+    },
     /// What making zones by type would do: the answer to a dry run.
-    AutoPlanned { plan: AutoPlan },
+    AutoPlanned {
+        plan: AutoPlan,
+    },
     /// Zones were made by type: the ones that are new, how many items
     /// were put into zones (new ones and those that were there), and how
     /// many rules were added. Nothing at all where there was nothing to
     /// do.
-    AutoCreated { zones: Vec<ZoneId>, items: usize, rules: usize },
+    AutoCreated {
+        zones: Vec<ZoneId>,
+        items: usize,
+        rules: usize,
+    },
     /// The last making of zones by type was taken back: how many zones
     /// went, how many items are where they were, how many rules went.
-    AutoUndone { zones: usize, items: usize, rules: usize },
+    AutoUndone {
+        zones: usize,
+        items: usize,
+        rules: usize,
+    },
 }
 
 /// What follows from an event or a command.
@@ -817,11 +974,18 @@ struct Before {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Pending {
     /// A rule moves this item's file.
-    RuleMove { item: ItemId, operation: FileOperation },
+    RuleMove {
+        item: ItemId,
+        operation: FileOperation,
+    },
     /// Something was dropped on a portal; it can be taken back.
     Portal { operation: FileOperation },
     /// A file is brought to the desktop; where it goes once it is there.
-    Arriving { operation: FileOperation, zone: Option<ZoneId>, at: Option<LoosePosition> },
+    Arriving {
+        operation: FileOperation,
+        zone: Option<ZoneId>,
+        at: Option<LoosePosition>,
+    },
     /// Something is being taken back.
     TakingBack { operation: FileOperation },
 }
@@ -843,7 +1007,9 @@ fn lands_at(operation: &FileOperation) -> Option<String> {
         FileOperation::Copy { from, to_folder } | FileOperation::Move { from, to_folder } => {
             Some(paths::join(to_folder, paths::file_name(from)))
         }
-        FileOperation::Rename { path, new_name } => Some(paths::join(paths::parent(path)?, new_name)),
+        FileOperation::Rename { path, new_name } => {
+            Some(paths::join(paths::parent(path)?, new_name))
+        }
         FileOperation::NewFolder { parent, name } => Some(paths::join(parent, name)),
         FileOperation::Restore { path } => Some(path.clone()),
         FileOperation::Trash { .. } => None,
@@ -960,7 +1126,11 @@ impl ZonesCore {
         self.items
             .get(id)
             .or_else(|| self.directories.values().find_map(|items| items.get(id)))
-            .or_else(|| self.sources.values().find_map(|items| items.iter().find(|item| &item.id == id)))
+            .or_else(|| {
+                self.sources
+                    .values()
+                    .find_map(|items| items.iter().find(|item| &item.id == id))
+            })
     }
 
     /// The workspace that is shown, as far as it was told.
@@ -970,11 +1140,13 @@ impl ZonesCore {
 
     /// The arrangement in use.
     pub fn profile(&self) -> Option<&Profile> {
-        self.current.and_then(|index| self.state.profiles.get(index))
+        self.current
+            .and_then(|index| self.state.profiles.get(index))
     }
 
     fn profile_mut(&mut self) -> Option<&mut Profile> {
-        self.current.and_then(|index| self.state.profiles.get_mut(index))
+        self.current
+            .and_then(|index| self.state.profiles.get_mut(index))
     }
 
     /// What to ask of the backend at the start: the folders of the
@@ -1073,7 +1245,10 @@ impl ZonesCore {
     /// Where a zone is, whole (not rolled up), and on which display.
     fn place_of(&self, zone: &ZoneId) -> Option<(Rect, &Display)> {
         let geometry = self.profile()?.geometry.get(&self.leader(zone))?;
-        let display = self.displays.iter().find(|display| display.id == geometry.display)?;
+        let display = self
+            .displays
+            .iter()
+            .find(|display| display.id == geometry.display)?;
         let rect = snap::keep_reachable(geometry.on(display), work_area(display, &self.reserved));
         Some((rect, display))
     }
@@ -1083,7 +1258,11 @@ impl ZonesCore {
     /// display that is there.
     pub fn zone_rect(&self, zone: &ZoneId) -> Option<Rect> {
         let (rect, _) = self.place_of(zone)?;
-        Some(if self.is_rolled(zone) { layout::rolled_up(rect, &self.metrics) } else { rect })
+        Some(if self.is_rolled(zone) {
+            layout::rolled_up(rect, &self.metrics)
+        } else {
+            rect
+        })
     }
 
     /// Whether a zone is shown now: not hidden on these displays, on the
@@ -1093,7 +1272,10 @@ impl ZonesCore {
         self.is_about(zone)
             && (self.peeking
                 || !self.state.quick_hidden
-                || self.config.zone(zone).is_some_and(|zone| zone.always_visible))
+                || self
+                    .config
+                    .zone(zone)
+                    .is_some_and(|zone| zone.always_visible))
     }
 
     /// Whether a zone belongs to what is shown here at all: not hidden on
@@ -1103,16 +1285,25 @@ impl ZonesCore {
         let Some(definition) = self.config.zone(zone).filter(|_| self.config.enabled) else {
             return false;
         };
-        let hidden_here = self.profile().is_some_and(|profile| profile.hidden.contains(zone));
+        let hidden_here = self
+            .profile()
+            .is_some_and(|profile| profile.hidden.contains(zone));
         let on_this_workspace = definition.workspaces.is_empty()
-            || self.workspace.as_ref().is_none_or(|shown| definition.workspaces.contains(shown));
+            || self
+                .workspace
+                .as_ref()
+                .is_none_or(|shown| definition.workspaces.contains(shown));
         !hidden_here && on_this_workspace
     }
 
     /// What of a zone may not be changed by dragging: by its own lock or
     /// by the one for all zones.
     pub fn lock_of(&self, zone: &ZoneId) -> Lock {
-        self.config.zone(zone).map(|zone| zone.lock).unwrap_or_default().or(self.config.lock)
+        self.config
+            .zone(zone)
+            .map(|zone| zone.lock)
+            .unwrap_or_default()
+            .or(self.config.lock)
     }
 
     /// The tab of a group that is in front.
@@ -1168,13 +1359,18 @@ impl ZonesCore {
     /// in a zone that is not there is loose.
     pub fn zone_of(&self, item: &ItemId) -> Option<&ZoneId> {
         self.state.placements.zone_of(item).filter(|zone| {
-            self.config.zone(zone).is_some_and(|zone| zone.kind == ZoneKind::Manual)
+            self.config
+                .zone(zone)
+                .is_some_and(|zone| zone.kind == ZoneKind::Manual)
         })
     }
 
     /// The items of the desktop that are in no zone.
     pub fn loose_items(&self) -> Vec<&Item> {
-        self.items.values().filter(|item| self.zone_of(&item.id).is_none()).collect()
+        self.items
+            .values()
+            .filter(|item| self.zone_of(&item.id).is_none())
+            .collect()
     }
 
     /// Say of each placed item what a renderer and a screen reader need:
@@ -1196,7 +1392,12 @@ impl ZonesCore {
     }
 
     /// One zone as it is to be drawn; nothing for a zone without a place.
-    fn zone_scene(&self, definition: &ZoneDefinition, groups: &[layout::TabGroup], now: u64) -> Option<ZoneScene> {
+    fn zone_scene(
+        &self,
+        definition: &ZoneDefinition,
+        groups: &[layout::TabGroup],
+        now: u64,
+    ) -> Option<ZoneScene> {
         let (whole, display) = self.place_of(&definition.id)?;
         let group = layout::group_of(groups, &definition.id);
         let content = layout::content_area(whole, group.is_some(), &self.metrics);
@@ -1207,7 +1408,10 @@ impl ZonesCore {
         let items: Vec<ItemId> = if masked {
             Vec::new()
         } else {
-            self.zone_items(&definition.id, now).into_iter().map(|item| item.id.clone()).collect()
+            self.zone_items(&definition.id, now)
+                .into_iter()
+                .map(|item| item.id.clone())
+                .collect()
         };
         let no_cells = BTreeMap::new();
         let cells = match (&definition.kind, definition.sort) {
@@ -1227,14 +1431,25 @@ impl ZonesCore {
             &items,
             cells,
         );
-        let focus = self.view.focus.as_ref().filter(|focus| focus.zone == definition.id);
-        self.describe(&mut laid_out.items, focus.and_then(|focus| focus.item.as_ref()));
+        let focus = self
+            .view
+            .focus
+            .as_ref()
+            .filter(|focus| focus.zone == definition.id);
+        self.describe(
+            &mut laid_out.items,
+            focus.and_then(|focus| focus.item.as_ref()),
+        );
         let rolled = self.is_rolled(&definition.id);
         Some(ZoneScene {
             zone: definition.id.clone(),
             title: definition.title.clone(),
             display: display.id.clone(),
-            rect: if rolled { layout::rolled_up(whole, &self.metrics) } else { whole },
+            rect: if rolled {
+                layout::rolled_up(whole, &self.metrics)
+            } else {
+                whole
+            },
             shown: self.is_shown(&definition.id),
             rolled_up: definition.rolled_up,
             tab_group: group.map(|group| group.name.clone()),
@@ -1255,8 +1470,14 @@ impl ZonesCore {
             item_count,
             filter: self.view.filters.get(&definition.id).cloned(),
             tab: group.and_then(|group| {
-                let index = group.members.iter().position(|member| member == &definition.id)?;
-                Some(TabPlace { index, count: group.members.len() })
+                let index = group
+                    .members
+                    .iter()
+                    .position(|member| member == &definition.id)?;
+                Some(TabPlace {
+                    index,
+                    count: group.members.len(),
+                })
             }),
             portal: self.portal_scene(definition),
             source: self.source_listing(definition),
@@ -1294,7 +1515,10 @@ impl ZonesCore {
             .collect();
         scene.operations = self.operations();
         for zone in &mut scene.zones {
-            zone.busy = scene.operations.iter().any(|operation| operation.zones.contains(&zone.zone));
+            zone.busy = scene
+                .operations
+                .iter()
+                .any(|operation| operation.zones.contains(&zone.zone));
         }
         scene.loose = self.loose_scenes();
         scene
@@ -1304,7 +1528,8 @@ impl ZonesCore {
     /// some.
     pub(crate) fn loose_scenes(&self) -> Vec<LooseScene> {
         let mut loose = Vec::new();
-        let Some(fallback) = fallback_display(&self.displays).map(|display| display.id.clone()) else {
+        let Some(fallback) = fallback_display(&self.displays).map(|display| display.id.clone())
+        else {
             return loose;
         };
         let mut by_display: BTreeMap<DisplayId, Vec<&Item>> = BTreeMap::new();
@@ -1312,7 +1537,12 @@ impl ZonesCore {
             if self.is_withheld(&item.id) {
                 continue;
             }
-            let own = self.state.placements.loose.get(&item.id).map(|position| &position.display);
+            let own = self
+                .state
+                .placements
+                .loose
+                .get(&item.id)
+                .map(|position| &position.display);
             let display = own
                 .filter(|wanted| self.displays.iter().any(|display| &display.id == *wanted))
                 .unwrap_or(&fallback);
@@ -1352,7 +1582,11 @@ impl ZonesCore {
                     &own,
                 )
             };
-            let focus = self.view.focus.as_ref().filter(|focus| focus.desk.as_ref() == Some(&display.id));
+            let focus = self
+                .view
+                .focus
+                .as_ref()
+                .filter(|focus| focus.desk.as_ref() == Some(&display.id));
             self.describe(&mut placed, focus.and_then(|focus| focus.item.as_ref()));
             loose.push(LooseScene {
                 display: display.id.clone(),
@@ -1390,7 +1624,10 @@ impl ZonesCore {
             }
             for item in self.zone_holds(&definition.id, now) {
                 if matches!(definition.kind, ZoneKind::Smart { .. }) {
-                    smart.entry(&item.id).or_default().push(definition.id.clone());
+                    smart
+                        .entry(&item.id)
+                        .or_default()
+                        .push(definition.id.clone());
                 }
                 // Once is enough: an item of the desktop is found there,
                 // and what two zones show is found in the first.
@@ -1421,16 +1658,32 @@ impl ZonesCore {
             }
         }
         for (group, front) in &self.state.active_tabs {
-            if self.config.zone(front).is_none_or(|zone| zone.tab_group.as_ref() != Some(group)) {
-                return Some(format!("{front} is in front of {group} and is no tab of it"));
+            if self
+                .config
+                .zone(front)
+                .is_none_or(|zone| zone.tab_group.as_ref() != Some(group))
+            {
+                return Some(format!(
+                    "{front} is in front of {group} and is no tab of it"
+                ));
             }
         }
-        if let Some(focus) = self.view.focus.as_ref().filter(|focus| focus.desk.is_none()) {
+        if let Some(focus) = self
+            .view
+            .focus
+            .as_ref()
+            .filter(|focus| focus.desk.is_none())
+        {
             if self.config.zone(&focus.zone).is_none() {
                 return Some(format!("{} has the keyboard and is no zone", focus.zone));
             }
         }
-        if let Some(stray) = self.view.selection.iter().find(|item| self.item(item).is_none()) {
+        if let Some(stray) = self
+            .view
+            .selection
+            .iter()
+            .find(|item| self.item(item).is_none())
+        {
             return Some(format!("{stray} is chosen and is not there"));
         }
         if let Some(open) = self
@@ -1454,9 +1707,15 @@ impl ZonesCore {
             let Some(geometry) = profile.geometry.get(&zone.id) else {
                 return Some(format!("{} has no place", zone.id));
             };
-            let Some(display) = self.displays.iter().find(|display| display.id == geometry.display)
+            let Some(display) = self
+                .displays
+                .iter()
+                .find(|display| display.id == geometry.display)
             else {
-                return Some(format!("{} is on {}, which is not there", zone.id, geometry.display));
+                return Some(format!(
+                    "{} is on {}, which is not there",
+                    zone.id, geometry.display
+                ));
             };
             let Some(rect) = self.zone_rect(&zone.id) else {
                 return Some(format!("{} has no rectangle", zone.id));
@@ -1470,7 +1729,10 @@ impl ZonesCore {
                 || rect.height < 1
                 || !snap::within(rect, work_area(on, &self.reserved))
             {
-                return Some(format!("{} at {rect:?} cannot be reached on {}", zone.id, on.id));
+                return Some(format!(
+                    "{} at {rect:?} cannot be reached on {}",
+                    zone.id, on.id
+                ));
             }
         }
         None
@@ -1511,14 +1773,19 @@ impl ZonesCore {
     /// `before` (the arrangement that was in use until now). Also says
     /// which zones were on a display that is not there and went to
     /// another.
-    fn reconcile_from(&mut self, before: Option<&BTreeMap<ZoneId, ZoneGeometry>>) -> (bool, Vec<ZoneId>) {
+    fn reconcile_from(
+        &mut self,
+        before: Option<&BTreeMap<ZoneId, ZoneGeometry>>,
+    ) -> (bool, Vec<ZoneId>) {
         let mut changed = false;
         let valid: Vec<(String, ZoneId)> = self
             .state
             .active_tabs
             .iter()
             .filter(|(group, zone)| {
-                self.config.zone(zone).is_some_and(|zone| zone.tab_group.as_ref() == Some(*group))
+                self.config
+                    .zone(zone)
+                    .is_some_and(|zone| zone.tab_group.as_ref() == Some(*group))
             })
             .map(|(group, zone)| (group.clone(), zone.clone()))
             .collect();
@@ -1559,7 +1826,11 @@ impl ZonesCore {
         }
         let key = self.key();
         if self.profile().is_some_and(|profile| profile.key == key) {
-            return if self.reconcile() { vec![Effect::SaveState] } else { Vec::new() };
+            return if self.reconcile() {
+                vec![Effect::SaveState]
+            } else {
+                Vec::new()
+            };
         }
         let before = self.profile().map(|profile| profile.geometry.clone());
         let workspace = key.workspace.clone();
@@ -1576,7 +1847,10 @@ impl ZonesCore {
         let mut moved = chosen.moved;
         moved.extend(self.reconcile_from(before.as_ref()).1);
         vec![
-            Effect::Notify(ZonesEvent::ProfileChanged { made: chosen.made.is_some(), moved }),
+            Effect::Notify(ZonesEvent::ProfileChanged {
+                made: chosen.made.is_some(),
+                moved,
+            }),
             Effect::SaveState,
         ]
     }
@@ -1604,20 +1878,29 @@ impl ZonesCore {
         let mut effects = Vec::new();
         for directory in wanted.difference(&self.watched) {
             self.listings.insert(directory.clone(), Listing::Loading);
-            effects.push(Effect::Ask(BackendRequest::Watch { directory: directory.clone() }));
+            effects.push(Effect::Ask(BackendRequest::Watch {
+                directory: directory.clone(),
+            }));
         }
         for directory in self.watched.difference(&wanted) {
-            effects.push(Effect::Ask(BackendRequest::Unwatch { directory: directory.clone() }));
+            effects.push(Effect::Ask(BackendRequest::Unwatch {
+                directory: directory.clone(),
+            }));
             self.directories.remove(directory);
             self.listings.remove(directory);
         }
         self.watched = wanted;
         for source in wanted_sources.difference(&self.watched_sources) {
-            self.source_listings.insert(source.clone(), Listing::Loading);
-            effects.push(Effect::Ask(BackendRequest::WatchSource { source: source.clone() }));
+            self.source_listings
+                .insert(source.clone(), Listing::Loading);
+            effects.push(Effect::Ask(BackendRequest::WatchSource {
+                source: source.clone(),
+            }));
         }
         for source in self.watched_sources.difference(&wanted_sources) {
-            effects.push(Effect::Ask(BackendRequest::UnwatchSource { source: source.clone() }));
+            effects.push(Effect::Ask(BackendRequest::UnwatchSource {
+                source: source.clone(),
+            }));
             self.sources.remove(source);
             self.source_listings.remove(source);
         }
@@ -1628,9 +1911,15 @@ impl ZonesCore {
     fn ask(&mut self, pending: Pending) -> Effect {
         self.requests += 1;
         let operation = pending.operation().clone();
-        log::debug!("request {}: {operation} is asked of the backend", self.requests);
+        log::debug!(
+            "request {}: {operation} is asked of the backend",
+            self.requests
+        );
         self.pending.insert(self.requests, pending);
-        Effect::Ask(BackendRequest::Perform { request: self.requests, operation })
+        Effect::Ask(BackendRequest::Perform {
+            request: self.requests,
+            operation,
+        })
     }
 
     // ---- what happened outside ----------------------------------------
@@ -1648,38 +1937,65 @@ impl ZonesCore {
 
     fn happened(&mut self, event: BackendEvent, now: u64) -> Vec<Effect> {
         match event {
-            BackendEvent::Listed { location: Location::Desktop, items } => {
-                self.items = items.into_iter().map(|item| (item.id.clone(), item)).collect();
+            BackendEvent::Listed {
+                location: Location::Desktop,
+                items,
+            } => {
+                self.items = items
+                    .into_iter()
+                    .map(|item| (item.id.clone(), item))
+                    .collect();
                 let items = &self.items;
                 self.state.withheld.retain(|item| items.contains_key(item));
                 vec![Effect::Notify(ZonesEvent::LayoutChanged)]
             }
-            BackendEvent::Listed { location: Location::Directory { path }, items } => {
+            BackendEvent::Listed {
+                location: Location::Directory { path },
+                items,
+            } => {
                 // (An answer that comes after the folder was let go.)
                 if !self.watched.contains(&path) {
                     return Vec::new();
                 }
-                self.directories
-                    .insert(path.clone(), items.into_iter().map(|item| (item.id.clone(), item)).collect());
+                self.directories.insert(
+                    path.clone(),
+                    items
+                        .into_iter()
+                        .map(|item| (item.id.clone(), item))
+                        .collect(),
+                );
                 let mut effects = self.listing_is(&path, Listing::Ready);
                 effects.extend(self.portals_changed(&path));
                 effects
             }
-            BackendEvent::ListingFailed { location: Location::Directory { path }, error } => {
+            BackendEvent::ListingFailed {
+                location: Location::Directory { path },
+                error,
+            } => {
                 if !self.watched.contains(&path) {
                     return Vec::new();
                 }
                 log::debug!("{path} could not be listed: {error}");
                 // What was shown of it is not known to be there any more.
                 self.directories.remove(&path);
-                let mut effects = self.listing_is(&path, Listing::Unavailable { reason: error.to_string() });
+                let mut effects = self.listing_is(
+                    &path,
+                    Listing::Unavailable {
+                        reason: error.to_string(),
+                    },
+                );
                 effects.extend(self.portals_changed(&path));
                 effects
             }
             // The desktop that cannot be listed keeps what was last known
             // of it: there is nothing better to show.
-            BackendEvent::ListingFailed { location: Location::Desktop, error } => {
-                log::debug!("the desktop could not be listed; what was known of it is kept: {error}");
+            BackendEvent::ListingFailed {
+                location: Location::Desktop,
+                error,
+            } => {
+                log::debug!(
+                    "the desktop could not be listed; what was known of it is kept: {error}"
+                );
                 Vec::new()
             }
             BackendEvent::SourceListed { source, items } => self.source_listed(source, items),
@@ -1689,20 +2005,37 @@ impl ZonesCore {
                 Some(pending) => {
                     self.view.long.insert(request, (0, 0));
                     let operation = pending.operation().clone();
-                    vec![Effect::Notify(ZonesEvent::OperationBegun { request, operation })]
+                    vec![Effect::Notify(ZonesEvent::OperationBegun {
+                        request,
+                        operation,
+                    })]
                 }
                 None => Vec::new(),
             },
-            BackendEvent::OperationProgress { request, done, total } => {
+            BackendEvent::OperationProgress {
+                request,
+                done,
+                total,
+            } => {
                 // (Word of one that has ended, or was never asked for.)
                 if !self.pending.contains_key(&request) {
                     return Vec::new();
                 }
                 self.view.long.insert(request, (done, total));
-                vec![Effect::Notify(ZonesEvent::OperationProgress { request, done, total })]
+                vec![Effect::Notify(ZonesEvent::OperationProgress {
+                    request,
+                    done,
+                    total,
+                })]
             }
-            BackendEvent::ItemAdded { location: Location::Desktop, item } => self.arrived(item, now),
-            BackendEvent::ItemRemoved { location: Location::Desktop, item } => {
+            BackendEvent::ItemAdded {
+                location: Location::Desktop,
+                item,
+            } => self.arrived(item, now),
+            BackendEvent::ItemRemoved {
+                location: Location::Desktop,
+                item,
+            } => {
                 let zone = self.zone_of(&item).cloned();
                 if self.items.remove(&item).is_none() {
                     return Vec::new();
@@ -1710,9 +2043,16 @@ impl ZonesCore {
                 self.state.placements.take(&item);
                 self.state.always_visible_items.remove(&item);
                 self.state.withheld.remove(&item);
-                vec![Effect::Notify(ZonesEvent::ItemsChanged { zone }), Effect::SaveState]
+                vec![
+                    Effect::Notify(ZonesEvent::ItemsChanged { zone }),
+                    Effect::SaveState,
+                ]
             }
-            BackendEvent::ItemRenamed { location: Location::Desktop, from, item } => {
+            BackendEvent::ItemRenamed {
+                location: Location::Desktop,
+                from,
+                item,
+            } => {
                 self.items.remove(&from);
                 self.state.placements.rename(&from, &item.id);
                 if self.state.always_visible_items.remove(&from) {
@@ -1723,22 +2063,40 @@ impl ZonesCore {
                 }
                 let zone = self.zone_of(&item.id).cloned();
                 self.items.insert(item.id.clone(), item);
-                vec![Effect::Notify(ZonesEvent::ItemsChanged { zone }), Effect::SaveState]
+                vec![
+                    Effect::Notify(ZonesEvent::ItemsChanged { zone }),
+                    Effect::SaveState,
+                ]
             }
-            BackendEvent::ItemChanged { location: Location::Desktop, item } => {
+            BackendEvent::ItemChanged {
+                location: Location::Desktop,
+                item,
+            } => {
                 let zone = self.zone_of(&item.id).cloned();
                 self.items.insert(item.id.clone(), item);
                 vec![Effect::Notify(ZonesEvent::ItemsChanged { zone })]
             }
-            BackendEvent::ItemAdded { location: Location::Directory { path }, item }
-            | BackendEvent::ItemChanged { location: Location::Directory { path }, item } => {
+            BackendEvent::ItemAdded {
+                location: Location::Directory { path },
+                item,
+            }
+            | BackendEvent::ItemChanged {
+                location: Location::Directory { path },
+                item,
+            } => {
                 if !self.follows(&path) {
                     return Vec::new();
                 }
-                self.directories.entry(path.clone()).or_default().insert(item.id.clone(), item);
+                self.directories
+                    .entry(path.clone())
+                    .or_default()
+                    .insert(item.id.clone(), item);
                 self.portals_changed(&path)
             }
-            BackendEvent::ItemRemoved { location: Location::Directory { path }, item } => {
+            BackendEvent::ItemRemoved {
+                location: Location::Directory { path },
+                item,
+            } => {
                 if !self.follows(&path) {
                     return Vec::new();
                 }
@@ -1748,7 +2106,11 @@ impl ZonesCore {
                 self.state.always_visible_items.remove(&item);
                 self.portals_changed(&path)
             }
-            BackendEvent::ItemRenamed { location: Location::Directory { path }, from, item } => {
+            BackendEvent::ItemRenamed {
+                location: Location::Directory { path },
+                from,
+                item,
+            } => {
                 if !self.follows(&path) {
                     return Vec::new();
                 }
@@ -1766,9 +2128,18 @@ impl ZonesCore {
                     }
                     return Vec::new();
                 }
-                let ids = |displays: &[Display]| displays.iter().map(|display| display.id.to_string()).collect::<Vec<_>>();
+                let ids = |displays: &[Display]| {
+                    displays
+                        .iter()
+                        .map(|display| display.id.to_string())
+                        .collect::<Vec<_>>()
+                };
                 if ids(&self.displays) != ids(&displays) {
-                    log::debug!("the zones are on {} now: {}", crate::timed::count(displays.len(), "display", "displays"), ids(&displays).join(", "));
+                    log::debug!(
+                        "the zones are on {} now: {}",
+                        crate::timed::count(displays.len(), "display", "displays"),
+                        ids(&displays).join(", ")
+                    );
                 }
                 self.displays = displays;
                 self.reserved = reserved;
@@ -1780,12 +2151,20 @@ impl ZonesCore {
                 if self.workspace == name {
                     return Vec::new();
                 }
-                log::debug!("the zones are on the workspace {} now", name.as_deref().unwrap_or("(none)"));
+                log::debug!(
+                    "the zones are on the workspace {} now",
+                    name.as_deref().unwrap_or("(none)")
+                );
                 self.workspace = name;
                 if !self.config.profile_per_workspace {
                     // Zones that are of some workspaces only come and go
                     // with them, also where all share one arrangement.
-                    return if self.config.zones.iter().any(|zone| !zone.workspaces.is_empty()) {
+                    return if self
+                        .config
+                        .zones
+                        .iter()
+                        .any(|zone| !zone.workspaces.is_empty())
+                    {
                         vec![Effect::Notify(ZonesEvent::LayoutChanged)]
                     } else {
                         Vec::new()
@@ -1795,7 +2174,11 @@ impl ZonesCore {
                 effects.push(Effect::Notify(ZonesEvent::LayoutChanged));
                 effects
             }
-            BackendEvent::OperationDone { request, undo, error } => {
+            BackendEvent::OperationDone {
+                request,
+                undo,
+                error,
+            } => {
                 let long = self.view.long.remove(&request).is_some();
                 let mut effects = self.operation_done(request, undo, error);
                 if long {
@@ -1812,7 +2195,8 @@ impl ZonesCore {
     /// listed, or could not be), a single item says nothing of the rest,
     /// and the listing that comes will have it.
     fn follows(&self, directory: &str) -> bool {
-        self.watched.contains(directory) && self.listings.get(directory).is_some_and(Listing::is_ready)
+        self.watched.contains(directory)
+            && self.listings.get(directory).is_some_and(Listing::is_ready)
     }
 
     /// The zones that show a folder have other items.
@@ -1834,7 +2218,8 @@ impl ZonesCore {
         }
         let takes = |zone: &&ZoneDefinition| zone.kind == ZoneKind::Manual && !zone.lock.members;
         let open = || self.config.zones.iter().filter(takes);
-        let category = crate::auto::category_of(&self.config.auto.categories, item).map(|category| &category.id);
+        let category = crate::auto::category_of(&self.config.auto.categories, item)
+            .map(|category| &category.id);
         let own = || open().filter(|zone| zone.auto.is_none());
         open()
             .find(|zone| category.is_some() && zone.auto.as_ref() == category)
@@ -1858,24 +2243,42 @@ impl ZonesCore {
         let ours = item.path.as_ref().is_some_and(|path| {
             let returned = self.returning.iter().position(|known| known == path);
             returned.map(|at| self.returning.remove(at)).is_some()
-                || self.pending.values().any(|pending| lands_at(pending.operation()).as_ref() == Some(path))
+                || self
+                    .pending
+                    .values()
+                    .any(|pending| lands_at(pending.operation()).as_ref() == Some(path))
         });
         // (Told of twice, or known from before with a place of its own:
         // it is where the person has it.)
-        let new = !ours && !self.items.contains_key(&id) && !self.state.placements.loose.contains_key(&id);
+        let new = !ours
+            && !self.items.contains_key(&id)
+            && !self.state.placements.loose.contains_key(&id);
         // Brought here by the person: where they let it go, before any rule.
-        let brought = item.path.as_ref().and_then(|path| self.arriving.remove(path));
+        let brought = item
+            .path
+            .as_ref()
+            .and_then(|path| self.arriving.remove(path));
         if let Some(place) = brought {
             self.items.insert(id.clone(), item);
             self.settle_arrival(&id, place);
             let zone = self.zone_of(&id).cloned();
-            return vec![Effect::Notify(ZonesEvent::ItemsChanged { zone }), Effect::SaveState];
+            return vec![
+                Effect::Notify(ZonesEvent::ItemsChanged { zone }),
+                Effect::SaveState,
+            ];
         }
         if self.config.enabled && self.zone_of(&id).is_none() {
             let decided = self
                 .config
                 .rules_on_arrival
-                .then(|| rules::decide(&self.config.rules, self.config.catch_all.as_ref(), &item, now))
+                .then(|| {
+                    rules::decide(
+                        &self.config.rules,
+                        self.config.catch_all.as_ref(),
+                        &item,
+                        now,
+                    )
+                })
                 .flatten()
                 .map(|(_, action)| action.clone());
             // (What is no file, as This PC or the bin, is on the desktop
@@ -1883,11 +2286,10 @@ impl ZonesCore {
             let by_itself = new && item.kind != ItemKind::Virtual;
             match decided {
                 Some(RuleAction::AssignToZone { zone }) => {
-                    let takes = self
-                        .config
-                        .zone(&zone)
-                        .is_some_and(|zone| zone.kind == ZoneKind::Manual && !zone.lock.members)
-                        && !self.config.lock.members;
+                    let takes =
+                        self.config.zone(&zone).is_some_and(|zone| {
+                            zone.kind == ZoneKind::Manual && !zone.lock.members
+                        }) && !self.config.lock.members;
                     if takes {
                         self.state.placements.assign(&id, &zone, None, None);
                         effects.push(Effect::SaveState);
@@ -1917,10 +2319,16 @@ impl ZonesCore {
 
     /// Put an item that was brought to the desktop where it was let go:
     /// into the zone, if that still takes it, or at its place.
-    fn settle_arrival(&mut self, item: &ItemId, (zone, at): (Option<ZoneId>, Option<LoosePosition>)) {
+    fn settle_arrival(
+        &mut self,
+        item: &ItemId,
+        (zone, at): (Option<ZoneId>, Option<LoosePosition>),
+    ) {
         let takes = !self.config.lock.members
             && zone.as_ref().is_some_and(|zone| {
-                self.config.zone(zone).is_some_and(|zone| zone.kind == ZoneKind::Manual && !zone.lock.members)
+                self.config
+                    .zone(zone)
+                    .is_some_and(|zone| zone.kind == ZoneKind::Manual && !zone.lock.members)
             });
         match (zone, at) {
             (Some(zone), _) if takes => self.state.placements.assign(item, &zone, None, None),
@@ -1941,8 +2349,12 @@ impl ZonesCore {
         };
         match &error {
             None => log::debug!("request {request} is done: {}", pending.operation()),
-            Some(BackendError::Cancelled) => log::debug!("request {request} was called off: {}", pending.operation()),
-            Some(error) => log::debug!("request {request} failed: {}: {error}", pending.operation()),
+            Some(BackendError::Cancelled) => {
+                log::debug!("request {request} was called off: {}", pending.operation())
+            }
+            Some(error) => {
+                log::debug!("request {request} failed: {}: {error}", pending.operation())
+            }
         }
         match (pending, error) {
             (Pending::RuleMove { item, operation }, Some(error)) => {
@@ -1964,11 +2376,10 @@ impl ZonesCore {
                 let Some(undo) = undo else {
                     return Vec::new();
                 };
-                let moved = self
-                    .state
-                    .undo
-                    .as_mut()
-                    .and_then(|record| record.moved.iter_mut().find(|moved| moved.item == item));
+                let moved =
+                    self.state.undo.as_mut().and_then(|record| {
+                        record.moved.iter_mut().find(|moved| moved.item == item)
+                    });
                 match moved {
                     Some(moved) if moved.undo != undo => {
                         moved.undo = undo;
@@ -1983,9 +2394,19 @@ impl ZonesCore {
                 | Pending::Arriving { operation, .. },
                 Some(error),
             ) => {
-                vec![Effect::Notify(ZonesEvent::OperationFailed { operation, error })]
+                vec![Effect::Notify(ZonesEvent::OperationFailed {
+                    operation,
+                    error,
+                })]
             }
-            (Pending::Arriving { operation, zone, at }, None) => {
+            (
+                Pending::Arriving {
+                    operation,
+                    zone,
+                    at,
+                },
+                None,
+            ) => {
                 let undo = undo.or_else(|| operation.reversed());
                 // Where the file is now is what takes it back says.
                 let path = match &undo {
@@ -2003,12 +2424,19 @@ impl ZonesCore {
                     return Vec::new();
                 };
                 // Told of already, or still to come.
-                let there = self.items.values().find(|item| item.path.as_ref() == Some(&path)).map(|item| item.id.clone());
+                let there = self
+                    .items
+                    .values()
+                    .find(|item| item.path.as_ref() == Some(&path))
+                    .map(|item| item.id.clone());
                 match there {
                     Some(item) => {
                         self.settle_arrival(&item, (zone, at));
                         let zone = self.zone_of(&item).cloned();
-                        vec![Effect::Notify(ZonesEvent::ItemsChanged { zone }), Effect::SaveState]
+                        vec![
+                            Effect::Notify(ZonesEvent::ItemsChanged { zone }),
+                            Effect::SaveState,
+                        ]
                     }
                     None => {
                         self.arriving.insert(path, (zone, at));
@@ -2055,8 +2483,16 @@ impl ZonesCore {
     /// Carry out a command. One that cannot be carried out changes
     /// nothing and gives `ZonesEvent::Refused` with the reason.
     pub fn command(&mut self, command: Command, now: u64) -> Vec<Effect> {
-        let level = if busy(&command) { log::Level::Trace } else { log::Level::Debug };
-        let name = if log::log_enabled!(level) { name_of(&command) } else { String::new() };
+        let level = if busy(&command) {
+            log::Level::Trace
+        } else {
+            log::Level::Debug
+        };
+        let name = if log::log_enabled!(level) {
+            name_of(&command)
+        } else {
+            String::new()
+        };
         let refused = |reason: String| vec![Effect::Notify(ZonesEvent::Refused { reason })];
         if !self.config.enabled {
             log::log!(level, "{name} was refused: the zones are switched off");
@@ -2073,8 +2509,14 @@ impl ZonesCore {
         self.view.refused_by = None;
         let (mut zone, item) = Self::about(&command);
         if log::log_enabled!(level) {
-            let zone = zone.as_ref().map(|zone| format!(" for the zone {zone}")).unwrap_or_default();
-            let item = item.as_ref().map(|item| format!(" about {item}")).unwrap_or_default();
+            let zone = zone
+                .as_ref()
+                .map(|zone| format!(" for the zone {zone}"))
+                .unwrap_or_default();
+            let item = item
+                .as_ref()
+                .map(|item| format!(" about {item}"))
+                .unwrap_or_default();
             log::log!(level, "the zones were asked to {name}{zone}{item}");
         }
         let mut effects = self.carry_out(command, now).unwrap_or_else(refused);
@@ -2090,11 +2532,20 @@ impl ZonesCore {
             let locked = by_lock.is_some();
             if let Some((locked_zone, geometry)) = by_lock {
                 zone = Some(locked_zone.clone());
-                let event = ZonesEvent::RefusedByLock { zone: locked_zone, geometry, members: !geometry };
+                let event = ZonesEvent::RefusedByLock {
+                    zone: locked_zone,
+                    geometry,
+                    members: !geometry,
+                };
                 effects.push(Effect::Notify(event));
             }
             if zone.is_some() || item.is_some() {
-                effects.push(Effect::Notify(ZonesEvent::RefusedAbout { reason, zone, item, locked }));
+                effects.push(Effect::Notify(ZonesEvent::RefusedAbout {
+                    reason,
+                    zone,
+                    item,
+                    locked,
+                }));
             }
         }
         self.settle(&mut effects, before, Some(now));
@@ -2122,7 +2573,10 @@ impl ZonesCore {
                 if focused.desk.is_some() {
                     return Err("the desktop has the keyboard, not a zone".to_string());
                 }
-                fields.insert(key.to_string(), serde_json::Value::from(focused.zone.as_str()));
+                fields.insert(
+                    key.to_string(),
+                    serde_json::Value::from(focused.zone.as_str()),
+                );
                 aimed = true;
             }
         }
@@ -2139,13 +2593,27 @@ impl ZonesCore {
             return (None, None);
         }
         let written = serde_json::to_value(command).unwrap_or_default();
-        let named = |key: &str| written.get(key).and_then(|name| name.as_str()).map(str::to_string);
-        let first = written.get("items").and_then(|items| items.get(0)).and_then(|item| item.as_str());
-        (named("zone").map(ZoneId::new), named("item").or(first.map(str::to_string)).map(ItemId::new))
+        let named = |key: &str| {
+            written
+                .get(key)
+                .and_then(|name| name.as_str())
+                .map(str::to_string)
+        };
+        let first = written
+            .get("items")
+            .and_then(|items| items.get(0))
+            .and_then(|item| item.as_str());
+        (
+            named("zone").map(ZoneId::new),
+            named("item").or(first.map(str::to_string)).map(ItemId::new),
+        )
     }
 
     fn before(&self) -> Before {
-        Before { focus: self.view.focus.clone(), selection: self.view.selection.clone() }
+        Before {
+            focus: self.view.focus.clone(),
+            selection: self.view.selection.clone(),
+        }
     }
 
     /// After anything happened: bring what is so for the moment in line
@@ -2154,17 +2622,34 @@ impl ZonesCore {
     /// by the way: the keyboard is elsewhere, other items are chosen,
     /// other room is to be kept free of tiled windows.
     fn settle(&mut self, effects: &mut Vec<Effect>, before: Before, now: Option<u64>) {
-        let rolled = |core: &Self, zone: &ZoneId| core.config.zone(zone).is_some_and(|zone| zone.rolled_up);
-        let open: Vec<ZoneId> = self.view.expanded.iter().filter(|zone| !rolled(self, zone)).cloned().collect();
+        let rolled =
+            |core: &Self, zone: &ZoneId| core.config.zone(zone).is_some_and(|zone| zone.rolled_up);
+        let open: Vec<ZoneId> = self
+            .view
+            .expanded
+            .iter()
+            .filter(|zone| !rolled(self, zone))
+            .cloned()
+            .collect();
         for zone in open {
             self.view.expanded.remove(&zone);
             self.view.closing.remove(&zone);
         }
-        if self.view.opening.as_ref().is_some_and(|(zone, _)| !rolled(self, zone)) {
+        if self
+            .view
+            .opening
+            .as_ref()
+            .is_some_and(|(zone, _)| !rolled(self, zone))
+        {
             self.view.opening = None;
         }
         let known = |core: &Self, zone: &ZoneId| core.config.zone(zone).is_some();
-        if self.view.pointer.as_ref().is_some_and(|zone| !known(self, zone)) {
+        if self
+            .view
+            .pointer
+            .as_ref()
+            .is_some_and(|zone| !known(self, zone))
+        {
             self.view.pointer = None;
         }
         let gone: Vec<ZoneId> = self
@@ -2205,15 +2690,27 @@ impl ZonesCore {
                 match self.desks().into_iter().find(|(on, _, _)| on == display) {
                     None => self.view.focus = None,
                     Some((_, _, items)) => {
-                        if focus.item.as_ref().is_some_and(|item| !items.iter().any(|placed| &placed.item == item)) {
+                        if focus
+                            .item
+                            .as_ref()
+                            .is_some_and(|item| !items.iter().any(|placed| &placed.item == item))
+                        {
                             self.view.focus = Some(Focus::on_desk(display, None));
                         }
                     }
                 }
-            } else if !self.is_shown(&focus.zone) || (self.is_masked(&focus.zone) && focus.item.is_some()) {
-                self.view.focus = self.is_shown(&focus.zone).then(|| Focus::on_zone(&focus.zone, None));
+            } else if !self.is_shown(&focus.zone)
+                || (self.is_masked(&focus.zone) && focus.item.is_some())
+            {
+                self.view.focus = self
+                    .is_shown(&focus.zone)
+                    .then(|| Focus::on_zone(&focus.zone, None));
             } else if let (Some(item), Some(now)) = (&focus.item, now) {
-                if !self.zone_items(&focus.zone, now).iter().any(|shown| &shown.id == item) {
+                if !self
+                    .zone_items(&focus.zone, now)
+                    .iter()
+                    .any(|shown| &shown.id == item)
+                {
                     self.view.focus = Some(Focus::on_zone(&focus.zone, None));
                 }
             }
@@ -2221,11 +2718,16 @@ impl ZonesCore {
         // What was put somewhere is drawn from then on, wherever it goes
         // afterwards.
         let placements = &self.state.placements;
-        self.state
-            .withheld
-            .retain(|item| placements.zone_of(item).is_none() && !placements.loose.contains_key(item));
-        let stray: Vec<ItemId> =
-            self.view.selection.iter().filter(|item| self.item(item).is_none()).cloned().collect();
+        self.state.withheld.retain(|item| {
+            placements.zone_of(item).is_none() && !placements.loose.contains_key(item)
+        });
+        let stray: Vec<ItemId> = self
+            .view
+            .selection
+            .iter()
+            .filter(|item| self.item(item).is_none())
+            .cloned()
+            .collect();
         for item in stray {
             self.view.selection.remove(&item);
         }
@@ -2234,7 +2736,11 @@ impl ZonesCore {
         let was_in = before.focus.as_ref().map(|focus| &focus.zone);
         let is_in = self.view.focus.as_ref().map(|focus| focus.zone.clone());
         if let Some(left) = was_in.filter(|zone| Some(*zone) != is_in.as_ref()) {
-            let held = self.view.pointer.as_ref().is_some_and(|over| self.companions(over).contains(left));
+            let held = self
+                .view
+                .pointer
+                .as_ref()
+                .is_some_and(|over| self.companions(over).contains(left));
             if !held && self.view.expanded.contains(left) {
                 effects.extend(self.set_expanded(&left.clone(), false));
             }
@@ -2261,17 +2767,36 @@ impl ZonesCore {
     fn carry_out(&mut self, command: Command, now: u64) -> Outcome {
         match command {
             Command::CreateZone { title, kind, rect } => self.create_zone(title, kind, rect),
-            Command::RenameZone { zone, title } => self.change_zone(&zone, |zone| zone.title = title),
+            Command::RenameZone { zone, title } => {
+                self.change_zone(&zone, |zone| zone.title = title)
+            }
             Command::DeleteZone { zone } => self.delete_zone(&zone),
             Command::MoveZone { zone, x, y, snap } => self.move_zone(&zone, x, y, snap),
-            Command::ResizeZone { zone, rect, edges, snap } => self.resize_zone(&zone, rect, edges, snap),
-            Command::AddItem { zone, item, index, cell } => self.add_item(&zone, &item, index, cell),
+            Command::ResizeZone {
+                zone,
+                rect,
+                edges,
+                snap,
+            } => self.resize_zone(&zone, rect, edges, snap),
+            Command::AddItem {
+                zone,
+                item,
+                index,
+                cell,
+            } => self.add_item(&zone, &item, index, cell),
             Command::RemoveItem { item } => self.loosen_item(&item, None),
-            Command::PlaceLooseItem { item, display, x, y } => {
-                self.loosen_item(&item, Some(LoosePosition { display, x, y }))
-            }
+            Command::PlaceLooseItem {
+                item,
+                display,
+                x,
+                y,
+            } => self.loosen_item(&item, Some(LoosePosition { display, x, y })),
             Command::RollUp { zone, rolled_up } => self.roll_up(&zone, rolled_up),
-            Command::Lock { zone, geometry, members } => self.change_zone(&zone, |zone| {
+            Command::Lock {
+                zone,
+                geometry,
+                members,
+            } => self.change_zone(&zone, |zone| {
                 zone.lock.geometry = geometry.unwrap_or(zone.lock.geometry);
                 zone.lock.members = members.unwrap_or(zone.lock.members);
             }),
@@ -2280,7 +2805,10 @@ impl ZonesCore {
                 self.config.lock = match (geometry, members) {
                     (None, None) => {
                         let on = !(before.geometry && before.members);
-                        Lock { geometry: on, members: on }
+                        Lock {
+                            geometry: on,
+                            members: on,
+                        }
                     }
                     _ => Lock {
                         geometry: geometry.unwrap_or(before.geometry),
@@ -2299,13 +2827,20 @@ impl ZonesCore {
             }
             Command::ModifyZone { zone, changes } => self.modify_zone(&zone, &changes),
             Command::ModifySettings { changes } => self.modify_settings(&changes),
-            Command::PointerOver { zone, at_ms, dragging } => Ok(self.pointer_over(zone, at_ms, dragging)),
+            Command::PointerOver {
+                zone,
+                at_ms,
+                dragging,
+            } => Ok(self.pointer_over(zone, at_ms, dragging)),
             Command::Expand { zone, expanded } => self.expand(&zone, expanded),
             Command::Tick { at_ms } => Ok(self.tick(at_ms)),
             Command::MoveTab { zone, index } => self.move_tab(&zone, index),
             Command::SplitTab { zone, x, y, snap } => {
                 // (Refused before anything is taken apart.)
-                self.known(&zone)?.tab_group.as_ref().ok_or_else(|| format!("{zone} is no tab"))?;
+                self.known(&zone)?
+                    .tab_group
+                    .as_ref()
+                    .ok_or_else(|| format!("{zone} is no tab"))?;
                 self.movable(&zone)?;
                 let mut effects = self.untab(&zone)?;
                 effects.extend(self.move_zone(&zone, x, y, snap)?);
@@ -2322,16 +2857,26 @@ impl ZonesCore {
                 Ok(vec![self.visibility()])
             }
             Command::Dismiss => Ok(self.dismiss()),
-            Command::Open { items, with, in_place } => self.open(items, with, in_place),
+            Command::Open {
+                items,
+                with,
+                in_place,
+            } => self.open(items, with, in_place),
             Command::EnterFolder { zone, item } => self.navigate(&zone, folders::Way::Into(item)),
-            Command::NavigateTo { zone, directory } => self.navigate(&zone, folders::Way::To(directory)),
+            Command::NavigateTo { zone, directory } => {
+                self.navigate(&zone, folders::Way::To(directory))
+            }
             Command::NavigateUp { zone } => self.navigate(&zone, folders::Way::Up),
             Command::NavigateBack { zone } => self.navigate(&zone, folders::Way::Back),
             Command::NavigateForward { zone } => self.navigate(&zone, folders::Way::Forward),
             Command::RefreshZone { zone } => self.refresh_zone(&zone),
             Command::NewFolder { zone, name } => self.new_folder(&zone, &name),
             Command::NewFolderIn { folder, name } => self.new_folder_in(folder, &name),
-            Command::MoveItemsToFolder { items, folder, copy } => self.move_items_to_folder(&items, &folder, copy),
+            Command::MoveItemsToFolder {
+                items,
+                folder,
+                copy,
+            } => self.move_items_to_folder(&items, &folder, copy),
             Command::Filter { zone, typed } => self.filter(zone, &typed),
             Command::CheckTimedRules => self.check_timed_rules(now),
             Command::RenameSnapshot { name, to } => self.rename_snapshot(&name, &to),
@@ -2351,7 +2896,9 @@ impl ZonesCore {
                     self.open(items, None, true)
                 }
             }
-            Command::MoveFocusedItems { direction, zone } => self.move_focused_items(direction, zone, now),
+            Command::MoveFocusedItems { direction, zone } => {
+                self.move_focused_items(direction, zone, now)
+            }
             Command::CancelOperation { request } => {
                 if self.pending.contains_key(&request) && self.view.long.contains_key(&request) {
                     Ok(vec![Effect::Ask(BackendRequest::Cancel { request })])
@@ -2361,27 +2908,38 @@ impl ZonesCore {
             }
             Command::Mask { masked } => Ok(self.mask(masked)),
             Command::GreyIcons { on } => self.set_grey_icons(on),
-            Command::AutoCreate { scope, min_items, display, add_rules, dry_run } => {
-                self.auto_create(scope, min_items, display.as_ref(), add_rules, dry_run, now)
-            }
+            Command::AutoCreate {
+                scope,
+                min_items,
+                display,
+                add_rules,
+                dry_run,
+            } => self.auto_create(scope, min_items, display.as_ref(), add_rules, dry_run, now),
             Command::UndoAutoCreate => self.undo_auto_create(),
             Command::Reveal { zone, revealed } => self.reveal(zone, revealed),
             Command::Tab { zone, with } => self.tab(&zone, &with),
             Command::Untab { zone } => self.untab(&zone),
             Command::ActivateTab { zone } => self.activate_tab(&zone),
-            Command::SetView { zone, view, sort, descending, icon_size } => {
-                self.change_zone(&zone, |zone| {
-                    zone.view = view.unwrap_or(zone.view);
-                    zone.sort = sort.unwrap_or(zone.sort);
-                    zone.sort_descending = descending.unwrap_or(zone.sort_descending);
-                    zone.icon_size = icon_size.unwrap_or(zone.icon_size).clamp(16, 256);
-                })
-            }
+            Command::SetView {
+                zone,
+                view,
+                sort,
+                descending,
+                icon_size,
+            } => self.change_zone(&zone, |zone| {
+                zone.view = view.unwrap_or(zone.view);
+                zone.sort = sort.unwrap_or(zone.sort);
+                zone.sort_descending = descending.unwrap_or(zone.sort_descending);
+                zone.icon_size = icon_size.unwrap_or(zone.icon_size).clamp(16, 256);
+            }),
             Command::ShowZone { zone, shown } => self.show_zone(&zone, shown),
             Command::PreviewRules { scope } => {
                 let plan = self.plan(scope, now);
                 let lines = self.explain(&plan);
-                Ok(vec![Effect::Notify(ZonesEvent::RulesPreviewed { plan, lines })])
+                Ok(vec![Effect::Notify(ZonesEvent::RulesPreviewed {
+                    plan,
+                    lines,
+                })])
             }
             Command::ApplyRules { scope } => self.apply_rules(scope, now),
             Command::UndoRules => self.undo_rules(),
@@ -2400,15 +2958,27 @@ impl ZonesCore {
                     }
                     Some(path) if paths::file_name(&path) == name => Ok(Vec::new()),
                     Some(path) => {
-                        let operation = FileOperation::Rename { path, new_name: name };
+                        let operation = FileOperation::Rename {
+                            path,
+                            new_name: name,
+                        };
                         Ok(vec![self.ask(Pending::Portal { operation })])
                     }
                 }
             }
-            Command::BringIn { paths, folder, copy, zone, at } => {
+            Command::BringIn {
+                paths,
+                folder,
+                copy,
+                zone,
+                at,
+            } => {
                 if paths.is_empty() || folder.trim().is_empty() {
                     Err("nothing to bring in, or nowhere to".to_string())
-                } else if zone.as_ref().is_some_and(|zone| self.config.zone(zone).is_none()) {
+                } else if zone
+                    .as_ref()
+                    .is_some_and(|zone| self.config.zone(zone).is_none())
+                {
                     Err("no such zone".to_string())
                 } else {
                     Ok(paths
@@ -2416,9 +2986,15 @@ impl ZonesCore {
                         .enumerate()
                         .map(|(number, from)| {
                             let operation = if copy {
-                                FileOperation::Copy { from, to_folder: folder.clone() }
+                                FileOperation::Copy {
+                                    from,
+                                    to_folder: folder.clone(),
+                                }
                             } else {
-                                FileOperation::Move { from, to_folder: folder.clone() }
+                                FileOperation::Move {
+                                    from,
+                                    to_folder: folder.clone(),
+                                }
                             };
                             // Several let go at one point lie a step apart.
                             let at = at.clone().map(|at| LoosePosition {
@@ -2426,7 +3002,11 @@ impl ZonesCore {
                                 y: at.y + 24 * number as i32,
                                 ..at
                             });
-                            self.ask(Pending::Arriving { operation, zone: zone.clone(), at })
+                            self.ask(Pending::Arriving {
+                                operation,
+                                zone: zone.clone(),
+                                at,
+                            })
                         })
                         .collect())
                 }
@@ -2435,11 +3015,16 @@ impl ZonesCore {
             Command::RestoreSnapshot { name } => self.restore_snapshot(&name, now),
             Command::DeleteSnapshot { name } => {
                 let before = self.state.snapshots.len();
-                self.state.snapshots.retain(|snapshot| snapshot.name != name);
+                self.state
+                    .snapshots
+                    .retain(|snapshot| snapshot.name != name);
                 if self.state.snapshots.len() == before {
                     Err(format!("no snapshot is called {name}"))
                 } else {
-                    Ok(vec![Effect::Notify(ZonesEvent::SnapshotDeleted { name }), Effect::SaveState])
+                    Ok(vec![
+                        Effect::Notify(ZonesEvent::SnapshotDeleted { name }),
+                        Effect::SaveState,
+                    ])
                 }
             }
             Command::QuickHide { hidden } => {
@@ -2469,7 +3054,9 @@ impl ZonesCore {
     }
 
     fn known(&self, zone: &ZoneId) -> Result<&ZoneDefinition, String> {
-        self.config.zone(zone).ok_or_else(|| format!("no zone is called {zone}"))
+        self.config
+            .zone(zone)
+            .ok_or_else(|| format!("no zone is called {zone}"))
     }
 
     /// Change something of a zone's own in the configuration.
@@ -2482,7 +3069,10 @@ impl ZonesCore {
         if *definition == before {
             return Ok(Vec::new());
         }
-        Ok(vec![Effect::Notify(ZonesEvent::ZoneChanged { zone: zone.clone() }), Effect::SaveConfig])
+        Ok(vec![
+            Effect::Notify(ZonesEvent::ZoneChanged { zone: zone.clone() }),
+            Effect::SaveConfig,
+        ])
     }
 
     fn create_zone(&mut self, title: String, kind: ZoneKind, rect: Option<Rect>) -> Outcome {
@@ -2500,16 +3090,27 @@ impl ZonesCore {
             Some(rect) => {
                 let display = display_of(rect, &self.displays).ok_or("no display is known yet")?;
                 let (least_width, least_height) = self.metrics.least();
-                let sized = Rect::new(rect.x, rect.y, rect.width.max(least_width), rect.height.max(least_height));
+                let sized = Rect::new(
+                    rect.x,
+                    rect.y,
+                    rect.width.max(least_width),
+                    rect.height.max(least_height),
+                );
                 let rect = snap::keep_reachable(sized, work_area(display, &self.reserved));
                 ZoneGeometry::nearest(rect, display)
             }
             None => {
                 let already = self.profile().map_or(0, |profile| profile.geometry.len());
-                self.default_geometry(already).ok_or("no display is known yet")?
+                self.default_geometry(already)
+                    .ok_or("no display is known yet")?
             }
         };
-        self.config.zones.push(ZoneDefinition { id: id.clone(), title, kind, ..ZoneDefinition::default() });
+        self.config.zones.push(ZoneDefinition {
+            id: id.clone(),
+            title,
+            kind,
+            ..ZoneDefinition::default()
+        });
         // A zone that was here under this name once left nothing behind.
         self.state.placements.drop_zone(&id);
         if let Some(profile) = self.profile_mut() {
@@ -2524,7 +3125,9 @@ impl ZonesCore {
 
     fn delete_zone(&mut self, zone: &ZoneId) -> Outcome {
         let group = self.known(zone)?.tab_group.clone();
-        self.config.zones.retain(|definition| &definition.id != zone);
+        self.config
+            .zones
+            .retain(|definition| &definition.id != zone);
         self.state.placements.drop_zone(zone);
         for profile in &mut self.state.profiles {
             profile.geometry.remove(zone);
@@ -2532,7 +3135,9 @@ impl ZonesCore {
         }
         self.dissolve_lone_tab(group);
         self.reconcile();
-        let mut effects = vec![Effect::Notify(ZonesEvent::ZoneDeleted { zone: zone.clone() })];
+        let mut effects = vec![Effect::Notify(ZonesEvent::ZoneDeleted {
+            zone: zone.clone(),
+        })];
         effects.extend(self.sync_watches());
         effects.extend([Effect::SaveConfig, Effect::SaveState]);
         Ok(effects)
@@ -2563,7 +3168,10 @@ impl ZonesCore {
             .filter(|zone| !but.contains(&zone.id) && self.is_shown(&zone.id))
             // (Tabs share one place: once is enough.)
             .filter(|zone| seen.insert(self.leader(&zone.id)))
-            .filter(|zone| self.place_of(&zone.id).is_some_and(|(_, on)| &on.id == display))
+            .filter(|zone| {
+                self.place_of(&zone.id)
+                    .is_some_and(|(_, on)| &on.id == display)
+            })
             .filter_map(|zone| self.zone_rect(&zone.id))
             .collect()
     }
@@ -2582,7 +3190,10 @@ impl ZonesCore {
             .into_iter()
             .filter_map(|companion| {
                 let rect = self.zone_rect(&companion)?;
-                Some(Effect::Notify(ZonesEvent::ZonePlaced { zone: companion, rect }))
+                Some(Effect::Notify(ZonesEvent::ZonePlaced {
+                    zone: companion,
+                    rect,
+                }))
             })
             .collect();
         effects.push(Effect::SaveState);
@@ -2603,11 +3214,17 @@ impl ZonesCore {
     fn move_zone(&mut self, zone: &ZoneId, x: i32, y: i32, snapping: bool) -> Outcome {
         let (whole, _) = self.movable(zone)?;
         let wanted = Rect::new(x, y, whole.width, whole.height);
-        let display = display_of(wanted, &self.displays).ok_or("no display is known yet")?.clone();
+        let display = display_of(wanted, &self.displays)
+            .ok_or("no display is known yet")?
+            .clone();
         let area = work_area(&display, &self.reserved);
         let rest = if snapping {
             let others = self.others_on(&display.id, &self.companions(zone));
-            let around = Surroundings { display: display.rect, work_area: area, others: &others };
+            let around = Surroundings {
+                display: display.rect,
+                work_area: area,
+                others: &others,
+            };
             snap::snap_move(wanted, &around, &self.config.snap)
         } else {
             snap::keep_reachable(wanted, area)
@@ -2619,7 +3236,11 @@ impl ZonesCore {
         let (_, display) = self.movable(zone)?;
         let area = work_area(&display, &self.reserved);
         let others = self.others_on(&display.id, &self.companions(zone));
-        let around = Surroundings { display: display.rect, work_area: area, others: &others };
+        let around = Surroundings {
+            display: display.rect,
+            work_area: area,
+            others: &others,
+        };
         let settings = crate::config::SnapSettings {
             enabled: snapping && self.config.snap.enabled,
             ..self.config.snap.clone()
@@ -2630,7 +3251,10 @@ impl ZonesCore {
 
     fn roll_up(&mut self, zone: &ZoneId, rolled_up: Option<bool>) -> Outcome {
         let rolled_up = rolled_up.unwrap_or(!self.known(zone)?.rolled_up);
-        log::debug!("the zone {zone} is {}", if rolled_up { "rolled up" } else { "unrolled" });
+        log::debug!(
+            "the zone {zone} is {}",
+            if rolled_up { "rolled up" } else { "unrolled" }
+        );
         let mut effects = Vec::new();
         // Tabs roll up together: they are one thing on the desktop.
         for companion in self.companions(zone) {
@@ -2639,7 +3263,13 @@ impl ZonesCore {
         Ok(effects)
     }
 
-    fn add_item(&mut self, zone: &ZoneId, item: &ItemId, index: Option<usize>, cell: Option<Cell>) -> Outcome {
+    fn add_item(
+        &mut self,
+        zone: &ZoneId,
+        item: &ItemId,
+        index: Option<usize>,
+        cell: Option<Cell>,
+    ) -> Outcome {
         let target = self.known(zone)?.clone();
         if self.lock_of(zone).members {
             self.view.refused_by = Some((zone.clone(), false));
@@ -2656,7 +3286,9 @@ impl ZonesCore {
                     return Err(format!("{item} is not on the desktop"));
                 }
                 self.state.placements.assign(item, zone, index, cell);
-                let mut effects = vec![Effect::Notify(ZonesEvent::ItemsChanged { zone: Some(zone.clone()) })];
+                let mut effects = vec![Effect::Notify(ZonesEvent::ItemsChanged {
+                    zone: Some(zone.clone()),
+                })];
                 if from.as_ref() != Some(zone) {
                     effects.push(Effect::Notify(ZonesEvent::ItemsChanged { zone: from }));
                 }
@@ -2666,7 +3298,9 @@ impl ZonesCore {
             ZoneKind::Portal { directory } => {
                 // Into the folder the portal stands in, which is the one
                 // the person sees.
-                let directory = self.directory_of(&target).unwrap_or_else(|| directory.clone());
+                let directory = self
+                    .directory_of(&target)
+                    .unwrap_or_else(|| directory.clone());
                 let path = self
                     .item(item)
                     .and_then(|item| item.path.clone())
@@ -2674,7 +3308,10 @@ impl ZonesCore {
                 if paths::parent(&path).is_some_and(|at| paths::same_folder(at, &directory)) {
                     return Err(format!("{item} is in that folder already"));
                 }
-                let operation = FileOperation::Move { from: path, to_folder: directory };
+                let operation = FileOperation::Move {
+                    from: path,
+                    to_folder: directory,
+                };
                 Ok(vec![self.ask(Pending::Portal { operation })])
             }
             ZoneKind::Smart { .. } => Err(format!("{zone} fills itself")),
@@ -2684,12 +3321,20 @@ impl ZonesCore {
     fn trash_items(&mut self, items: &[ItemId]) -> Outcome {
         let mut effects = Vec::new();
         for id in items {
-            let locked = self.zone_of(id).is_some_and(|zone| self.lock_of(zone).members);
+            let locked = self
+                .zone_of(id)
+                .is_some_and(|zone| self.lock_of(zone).members);
             // What is no file (This PC) and what a locked zone holds stays.
-            let Some(path) = self.item(id).and_then(|item| item.path.clone()).filter(|_| !locked) else {
+            let Some(path) = self
+                .item(id)
+                .and_then(|item| item.path.clone())
+                .filter(|_| !locked)
+            else {
                 continue;
             };
-            effects.push(self.ask(Pending::Portal { operation: FileOperation::Trash { path } }));
+            effects.push(self.ask(Pending::Portal {
+                operation: FileOperation::Trash { path },
+            }));
         }
         if effects.is_empty() {
             return Err("nothing of that can be put into the bin".to_string());
@@ -2707,7 +3352,11 @@ impl ZonesCore {
             return Err(format!("{item} is in a locked zone"));
         }
         if let Some(position) = &position {
-            if !self.displays.iter().any(|display| display.id == position.display) {
+            if !self
+                .displays
+                .iter()
+                .any(|display| display.id == position.display)
+            {
                 return Err(format!("no display is called {}", position.display));
             }
         }
@@ -2737,14 +3386,26 @@ impl ZonesCore {
             .profile()
             .and_then(|profile| profile.geometry.get(&leader).cloned())
             .ok_or("no display is known yet")?;
-        let left = self.config.zone(zone).and_then(|zone| zone.tab_group.clone());
-        let group = match self.config.zone(with).and_then(|with| with.tab_group.clone()) {
+        let left = self
+            .config
+            .zone(zone)
+            .and_then(|zone| zone.tab_group.clone());
+        let group = match self
+            .config
+            .zone(with)
+            .and_then(|with| with.tab_group.clone())
+        {
             Some(group) => group,
             None => {
                 let mut number = 1;
                 loop {
                     let name = format!("tabs-{number}");
-                    if !self.config.zones.iter().any(|zone| zone.tab_group.as_ref() == Some(&name)) {
+                    if !self
+                        .config
+                        .zones
+                        .iter()
+                        .any(|zone| zone.tab_group.as_ref() == Some(&name))
+                    {
                         break name;
                     }
                     number += 1;
@@ -2776,8 +3437,14 @@ impl ZonesCore {
     }
 
     fn untab(&mut self, zone: &ZoneId) -> Outcome {
-        let group = self.known(zone)?.tab_group.clone().ok_or_else(|| format!("{zone} is no tab"))?;
-        let place = self.place_of(zone).map(|(rect, display)| (rect, display.clone()));
+        let group = self
+            .known(zone)?
+            .tab_group
+            .clone()
+            .ok_or_else(|| format!("{zone} is no tab"))?;
+        let place = self
+            .place_of(zone)
+            .map(|(rect, display)| (rect, display.clone()));
         if let Some(definition) = self.config.zone_mut(zone) {
             definition.tab_group = None;
         }
@@ -2806,31 +3473,56 @@ impl ZonesCore {
     }
 
     fn activate_tab(&mut self, zone: &ZoneId) -> Outcome {
-        let group = self.known(zone)?.tab_group.clone().ok_or_else(|| format!("{zone} is no tab"))?;
+        let group = self
+            .known(zone)?
+            .tab_group
+            .clone()
+            .ok_or_else(|| format!("{zone} is no tab"))?;
         if self.state.active_tabs.insert(group, zone.clone()).as_ref() == Some(zone) {
             return Ok(Vec::new());
         }
-        Ok(vec![Effect::Notify(ZonesEvent::ZoneChanged { zone: zone.clone() }), Effect::SaveState])
+        Ok(vec![
+            Effect::Notify(ZonesEvent::ZoneChanged { zone: zone.clone() }),
+            Effect::SaveState,
+        ])
     }
 
     fn show_zone(&mut self, zone: &ZoneId, shown: bool) -> Outcome {
         self.known(zone)?;
         let profile = self.profile_mut().ok_or("no display is known yet")?;
-        let changed = if shown { profile.hidden.remove(zone) } else { profile.hidden.insert(zone.clone()) };
+        let changed = if shown {
+            profile.hidden.remove(zone)
+        } else {
+            profile.hidden.insert(zone.clone())
+        };
         if !changed {
             return Ok(Vec::new());
         }
-        Ok(vec![Effect::Notify(ZonesEvent::ZoneChanged { zone: zone.clone() }), Effect::SaveState])
+        Ok(vec![
+            Effect::Notify(ZonesEvent::ZoneChanged { zone: zone.clone() }),
+            Effect::SaveState,
+        ])
     }
 
     /// What the rules would do now.
     pub fn plan(&self, scope: Scope, now: u64) -> Plan {
-        rules::plan(&self.config, self.items.values(), &self.state.placements, scope, now)
+        rules::plan(
+            &self.config,
+            self.items.values(),
+            &self.state.placements,
+            scope,
+            now,
+        )
     }
 
     /// A plan in the words a person is shown, as the items are now.
     pub fn explain(&self, plan: &Plan) -> Vec<PlanLine> {
-        rules::explain(plan, &self.config, &|id| self.items.get(id), &self.state.placements)
+        rules::explain(
+            plan,
+            &self.config,
+            &|id| self.items.get(id),
+            &self.state.placements,
+        )
     }
 
     /// How often the rules that ask the time want to be tried
@@ -2867,7 +3559,10 @@ impl ZonesCore {
         let lines = self.explain(&plan);
         if plan.steps.is_empty() {
             // Nothing to do, and nothing to take back that was not there before.
-            return Ok(vec![Effect::Notify(ZonesEvent::RulesApplied { plan, lines })]);
+            return Ok(vec![Effect::Notify(ZonesEvent::RulesApplied {
+                plan,
+                lines,
+            })]);
         }
         let items = &self.items;
         let path_of = |id: &ItemId| items.get(id).and_then(|item| item.path.clone());
@@ -2886,7 +3581,11 @@ impl ZonesCore {
     }
 
     fn undo_rules(&mut self) -> Outcome {
-        let record = self.state.undo.take().ok_or("the rules were not applied, or it was taken back already")?;
+        let record = self
+            .state
+            .undo
+            .take()
+            .ok_or("the rules were not applied, or it was taken back already")?;
         let operations = rules::undo(&record, &mut self.state.placements);
         let mut effects = vec![Effect::Notify(ZonesEvent::RulesUndone)];
         for operation in operations {
@@ -2909,7 +3608,12 @@ fn name_of(command: &Command) -> String {
     }
     serde_json::to_value(command)
         .ok()
-        .and_then(|written| written.get("command").and_then(|name| name.as_str()).map(str::to_string))
+        .and_then(|written| {
+            written
+                .get("command")
+                .and_then(|name| name.as_str())
+                .map(str::to_string)
+        })
         .unwrap_or_else(|| "do something".to_string())
 }
 
@@ -2941,13 +3645,27 @@ fn told(event: &BackendEvent) {
         return;
     }
     match event {
-        BackendEvent::Listed { location, items } => log::trace!("{location} was listed: {} items", items.len()),
+        BackendEvent::Listed { location, items } => {
+            log::trace!("{location} was listed: {} items", items.len())
+        }
         BackendEvent::ItemAdded { location, item } => log::trace!("{} came to {location}", item.id),
         BackendEvent::ItemRemoved { location, item } => log::trace!("{item} went from {location}"),
-        BackendEvent::ItemRenamed { location, from, item } => log::trace!("{from} in {location} is {} now", item.id),
-        BackendEvent::ItemChanged { location, item } => log::trace!("{} in {location} changed", item.id),
-        BackendEvent::OperationProgress { request, done, total } => log::trace!("request {request} has come to {done} of {total}"),
-        BackendEvent::IconReady { request, icon } => log::trace!("the picture of request {} is {icon:?}", request.0),
+        BackendEvent::ItemRenamed {
+            location,
+            from,
+            item,
+        } => log::trace!("{from} in {location} is {} now", item.id),
+        BackendEvent::ItemChanged { location, item } => {
+            log::trace!("{} in {location} changed", item.id)
+        }
+        BackendEvent::OperationProgress {
+            request,
+            done,
+            total,
+        } => log::trace!("request {request} has come to {done} of {total}"),
+        BackendEvent::IconReady { request, icon } => {
+            log::trace!("the picture of request {} is {icon:?}", request.0)
+        }
         _ => {}
     }
 }
@@ -2975,46 +3693,113 @@ fn say(effects: &[Effect]) {
         match event {
             ZonesEvent::ZoneCreated { zone } => log::debug!("the zone {zone} was made"),
             ZonesEvent::ZoneDeleted { zone } => log::debug!("the zone {zone} was taken away"),
-            ZonesEvent::ZoneExpanded { zone, expanded: true } => log::debug!("the zone {zone} is open"),
-            ZonesEvent::ZoneExpanded { zone, expanded: false } => log::debug!("the zone {zone} is rolled up again"),
+            ZonesEvent::ZoneExpanded {
+                zone,
+                expanded: true,
+            } => log::debug!("the zone {zone} is open"),
+            ZonesEvent::ZoneExpanded {
+                zone,
+                expanded: false,
+            } => log::debug!("the zone {zone} is rolled up again"),
             ZonesEvent::ProfileChanged { made, moved } => log::debug!(
                 "another arrangement of the zones is in use{}{}",
-                if *made { ", made new for these displays" } else { "" },
-                if moved.is_empty() { String::new() } else { format!(", {} moved to another display", moved.len()) }
+                if *made {
+                    ", made new for these displays"
+                } else {
+                    ""
+                },
+                if moved.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {} moved to another display", moved.len())
+                }
             ),
             ZonesEvent::SettingsChanged => log::debug!("the zones' settings changed"),
-            ZonesEvent::Navigated { zone, directory } => log::debug!("the portal {zone} shows {directory} now"),
-            ZonesEvent::ListingChanged { zone, listing } => log::debug!("the listing of the zone {zone} is {listing:?}"),
-            ZonesEvent::OperationBegun { request, operation } => log::debug!("request {request} ({operation}) goes on by itself"),
+            ZonesEvent::Navigated { zone, directory } => {
+                log::debug!("the portal {zone} shows {directory} now")
+            }
+            ZonesEvent::ListingChanged { zone, listing } => {
+                log::debug!("the listing of the zone {zone} is {listing:?}")
+            }
+            ZonesEvent::OperationBegun { request, operation } => {
+                log::debug!("request {request} ({operation}) goes on by itself")
+            }
             ZonesEvent::OperationEnded { request } => log::debug!("request {request} has ended"),
             ZonesEvent::OpenRequested { items, with } => log::debug!(
                 "{} to be opened{}",
                 crate::timed::count(items.len(), "item is", "items are"),
-                with.as_ref().map(|with| format!(" with {with}")).unwrap_or_default()
+                with.as_ref()
+                    .map(|with| format!(" with {with}"))
+                    .unwrap_or_default()
             ),
             ZonesEvent::SnapshotSaved { name } => log::debug!("the snapshot {name} was saved"),
-            ZonesEvent::SnapshotRestored { name } => log::debug!("the snapshot {name} was put in force"),
-            ZonesEvent::SnapshotDeleted { name } => log::debug!("the snapshot {name} was taken away"),
-            ZonesEvent::SnapshotRenamed { name, to } => log::debug!("the snapshot {name} is called {to} now"),
+            ZonesEvent::SnapshotRestored { name } => {
+                log::debug!("the snapshot {name} was put in force")
+            }
+            ZonesEvent::SnapshotDeleted { name } => {
+                log::debug!("the snapshot {name} was taken away")
+            }
+            ZonesEvent::SnapshotRenamed { name, to } => {
+                log::debug!("the snapshot {name} is called {to} now")
+            }
             ZonesEvent::LayoutImported { name, applied, .. } => {
-                log::debug!("a layout was taken in as {name}{}", if *applied { " and put in force" } else { "" })
+                log::debug!(
+                    "a layout was taken in as {name}{}",
+                    if *applied { " and put in force" } else { "" }
+                )
             }
             ZonesEvent::LayoutExported { .. } => log::debug!("the zones' layout was written out"),
-            ZonesEvent::RulesApplied { plan, .. } => log::debug!("the rules were applied: {} steps, {} held back", plan.steps.len(), plan.held.len()),
+            ZonesEvent::RulesApplied { plan, .. } => log::debug!(
+                "the rules were applied: {} steps, {} held back",
+                plan.steps.len(),
+                plan.held.len()
+            ),
             ZonesEvent::RulesUndone => log::debug!("what the rules did was taken back"),
-            ZonesEvent::AutoCreated { zones, items, rules } => {
-                log::debug!("{} were made by type, holding {items} items, with {rules} rules", crate::timed::count(zones.len(), "zone", "zones"))
+            ZonesEvent::AutoCreated {
+                zones,
+                items,
+                rules,
+            } => {
+                log::debug!(
+                    "{} were made by type, holding {items} items, with {rules} rules",
+                    crate::timed::count(zones.len(), "zone", "zones")
+                )
             }
-            ZonesEvent::AutoUndone { zones, items, rules } => {
+            ZonesEvent::AutoUndone {
+                zones,
+                items,
+                rules,
+            } => {
                 log::debug!("the zones made by type were taken back: {zones} zones, {items} items, {rules} rules")
             }
-            ZonesEvent::VisibilityChanged { quick_hidden, peeking } => {
-                log::debug!("the zones are {}{}", if *quick_hidden { "hidden" } else { "shown" }, if *peeking { ", looked at above the windows" } else { "" })
+            ZonesEvent::VisibilityChanged {
+                quick_hidden,
+                peeking,
+            } => {
+                log::debug!(
+                    "the zones are {}{}",
+                    if *quick_hidden { "hidden" } else { "shown" },
+                    if *peeking {
+                        ", looked at above the windows"
+                    } else {
+                        ""
+                    }
+                )
             }
-            ZonesEvent::PrivacyChanged { masked, screen_shared } => {
-                log::debug!("what the zones show is {} (the screen is {}shared)", if *masked { "covered" } else { "uncovered" }, if *screen_shared { "" } else { "not " })
+            ZonesEvent::PrivacyChanged {
+                masked,
+                screen_shared,
+            } => {
+                log::debug!(
+                    "what the zones show is {} (the screen is {}shared)",
+                    if *masked { "covered" } else { "uncovered" },
+                    if *screen_shared { "" } else { "not " }
+                )
             }
-            ZonesEvent::GreyIconsChanged { on } => log::debug!("the icons are drawn {}", if *on { "grey" } else { "in their colours" }),
+            ZonesEvent::GreyIconsChanged { on } => log::debug!(
+                "the icons are drawn {}",
+                if *on { "grey" } else { "in their colours" }
+            ),
             ZonesEvent::RefusedByLock { zone, .. } => log::debug!("the lock of {zone} refused it"),
             _ => log::trace!("the zones tell: {}", told_name(event)),
         }

@@ -107,8 +107,7 @@ pub fn floats_first(config: &gevrek_model::Config) -> bool {
 /// Whether the person is to be welcomed now, by what runs: a first
 /// launch, floating as one does.
 pub fn welcome_due(running: &gevrek_model::Config) -> bool {
-    floats_first(running)
-        && first_launch(gevrek_model::paths::resolve_config(None).0.exists())
+    floats_first(running) && first_launch(gevrek_model::paths::resolve_config(None).0.exists())
 }
 
 #[cfg(test)]
@@ -121,8 +120,10 @@ mod tests {
         assert!(!floats_first(&config));
         float_first(&mut config);
         assert!(floats_first(&config));
-        assert!(config.validate().iter().all(|issue| issue.severity
-            != gevrek_model::settings::ConfigIssueSeverity::Error));
+        assert!(config
+            .validate()
+            .iter()
+            .all(|issue| issue.severity != gevrek_model::settings::ConfigIssueSeverity::Error));
     }
 
     #[test]
@@ -132,7 +133,10 @@ mod tests {
         let keys = keys_for(&config, focus_right);
         // (Both that the starting configuration has, the arrow first.)
         assert_eq!(keys.len(), 2, "{keys:?}");
-        assert!(keys[0].ends_with("+RIGHT") || keys[0].ends_with("+Right"), "{keys:?}");
+        assert!(
+            keys[0].ends_with("+RIGHT") || keys[0].ends_with("+Right"),
+            "{keys:?}"
+        );
         assert!(keys[1].ends_with("+L"), "{keys:?}");
         // The wheel's binding of the same command is no key.
         assert!(keys.iter().all(|keys| !keys.contains("WHEEL")));

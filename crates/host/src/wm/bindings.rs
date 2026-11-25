@@ -229,7 +229,8 @@ pub trait Bindings: WmHost {
             };
             if let Some(id) = target {
                 focused = true;
-                if let Err(error) = gevrek_engine::Desktop::apply(parts.desktop, &Effect::Focus(Some(id)))
+                if let Err(error) =
+                    gevrek_engine::Desktop::apply(parts.desktop, &Effect::Focus(Some(id)))
                 {
                     log::error!("focus {id:?}: {error}");
                 }
@@ -335,8 +336,11 @@ mod tests {
             ..Default::default()
         };
         // (Keys the standard bindings, which are live too, do not use.)
-        config.desktop.bindings =
-            vec![key("F13", "default"), key("F14", "resize"), key("", "default")];
+        config.desktop.bindings = vec![
+            key("F13", "default"),
+            key("F14", "resize"),
+            key("", "default"),
+        ];
         let mut graph = NodeGraph::new();
         graph.add_node(
             NodeType::OnKeyPress {
@@ -364,11 +368,17 @@ mod tests {
         };
         assert_eq!(
             mine("default"),
-            vec![(-1, "F15".to_string()), (binding_id(index_of("F13")), "F13".to_string())]
+            vec![
+                (-1, "F15".to_string()),
+                (binding_id(index_of("F13")), "F13".to_string())
+            ]
         );
         assert_eq!(
             mine("resize"),
-            vec![(-1, "F15".to_string()), (binding_id(index_of("F14")), "F14".to_string())]
+            vec![
+                (-1, "F15".to_string()),
+                (binding_id(index_of("F14")), "F14".to_string())
+            ]
         );
     }
 }

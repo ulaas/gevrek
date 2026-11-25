@@ -128,7 +128,11 @@ fn take(list: &mut Vec<Kept>, told: &Told, stamp: u64) -> bool {
         // Taken away.
         (2, Some(at)) => {
             list.remove(at);
-            log::debug!("tray: icon {} of window {} is removed", told.id, told.window);
+            log::debug!(
+                "tray: icon {} of window {} is removed",
+                told.id,
+                told.window
+            );
             true
         }
         // The way presses are told.
@@ -193,7 +197,8 @@ fn picture_from(black: &[u8], white: &[u8], side: u32) -> Option<Picture> {
         .as_chunks::<4>()
         .0
         .iter()
-        .zip(white.as_chunks::<4>().0) {
+        .zip(white.as_chunks::<4>().0)
+    {
         let apart = (0..3)
             .map(|colour| on_white[colour].saturating_sub(on_black[colour]))
             .max()
@@ -206,7 +211,12 @@ fn picture_from(black: &[u8], white: &[u8], side: u32) -> Option<Picture> {
                 ((u32::from(colour) * 255) / u32::from(solid)).min(255) as u8
             }
         };
-        pixels.extend_from_slice(&[full(on_black[2]), full(on_black[1]), full(on_black[0]), solid]);
+        pixels.extend_from_slice(&[
+            full(on_black[2]),
+            full(on_black[1]),
+            full(on_black[0]),
+            solid,
+        ]);
     }
     Some(Picture {
         width: side,
@@ -235,7 +245,12 @@ pub fn without_ground(mut picture: crate::icons::Picture) -> crate::icons::Pictu
         let at = (y * width + x) * 4;
         [0, 1, 2].map(|part| f32::from(picture.pixels[at + part]))
     };
-    let corners = [corner(0, 0), corner(width - 1, 0), corner(0, height - 1), corner(width - 1, height - 1)];
+    let corners = [
+        corner(0, 0),
+        corner(width - 1, 0),
+        corner(0, height - 1),
+        corner(width - 1, height - 1),
+    ];
     let ground = [0, 1, 2].map(|part| corners.iter().map(|colour| colour[part]).sum::<f32>() / 4.0);
     let distance_of = |pixel: &[u8]| {
         (0..3)
@@ -303,7 +318,9 @@ mod mac {
     }
 
     fn programs() -> Vec<Program> {
-        let text = |object: Option<Retained<NSString>>| object.map(|text| text.to_string()).unwrap_or_default();
+        let text = |object: Option<Retained<NSString>>| {
+            object.map(|text| text.to_string()).unwrap_or_default()
+        };
         // SAFETY: the workspace's running applications, and their plain
         // properties.
         unsafe {
@@ -365,14 +382,19 @@ mod mac {
     /// Every other program's item of the menu bar, as the tray's icons.
     fn icons() -> Vec<Icon> {
         let mut icons = Vec::new();
-        for program in programs().into_iter().filter(|program| !the_systems(&program.id)) {
+        for program in programs()
+            .into_iter()
+            .filter(|program| !the_systems(&program.id))
+        {
             for (index, item) in items_of(program.pid).iter().enumerate() {
                 let tip = ["AXTitle", "AXDescription", "AXHelp"]
                     .iter()
                     .find_map(|name| said(item, name))
                     .unwrap_or_else(|| program.name.clone());
                 let picture = frame_of(item)
-                    .and_then(|(x, y, width, height)| crate::pictures::of_screen_area(x, y, width, height))
+                    .and_then(|(x, y, width, height)| {
+                        crate::pictures::of_screen_area(x, y, width, height)
+                    })
                     .map(super::without_ground);
                 let stamp = picture.as_ref().map_or(0, |picture| {
                     use std::hash::{Hash, Hasher};
@@ -383,7 +405,14 @@ mod mac {
                 icons.push(Icon {
                     key: format!("{}:{index}", program.pid),
                     tip,
-                    name: format!("{}:{index}", if program.id.is_empty() { &program.name } else { &program.id }),
+                    name: format!(
+                        "{}:{index}",
+                        if program.id.is_empty() {
+                            &program.name
+                        } else {
+                            &program.id
+                        }
+                    ),
                     picture: picture.map(Arc::new),
                     stamp,
                 });
@@ -427,10 +456,9 @@ mod mac {
         /// open their menu). `Menu` asks for the menu where the item has
         /// one of its own.
         pub fn press(&self, key: &str, press: Press) {
-            let Some((pid, index)) = key
-                .split_once(':')
-                .and_then(|(pid, index)| Some((pid.parse::<i32>().ok()?, index.parse::<usize>().ok()?)))
-            else {
+            let Some((pid, index)) = key.split_once(':').and_then(|(pid, index)| {
+                Some((pid.parse::<i32>().ok()?, index.parse::<usize>().ok()?))
+            }) else {
                 return;
             };
             let Some(item) = items_of(pid).into_iter().nth(index) else {
@@ -446,7 +474,10 @@ mod mac {
                 Press::Menu => action("AXShowMenu") || action("AXPress"),
                 Press::Main => action("AXPress"),
             };
-            log::debug!("menu bar item {key} pressed ({press:?}): {}", if done { "done" } else { "refused" });
+            log::debug!(
+                "menu bar item {key} pressed ({press:?}): {}",
+                if done { "done" } else { "refused" }
+            );
         }
     }
 
@@ -822,9 +853,9 @@ mod windows {
                 if let Ok(mut listening) = LISTENING.try_lock() {
                     if let Some(listening) = listening.as_mut() {
                         let before = listening.kept.len();
-                        listening
-                            .kept
-                            .retain(|kept| IsWindow(HWND(kept.window as usize as *mut _)).as_bool());
+                        listening.kept.retain(|kept| {
+                            IsWindow(HWND(kept.window as usize as *mut _)).as_bool()
+                        });
                         if listening.kept.len() != before {
                             log::debug!(
                                 "tray: {} icons are removed: their windows are gone",
@@ -936,7 +967,11 @@ mod tests {
             pixels: [ground, white, half, ground].concat(),
         };
         let clear = super::without_ground(picture);
-        assert!((115..145).contains(&clear.pixels[11]), "{}", clear.pixels[11]);
+        assert!(
+            (115..145).contains(&clear.pixels[11]),
+            "{}",
+            clear.pixels[11]
+        );
         assert!(clear.pixels[8] > 245, "{}", clear.pixels[8]);
     }
 
@@ -945,7 +980,8 @@ mod tests {
     /// A message as a program packs it.
     fn message(what: u32, window: u32, id: u32, flags: u32, icon: u32, tip: &str) -> Vec<u8> {
         let mut bytes = vec![0u8; 8 + 956];
-        let mut put = |at: usize, value: u32| bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        let mut put =
+            |at: usize, value: u32| bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
         put(0, MARK);
         put(4, what);
         put(8, 956);
@@ -974,7 +1010,10 @@ mod tests {
         // An older, shorter message still has what counts.
         let short = &message(0, 0x55, 3, 4, 0, "old")[..8 + 152];
         let heard = told(short).expect("a telling");
-        assert_eq!((heard.window, heard.tip.as_str(), heard.version), (0x55, "old", 0));
+        assert_eq!(
+            (heard.window, heard.tip.as_str(), heard.version),
+            (0x55, "old", 0)
+        );
     }
 
     #[test]
@@ -987,11 +1026,17 @@ mod tests {
         // Another tip: news; the picture is the same one.
         let retip = told(&message(1, 0x10, 1, 4, 0, "one!")).unwrap();
         assert!(take(&mut list, &retip, 3));
-        assert_eq!((list[0].tip.as_str(), list[0].icon, list[0].stamp), ("one!", 0xA, 1));
+        assert_eq!(
+            (list[0].tip.as_str(), list[0].icon, list[0].stamp),
+            ("one!", 0xA, 1)
+        );
         // Another picture: another stamp.
         let repaint = told(&message(1, 0x10, 1, 2, 0xB, "")).unwrap();
         assert!(take(&mut list, &repaint, 4));
-        assert_eq!((list[0].icon, list[0].stamp, list[0].tip.as_str()), (0xB, 4, "one!"));
+        assert_eq!(
+            (list[0].icon, list[0].stamp, list[0].tip.as_str()),
+            (0xB, 4, "one!")
+        );
         // A change of one that was never added adds it.
         let other = told(&message(1, 0x20, 5, 1 | 4, 0, "two")).unwrap();
         assert!(take(&mut list, &other, 5));
@@ -1016,7 +1061,9 @@ mod tests {
     fn a_picture_is_read_from_the_icon_on_black_and_on_white() {
         // Three pixels of four: nothing, solid red, half blue.
         let black = [0, 0, 0, 0, 0, 0, 255, 0, 127, 0, 0, 0, 0, 0, 0, 0];
-        let white = [255, 255, 255, 0, 0, 0, 255, 0, 255, 128, 128, 0, 255, 255, 255, 0];
+        let white = [
+            255, 255, 255, 0, 0, 0, 255, 0, 255, 128, 128, 0, 255, 255, 255, 0,
+        ];
         let picture = picture_from(&black, &white, 2).expect("a picture");
         assert_eq!(&picture.pixels[..4], &[0, 0, 0, 0]);
         assert_eq!(&picture.pixels[4..8], &[255, 0, 0, 255]);

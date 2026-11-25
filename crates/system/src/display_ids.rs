@@ -18,7 +18,10 @@ use windows::Win32::Foundation::ERROR_SUCCESS;
 pub fn device_path_of(device_name: &str) -> String {
     use windows::Win32::Graphics::Gdi::{EnumDisplayDevicesW, DISPLAY_DEVICEW};
     const EDD_GET_DEVICE_INTERFACE_NAME: u32 = 0x00000001;
-    let wide: Vec<u16> = device_name.encode_utf16().chain(std::iter::once(0)).collect();
+    let wide: Vec<u16> = device_name
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
     let mut interface = DISPLAY_DEVICEW {
         cb: std::mem::size_of::<DISPLAY_DEVICEW>() as u32,
         ..Default::default()
@@ -241,8 +244,8 @@ pub fn stable_ids(displays: &[(String, i32, i32, isize)]) -> Vec<String> {
     let mut told: Option<Vec<(String, String)>> = None;
     let mut ids: Vec<String> = displays
         .iter()
-        .map(|(path, ..)| {
-            match edid_of(path).and_then(|bytes| Edid::parse(&bytes)) {
+        .map(
+            |(path, ..)| match edid_of(path).and_then(|bytes| Edid::parse(&bytes)) {
                 Some(edid) => edid.stable_id(),
                 None => told
                     .get_or_insert_with(ids_by_makers_and_models)
@@ -250,8 +253,8 @@ pub fn stable_ids(displays: &[(String, i32, i32, isize)]) -> Vec<String> {
                     .find(|(known, _)| known.eq_ignore_ascii_case(path))
                     .map(|(_, id)| id.clone())
                     .unwrap_or_else(|| stable_id_of_place(path)),
-            }
-        })
+            },
+        )
         .collect();
     number_same_ids(&mut ids, displays);
     ids

@@ -126,12 +126,18 @@ impl Settings {
         let text = match std::fs::read_to_string(&file) {
             Ok(text) => text,
             Err(error) => {
-                log::debug!("the update settings are the defaults: {} was not read: {error}", file.display());
+                log::debug!(
+                    "the update settings are the defaults: {} was not read: {error}",
+                    file.display()
+                );
                 return Self::default();
             }
         };
         serde_json::from_str(&text).unwrap_or_else(|error| {
-            log::debug!("the update settings are the defaults: {} is not read: {error}", file.display());
+            log::debug!(
+                "the update settings are the defaults: {} is not read: {error}",
+                file.display()
+            );
             Self::default()
         })
     }
@@ -228,12 +234,17 @@ fn parse_release(text: &str, source: &Source) -> Result<Release> {
         serde_json::from_str(text).context("the answer about the latest release is not one")?;
     let version = told.tag_name.trim_start_matches(['v', 'V']).to_string();
     if parse_version(&version).is_none() {
-        bail!("the latest release is named {}, which is no version", told.tag_name);
+        bail!(
+            "the latest release is named {}, which is no version",
+            told.tag_name
+        );
     }
     let find = |name: &str| {
         told.assets
             .iter()
-            .find(|asset| asset.name == name && asset.browser_download_url.starts_with(&source.downloads))
+            .find(|asset| {
+                asset.name == name && asset.browser_download_url.starts_with(&source.downloads)
+            })
             .map(|asset| Asset {
                 name: asset.name.clone(),
                 url: asset.browser_download_url.clone(),
@@ -256,7 +267,9 @@ fn parse_release(text: &str, source: &Source) -> Result<Release> {
 fn system_program(name: &str) -> PathBuf {
     if cfg!(windows) {
         if let Some(root) = std::env::var_os("SystemRoot") {
-            let file = Path::new(&root).join("System32").join(format!("{name}.exe"));
+            let file = Path::new(&root)
+                .join("System32")
+                .join(format!("{name}.exe"));
             if file.exists() {
                 return file;
             }
@@ -295,8 +308,18 @@ fn download(source: &Source, url: &str, to: &Path, most: u64, seconds: u32) -> R
     if !output.status.success() {
         let _ = std::fs::remove_file(to);
         let said = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        log::debug!("{url} was not downloaded: curl ended with {}", output.status);
-        bail!("{url}: {}", if said.is_empty() { "the download failed" } else { &said });
+        log::debug!(
+            "{url} was not downloaded: curl ended with {}",
+            output.status
+        );
+        bail!(
+            "{url}: {}",
+            if said.is_empty() {
+                "the download failed"
+            } else {
+                &said
+            }
+        );
     }
     let size = std::fs::metadata(to)?.len();
     if size > most {
@@ -316,14 +339,23 @@ pub fn latest(source: &Source, folder: &Path) -> Result<Release> {
     download(source, &source.api, &file, MAX_TEXT, 60)?;
     let text = std::fs::read_to_string(&file);
     let _ = std::fs::remove_file(&file);
-    let release = parse_release(&text?, source)
-        .inspect_err(|error| log::debug!("the answer about the latest release is not read: {error:#}"))?;
+    let release = parse_release(&text?, source).inspect_err(|error| {
+        log::debug!("the answer about the latest release is not read: {error:#}")
+    })?;
     log::debug!(
         "the latest release is {} (this is {}): {}, {}",
         release.version,
         current(),
-        if release.package.is_some() { "with a Windows package" } else { "without a Windows package" },
-        if release.sums.is_some() { "with checksums" } else { "without checksums" }
+        if release.package.is_some() {
+            "with a Windows package"
+        } else {
+            "without a Windows package"
+        },
+        if release.sums.is_some() {
+            "with checksums"
+        } else {
+            "without checksums"
+        }
     );
     Ok(release)
 }
@@ -400,12 +432,22 @@ pub fn stage(source: &Source, release: &Release, folder: &Path) -> Result<PathBu
     // failure (no network, a file that is not the release's) leaves it as
     // it was, ready to be put in place.
     let mut replaced = false;
-    log::debug!("release {} is staged in {}", release.version, folder.display());
+    log::debug!(
+        "release {} is staged in {}",
+        release.version,
+        folder.display()
+    );
     let result = (|| {
         let sums_file = work.join(SUMS);
         download(source, &sums.url, &sums_file, MAX_TEXT, 60)?;
-        let expected = sum_of(&std::fs::read_to_string(&sums_file)?, &package.name)
-            .ok_or_else(|| anyhow!("{SUMS} of release {} does not name {}", release.version, package.name))?;
+        let expected =
+            sum_of(&std::fs::read_to_string(&sums_file)?, &package.name).ok_or_else(|| {
+                anyhow!(
+                    "{SUMS} of release {} does not name {}",
+                    release.version,
+                    package.name
+                )
+            })?;
         let zip = work.join(&package.name);
         download(source, &package.url, &zip, MAX_PACKAGE, 1800)?;
         let found = sha256_of(&zip)?;
@@ -415,14 +457,19 @@ pub fn stage(source: &Source, release: &Release, folder: &Path) -> Result<PathBu
                 package.name
             );
         }
-        log::debug!("{} is the file the release names (SHA-256 {found})", package.name);
+        log::debug!(
+            "{} is the file the release names (SHA-256 {found})",
+            package.name
+        );
         replaced = true;
         unstage(folder);
         let staged = staged_folder(folder);
         std::fs::create_dir_all(&staged)?;
         let mut tar = Command::new(system_program("tar"));
         tar.arg("-xf").arg(&zip).arg("-C").arg(&staged);
-        let output = quiet(&mut tar).output().context("tar could not be started")?;
+        let output = quiet(&mut tar)
+            .output()
+            .context("tar could not be started")?;
         if !output.status.success() {
             bail!(
                 "{} could not be unpacked: {}",
@@ -452,7 +499,11 @@ pub fn stage(source: &Source, release: &Release, folder: &Path) -> Result<PathBu
         Err(error) => log::debug!(
             "release {} was not staged{}: {error:#}",
             release.version,
-            if replaced { " and what was staged before is gone" } else { "; what was staged before is kept" }
+            if replaced {
+                " and what was staged before is gone"
+            } else {
+                "; what was staged before is kept"
+            }
         ),
     }
     if result.is_err() && replaced {
@@ -562,7 +613,10 @@ pub fn apply(package: &Path, install: &Path) -> Result<()> {
     for file in BESIDE {
         if package.join(file).is_file() {
             if let Err(error) = std::fs::copy(package.join(file), install.join(file)) {
-                log::debug!("{file} was not put in place in {}: {error}", install.display());
+                log::debug!(
+                    "{file} was not put in place in {}: {error}",
+                    install.display()
+                );
             }
         }
     }
@@ -622,10 +676,8 @@ mod tests {
     use super::*;
 
     fn folder(name: &str) -> PathBuf {
-        let folder = std::env::temp_dir().join(format!(
-            "gevrek-update-test-{name}-{}",
-            std::process::id()
-        ));
+        let folder =
+            std::env::temp_dir().join(format!("gevrek-update-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(&folder).unwrap();
         folder
@@ -660,7 +712,10 @@ mod tests {
     #[test]
     fn a_check_is_due_once_a_day_and_never_when_turned_off() {
         let mut settings = Settings::default();
-        assert!(settings.automatic, "gevrek looks for updates unless told not to");
+        assert!(
+            settings.automatic,
+            "gevrek looks for updates unless told not to"
+        );
         assert!(settings.check_due(1_000_000));
         settings.last_check = Some(1_000_000);
         assert!(!settings.check_due(1_000_000 + 3_600));
@@ -700,13 +755,23 @@ mod tests {
         }"#;
         let release = parse_release(text, &source).unwrap();
         assert_eq!(release.version, "0.7.0");
-        assert_eq!(release.page, "https://github.com/ulaas/gevrek/releases/tag/v0.7.0");
+        assert_eq!(
+            release.page,
+            "https://github.com/ulaas/gevrek/releases/tag/v0.7.0"
+        );
         assert_eq!(release.package.unwrap().name, "gevrek-windows-x64.zip");
-        assert_eq!(release.sums, None, "a list of checksums from another site is none");
+        assert_eq!(
+            release.sums, None,
+            "a list of checksums from another site is none"
+        );
 
         assert!(parse_release(r#"{"tag_name": "nightly"}"#, &source).is_err());
         assert!(parse_release("busy", &source).is_err());
-        let bare = parse_release(r#"{"tag_name": "0.8.0", "html_url": "http://elsewhere"}"#, &source).unwrap();
+        let bare = parse_release(
+            r#"{"tag_name": "0.8.0", "html_url": "http://elsewhere"}"#,
+            &source,
+        )
+        .unwrap();
         assert_eq!(bare.page, RELEASES_PAGE);
         assert_eq!(bare.package, None);
     }
@@ -715,9 +780,13 @@ mod tests {
     fn the_checksum_of_a_file_is_found_in_the_list() {
         let one = "a".repeat(64);
         let other = "B".repeat(64);
-        let sums = format!("{one}  gevrek-linux-x64.rpm\n{other} *gevrek-windows-x64.zip\nshort  x.zip\n");
+        let sums =
+            format!("{one}  gevrek-linux-x64.rpm\n{other} *gevrek-windows-x64.zip\nshort  x.zip\n");
         assert_eq!(sum_of(&sums, "gevrek-linux-x64.rpm"), Some(one));
-        assert_eq!(sum_of(&sums, "gevrek-windows-x64.zip"), Some("b".repeat(64)));
+        assert_eq!(
+            sum_of(&sums, "gevrek-windows-x64.zip"),
+            Some("b".repeat(64))
+        );
         assert_eq!(sum_of(&sums, "x.zip"), None);
         assert_eq!(sum_of(&sums, "gevrek.zip"), None);
     }
@@ -739,7 +808,10 @@ mod tests {
         let install = folder("packaged");
         assert!(!is_packaged(&install));
         programs(&install, "old");
-        assert!(!is_packaged(&install), "a build copied there by hand is not");
+        assert!(
+            !is_packaged(&install),
+            "a build copied there by hand is not"
+        );
         std::fs::write(install.join("uninstall.ps1"), "").unwrap();
         assert!(is_packaged(&install));
         std::fs::remove_file(install.join("uninstall.ps1")).unwrap();
@@ -762,13 +834,19 @@ mod tests {
 
         apply(&package, &install).unwrap();
         for program in WINDOWS_PROGRAMS {
-            assert_eq!(std::fs::read_to_string(install.join(program)).unwrap(), "new");
+            assert_eq!(
+                std::fs::read_to_string(install.join(program)).unwrap(),
+                "new"
+            );
             assert_eq!(
                 std::fs::read_to_string(install.join("previous").join(program)).unwrap(),
                 "old"
             );
         }
-        assert_eq!(std::fs::read_to_string(install.join("README.txt")).unwrap(), "new words");
+        assert_eq!(
+            std::fs::read_to_string(install.join("README.txt")).unwrap(),
+            "new words"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -781,7 +859,10 @@ mod tests {
         programs(&install, "old");
         assert!(apply(&package, &install).is_err());
         for program in WINDOWS_PROGRAMS {
-            assert_eq!(std::fs::read_to_string(install.join(program)).unwrap(), "old");
+            assert_eq!(
+                std::fs::read_to_string(install.join(program)).unwrap(),
+                "old"
+            );
         }
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -797,7 +878,9 @@ mod tests {
         // would be moved out of the way to.
         let blocked = install.join("previous").join(WINDOWS_PROGRAMS[2]);
         std::fs::create_dir_all(blocked.join("in the way")).unwrap();
-        let also = install.join("previous").join(format!("{}.old", WINDOWS_PROGRAMS[2]));
+        let also = install
+            .join("previous")
+            .join(format!("{}.old", WINDOWS_PROGRAMS[2]));
         std::fs::create_dir_all(also.join("in the way")).unwrap();
         assert!(apply(&package, &install).is_err());
         for program in WINDOWS_PROGRAMS {
@@ -816,9 +899,16 @@ mod tests {
         assert_eq!(staged(&folder), None);
         let package = staged_folder(&folder).join(WINDOWS_PACKAGE);
         programs(&package, "new");
-        assert_eq!(staged(&folder), None, "not without the mark that is written last");
+        assert_eq!(
+            staged(&folder),
+            None,
+            "not without the mark that is written last"
+        );
         std::fs::write(staged_folder(&folder).join("ready"), "0.7.0\n").unwrap();
-        assert_eq!(staged(&folder), Some(("0.7.0".to_string(), package.clone())));
+        assert_eq!(
+            staged(&folder),
+            Some(("0.7.0".to_string(), package.clone()))
+        );
         std::fs::remove_file(package.join("gevrek.exe")).unwrap();
         assert_eq!(staged(&folder), None);
         unstage(&folder);
@@ -847,7 +937,8 @@ mod tests {
             .status()
             .unwrap();
         assert!(packed.success());
-        let address = |file: &Path| format!("file:///{}", file.display().to_string().replace('\\', "/"));
+        let address =
+            |file: &Path| format!("file:///{}", file.display().to_string().replace('\\', "/"));
         let base = format!("{}/", address(&feed));
         let source = Source {
             api: format!("{base}latest.json"),
@@ -869,23 +960,43 @@ mod tests {
         let state = root.join("state");
 
         // The list names another file's sum: nothing is staged.
-        std::fs::write(feed.join(SUMS), format!("{}  {WINDOWS_PACKAGE}.zip\n", "0".repeat(64))).unwrap();
+        std::fs::write(
+            feed.join(SUMS),
+            format!("{}  {WINDOWS_PACKAGE}.zip\n", "0".repeat(64)),
+        )
+        .unwrap();
         let release = latest(&source, &state).unwrap();
         assert_eq!(release.version, "99.0.0");
         assert!(is_newer(&release.version, current()));
         let refused = stage(&source, &release, &state).unwrap_err().to_string();
-        assert!(refused.contains("is not the file the release names"), "{refused}");
+        assert!(
+            refused.contains("is not the file the release names"),
+            "{refused}"
+        );
         assert_eq!(staged(&state), None);
 
         // With the right sum it is staged, and can be applied.
-        std::fs::write(feed.join(SUMS), format!("{}  {WINDOWS_PACKAGE}.zip\n", sha256_of(&zip).unwrap())).unwrap();
+        std::fs::write(
+            feed.join(SUMS),
+            format!("{}  {WINDOWS_PACKAGE}.zip\n", sha256_of(&zip).unwrap()),
+        )
+        .unwrap();
         let package = stage(&source, &release, &state).unwrap();
-        assert_eq!(staged(&state), Some(("99.0.0".to_string(), package.clone())));
-        assert!(!state.join("download").exists(), "the downloads are not kept");
+        assert_eq!(
+            staged(&state),
+            Some(("99.0.0".to_string(), package.clone()))
+        );
+        assert!(
+            !state.join("download").exists(),
+            "the downloads are not kept"
+        );
         let install = root.join("install");
         programs(&install, "old");
         apply(&package, &install).unwrap();
-        assert_eq!(std::fs::read_to_string(install.join("gevrek-wm.exe")).unwrap(), "new");
+        assert_eq!(
+            std::fs::read_to_string(install.join("gevrek-wm.exe")).unwrap(),
+            "new"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }

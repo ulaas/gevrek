@@ -202,14 +202,11 @@ impl App {
             .as_ref()
             .expect("compositor")
             .create_surface(handle, ());
-        let layer_surface = self.layer_shell.as_ref().expect("layer shell").get_layer_surface(
-            &surface,
-            None,
-            layer,
-            name.to_string(),
-            handle,
-            index,
-        );
+        let layer_surface = self
+            .layer_shell
+            .as_ref()
+            .expect("layer shell")
+            .get_layer_surface(&surface, None, layer, name.to_string(), handle, index);
         layer_surface.set_anchor(anchor);
         layer_surface.set_size(size.0, size.1);
         layer_surface.set_exclusive_zone(-1);
@@ -547,7 +544,11 @@ fn a_surface_goes_over_the_windows_and_back_while_it_is_shown() {
     );
     harness.state.pointer_moved(middle.into(), 0);
     pump(&mut harness, &mut client);
-    assert_eq!(at(&harness.state, middle), (true, true), "the window is there");
+    assert_eq!(
+        at(&harness.state, middle),
+        (true, true),
+        "the window is there"
+    );
     assert_eq!(client.app.pointer_on, None);
     assert!(harness.clients[windows].app.windows[window].activated);
 
@@ -608,7 +609,11 @@ fn a_surface_given_the_keyboard_by_a_press_keeps_it_on_another_layer() {
     harness.state.pointer_button(LEFT, true, 0);
     harness.state.pointer_button(LEFT, false, 0);
     pump(&mut harness, &mut client);
-    assert_eq!(client.app.keyboard_on, Some(desk), "pressed: it has the keyboard");
+    assert_eq!(
+        client.app.keyboard_on,
+        Some(desk),
+        "pressed: it has the keyboard"
+    );
 
     client.app.sheets[desk].layer.set_layer(Layer::Overlay);
     client.app.sheets[desk].surface.commit();
@@ -688,11 +693,12 @@ fn a_drag_reaches_a_surface_over_the_windows_and_the_keys_say_what_it_does() {
     pump(&mut harness, &mut client);
     client.app.sheets[desk].layer.set_layer(Layer::Overlay);
     client.app.sheets[desk].surface.commit();
-    let device = client.app.data.as_ref().expect("data devices").get_data_device(
-        client.app.seat.as_ref().expect("a seat"),
-        &handle,
-        (),
-    );
+    let device = client
+        .app
+        .data
+        .as_ref()
+        .expect("data devices")
+        .get_data_device(client.app.seat.as_ref().expect("a seat"), &handle, ());
     client.app.device = Some(device);
     pump(&mut harness, &mut client);
 
@@ -724,9 +730,12 @@ fn a_drag_reaches_a_surface_over_the_windows_and_the_keys_say_what_it_does() {
         Some(&picture),
         press,
     );
-    let (buffer, _) = client
-        .app
-        .buffer(&handle, (32, 32), wl_shm::Format::Argb8888, [0, 0, 200, 255]);
+    let (buffer, _) = client.app.buffer(
+        &handle,
+        (32, 32),
+        wl_shm::Format::Argb8888,
+        [0, 0, 200, 255],
+    );
     picture.attach(Some(&buffer), 0, 0);
     picture.offset(-8, -6);
     picture.commit();
@@ -734,7 +743,11 @@ fn a_drag_reaches_a_surface_over_the_windows_and_the_keys_say_what_it_does() {
 
     harness.state.pointer_moved((900.0, 500.0).into(), 0);
     pump(&mut harness, &mut client);
-    assert_eq!(client.app.drag_on, Some(desk), "the drag is over the surface");
+    assert_eq!(
+        client.app.drag_on,
+        Some(desk),
+        "the drag is over the surface"
+    );
     assert_eq!(client.app.drag_entered, 1);
     // The picture is held where its program holds it.
     assert_eq!(harness.state.drag_picture_place(), Some((892, 494)));
@@ -765,8 +778,12 @@ fn a_drag_reaches_a_surface_over_the_windows_and_the_keys_say_what_it_does() {
     assert_eq!(client.app.told_source.last(), Some(&DndAction::Move));
     let entered = client.app.drag_entered;
     // A key that says nothing new asks nothing again.
-    harness.state.key_event((LETTER + 8).into(), KeyState::Pressed, 0);
-    harness.state.key_event((LETTER + 8).into(), KeyState::Released, 0);
+    harness
+        .state
+        .key_event((LETTER + 8).into(), KeyState::Pressed, 0);
+    harness
+        .state
+        .key_event((LETTER + 8).into(), KeyState::Released, 0);
     pump(&mut harness, &mut client);
     assert_eq!(client.app.drag_entered, entered);
     harness
@@ -853,7 +870,12 @@ fn the_desktop_is_soft_behind_the_parts_a_surface_names() {
     let parts = gevrek_smithay::background_effect::blur_parts(&server_surface);
     assert_eq!(parts.len(), 2);
     assert_eq!(
-        (parts[0].loc.x, parts[0].loc.y, parts[0].size.w, parts[0].size.h),
+        (
+            parts[0].loc.x,
+            parts[0].loc.y,
+            parts[0].size.w,
+            parts[0].size.h
+        ),
         (100, 100, 300, 200)
     );
 
@@ -902,9 +924,17 @@ fn picture_of_the_display(
         .screencopy
         .as_ref()
         .expect("screencopy")
-        .capture_output(0, client.app.output.as_ref().expect("an output"), &handle, ());
+        .capture_output(
+            0,
+            client.app.output.as_ref().expect("an output"),
+            &handle,
+            (),
+        );
     pump(harness, client);
-    let (width, height, stride) = client.app.frame_buffer.expect("told how the buffer must be");
+    let (width, height, stride) = client
+        .app
+        .frame_buffer
+        .expect("told how the buffer must be");
     assert_eq!(stride, width * 4);
     let (buffer, file) = client.app.buffer(
         &handle,
@@ -914,7 +944,9 @@ fn picture_of_the_display(
     );
     frame.copy(&buffer);
     pump(harness, client);
-    harness.state.serve_captures(renderer, target, Fourcc::Argb8888, None);
+    harness
+        .state
+        .serve_captures(renderer, target, Fourcc::Argb8888, None);
     pump(harness, client);
     assert!(client.app.frame_ready, "the picture came");
     assert!(!client.app.frame_failed);
@@ -973,7 +1005,11 @@ fn a_surface_whose_rule_says_so_is_left_out_of_pictures_of_the_screen() {
         [0, 0, 255, 255],
     );
     pump(&mut harness, &mut client);
-    assert!(harness.state.surface_under((900.0, 500.0).into()).1.is_some());
+    assert!(harness
+        .state
+        .surface_under((900.0, 500.0).into())
+        .1
+        .is_some());
     let on_display = harness
         .state
         .render_elements(&mut renderer, harness.output)
@@ -985,9 +1021,13 @@ fn a_surface_whose_rule_says_so_is_left_out_of_pictures_of_the_screen() {
     // Pictures again and again: the display is shared, and no longer
     // when they stop.
     assert_eq!(harness.state.shared_displays(), ["TEST-1"]);
-    harness.state.tick_sharing(Instant::now() + Duration::from_secs(1));
+    harness
+        .state
+        .tick_sharing(Instant::now() + Duration::from_secs(1));
     assert_eq!(harness.state.shared_displays(), ["TEST-1"]);
-    harness.state.tick_sharing(Instant::now() + Duration::from_secs(10));
+    harness
+        .state
+        .tick_sharing(Instant::now() + Duration::from_secs(10));
     assert!(harness.state.shared_displays().is_empty());
 }
 
@@ -1045,7 +1085,10 @@ fn the_room_the_zones_keep_is_told_apart_from_a_panels() {
     client.app.sheets[strip].surface.commit();
     pump(&mut harness, &mut client);
     let room = harness.state.zones_room(output);
-    assert_eq!((room.left, room.top, room.right, room.bottom), (0, 0, 280, 0));
+    assert_eq!(
+        (room.left, room.top, room.right, room.bottom),
+        (0, 0, 280, 0)
+    );
     // The room is deeper: what is told follows.
     client.app.sheets[strip].layer.set_size(320, 0);
     client.app.sheets[strip].layer.set_exclusive_zone(320);

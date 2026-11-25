@@ -360,7 +360,9 @@ pub fn renaming(
         );
     };
     if place.name().is_empty() {
-        return Renaming::Refused("This display has no name to write the title down for.".to_string());
+        return Renaming::Refused(
+            "This display has no name to write the title down for.".to_string(),
+        );
     }
     let mut changed = config.clone();
     let taken = || {
@@ -1553,9 +1555,7 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                 let centre_before: f32 = if bar.centre.is_empty() {
                     0.0
                 } else {
-                    context
-                        .data(|data| data.get_temp(centre_id))
-                        .unwrap_or(0.0)
+                    context.data(|data| data.get_temp(centre_id)).unwrap_or(0.0)
                 };
                 // (How long the start is matters to a taskbar that
                 // stands elsewhere, and is kept only for one.)
@@ -1588,8 +1588,8 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                 } else {
                     f32::INFINITY
                 });
-                let centre_most =
-                    2.0 * (middle - first - kept(start_before)).min(last - kept(end_before) - middle);
+                let centre_most = 2.0
+                    * (middle - first - kept(start_before)).min(last - kept(end_before) - middle);
                 let start_ink = with_room(0, start_most);
                 let end_ink = with_room(2, end_most);
                 let builder = egui::UiBuilder::new().max_rect(inner).layout(forward);
@@ -2260,10 +2260,10 @@ fn across_of(ui: &egui::Ui, upright: bool) -> f32 {
 fn cell(ui: &mut egui::Ui, ink: &Ink, cell: &Cell) -> egui::Response {
     let across = across_of(ui, ink.upright);
     let font = egui::FontId::proportional(if ink.upright { 10.5 } else { 12.5 });
-    let words = cell
-        .words
-        .filter(|words| !words.is_empty())
-        .map(|words| ui.painter().layout_no_wrap(words.to_string(), font, cell.colour));
+    let words = cell.words.filter(|words| !words.is_empty()).map(|words| {
+        ui.painter()
+            .layout_no_wrap(words.to_string(), font, cell.colour)
+    });
     let has_sign = !matches!(cell.sign, Sign::None);
     let size = if ink.upright {
         let high = 5.0
@@ -2633,7 +2633,11 @@ fn draw_module(
             cell(
                 ui,
                 ink,
-                &says(Sign::Font(icons::APP_WINDOW), Some(&count), text.gamma_multiply(0.7)),
+                &says(
+                    Sign::Font(icons::APP_WINDOW),
+                    Some(&count),
+                    text.gamma_multiply(0.7),
+                ),
             )
             .hint(if windows == 1 {
                 "1 window on this workspace".to_string()
@@ -3294,8 +3298,11 @@ fn draw_tasks(ui: &mut egui::Ui, shown: &Shown, ink: &Ink, asked: &mut Asked) {
                         );
                     }
                     (None, true) => {
-                        ui.painter()
-                            .galley(place.center() - words.size() / 2.0, words, button.colour);
+                        ui.painter().galley(
+                            place.center() - words.size() / 2.0,
+                            words,
+                            button.colour,
+                        );
                     }
                     (None, false) => {
                         // (In the middle of what the count leaves.)
@@ -3562,7 +3569,11 @@ pub fn task_actions_size() -> egui::Vec2 {
 /// a line for each [`TaskAction`], the one that is on marked. A line that
 /// cannot be chosen for this window is read, not pressed. What was
 /// chosen, if anything was.
-pub fn task_actions(ui: &mut egui::Ui, palette: &theme::Palette, task: &Task) -> Option<TaskAction> {
+pub fn task_actions(
+    ui: &mut egui::Ui,
+    palette: &theme::Palette,
+    task: &Task,
+) -> Option<TaskAction> {
     let mut chosen = None;
     egui::CentralPanel::default()
         .frame(
@@ -4204,13 +4215,22 @@ mod tests {
         };
         assert_eq!(
             tabs(first),
-            [("Saturn".to_string(), true, 2), ("Web".to_string(), false, 2)]
+            [
+                ("Saturn".to_string(), true, 2),
+                ("Web".to_string(), false, 2)
+            ]
         );
         assert_eq!(
             tabs(second),
-            [("Saturn".to_string(), false, 1), ("Web".to_string(), true, 1)]
+            [
+                ("Saturn".to_string(), false, 1),
+                ("Web".to_string(), true, 1)
+            ]
         );
-        assert_eq!((first.title.as_str(), second.title.as_str()), ("editor", "video"));
+        assert_eq!(
+            (first.title.as_str(), second.title.as_str()),
+            ("editor", "video")
+        );
         assert!(first.focused && !second.focused);
     }
 
@@ -4254,7 +4274,10 @@ mod tests {
         );
         let centred: DispatchCommand =
             serde_json::from_str(&TaskAction::Centre.command(&view, tiled).unwrap()).unwrap();
-        assert!(matches!(centred, DispatchCommand::ToggleWindowCentered { .. }));
+        assert!(matches!(
+            centred,
+            DispatchCommand::ToggleWindowCentered { .. }
+        ));
     }
 
     /// A press on a panel is for that panel's display: its workspace of
@@ -4330,7 +4353,11 @@ mod tests {
                 .map(|view| view.tasks.iter().map(|task| task.id).collect::<Vec<u64>>())
         };
         assert_eq!(ids("DP-1"), Some(vec![1]));
-        assert_eq!(ids("DP-2"), Some(vec![2]), "the display on DP-2, not the one called so");
+        assert_eq!(
+            ids("DP-2"),
+            Some(vec![2]),
+            "the display on DP-2, not the one called so"
+        );
         assert_eq!(ids("Second"), Some(vec![2]));
         assert_eq!(ids("HDMI-1"), None);
     }
@@ -4518,7 +4545,10 @@ mod tests {
         assert_eq!(labels(&right), ["1", "2"]);
         assert_eq!(left.tabs[0].name, "1");
         assert!(left.tabs[0].configured && !left.tabs[2].configured);
-        assert_eq!((left.place.name(), left.place.index, left.place.primary), ("DP-1", Some(0), true));
+        assert_eq!(
+            (left.place.name(), left.place.index, left.place.primary),
+            ("DP-1", Some(0), true)
+        );
         assert!(right.place.is_called("right") && right.place.index == Some(1));
 
         // Shown by the display's name and the workspace's, not by a place
@@ -4557,7 +4587,10 @@ mod tests {
             panic!("a second title is written down");
         };
         assert_eq!(label(&second, &left, "1").as_deref(), Some("Post"));
-        assert_eq!(second.desktop.workspaces.len(), first.desktop.workspaces.len());
+        assert_eq!(
+            second.desktop.workspaces.len(),
+            first.desktop.workspaces.len()
+        );
         assert!(second.desktop.validate().is_empty());
         // The keys are what they were.
         assert_eq!(
@@ -4565,13 +4598,28 @@ mod tests {
             serde_json::to_value(&config.desktop.bindings).unwrap()
         );
 
-        assert!(matches!(renaming(Some(&second), &left, "1", "Post"), Renaming::Nothing));
+        assert!(matches!(
+            renaming(Some(&second), &left, "1", "Post"),
+            Renaming::Nothing
+        ));
         // What another workspace of the display is called: said, not done.
-        assert!(matches!(renaming(Some(&second), &left, "2", "post"), Renaming::Refused(_)));
-        assert!(matches!(renaming(Some(&second), &left, "2", "3"), Renaming::Refused(_)));
+        assert!(matches!(
+            renaming(Some(&second), &left, "2", "post"),
+            Renaming::Refused(_)
+        ));
+        assert!(matches!(
+            renaming(Some(&second), &left, "2", "3"),
+            Renaming::Refused(_)
+        ));
         // On the other display the title is free.
-        assert!(matches!(renaming(Some(&second), &right, "2", "Post"), Renaming::Apply(_)));
-        assert!(matches!(renaming(None, &left, "1", "x"), Renaming::Refused(_)));
+        assert!(matches!(
+            renaming(Some(&second), &right, "2", "Post"),
+            Renaming::Apply(_)
+        ));
+        assert!(matches!(
+            renaming(None, &left, "1", "x"),
+            Renaming::Refused(_)
+        ));
 
         // A workspace of the moment is written down for its display, so
         // that the name it was given lasts.
@@ -4581,7 +4629,10 @@ mod tests {
         assert_eq!(label(&kept, &left, "12").as_deref(), Some("Music"));
         assert_eq!(label(&kept, &right, "12"), None);
         assert!(kept.desktop.validate().is_empty());
-        assert!(matches!(renaming(Some(&second), &left, "12", "Post"), Renaming::Refused(_)));
+        assert!(matches!(
+            renaming(Some(&second), &left, "12", "Post"),
+            Renaming::Refused(_)
+        ));
     }
 
     #[test]
@@ -4606,7 +4657,10 @@ mod tests {
         assert_eq!(own.right, bar.right);
         // Another display has the common panel.
         let first = DisplayRef::named("Monitor A");
-        assert_eq!(bar_on(&bar, "Monitor A", &first).expect("a panel").left, common);
+        assert_eq!(
+            bar_on(&bar, "Monitor A", &first).expect("a panel").left,
+            common
+        );
         // Switched off for that display: none there.
         bar.displays[0].enabled = false;
         assert!(bar_on(&bar, "Monitor B", &second).is_none());
@@ -4617,7 +4671,7 @@ mod tests {
     fn a_workspace_of_a_display_is_shown_by_a_command_the_model_reads() {
         use gevrek_model::command::{DispatchCommand, MonitorTarget, WorkspaceSelector};
         let here: DispatchCommand =
-serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a command");
+            serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a command");
         assert_eq!(
             here,
             DispatchCommand::SwitchWorkspaceSelector {
@@ -4626,7 +4680,8 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
         );
         // On a display without the keyboard, the display is named.
         let there: DispatchCommand =
-            serde_json::from_str(&show_workspace_at("Monitor X", false, 2, " ")).expect("a command");
+            serde_json::from_str(&show_workspace_at("Monitor X", false, 2, " "))
+                .expect("a command");
         assert_eq!(
             there,
             DispatchCommand::FocusMonitorWorkspace {
@@ -4988,7 +5043,10 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
         assert_eq!(fits, 5);
         assert!((each - (400.0 - 32.0) / 5.0).abs() < 0.01, "{each}");
         // Down to the least, and not below it.
-        assert_eq!(task_fit(5.0 * 28.0 + 4.0 * 8.0, 8.0, 5, 150.0), (TASK_LEAST, 5));
+        assert_eq!(
+            task_fit(5.0 * 28.0 + 4.0 * 8.0, 8.0, 5, 150.0),
+            (TASK_LEAST, 5)
+        );
         let (each, fits) = task_fit(5.0 * 28.0 + 4.0 * 8.0 - 1.0, 8.0, 5, 150.0);
         assert_eq!(each, TASK_LEAST);
         assert!(fits < 5);
@@ -5258,7 +5316,10 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
         let listed = listed.expect("a program's button");
         assert!(listed.len() >= 8, "{listed:?}");
         let program = |id: &u64| (id - 1) % 7;
-        assert!(listed.iter().all(|id| program(id) == program(&listed[0])), "{listed:?}");
+        assert!(
+            listed.iter().all(|id| program(id) == program(&listed[0])),
+            "{listed:?}"
+        );
     }
 
     /// A window the person minimized is read from the state as such, in
@@ -5278,9 +5339,17 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
             ]
         });
         let view = view_of(&monitor);
-        let flags: Vec<(u64, bool)> = view.tasks.iter().map(|task| (task.id, task.minimized)).collect();
+        let flags: Vec<(u64, bool)> = view
+            .tasks
+            .iter()
+            .map(|task| (task.id, task.minimized))
+            .collect();
         assert_eq!(flags, [(1, false), (2, true), (3, false)]);
-        let away = view.all_tasks.iter().find(|task| task.id == 7).expect("listed");
+        let away = view
+            .all_tasks
+            .iter()
+            .find(|task| task.id == 7)
+            .expect("listed");
         assert!(away.minimized && !away.shown);
         // (The list under a button has it as the view does.)
         assert!(tasks_of_ids(&view, &[2])[0].minimized);
@@ -5314,7 +5383,10 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
         ] {
             let faded = ink.gamma_multiply(MINIMIZED_INK);
             let seen = blend(faded, ground);
-            assert!(theme::contrast(seen, ground) >= 7.0, "{ink:?} on {ground:?}");
+            assert!(
+                theme::contrast(seen, ground) >= 7.0,
+                "{ink:?} on {ground:?}"
+            );
         }
     }
 
@@ -5324,7 +5396,9 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
         let mix = |front: u8, back: u8| {
             // (Premultiplied: what is in front is already as strong as
             // it is see-through.)
-            (front as f32 + back as f32 * (1.0 - over)).round().min(255.0) as u8
+            (front as f32 + back as f32 * (1.0 - over))
+                .round()
+                .min(255.0) as u8
         };
         egui::Color32::from_rgb(
             mix(colour.r(), ground.r()),
@@ -5364,8 +5438,7 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
             }
         }
         assert_eq!(went, Some(1), "a press on its button");
-        let command: serde_json::Value =
-            serde_json::from_str(&go_to_window(1)).expect("a command");
+        let command: serde_json::Value = serde_json::from_str(&go_to_window(1)).expect("a command");
         assert_eq!(command["command"], "focus_window");
         assert_eq!(command["selector"]["value"], 1);
         let parsed: gevrek_model::command::DispatchCommand =
@@ -5388,8 +5461,15 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
             .find(|button| button.iter().any(|task| task.minimized))
             .expect("its program's button");
         let ids: Vec<u64> = group.iter().map(|task| task.id).collect();
-        assert_eq!(ids, [1, 8], "with the other window of its program, in its place");
-        assert!(!group.iter().all(|task| task.minimized), "the button itself is not hollow");
+        assert_eq!(
+            ids,
+            [1, 8],
+            "with the other window of its program, in its place"
+        );
+        assert!(
+            !group.iter().all(|task| task.minimized),
+            "the button itself is not hollow"
+        );
     }
 
     /// A panel drawn into a picture, to be looked at while it is worked
@@ -5406,7 +5486,8 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
     fn the_panel_is_drawn_to_be_looked_at() {
         use gevrek_model::settings::{PanelEdge, PanelStyle};
         let said = |name: &str| std::env::var(name).ok().filter(|text| !text.is_empty());
-        let out = std::path::PathBuf::from(said("GEVREK_LOOK_OUT").expect("GEVREK_LOOK_OUT: a file"));
+        let out =
+            std::path::PathBuf::from(said("GEVREK_LOOK_OUT").expect("GEVREK_LOOK_OUT: a file"));
         let edge = match said("GEVREK_LOOK").as_deref() {
             Some("left") => PanelEdge::Left,
             Some("right") => PanelEdge::Right,
@@ -5421,7 +5502,10 @@ serde_json::from_str(&show_workspace_at("Monitor X", true, 2, "")).expect("a com
         let display = said("GEVREK_LOOK_SIZE")
             .and_then(|text| {
                 let (wide, high) = text.split_once('x')?;
-                Some((wide.trim().parse::<u32>().ok()?, high.trim().parse::<u32>().ok()?))
+                Some((
+                    wide.trim().parse::<u32>().ok()?,
+                    high.trim().parse::<u32>().ok()?,
+                ))
             })
             .unwrap_or((1600, 900));
         let mut bar = PanelProfile {

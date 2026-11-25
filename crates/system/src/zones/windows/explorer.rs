@@ -129,7 +129,10 @@ impl Journal {
             hidden: true,
             unreadable: true,
             desktop: DesktopView {
-                view: View { icons_shown: true, ..View::default() },
+                view: View {
+                    icons_shown: true,
+                    ..View::default()
+                },
                 icons: Vec::new(),
             },
             ..Journal::default()
@@ -140,8 +143,14 @@ impl Journal {
 /// One thing to do to Explorer to put the desktop back.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Step {
-    Size { view_mode: i32, icon_size: i32 },
-    Arrange { auto_arrange: bool, snap_to_grid: bool },
+    Size {
+        view_mode: i32,
+        icon_size: i32,
+    },
+    Arrange {
+        auto_arrange: bool,
+        snap_to_grid: bool,
+    },
     Place(Vec<Icon>),
     ShowIcons,
 }
@@ -166,14 +175,22 @@ pub fn plan(journal: &Journal, now: &DesktopView) -> Vec<Step> {
         return steps;
     }
     if was.icon_size > 0 && (was.view_mode, was.icon_size) != (is.view_mode, is.icon_size) {
-        steps.push(Step::Size { view_mode: was.view_mode, icon_size: was.icon_size });
+        steps.push(Step::Size {
+            view_mode: was.view_mode,
+            icon_size: was.icon_size,
+        });
     }
     if (was.auto_arrange, was.snap_to_grid) != (is.auto_arrange, is.snap_to_grid) {
-        steps.push(Step::Arrange { auto_arrange: was.auto_arrange, snap_to_grid: was.snap_to_grid });
+        steps.push(Step::Arrange {
+            auto_arrange: was.auto_arrange,
+            snap_to_grid: was.snap_to_grid,
+        });
     }
     // With auto-arrange Explorer decides the places itself and takes none.
     if !was.auto_arrange {
-        let resized = steps.iter().any(|step| matches!(step, Step::Size { .. } | Step::Arrange { .. }));
+        let resized = steps
+            .iter()
+            .any(|step| matches!(step, Step::Size { .. } | Step::Arrange { .. }));
         let moved: Vec<Icon> = journal
             .desktop
             .icons
@@ -201,7 +218,9 @@ pub fn plan(journal: &Journal, now: &DesktopView) -> Vec<Step> {
 }
 
 fn refused(what: impl std::fmt::Display) -> BackendError {
-    BackendError::Refused { what: what.to_string() }
+    BackendError::Refused {
+        what: what.to_string(),
+    }
 }
 
 fn now() -> u64 {
@@ -220,7 +239,9 @@ pub struct Keeper {
 impl Keeper {
     /// The journal under a state folder (`gevrek_model::paths::state_dir`).
     pub fn new(state_dir: &Path) -> Self {
-        Self { path: state_dir.join(FILE) }
+        Self {
+            path: state_dir.join(FILE),
+        }
     }
 
     pub fn path(&self) -> &Path {
@@ -239,7 +260,10 @@ impl Keeper {
             }
         };
         Some(Journal::decode(&text).unwrap_or_else(|| {
-            log::warn!("zones: {} is no journal that is understood", self.path.display());
+            log::warn!(
+                "zones: {} is no journal that is understood",
+                self.path.display()
+            );
             Journal::unreadable()
         }))
     }
@@ -266,11 +290,18 @@ impl Keeper {
         // The one from the time before is kept beside the new one: a
         // layout that was written down is not thrown away by the next.
         if before.is_some() {
-            if let Err(error) = std::fs::copy(&self.path, self.path.with_extension("previous.json")) {
-                log::debug!("zones: the journal before is not kept beside {}: {error}", self.path.display());
+            if let Err(error) = std::fs::copy(&self.path, self.path.with_extension("previous.json"))
+            {
+                log::debug!(
+                    "zones: the journal before is not kept beside {}: {error}",
+                    self.path.display()
+                );
             }
         }
-        log::debug!("zones: how Explorer's desktop is, is written down in {}", self.path.display());
+        log::debug!(
+            "zones: how Explorer's desktop is, is written down in {}",
+            self.path.display()
+        );
         self.save(&Journal {
             version: VERSION,
             written_at: now(),
@@ -285,7 +316,9 @@ impl Keeper {
     /// down (`journal`), and written into the journal before it is done.
     pub fn hide(&self, explorer: &mut dyn Explorer) -> Result<(), BackendError> {
         let Some(mut journal) = self.load().filter(|journal| journal.open) else {
-            return Err(refused("Explorer's icons are not written down; they are not put away"));
+            return Err(refused(
+                "Explorer's icons are not written down; they are not put away",
+            ));
         };
         if !journal.desktop.view.icons_shown {
             // The person has them switched off already: nothing to do,
@@ -308,11 +341,20 @@ impl Keeper {
         };
         let now_shown = explorer.read()?;
         let steps = plan(&journal, &now_shown);
-        log::debug!("zones: Explorer's desktop is put back as written down, in {} steps", steps.len());
+        log::debug!(
+            "zones: Explorer's desktop is put back as written down, in {} steps",
+            steps.len()
+        );
         for step in steps {
             match step {
-                Step::Size { view_mode, icon_size } => explorer.size_icons(view_mode, icon_size)?,
-                Step::Arrange { auto_arrange, snap_to_grid } => explorer.arrange(auto_arrange, snap_to_grid)?,
+                Step::Size {
+                    view_mode,
+                    icon_size,
+                } => explorer.size_icons(view_mode, icon_size)?,
+                Step::Arrange {
+                    auto_arrange,
+                    snap_to_grid,
+                } => explorer.arrange(auto_arrange, snap_to_grid)?,
                 Step::Place(icons) => explorer.place(&icons)?,
                 Step::ShowIcons => explorer.show_icons(true)?,
             }
@@ -343,7 +385,10 @@ pub struct FakeExplorer {
 
 impl FakeExplorer {
     pub fn showing(desktop: DesktopView) -> Self {
-        Self { desktop, ..Self::default() }
+        Self {
+            desktop,
+            ..Self::default()
+        }
     }
 
     fn change(&mut self, what: String) -> Result<(), BackendError> {
@@ -387,7 +432,12 @@ impl Explorer for FakeExplorer {
     fn place(&mut self, icons: &[Icon]) -> Result<(), BackendError> {
         self.change(format!("place({})", icons.len()))?;
         for icon in icons {
-            if let Some(known) = self.desktop.icons.iter_mut().find(|known| known.id.eq_ignore_ascii_case(&icon.id)) {
+            if let Some(known) = self
+                .desktop
+                .icons
+                .iter_mut()
+                .find(|known| known.id.eq_ignore_ascii_case(&icon.id))
+            {
                 (known.x, known.y) = (icon.x, icon.y);
             }
         }
@@ -410,7 +460,7 @@ mod real {
     use windows::Win32::UI::Shell::Common::ITEMIDLIST;
     use windows::Win32::UI::Shell::{
         IEnumIDList, IFolderView2, IShellBrowser, IShellWindows, SHGetNameFromIDList,
-        ShellWindows, SID_STopLevelBrowser, FOLDERVIEWMODE, FWF_AUTOARRANGE, FWF_NOICONS,
+        SID_STopLevelBrowser, ShellWindows, FOLDERVIEWMODE, FWF_AUTOARRANGE, FWF_NOICONS,
         FWF_SNAPTOGRID, SIGDN_DESKTOPABSOLUTEPARSING, SIGDN_NORMALDISPLAY, SVGIO_ALLVIEW,
         SVSI_POSITIONITEM, SWC_DESKTOP, SWFO_NEEDDISPATCH,
     };
@@ -472,13 +522,18 @@ mod real {
             browser.QueryActiveShellView()?.cast::<IFolderView2>()
         })();
         found.map_err(|error: windows::core::Error| {
-            refused(format!("Explorer's desktop was not reached: {}", error.message()))
+            refused(format!(
+                "Explorer's desktop was not reached: {}",
+                error.message()
+            ))
         })
     }
 
     /// Every item of the view, as Explorer's own list for it.
     unsafe fn items(view: &IFolderView2) -> Result<Vec<Pidl>, BackendError> {
-        let all: IEnumIDList = view.Items(SVGIO_ALLVIEW).map_err(|error| refused(error.message()))?;
+        let all: IEnumIDList = view
+            .Items(SVGIO_ALLVIEW)
+            .map_err(|error| refused(error.message()))?;
         let mut found = Vec::new();
         loop {
             let mut next = [std::ptr::null_mut(); 1];
@@ -495,7 +550,11 @@ mod real {
     /// is where the shell's names begin: an item's list within it is its
     /// whole name.)
     unsafe fn name(item: &Pidl, shown: bool) -> String {
-        let which = if shown { SIGDN_NORMALDISPLAY } else { SIGDN_DESKTOPABSOLUTEPARSING };
+        let which = if shown {
+            SIGDN_NORMALDISPLAY
+        } else {
+            SIGDN_DESKTOPABSOLUTEPARSING
+        };
         SHGetNameFromIDList(item.as_ptr(), which)
             .map(|name| taken(name))
             .unwrap_or_default()
@@ -515,7 +574,9 @@ mod real {
             // SAFETY: Explorer's objects are used on this thread alone.
             unsafe {
                 let view = view()?;
-                let flags = view.GetCurrentFolderFlags().map_err(|error| refused(error.message()))?;
+                let flags = view
+                    .GetCurrentFolderFlags()
+                    .map_err(|error| refused(error.message()))?;
                 let has = |flag: i32| flags & flag as u32 != 0;
                 let (mut view_mode, mut icon_size) = (FOLDERVIEWMODE::default(), 0i32);
                 let _ = view.GetViewModeAndIconSize(&mut view_mode, &mut icon_size);
@@ -528,7 +589,12 @@ mod real {
                     let Ok(POINT { x, y }) = view.GetItemPosition(item.as_ptr()) else {
                         continue;
                     };
-                    icons.push(Icon { id, name: name(&item, true), x, y });
+                    icons.push(Icon {
+                        id,
+                        name: name(&item, true),
+                        x,
+                        y,
+                    });
                 }
                 Ok(DesktopView {
                     view: View {
@@ -557,7 +623,9 @@ mod real {
                     }
                     Err(error) if tried >= READ_TRIES => return Err(error),
                     Err(error) => {
-                        log::debug!("zones: Explorer's desktop was not read ({error}); it is read again");
+                        log::debug!(
+                            "zones: Explorer's desktop was not read ({error}); it is read again"
+                        );
                         tried += 1;
                         std::thread::sleep(READ_PAUSE);
                     }
@@ -611,10 +679,17 @@ mod real {
                 // found by the item's name.
                 for item in items(&view)? {
                     let id = name(&item, false);
-                    let Some(icon) = icons.iter().find(|icon| icon.id.eq_ignore_ascii_case(&id)) else {
+                    let Some(icon) = icons.iter().find(|icon| icon.id.eq_ignore_ascii_case(&id))
+                    else {
                         continue;
                     };
-                    let (list, at): (*const ITEMIDLIST, POINT) = (item.as_ptr(), POINT { x: icon.x, y: icon.y });
+                    let (list, at): (*const ITEMIDLIST, POINT) = (
+                        item.as_ptr(),
+                        POINT {
+                            x: icon.x,
+                            y: icon.y,
+                        },
+                    );
                     view.SelectAndPositionItems(1, &list, Some(&at), SVSI_POSITIONITEM.0 as u32)
                         .map_err(|error| refused(error.message()))?;
                 }
@@ -629,43 +704,80 @@ mod tests {
     use super::*;
 
     fn icon(name: &str, x: i32, y: i32) -> Icon {
-        Icon { id: format!("C:\\Users\\ada\\Desktop\\{name}"), name: name.to_string(), x, y }
+        Icon {
+            id: format!("C:\\Users\\ada\\Desktop\\{name}"),
+            name: name.to_string(),
+            x,
+            y,
+        }
     }
 
     fn desktop() -> DesktopView {
         DesktopView {
-            view: View { icons_shown: true, auto_arrange: false, snap_to_grid: true, view_mode: 1, icon_size: 48 },
-            icons: vec![icon("a.txt", 20, 2), icon("b.txt", 20, 102), icon("c.txt", 116, 2)],
+            view: View {
+                icons_shown: true,
+                auto_arrange: false,
+                snap_to_grid: true,
+                view_mode: 1,
+                icon_size: 48,
+            },
+            icons: vec![
+                icon("a.txt", 20, 2),
+                icon("b.txt", 20, 102),
+                icon("c.txt", 116, 2),
+            ],
         }
     }
 
     fn keeper(name: &str) -> (Keeper, PathBuf) {
-        let folder = std::env::temp_dir().join(format!("gevrek-zones-journal-{name}-{}", std::process::id()));
+        let folder = std::env::temp_dir().join(format!(
+            "gevrek-zones-journal-{name}-{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&folder);
         (Keeper::new(&folder), folder)
     }
 
     #[test]
     fn a_journal_survives_its_text_and_an_unknown_one_is_not_guessed_at() {
-        let journal = Journal { version: VERSION, written_at: 1_700_000_000, open: true, hidden: true, desktop: desktop(), unreadable: false };
+        let journal = Journal {
+            version: VERSION,
+            written_at: 1_700_000_000,
+            open: true,
+            hidden: true,
+            desktop: desktop(),
+            unreadable: false,
+        };
         let text = journal.encode();
         assert_eq!(Journal::decode(&text), Some(journal.clone()));
         // The file is one a person can read.
-        assert!(text.contains("\"icons_shown\": true") && text.contains("\"name\": \"a.txt\""), "{text}");
+        assert!(
+            text.contains("\"icons_shown\": true") && text.contains("\"name\": \"a.txt\""),
+            "{text}"
+        );
         // A format from later, and what is no journal.
-        assert_eq!(Journal::decode(&text.replace("\"version\": 1", "\"version\": 2")), None);
+        assert_eq!(
+            Journal::decode(&text.replace("\"version\": 1", "\"version\": 2")),
+            None
+        );
         assert_eq!(Journal::decode("{ half"), None);
         assert_eq!(Journal::decode("{}"), None);
         // Keys that are not known are passed over; missing ones have
         // their defaults.
-        let lean = r#"{"version":1,"open":true,"later":{"x":1},"desktop":{"view":{"icons_shown":true}}}"#;
+        let lean =
+            r#"{"version":1,"open":true,"later":{"x":1},"desktop":{"view":{"icons_shown":true}}}"#;
         let read = Journal::decode(lean).expect("read");
         assert!(read.open && read.desktop.view.icons_shown && read.desktop.icons.is_empty());
     }
 
     #[test]
     fn putting_back_touches_only_what_differs() {
-        let journal = Journal { version: VERSION, open: true, desktop: desktop(), ..Journal::default() };
+        let journal = Journal {
+            version: VERSION,
+            open: true,
+            desktop: desktop(),
+            ..Journal::default()
+        };
         // As it was: nothing to do.
         assert_eq!(plan(&journal, &desktop()), []);
         // Put away, and nothing else: only shown again.
@@ -676,7 +788,10 @@ mod tests {
         now.icons[1].y = 500;
         now.icons.remove(2);
         now.icons.push(icon("new.txt", 300, 300));
-        assert_eq!(plan(&journal, &now), [Step::Place(vec![icon("b.txt", 20, 102)]), Step::ShowIcons]);
+        assert_eq!(
+            plan(&journal, &now),
+            [Step::Place(vec![icon("b.txt", 20, 102)]), Step::ShowIcons]
+        );
         // Another size and arrangement: both first, then every icon that
         // is still there to its place.
         now.view.icon_size = 96;
@@ -684,8 +799,14 @@ mod tests {
         assert_eq!(
             plan(&journal, &now),
             [
-                Step::Size { view_mode: 1, icon_size: 48 },
-                Step::Arrange { auto_arrange: false, snap_to_grid: true },
+                Step::Size {
+                    view_mode: 1,
+                    icon_size: 48
+                },
+                Step::Arrange {
+                    auto_arrange: false,
+                    snap_to_grid: true
+                },
                 Step::Place(vec![icon("a.txt", 20, 2), icon("b.txt", 20, 102)]),
                 Step::ShowIcons,
             ]
@@ -697,7 +818,12 @@ mod tests {
         // Auto-arrange: Explorer has the places, none are given.
         let mut arranged = desktop();
         arranged.view.auto_arrange = true;
-        let journal = Journal { version: VERSION, open: true, desktop: arranged.clone(), ..Journal::default() };
+        let journal = Journal {
+            version: VERSION,
+            open: true,
+            desktop: arranged.clone(),
+            ..Journal::default()
+        };
         let mut now = arranged.clone();
         now.icons[0].x = 999;
         now.view.icons_shown = false;
@@ -706,7 +832,12 @@ mod tests {
         // switched on by them while gevrek ran: stays on.
         let mut off = desktop();
         off.view.icons_shown = false;
-        let journal = Journal { version: VERSION, open: true, desktop: off.clone(), ..Journal::default() };
+        let journal = Journal {
+            version: VERSION,
+            open: true,
+            desktop: off.clone(),
+            ..Journal::default()
+        };
         assert_eq!(plan(&journal, &off), []);
         assert_eq!(plan(&journal, &desktop()), []);
     }
@@ -724,14 +855,22 @@ mod tests {
 
         keeper.journal(&mut explorer).expect("written down");
         assert!(keeper.to_restore());
-        assert_eq!(explorer.asked, Vec::<String>::new(), "writing down changes nothing");
+        assert_eq!(
+            explorer.asked,
+            Vec::<String>::new(),
+            "writing down changes nothing"
+        );
         let written = keeper.load().expect("a journal");
-        assert_eq!((written.open, written.hidden, &written.desktop), (true, false, &desktop()));
+        assert_eq!(
+            (written.open, written.hidden, &written.desktop),
+            (true, false, &desktop())
+        );
 
         keeper.hide(&mut explorer).expect("put away");
         assert_eq!(explorer.asked, ["show_icons(false)"]);
         // In the moment Explorer was asked, the disk already said so.
-        let at_the_change = Journal::decode(&explorer.journal_at_each_change[0]).expect("a journal on the disk");
+        let at_the_change =
+            Journal::decode(&explorer.journal_at_each_change[0]).expect("a journal on the disk");
         assert!(at_the_change.open && at_the_change.hidden);
         assert_eq!(at_the_change.desktop, desktop());
 
@@ -741,11 +880,17 @@ mod tests {
         assert_eq!(keeper.load().expect("a journal").desktop, desktop());
 
         keeper.restore(&mut explorer).expect("put back");
-        assert_eq!(explorer.asked, ["show_icons(false)", "place(1)", "show_icons(true)"]);
+        assert_eq!(
+            explorer.asked,
+            ["show_icons(false)", "place(1)", "show_icons(true)"]
+        );
         assert_eq!(explorer.desktop, desktop());
         assert!(!keeper.to_restore());
         // Closed, it stays as a record; put back again, nothing is asked.
-        assert_eq!(keeper.load().map(|journal| (journal.open, journal.hidden)), Some((false, false)));
+        assert_eq!(
+            keeper.load().map(|journal| (journal.open, journal.hidden)),
+            Some((false, false))
+        );
         keeper.restore(&mut explorer).expect("nothing to do");
         assert_eq!(explorer.asked.len(), 3);
 
@@ -753,8 +898,12 @@ mod tests {
         explorer.desktop.icons[0].x = 40;
         keeper.journal(&mut explorer).expect("written down");
         assert_eq!(keeper.load().expect("a journal").desktop.icons[0].x, 40);
-        let previous = std::fs::read_to_string(keeper.path().with_extension("previous.json")).expect("kept");
-        assert_eq!(Journal::decode(&previous).expect("a journal").desktop, desktop());
+        let previous =
+            std::fs::read_to_string(keeper.path().with_extension("previous.json")).expect("kept");
+        assert_eq!(
+            Journal::decode(&previous).expect("a journal").desktop,
+            desktop()
+        );
         let _ = std::fs::remove_dir_all(folder);
     }
 

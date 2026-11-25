@@ -18,9 +18,7 @@ use gevrek_zones::backend::BackendError;
 use gevrek_zones::ids::ItemId;
 use std::cell::RefCell;
 use windows::core::{w, Interface, HSTRING, PCSTR, PCWSTR};
-use windows::Win32::Foundation::{
-    BOOL, HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM,
-};
+use windows::Win32::Foundation::{BOOL, HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Ole::{OleInitialize, OleUninitialize};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
@@ -32,12 +30,12 @@ use windows::Win32::UI::Shell::{
     CMINVOKECOMMANDINFOEX, SEE_MASK_INVOKEIDLIST, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
-    DispatchMessageW, EnumThreadWindows, GetMenuItemCount, GetMenuStringW, GetMessageW,
-    IsWindow, IsWindowVisible, KillTimer, PostMessageW, PostQuitMessage, RegisterClassW,
-    SetForegroundWindow, SetTimer, TrackPopupMenuEx, TranslateMessage, HMENU, MF_BYPOSITION,
-    MSG, SW_SHOWNORMAL, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_DRAWITEM, WM_INITMENUPOPUP,
-    WM_MEASUREITEM, WM_MENUCHAR, WM_NULL, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
+    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, DispatchMessageW,
+    EnumThreadWindows, GetMenuItemCount, GetMenuStringW, GetMessageW, IsWindow, IsWindowVisible,
+    KillTimer, PostMessageW, PostQuitMessage, RegisterClassW, SetForegroundWindow, SetTimer,
+    TrackPopupMenuEx, TranslateMessage, HMENU, MF_BYPOSITION, MSG, SW_SHOWNORMAL, TPM_RETURNCMD,
+    TPM_RIGHTBUTTON, WM_DRAWITEM, WM_INITMENUPOPUP, WM_MEASUREITEM, WM_MENUCHAR, WM_NULL, WM_TIMER,
+    WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 
 /// The numbers the menu's entries get: the first and the last.
@@ -48,7 +46,9 @@ const LAST: u32 = 0x7FFF;
 const UNICODE: u32 = 0x4000;
 
 fn missing(item: &ItemId) -> BackendError {
-    BackendError::NotFound { what: item.as_str().to_string() }
+    BackendError::NotFound {
+        what: item.as_str().to_string(),
+    }
 }
 
 /// Whether what an id names can be there at all: a path is looked for, a
@@ -73,7 +73,9 @@ fn on_a_thread(name: &str, work: impl FnOnce() + Send + 'static) -> Result<(), B
             }
         })
         .map(|_| ())
-        .map_err(|error| BackendError::Refused { what: format!("no thread: {error}") })
+        .map_err(|error| BackendError::Refused {
+            what: format!("no thread: {error}"),
+        })
 }
 
 /// Have the shell do `verb` with an item (`None`: what a double click
@@ -95,7 +97,9 @@ fn execute(item: &ItemId, verb: Option<&'static str>) -> Result<(), BackendError
             // file opens as well; done when the call returns, for this
             // thread ends with it.
             fMask: SEE_MASK_INVOKEIDLIST | SEE_MASK_NOASYNC,
-            lpVerb: verb.as_ref().map_or(PCWSTR::null(), |verb| PCWSTR(verb.as_ptr())),
+            lpVerb: verb
+                .as_ref()
+                .map_or(PCWSTR::null(), |verb| PCWSTR(verb.as_ptr())),
             lpIDList: pidl.as_ptr() as *mut _,
             nShow: SW_SHOWNORMAL.0,
             ..Default::default()
@@ -129,7 +133,10 @@ pub fn open_with(item: &ItemId, program: Option<&str>) -> Result<(), BackendErro
     }
     let (program, file) = (program.to_string(), plain(item.as_str()));
     on_a_thread("gevrek-zones-open", move || {
-        let (wide_program, parameters) = (HSTRING::from(&program), HSTRING::from(format!("\"{file}\"")));
+        let (wide_program, parameters) = (
+            HSTRING::from(&program),
+            HSTRING::from(format!("\"{file}\"")),
+        );
         let mut asked = SHELLEXECUTEINFOW {
             cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
             fMask: SEE_MASK_NOASYNC,
@@ -167,7 +174,10 @@ unsafe fn menu_of(pidls: &[Pidl], owner: HWND) -> Option<IContextMenu> {
 
 /// The lists of the items that are there.
 fn lists(items: &[ItemId]) -> Vec<Pidl> {
-    items.iter().filter_map(|item| Pidl::parse(item.as_str())).collect()
+    items
+        .iter()
+        .filter_map(|item| Pidl::parse(item.as_str()))
+        .collect()
 }
 
 /// The entries of the shell's menu for some items, as texts (an empty
@@ -201,7 +211,9 @@ pub fn menu_entries(items: &[ItemId]) -> Result<Vec<String>, BackendError> {
 }
 
 fn refused(error: windows::core::Error) -> BackendError {
-    BackendError::Refused { what: error.message() }
+    BackendError::Refused {
+        what: error.message(),
+    }
 }
 
 thread_local! {
@@ -320,7 +332,9 @@ pub fn show_menu(owner: isize, items: &[ItemId], at: (i32, i32)) -> Result<(), B
     let owner = HWND(owner as *mut _);
     // SAFETY: only asks whether the handle names a window.
     if !owner.is_invalid() && !unsafe { IsWindow(owner) }.as_bool() {
-        return Err(BackendError::Refused { what: "the menu's owner is no window".to_string() });
+        return Err(BackendError::Refused {
+            what: "the menu's owner is no window".to_string(),
+        });
     }
     let (items, owner) = (items.to_vec(), owner.0 as isize);
     on_a_thread("gevrek-zones-menu", move || {
@@ -345,8 +359,15 @@ unsafe fn run_menu(owner: HWND, items: &[ItemId], at: POINT) {
         let held = |key| GetKeyState(i32::from(key)) < 0;
         // (With Shift held the shell adds the entries it keeps back
         // otherwise, as in Explorer.)
-        let how = if held(VK_SHIFT.0) { CMF_NORMAL | CMF_EXTENDEDVERBS } else { CMF_NORMAL };
-        if shell_menu.QueryContextMenu(menu, 0, FIRST, LAST, how).is_err() {
+        let how = if held(VK_SHIFT.0) {
+            CMF_NORMAL | CMF_EXTENDEDVERBS
+        } else {
+            CMF_NORMAL
+        };
+        if shell_menu
+            .QueryContextMenu(menu, 0, FIRST, LAST, how)
+            .is_err()
+        {
             let _ = DestroyMenu(menu);
             return None;
         }
@@ -356,7 +377,14 @@ unsafe fn run_menu(owner: HWND, items: &[ItemId], at: POINT) {
         // A menu closes when the person presses elsewhere only if its
         // window is the one in front.
         let _ = SetForegroundWindow(window);
-        let picked = TrackPopupMenuEx(menu, (TPM_RETURNCMD | TPM_RIGHTBUTTON).0, at.x, at.y, window, None);
+        let picked = TrackPopupMenuEx(
+            menu,
+            (TPM_RETURNCMD | TPM_RIGHTBUTTON).0,
+            at.x,
+            at.y,
+            window,
+            None,
+        );
         let _ = PostMessageW(window, WM_NULL, WPARAM(0), LPARAM(0));
         OPEN.with(|open| *open.borrow_mut() = None);
         let _ = DestroyMenu(menu);
@@ -385,8 +413,8 @@ unsafe fn run_menu(owner: HWND, items: &[ItemId], at: POINT) {
             ptInvoke: at,
             ..Default::default()
         };
-        if let Err(error) =
-            shell_menu.InvokeCommand(&asked as *const CMINVOKECOMMANDINFOEX as *const CMINVOKECOMMANDINFO)
+        if let Err(error) = shell_menu
+            .InvokeCommand(&asked as *const CMINVOKECOMMANDINFOEX as *const CMINVOKECOMMANDINFO)
         {
             log::warn!("zones: the menu's entry was not carried out: {error}");
         } else {
@@ -419,11 +447,17 @@ mod tests {
         assert_eq!(open(&gone), Err(missing(&gone)));
         assert_eq!(open_with(&gone, None), Err(missing(&gone)));
         assert_eq!(open_with(&gone, Some("notepad.exe")), Err(missing(&gone)));
-        assert_eq!(show_menu(0, std::slice::from_ref(&gone), (0, 0)), Err(missing(&gone)));
+        assert_eq!(
+            show_menu(0, std::slice::from_ref(&gone), (0, 0)),
+            Err(missing(&gone))
+        );
         assert_eq!(show_menu(0, &[], (0, 0)), Err(BackendError::Unsupported));
         // What is no file is not handed to a program.
         let this_pc = ItemId::new("::{20D04FE0-3AEA-1069-A2D8-08002B30309D}");
-        assert_eq!(open_with(&this_pc, Some("notepad.exe")), Err(BackendError::Unsupported));
+        assert_eq!(
+            open_with(&this_pc, Some("notepad.exe")),
+            Err(BackendError::Unsupported)
+        );
         assert!(there(&this_pc));
         assert!(!there(&ItemId::new("")));
     }

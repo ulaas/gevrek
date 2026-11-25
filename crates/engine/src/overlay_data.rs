@@ -432,9 +432,9 @@ pub struct DetailedWindowInfo {
     pub is_focused: bool,
     pub is_minimized: bool,
     pub is_maximized: bool,
-    pub is_managed: bool,       // Whether window is managed by WM
-    pub is_tiled: bool,         // Window is in tiling layout (not floating)
-    pub is_floating: bool,      // Window is floating
+    pub is_managed: bool,  // Whether window is managed by WM
+    pub is_tiled: bool,    // Window is in tiling layout (not floating)
+    pub is_floating: bool, // Window is floating
     /// It is kept above the other windows (always on top).
     pub is_always_on_top: bool,
     pub has_border: bool,       // Window has decorative border

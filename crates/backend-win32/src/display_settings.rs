@@ -217,9 +217,8 @@ mod system {
     use windows::Win32::Graphics::Gdi::{
         ChangeDisplaySettingsExW, EnumDisplaySettingsExW, CDS_NORESET, CDS_SET_PRIMARY, CDS_TEST,
         CDS_TYPE, CDS_UPDATEREGISTRY, DEVMODEW, DISP_CHANGE, DISP_CHANGE_SUCCESSFUL, DMDO_180,
-        DMDO_270, DMDO_90, DMDO_DEFAULT, DM_DISPLAYFREQUENCY, DM_DISPLAYORIENTATION,
-        DM_PELSHEIGHT, DM_PELSWIDTH, DM_POSITION, ENUM_CURRENT_SETTINGS,
-        ENUM_DISPLAY_SETTINGS_MODE,
+        DMDO_270, DMDO_90, DMDO_DEFAULT, DM_DISPLAYFREQUENCY, DM_DISPLAYORIENTATION, DM_PELSHEIGHT,
+        DM_PELSWIDTH, DM_POSITION, ENUM_CURRENT_SETTINGS, ENUM_DISPLAY_SETTINGS_MODE,
     };
 
     fn wide(text: &str) -> Vec<u16> {
@@ -233,14 +232,16 @@ mod system {
             ..Default::default()
         };
         // SAFETY: the name ends with a zero; the structure says its size.
-        unsafe { EnumDisplaySettingsExW(
+        unsafe {
+            EnumDisplaySettingsExW(
                 PCWSTR(name.as_ptr()),
                 which,
                 &mut mode,
                 windows::Win32::Graphics::Gdi::ENUM_DISPLAY_SETTINGS_FLAGS(0),
-            ) }
-            .as_bool()
-            .then_some(mode)
+            )
+        }
+        .as_bool()
+        .then_some(mode)
     }
 
     /// The modes a display offers: width, height, hertz, each once.
@@ -495,7 +496,10 @@ mod tests {
         // Named, and only switched on or off: Windows' own business.
         let mut off = entry("Monitor ACM2702");
         off.enabled = false;
-        assert_eq!(plan(&[entry("Monitor ACM2401"), off], &two()), Ok(Vec::new()));
+        assert_eq!(
+            plan(&[entry("Monitor ACM2401"), off], &two()),
+            Ok(Vec::new())
+        );
         // Said as it is: nothing to do.
         let mut same = entry("DISPLAY2");
         same.position = Some((2560, 0));

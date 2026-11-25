@@ -93,7 +93,9 @@ impl StartupProcessManager {
                 .is_some_and(|profile| profile.terminate_on_exit)
             {
                 if let Err(error) = self.stop_record(&id, "removed") {
-                    log::debug!("startup application '{id}' was removed but not stopped: {error:#}");
+                    log::debug!(
+                        "startup application '{id}' was removed but not stopped: {error:#}"
+                    );
                 }
             }
             self.records.remove(&id);
@@ -164,7 +166,10 @@ impl StartupProcessManager {
                 .and_then(|record| record.next_launch)
                 .is_some_and(|deadline| deadline <= now);
             if due {
-                let first = self.records.get(&id).is_none_or(|record| record.restart_count == 0);
+                let first = self
+                    .records
+                    .get(&id)
+                    .is_none_or(|record| record.restart_count == 0);
                 if let Err(error) = self.spawn_profile(&id) {
                     // Said once; the tries after it are at debug.
                     if first {
@@ -205,7 +210,11 @@ impl StartupProcessManager {
         // One that is switched off is not started, again or at all. (It
         // was set to start at once, could not be, and said so with
         // every pass of the loop.)
-        if self.profiles.get(&id).is_some_and(|profile| !profile.enabled) {
+        if self
+            .profiles
+            .get(&id)
+            .is_some_and(|profile| !profile.enabled)
+        {
             return Err(anyhow!("Startup application '{id}' is disabled"));
         }
         self.stop_record(&id, "restarting")?;
@@ -414,7 +423,9 @@ impl StartupProcessManager {
                 // beside it later.)
                 record.last_error = Some(error.to_string());
                 record.child = Some(child);
-                return Err(anyhow!("Could not stop startup application '{id}': {error}"));
+                return Err(anyhow!(
+                    "Could not stop startup application '{id}': {error}"
+                ));
             }
             match child.wait() {
                 Ok(exit) => {
@@ -475,7 +486,10 @@ fn end_with_this_program(child: &Child) {
         )
     };
     if let Err(error) = joined {
-        log::debug!("process {} does not end with gevrek by itself: {error}", child.id());
+        log::debug!(
+            "process {} does not end with gevrek by itself: {error}",
+            child.id()
+        );
     }
 }
 
@@ -545,7 +559,10 @@ mod tests {
         assert!(manager.restart("notes").is_err());
         assert!(manager.records["notes"].next_launch.is_none());
         // Switched on by a reload: due to be started.
-        let on = StartupProfile { enabled: true, ..off };
+        let on = StartupProfile {
+            enabled: true,
+            ..off
+        };
         manager.configure(&[on], true);
         assert!(manager.records["notes"].next_launch.is_some());
     }

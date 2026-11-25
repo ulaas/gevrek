@@ -35,7 +35,11 @@ impl Art {
         use std::hash::{Hash, Hasher};
         let picture = image::load_from_memory(bytes).ok()?;
         let small = picture
-            .resize_to_fill(Self::SIDE, Self::SIDE, image::imageops::FilterType::Triangle)
+            .resize_to_fill(
+                Self::SIDE,
+                Self::SIDE,
+                image::imageops::FilterType::Triangle,
+            )
             .to_rgba8();
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         bytes.hash(&mut hasher);
@@ -71,7 +75,10 @@ pub fn open_studio(page: &str) {
         .and_then(|own| Some(own.parent()?.join(&name)))
         .filter(|studio| studio.is_file())
         .unwrap_or_else(|| name.into());
-    match std::process::Command::new(studio).args(["--page", page]).spawn() {
+    match std::process::Command::new(studio)
+        .args(["--page", page])
+        .spawn()
+    {
         // Waited for on a thread of its own: one that is not stays in the
         // process table, dead, for as long as the shell runs.
         Ok(mut child) => {
@@ -311,16 +318,20 @@ enum Switch {
 
 /// A tile: its switch, its sign, its name, how it stands, whether it is
 /// on, what it opens, and whether the system is still following a press.
-type Tile = (Switch, &'static str, &'static str, String, bool, Option<Detail>, bool);
+type Tile = (
+    Switch,
+    &'static str,
+    &'static str,
+    String,
+    bool,
+    Option<Detail>,
+    bool,
+);
 
 /// The tiles this machine has, in their order: each with its sign, its
 /// name, how it stands, whether it is on, what it opens, and whether the
 /// system is still following a press.
-fn tiles_of(
-    facts: &Facts,
-    held: &mut Held,
-    now: std::time::Instant,
-) -> Vec<Tile> {
+fn tiles_of(facts: &Facts, held: &mut Held, now: std::time::Instant) -> Vec<Tile> {
     let mut tiles = Vec::new();
     match (&facts.wifi, &facts.network) {
         (Some(wifi), _) => {
@@ -340,7 +351,11 @@ fn tiles_of(
                     _ => "Not on a network".to_string(),
                 },
             };
-            let sign = if on { icons::WIFI_HIGH } else { icons::WIFI_SLASH };
+            let sign = if on {
+                icons::WIFI_HIGH
+            } else {
+                icons::WIFI_SLASH
+            };
             tiles.push((
                 Switch::Wifi,
                 sign,
@@ -357,7 +372,11 @@ fn tiles_of(
                 (true, false) => (icons::PLUGS_CONNECTED, network.name.as_str()),
                 (false, _) => (icons::WIFI_SLASH, "Not on a network"),
             };
-            let state = if state.is_empty() { "On a network" } else { state };
+            let state = if state.is_empty() {
+                "On a network"
+            } else {
+                state
+            };
             tiles.push((
                 Switch::Network,
                 sign,
@@ -771,7 +790,9 @@ fn pill(
         });
         if left || right {
             let by = (high - low) / 20.0;
-            *value = (*value + if right { by } else { -by }).clamp(low, high).round();
+            *value = (*value + if right { by } else { -by })
+                .clamp(low, high)
+                .round();
             slider.mark_changed();
         }
     }
@@ -791,7 +812,10 @@ fn pill(
     );
     let filled = egui::Rect::from_min_max(
         rect.min,
-        egui::pos2(egui::lerp(along.min..=along.max, part) + 6.0 * part, rect.bottom()),
+        egui::pos2(
+            egui::lerp(along.min..=along.max, part) + 6.0 * part,
+            rect.bottom(),
+        ),
     );
     let fill = if dim {
         theme::mix(palette.control_active(), palette.text, 0.10)
@@ -799,7 +823,11 @@ fn pill(
         theme::mix(palette.control, palette.accent, 0.80 + 0.12 * hot)
     };
     painter.rect_filled(filled, 13.0, fill);
-    let on_fill = if dim { palette.muted } else { palette.on_accent() };
+    let on_fill = if dim {
+        palette.muted
+    } else {
+        palette.on_accent()
+    };
     painter.text(
         sign_at.center(),
         egui::Align2::CENTER_CENTER,
@@ -847,7 +875,11 @@ fn round_button(
 ) -> bool {
     let rect = egui::Rect::from_center_size(centre, egui::Vec2::splat(radius * 2.0));
     let pressed = ui
-        .interact(rect, ui.scope_id().with(("playing", hint)), egui::Sense::click())
+        .interact(
+            rect,
+            ui.scope_id().with(("playing", hint)),
+            egui::Sense::click(),
+        )
         .on_hover_text(hint);
     let hot = ui
         .ctx()
@@ -867,7 +899,11 @@ fn round_button(
         egui::Align2::CENTER_CENTER,
         sign,
         egui::FontId::proportional(if filled { 17.0 } else { 16.0 }),
-        if filled { palette.on_accent() } else { palette.text },
+        if filled {
+            palette.on_accent()
+        } else {
+            palette.text
+        },
     );
     pressed.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, hint));
     pressed.clicked()
@@ -888,10 +924,8 @@ fn now_playing(
     use gevrek_ui::controls;
     let playing = playing.filter(|playing| !playing.line().trim().is_empty());
     let Some(playing) = playing else {
-        let (rect, _) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width(), PILL),
-            egui::Sense::hover(),
-        );
+        let (rect, _) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), PILL), egui::Sense::hover());
         ui.painter().rect(
             rect,
             13.0,
@@ -930,10 +964,8 @@ fn now_playing(
 
     const HIGH: f32 = 92.0;
     const PICTURE: f32 = 68.0;
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), HIGH),
-        egui::Sense::hover(),
-    );
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), HIGH), egui::Sense::hover());
     ui.painter().rect(
         rect,
         14.0,
@@ -955,7 +987,8 @@ fn now_playing(
         match known {
             Some((_, texture)) => texture,
             None => {
-                let image = egui::ColorImage::from_rgba_unmultiplied([art.side, art.side], &art.rgba);
+                let image =
+                    egui::ColorImage::from_rgba_unmultiplied([art.side, art.side], &art.rgba);
                 let texture =
                     ui.ctx()
                         .load_texture("what is playing", image, egui::TextureOptions::LINEAR);
@@ -1016,7 +1049,8 @@ fn now_playing(
         room,
     );
     let top = rect.top() + 12.0;
-    ui.painter().galley(egui::pos2(left, top), title.clone(), palette.text);
+    ui.painter()
+        .galley(egui::pos2(left, top), title.clone(), palette.text);
     ui.painter().galley(
         egui::pos2(left, top + title.size().y + 1.0),
         by,
@@ -1054,7 +1088,10 @@ fn now_playing(
             name_room,
         );
         ui.painter().galley(
-            egui::pos2(rect.right() - 12.0 - name.size().x, line - name.size().y / 2.0),
+            egui::pos2(
+                rect.right() - 12.0 - name.size().x,
+                line - name.size().y / 2.0,
+            ),
             name,
             palette.faint,
         );
@@ -1109,8 +1146,12 @@ pub fn draw(
                         {
                             asked.push(Ask::Close);
                         }
-                        if widgets::icon_button(ui, icons::GEAR_SIX, "Set the desktop up: gevrek studio")
-                            .clicked()
+                        if widgets::icon_button(
+                            ui,
+                            icons::GEAR_SIX,
+                            "Set the desktop up: gevrek studio",
+                        )
+                        .clicked()
                         {
                             asked.push(Ask::Settings);
                         }
@@ -1124,250 +1165,259 @@ pub fn draw(
                 // over what is scrolled: the part that scrolls reaches that
                 // much further to the right than what is in it.)
                 let inside = ui.available_width();
-                let part = egui::Rect::from_min_size(
-                    ui.cursor().min,
-                    egui::vec2(inside + 12.0, room),
-                );
+                let part =
+                    egui::Rect::from_min_size(ui.cursor().min, egui::vec2(inside + 12.0, room));
                 ui.scope_builder(egui::UiBuilder::new().max_rect(part), |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("the control centre")
-                    .max_height(room)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.set_max_width(inside);
-                        ui.spacing_mut().item_spacing.y = 8.0;
-                        let now = std::time::Instant::now();
+                    egui::ScrollArea::vertical()
+                        .id_salt("the control centre")
+                        .max_height(room)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.set_max_width(inside);
+                            ui.spacing_mut().item_spacing.y = 8.0;
+                            let now = std::time::Instant::now();
 
-                        // What is on and what is off.
-                        let tiles = tiles_of(facts, held, now);
-                        let wide = (ui.available_width() - BETWEEN) / 2.0;
-                        for pair in tiles.chunks(2) {
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = BETWEEN;
-                                for (which, icon, name, state, on, more, busy) in pair {
-                                    let pressed = controls::tile(
-                                        ui,
-                                        egui::vec2(wide, TILE),
-                                        &Tile {
-                                            icon,
-                                            name,
-                                            state,
-                                            on: *on,
-                                            more: more.map(|detail| held.open == Some(detail)),
-                                            busy: *busy,
-                                        },
-                                    );
-                                    if let (true, Some(detail)) = (pressed.more, more) {
-                                        held.open = (held.open != Some(*detail)).then_some(*detail);
-                                    }
-                                    if !pressed.switched {
-                                        continue;
-                                    }
-                                    match which {
-                                        // (What is chosen is seen on the
-                                        // tile; a press brings the list to
-                                        // choose from. A radio that is on is
-                                        // not switched off by a press meant
-                                        // for its list: the list's first
-                                        // line does that. One that is off
-                                        // is switched on, and its list
-                                        // comes with it.)
-                                        Switch::Wifi => {
-                                            if *on {
-                                                held.open = (held.open != Some(Detail::Wifi))
-                                                    .then_some(Detail::Wifi);
-                                            } else {
-                                                held.wifi_switched.ask(true, now);
-                                                asked.push(Ask::Wifi(true));
-                                                held.open = Some(Detail::Wifi);
-                                            }
+                            // What is on and what is off.
+                            let tiles = tiles_of(facts, held, now);
+                            let wide = (ui.available_width() - BETWEEN) / 2.0;
+                            for pair in tiles.chunks(2) {
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = BETWEEN;
+                                    for (which, icon, name, state, on, more, busy) in pair {
+                                        let pressed = controls::tile(
+                                            ui,
+                                            egui::vec2(wide, TILE),
+                                            &Tile {
+                                                icon,
+                                                name,
+                                                state,
+                                                on: *on,
+                                                more: more.map(|detail| held.open == Some(detail)),
+                                                busy: *busy,
+                                            },
+                                        );
+                                        if let (true, Some(detail)) = (pressed.more, more) {
+                                            held.open =
+                                                (held.open != Some(*detail)).then_some(*detail);
                                         }
-                                        Switch::Bluetooth => {
-                                            if *on {
-                                                held.open = (held.open != Some(Detail::Bluetooth))
+                                        if !pressed.switched {
+                                            continue;
+                                        }
+                                        match which {
+                                            // (What is chosen is seen on the
+                                            // tile; a press brings the list to
+                                            // choose from. A radio that is on is
+                                            // not switched off by a press meant
+                                            // for its list: the list's first
+                                            // line does that. One that is off
+                                            // is switched on, and its list
+                                            // comes with it.)
+                                            Switch::Wifi => {
+                                                if *on {
+                                                    held.open = (held.open != Some(Detail::Wifi))
+                                                        .then_some(Detail::Wifi);
+                                                } else {
+                                                    held.wifi_switched.ask(true, now);
+                                                    asked.push(Ask::Wifi(true));
+                                                    held.open = Some(Detail::Wifi);
+                                                }
+                                            }
+                                            Switch::Bluetooth => {
+                                                if *on {
+                                                    held.open = (held.open
+                                                        != Some(Detail::Bluetooth))
                                                     .then_some(Detail::Bluetooth);
-                                            } else {
-                                                held.bluetooth_switched.ask(true, now);
-                                                asked.push(Ask::Bluetooth(true));
-                                                held.open = Some(Detail::Bluetooth);
+                                                } else {
+                                                    held.bluetooth_switched.ask(true, now);
+                                                    asked.push(Ask::Bluetooth(true));
+                                                    held.open = Some(Detail::Bluetooth);
+                                                }
                                             }
+                                            Switch::Quiet => asked.push(Ask::Quiet(!on)),
+                                            Switch::NightLight => asked.push(Ask::NightLight),
+                                            Switch::Record => asked.push(Ask::Record),
+                                            // (A choice, not a switch: a press
+                                            // opens it.)
+                                            Switch::Profiles => {
+                                                held.open = (held.open != Some(Detail::Profiles))
+                                                    .then_some(Detail::Profiles);
+                                            }
+                                            Switch::Network => {}
                                         }
-                                        Switch::Quiet => asked.push(Ask::Quiet(!on)),
-                                        Switch::NightLight => asked.push(Ask::NightLight),
-                                        Switch::Record => asked.push(Ask::Record),
-                                        // (A choice, not a switch: a press
-                                        // opens it.)
-                                        Switch::Profiles => {
-                                            held.open = (held.open != Some(Detail::Profiles))
-                                                .then_some(Detail::Profiles);
-                                        }
-                                        Switch::Network => {}
                                     }
-                                }
-                            });
-                        }
-                        // (A password that is being typed keeps its list open.)
-                        if held.wifi_password.is_some() {
-                            held.open = Some(Detail::Wifi);
-                        }
-                        detail(ui, palette, facts, held, &mut asked);
-
-                        // What is playing.
-                        now_playing(ui, palette, facts.playing.as_ref(), &mut asked);
-
-                        // The brightness, on a machine that has one to set.
-                        if let Some(percent) = facts.brightness {
-                            let percent = held.brightness_asked.level(percent, now);
-                            if held.brightness_asked.waiting() {
-                                ui.ctx()
-                                    .request_repaint_after(std::time::Duration::from_millis(100));
+                                });
                             }
-                            let mut value = held.brightness.unwrap_or(percent as f32);
-                            let said = format!("{} %", value.round() as u32);
-                            let moved = pill(
-                                ui,
-                                palette,
-                                icons::SUN,
-                                "How bright the display is",
-                                &mut value,
-                                1.0..=100.0,
-                                &said,
-                                false,
-                            );
-                            if moved.slider.dragged() {
-                                held.brightness = Some(value);
-                            } else if moved.slider.drag_stopped() || moved.slider.changed() {
-                                held.brightness = None;
-                                if let Some(step) = step_to(percent, value) {
-                                    held.brightness_asked.ask(value.round() as u32, now);
-                                    asked.push(Ask::Brightness(step));
-                                }
+                            // (A password that is being typed keeps its list open.)
+                            if held.wifi_password.is_some() {
+                                held.open = Some(Detail::Wifi);
                             }
-                        }
+                            detail(ui, palette, facts, held, &mut asked);
 
-                        // The sound.
-                        match facts.volume {
-                            Some((percent, muted)) => {
-                                // (Where it was put, until the system has it there.)
-                                let percent = held.volume_asked.level(percent, now);
-                                if held.volume_asked.waiting() {
+                            // What is playing.
+                            now_playing(ui, palette, facts.playing.as_ref(), &mut asked);
+
+                            // The brightness, on a machine that has one to set.
+                            if let Some(percent) = facts.brightness {
+                                let percent = held.brightness_asked.level(percent, now);
+                                if held.brightness_asked.waiting() {
                                     ui.ctx().request_repaint_after(
                                         std::time::Duration::from_millis(100),
                                     );
                                 }
-                                let mut value = held.volume.unwrap_or(percent as f32);
+                                let mut value = held.brightness.unwrap_or(percent as f32);
                                 let said = format!("{} %", value.round() as u32);
                                 let moved = pill(
                                     ui,
                                     palette,
-                                    crate::panel::sound_icon(percent, muted),
-                                    if muted { "Let it be heard" } else { "Mute" },
+                                    icons::SUN,
+                                    "How bright the display is",
                                     &mut value,
-                                    0.0..=100.0,
+                                    1.0..=100.0,
                                     &said,
-                                    muted,
+                                    false,
                                 );
-                                if moved.sign {
-                                    asked.push(Ask::Mute);
-                                }
                                 if moved.slider.dragged() {
-                                    held.volume = Some(value);
+                                    held.brightness = Some(value);
                                 } else if moved.slider.drag_stopped() || moved.slider.changed() {
-                                    held.volume = None;
+                                    held.brightness = None;
                                     if let Some(step) = step_to(percent, value) {
-                                        held.volume_asked.ask(value.round() as u32, now);
-                                        asked.push(Ask::Volume(step));
+                                        held.brightness_asked.ask(value.round() as u32, now);
+                                        asked.push(Ask::Brightness(step));
                                     }
                                 }
-                                // Which device plays, where there is a choice.
-                                if let Some(device) = devices(
-                                    ui,
-                                    "Plays on",
-                                    "outputs",
-                                    &facts.outputs,
-                                    &mut held.outputs_open,
-                                ) {
-                                    asked.push(Ask::Output(device));
-                                }
-                                // The programs that play, each by itself:
-                                // one in its own line; several behind one
-                                // line that names them and opens them.
-                                if facts.streams.len() < 2 {
-                                    held.streams_open = false;
-                                } else {
-                                    let names = facts
-                                        .streams
-                                        .iter()
-                                        .map(|stream| stream.name.as_str())
-                                        .collect::<Vec<_>>()
-                                        .join(", ");
-                                    if controls::chosen_line(ui, "Programs", &names, held.streams_open)
-                                        .clicked()
-                                    {
-                                        held.streams_open = !held.streams_open;
+                            }
+
+                            // The sound.
+                            match facts.volume {
+                                Some((percent, muted)) => {
+                                    // (Where it was put, until the system has it there.)
+                                    let percent = held.volume_asked.level(percent, now);
+                                    if held.volume_asked.waiting() {
+                                        ui.ctx().request_repaint_after(
+                                            std::time::Duration::from_millis(100),
+                                        );
                                     }
-                                }
-                                let shown = facts.streams.len() < 2 || held.streams_open;
-                                for stream in facts.streams.iter().filter(|_| shown) {
-                                    let held_here = held
-                                        .stream
-                                        .filter(|(id, _)| *id == stream.id)
-                                        .map(|(_, value)| value);
-                                    let mut value =
-                                        held_here.unwrap_or(stream.level.percent.min(100) as f32);
-                                    let moved = controls::level(
+                                    let mut value = held.volume.unwrap_or(percent as f32);
+                                    let said = format!("{} %", value.round() as u32);
+                                    let moved = pill(
                                         ui,
-                                        crate::panel::sound_icon(
-                                            stream.level.percent,
-                                            stream.level.muted,
-                                        ),
-                                        if stream.level.muted {
-                                            "Let it be heard"
-                                        } else {
-                                            "Mute this program"
-                                        },
-                                        Some(&stream.name),
+                                        palette,
+                                        crate::panel::sound_icon(percent, muted),
+                                        if muted { "Let it be heard" } else { "Mute" },
                                         &mut value,
                                         0.0..=100.0,
-                                        None,
+                                        &said,
+                                        muted,
                                     );
                                     if moved.sign {
-                                        asked.push(Ask::StreamMute(stream.id));
+                                        asked.push(Ask::Mute);
                                     }
                                     if moved.slider.dragged() {
-                                        held.stream = Some((stream.id, value));
+                                        held.volume = Some(value);
                                     } else if moved.slider.drag_stopped() || moved.slider.changed()
                                     {
-                                        held.stream = None;
-                                        if value.round() as u32 != stream.level.percent {
-                                            asked
-                                                .push(Ask::Stream(stream.id, value.round() as u32));
+                                        held.volume = None;
+                                        if let Some(step) = step_to(percent, value) {
+                                            held.volume_asked.ask(value.round() as u32, now);
+                                            asked.push(Ask::Volume(step));
                                         }
                                     }
+                                    // Which device plays, where there is a choice.
+                                    if let Some(device) = devices(
+                                        ui,
+                                        "Plays on",
+                                        "outputs",
+                                        &facts.outputs,
+                                        &mut held.outputs_open,
+                                    ) {
+                                        asked.push(Ask::Output(device));
+                                    }
+                                    // The programs that play, each by itself:
+                                    // one in its own line; several behind one
+                                    // line that names them and opens them.
+                                    if facts.streams.len() < 2 {
+                                        held.streams_open = false;
+                                    } else {
+                                        let names = facts
+                                            .streams
+                                            .iter()
+                                            .map(|stream| stream.name.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join(", ");
+                                        if controls::chosen_line(
+                                            ui,
+                                            "Programs",
+                                            &names,
+                                            held.streams_open,
+                                        )
+                                        .clicked()
+                                        {
+                                            held.streams_open = !held.streams_open;
+                                        }
+                                    }
+                                    let shown = facts.streams.len() < 2 || held.streams_open;
+                                    for stream in facts.streams.iter().filter(|_| shown) {
+                                        let held_here = held
+                                            .stream
+                                            .filter(|(id, _)| *id == stream.id)
+                                            .map(|(_, value)| value);
+                                        let mut value = held_here
+                                            .unwrap_or(stream.level.percent.min(100) as f32);
+                                        let moved = controls::level(
+                                            ui,
+                                            crate::panel::sound_icon(
+                                                stream.level.percent,
+                                                stream.level.muted,
+                                            ),
+                                            if stream.level.muted {
+                                                "Let it be heard"
+                                            } else {
+                                                "Mute this program"
+                                            },
+                                            Some(&stream.name),
+                                            &mut value,
+                                            0.0..=100.0,
+                                            None,
+                                        );
+                                        if moved.sign {
+                                            asked.push(Ask::StreamMute(stream.id));
+                                        }
+                                        if moved.slider.dragged() {
+                                            held.stream = Some((stream.id, value));
+                                        } else if moved.slider.drag_stopped()
+                                            || moved.slider.changed()
+                                        {
+                                            held.stream = None;
+                                            if value.round() as u32 != stream.level.percent {
+                                                asked.push(Ask::Stream(
+                                                    stream.id,
+                                                    value.round() as u32,
+                                                ));
+                                            }
+                                        }
+                                    }
+                                    // Which device records, where there is a choice.
+                                    if let Some(device) = devices(
+                                        ui,
+                                        "Records from",
+                                        "inputs",
+                                        &facts.inputs,
+                                        &mut held.inputs_open,
+                                    ) {
+                                        asked.push(Ask::Input(device));
+                                    }
                                 }
-                                // Which device records, where there is a choice.
-                                if let Some(device) = devices(
-                                    ui,
-                                    "Records from",
-                                    "inputs",
-                                    &facts.inputs,
-                                    &mut held.inputs_open,
-                                ) {
-                                    asked.push(Ask::Input(device));
+                                None => {
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{}  No sound server answers",
+                                            icons::SPEAKER_X
+                                        ))
+                                        .color(palette.muted),
+                                    );
                                 }
                             }
-                            None => {
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{}  No sound server answers",
-                                        icons::SPEAKER_X
-                                    ))
-                                    .color(palette.muted),
-                                );
-                            }
-                        }
-
-                    });
+                        });
                 });
 
                 // The foot: always in sight. (As wide as what is above it,
@@ -1439,11 +1489,27 @@ mod tests {
                 device(0, "Headphones (USB Audio Device)", false),
                 device(1, "Speakers (High Definition Audio)", true),
                 device(2, "27GL850 (NVIDIA High Definition Audio)", false),
-                device(3, "Speakers (2- Blackmagic DeckLink 8K Pro (4) Audio)", false),
-                device(4, "Speakers (2- Blackmagic DeckLink 8K Pro (2) Audio)", false),
-                device(5, "Speakers (2- Blackmagic DeckLink 8K Pro (3) Audio)", false),
+                device(
+                    3,
+                    "Speakers (2- Blackmagic DeckLink 8K Pro (4) Audio)",
+                    false,
+                ),
+                device(
+                    4,
+                    "Speakers (2- Blackmagic DeckLink 8K Pro (2) Audio)",
+                    false,
+                ),
+                device(
+                    5,
+                    "Speakers (2- Blackmagic DeckLink 8K Pro (3) Audio)",
+                    false,
+                ),
                 device(6, "Speakers (Steam Streaming Speakers)", false),
-                device(7, "Speakers (2- Blackmagic DeckLink 8K Pro (1) Audio)", false),
+                device(
+                    7,
+                    "Speakers (2- Blackmagic DeckLink 8K Pro (1) Audio)",
+                    false,
+                ),
             ],
             inputs: vec![
                 device(0, "Webcam 1 (NDI Webcam Audio)", false),
@@ -1453,10 +1519,26 @@ mod tests {
                 device(4, "Microphone (Steam Streaming Microphone)", false),
                 device(5, "Microphone (C922 Pro Stream Webcam)", false),
                 device(6, "Webcam 2 (NDI Webcam Audio)", false),
-                device(7, "Line In (2- Blackmagic DeckLink 8K Pro (3) Audio)", false),
-                device(8, "Line In (2- Blackmagic DeckLink 8K Pro (2) Audio)", false),
-                device(9, "Line In (2- Blackmagic DeckLink 8K Pro (4) Audio)", false),
-                device(10, "Line In (2- Blackmagic DeckLink 8K Pro (1) Audio)", false),
+                device(
+                    7,
+                    "Line In (2- Blackmagic DeckLink 8K Pro (3) Audio)",
+                    false,
+                ),
+                device(
+                    8,
+                    "Line In (2- Blackmagic DeckLink 8K Pro (2) Audio)",
+                    false,
+                ),
+                device(
+                    9,
+                    "Line In (2- Blackmagic DeckLink 8K Pro (4) Audio)",
+                    false,
+                ),
+                device(
+                    10,
+                    "Line In (2- Blackmagic DeckLink 8K Pro (1) Audio)",
+                    false,
+                ),
             ],
             streams: vec![
                 stream(11, "firefox", 100, false),
@@ -1541,10 +1623,13 @@ mod tests {
             let (one, other) = text.split_once(by)?;
             Some((one.trim().parse().ok()?, other.trim().parse().ok()?))
         };
-        let out = std::path::PathBuf::from(said("GEVREK_LOOK_OUT").expect("GEVREK_LOOK_OUT: a file"));
+        let out =
+            std::path::PathBuf::from(said("GEVREK_LOOK_OUT").expect("GEVREK_LOOK_OUT: a file"));
         let size = said("GEVREK_LOOK_SIZE")
             .and_then(|text| pair(&text, 'x'))
-            .map_or((WIDTH, 1000), |(width, height)| (width as u32, height as u32));
+            .map_or((WIDTH, 1000), |(width, height)| {
+                (width as u32, height as u32)
+            });
         let press = said("GEVREK_LOOK_PRESS").and_then(|text| pair(&text, ','));
         let facts = match said("GEVREK_LOOK").as_deref() {
             Some("plain") => Facts {
@@ -1597,7 +1682,13 @@ mod tests {
                 }
             }
             pixels = painter.frame_of(&context, 10.0 + f64::from(step) * 0.4, events, |ui| {
-                draw(ui, &palette, &facts, &mut held, &crate::frost::Look::plain());
+                draw(
+                    ui,
+                    &palette,
+                    &facts,
+                    &mut held,
+                    &crate::frost::Look::plain(),
+                );
             });
         }
         painter.save(&pixels, &out).expect("the picture is written");
@@ -1619,7 +1710,14 @@ mod tests {
         let said: Vec<&str> = all.iter().map(|(name, _, _)| *name).collect();
         assert_eq!(
             said,
-            ["Wireless", "Bluetooth", "Do not disturb", "Night light", "Power", "Record screen"]
+            [
+                "Wireless",
+                "Bluetooth",
+                "Do not disturb",
+                "Night light",
+                "Power",
+                "Record screen"
+            ]
         );
         assert_eq!(all[0], ("Wireless", "gevrek-5G".to_string(), true));
         assert_eq!(all[1], ("Bluetooth", "Studio Headphones".to_string(), true));
@@ -1669,7 +1767,13 @@ mod tests {
             for _ in 0..3 {
                 let mut asked = Vec::new();
                 let mut drawn = context.run_ui(egui::RawInput::default(), |ui| {
-                    asked = draw(ui, &palette, &facts, &mut held, &crate::frost::Look::plain());
+                    asked = draw(
+                        ui,
+                        &palette,
+                        &facts,
+                        &mut held,
+                        &crate::frost::Look::plain(),
+                    );
                 });
                 drawn.textures_delta.clear();
                 assert_eq!(asked, []);

@@ -115,6 +115,12 @@ mod tests {
     fn a_file_is_named_by_the_end_of_its_path_on_both_systems() {
         assert_eq!(Item::file("C:\\Users\\ada\\Desktop\\a.txt").name, "a.txt");
         assert_eq!(Item::file("/home/ada/Desktop/a.txt").name, "a.txt");
-        assert_eq!(Item::file("/home/ada/Desktop/a.txt").facts.extension.as_deref(), Some("txt"));
+        assert_eq!(
+            Item::file("/home/ada/Desktop/a.txt")
+                .facts
+                .extension
+                .as_deref(),
+            Some("txt")
+        );
     }
 }

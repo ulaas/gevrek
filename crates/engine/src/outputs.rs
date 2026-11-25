@@ -113,10 +113,20 @@ pub fn number_same_names(monitors: &mut [MonitorInfo]) {
 /// it is.
 pub fn number_same_stable_ids(monitors: &mut [MonitorInfo]) {
     // (The rule itself is written once, beside the ids: `edid`.)
-    let mut ids: Vec<String> = monitors.iter().map(|monitor| monitor.stable_id.clone()).collect();
+    let mut ids: Vec<String> = monitors
+        .iter()
+        .map(|monitor| monitor.stable_id.clone())
+        .collect();
     let places: Vec<(String, i32, i32, isize)> = monitors
         .iter()
-        .map(|monitor| (monitor.device_path.clone(), monitor.x, monitor.y, monitor.handle.0))
+        .map(|monitor| {
+            (
+                monitor.device_path.clone(),
+                monitor.x,
+                monitor.y,
+                monitor.handle.0,
+            )
+        })
         .collect();
     edid::number_same_ids(&mut ids, &places);
     for (monitor, id) in monitors.iter_mut().zip(ids) {
@@ -1519,7 +1529,10 @@ mod tests {
         outputs.set_panel_seen(true);
         let (first, second) = (MonitorHandle(1), MonitorHandle(2));
         let room = |outputs: &Outputs, monitor| {
-            1040 - outputs.get_adjusted_work_area(monitor, &desktop).unwrap().height
+            1040 - outputs
+                .get_adjusted_work_area(monitor, &desktop)
+                .unwrap()
+                .height
         };
 
         // Pixels that count the scale in already (a compositor): as given.
@@ -1875,7 +1888,11 @@ mod tests {
         );
     }
 
-    fn shell_room(display: &str, side: crate::shell_room::Side, depth: i32) -> crate::shell_room::ShellRoom {
+    fn shell_room(
+        display: &str,
+        side: crate::shell_room::Side,
+        depth: i32,
+    ) -> crate::shell_room::ShellRoom {
         crate::shell_room::ShellRoom {
             display: display.to_string(),
             side,
@@ -1901,7 +1918,8 @@ mod tests {
         let desktop = crate::testing::FakeDesktop::new(MonitorHandle(1));
         let mut outputs = two_displays();
         let (first, second) = (MonitorHandle(1), MonitorHandle(2));
-        let whole = |outputs: &Outputs, monitor| outputs.get_adjusted_work_area(monitor, &desktop).unwrap();
+        let whole =
+            |outputs: &Outputs, monitor| outputs.get_adjusted_work_area(monitor, &desktop).unwrap();
         let (first_whole, second_whole) = (whole(&outputs, first), whole(&outputs, second));
 
         // A zone at the right of the second display: that display's
@@ -1910,7 +1928,10 @@ mod tests {
         assert_eq!(changed, [second]);
         assert_eq!(whole(&outputs, first), first_whole);
         let kept = whole(&outputs, second);
-        assert_eq!((kept.x, kept.y, kept.height), (second_whole.x, second_whole.y, second_whole.height));
+        assert_eq!(
+            (kept.x, kept.y, kept.height),
+            (second_whole.x, second_whole.y, second_whole.height)
+        );
         assert_eq!(kept.width, second_whole.width - 280);
         assert_eq!(outputs.shell_room_of(second).right, 280);
         // What was taken is said, for the shell to read back.
@@ -1921,7 +1942,10 @@ mod tests {
                 ..ReservedArea::default()
             }
         );
-        assert_eq!(outputs.shell_room_taken(first, &desktop), ReservedArea::default());
+        assert_eq!(
+            outputs.shell_room_taken(first, &desktop),
+            ReservedArea::default()
+        );
 
         // The same told again changes nothing; another side does.
         assert!(outputs
@@ -1933,7 +1957,10 @@ mod tests {
         ]);
         assert_eq!(changed, [first]);
         let kept = whole(&outputs, first);
-        assert_eq!((kept.y, kept.height), (first_whole.y + 96, first_whole.height - 96));
+        assert_eq!(
+            (kept.y, kept.height),
+            (first_whole.y + 96, first_whole.height - 96)
+        );
 
         // The shell is gone, or what it said is stale: all given back.
         let changed = outputs.set_shell_room(&[]);
@@ -1948,7 +1975,11 @@ mod tests {
         let desktop = crate::testing::FakeDesktop::new(MonitorHandle(1));
         let mut outputs = two_displays();
         let before: Vec<Rect> = [1, 2]
-            .map(|handle| outputs.get_adjusted_work_area(MonitorHandle(handle), &desktop).unwrap())
+            .map(|handle| {
+                outputs
+                    .get_adjusted_work_area(MonitorHandle(handle), &desktop)
+                    .unwrap()
+            })
             .to_vec();
         let changed = outputs.set_shell_room(&[
             shell_room("edid:GONE-9", Side::Left, 400),
@@ -1956,14 +1987,23 @@ mod tests {
         ]);
         assert!(changed.is_empty());
         let after: Vec<Rect> = [1, 2]
-            .map(|handle| outputs.get_adjusted_work_area(MonitorHandle(handle), &desktop).unwrap())
+            .map(|handle| {
+                outputs
+                    .get_adjusted_work_area(MonitorHandle(handle), &desktop)
+                    .unwrap()
+            })
             .to_vec();
         assert_eq!(after, before);
         // A display without a lasting id is never the one that is meant.
         let mut nameless = Outputs::new();
         nameless.set_monitors_only(vec![named(1, "Monitor A", "DP-1", 0)]);
-        assert!(nameless.set_shell_room(&[shell_room("", Side::Top, 400)]).is_empty());
-        assert_eq!(nameless.shell_room_of(MonitorHandle(1)), ReservedArea::default());
+        assert!(nameless
+            .set_shell_room(&[shell_room("", Side::Top, 400)])
+            .is_empty());
+        assert_eq!(
+            nameless.shell_room_of(MonitorHandle(1)),
+            ReservedArea::default()
+        );
     }
 
     #[test]
@@ -1998,7 +2038,10 @@ mod tests {
         let least = outputs.get_adjusted_work_area(first, &desktop).unwrap();
         assert!(least.width >= 1 && least.height >= 1);
         // And no more is said to be taken than was there.
-        assert_eq!(outputs.shell_room_taken(first, &desktop).left, 1920 - least.width);
+        assert_eq!(
+            outputs.shell_room_taken(first, &desktop).left,
+            1920 - least.width
+        );
     }
 
     #[test]

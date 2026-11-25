@@ -268,12 +268,12 @@ impl Executor {
                 // (A window that has gone is arranged nowhere: a graph
                 // may hand on the window that closed, and it was given a
                 // place for good.)
-                if let Some(Value::WindowHandle(handle)) = self
-                    .get_input_value(node_id, 1)
-                    .filter(|value| match value {
-                        Value::WindowHandle(handle) => queries(window_manager).exists(*handle),
-                        _ => true,
-                    })
+                if let Some(Value::WindowHandle(handle)) =
+                    self.get_input_value(node_id, 1)
+                        .filter(|value| match value {
+                            Value::WindowHandle(handle) => queries(window_manager).exists(*handle),
+                            _ => true,
+                        })
                 {
                     if self.is_startup_phase
                         && matches!(mode, gevrek_model::graph::WindowMode::Auto)
@@ -390,9 +390,12 @@ impl Executor {
                                 return Ok(NodeDone::Early);
                             }
                         }
-                    } else if let Some(keyboard_monitor) = self
-                        .keyboard_output_for_new_tile(window_manager, monitor_manager, handle, mode)
-                    {
+                    } else if let Some(keyboard_monitor) = self.keyboard_output_for_new_tile(
+                        window_manager,
+                        monitor_manager,
+                        handle,
+                        mode,
+                    ) {
                         // Where the system opens a window on a display of
                         // its own choosing (Windows: where the program
                         // last was), one that is to be tiled goes to the

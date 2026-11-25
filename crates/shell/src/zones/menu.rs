@@ -29,7 +29,16 @@ const BETWEEN: f32 = 2.0;
 
 /// How large a menu of these lines is, in points.
 pub fn menu_size(lines: &[Line]) -> egui::Vec2 {
-    let high: f32 = lines.iter().map(|line| if *line == Line::Gap { GAP_HEIGHT } else { LINE_HEIGHT + BETWEEN }).sum();
+    let high: f32 = lines
+        .iter()
+        .map(|line| {
+            if *line == Line::Gap {
+                GAP_HEIGHT
+            } else {
+                LINE_HEIGHT + BETWEEN
+            }
+        })
+        .sum();
     vec2(MENU_WIDTH, 2.0 * MARGIN + high)
 }
 
@@ -40,7 +49,11 @@ pub fn rows(lines: &[Line]) -> Vec<Rect> {
     lines
         .iter()
         .map(|line| {
-            let high = if *line == Line::Gap { GAP_HEIGHT - BETWEEN } else { LINE_HEIGHT };
+            let high = if *line == Line::Gap {
+                GAP_HEIGHT - BETWEEN
+            } else {
+                LINE_HEIGHT
+            };
             let row = Rect::from_min_size(pos2(MARGIN, top), vec2(MENU_WIDTH - 2.0 * MARGIN, high));
             top += high + BETWEEN;
             row
@@ -95,7 +108,9 @@ impl Level {
             (None, true) => (0..count).collect(),
             (None, false) => (0..count).rev().collect(),
             (Some(from), true) => (1..=count).map(|by| (from + by) % count).collect(),
-            (Some(from), false) => (1..=count).map(|by| (from + count - by % count) % count).collect(),
+            (Some(from), false) => (1..=count)
+                .map(|by| (from + count - by % count) % count)
+                .collect(),
         };
         order.into_iter().find(|line| self.can_choose(*line))
     }
@@ -128,7 +143,12 @@ impl Chain {
 
     fn push(&mut self, lines: Vec<Line>, by_keys: bool) {
         self.serials += 1;
-        let mut level = Level { serial: self.serials, lines, at: None, open: None };
+        let mut level = Level {
+            serial: self.serials,
+            lines,
+            at: None,
+            open: None,
+        };
         if by_keys {
             level.at = level.step(None, true);
         }
@@ -154,7 +174,12 @@ impl Chain {
     /// Open the menu a line leads to, beside its own; whatever was open
     /// from that menu goes first.
     fn open(&mut self, level: usize, line: usize, by_keys: bool) {
-        let Some(Line::Sub { lines, .. }) = self.levels.get(level).and_then(|menu| menu.lines.get(line)).cloned() else {
+        let Some(Line::Sub { lines, .. }) = self
+            .levels
+            .get(level)
+            .and_then(|menu| menu.lines.get(line))
+            .cloned()
+        else {
             return;
         };
         self.close_from(level + 1);
@@ -187,14 +212,21 @@ impl Chain {
         let changes = menu.leads_on(line) || menu.open.is_some();
         match self.resting {
             Some(resting) if resting.level == level && resting.line == line => {}
-            _ => self.resting = changes.then_some(Resting { level, line, since: now }),
+            _ => {
+                self.resting = changes.then_some(Resting {
+                    level,
+                    line,
+                    since: now,
+                })
+            }
         }
     }
 
     /// How long until the pointer has rested long enough, in seconds;
     /// none while nothing waits.
     pub fn rests_in(&self, now: f64) -> Option<f64> {
-        self.resting.map(|resting| (resting.since + REST - now).max(0.0))
+        self.resting
+            .map(|resting| (resting.since + REST - now).max(0.0))
     }
 
     /// Time has passed. Says whether the menus changed.
@@ -295,22 +327,39 @@ mod tests {
     use gevrek_zones::core::Command;
 
     fn does(name: &str) -> Does {
-        Does::Command(Command::Search { typed: name.to_string() })
+        Does::Command(Command::Search {
+            typed: name.to_string(),
+        })
     }
 
     fn choice(name: &str) -> Line {
-        Line::Choice { label: name.to_string(), marked: false, does: does(name) }
+        Line::Choice {
+            label: name.to_string(),
+            marked: false,
+            does: does(name),
+        }
     }
 
     fn sub(name: &str, lines: Vec<Line>) -> Line {
-        Line::Sub { label: name.to_string(), lines }
+        Line::Sub {
+            label: name.to_string(),
+            lines,
+        }
     }
 
     /// Rename / Shown ▸ (Grid, List, Order ▸ (Name, Date)) / gap / Look ▸ (Solid) / Away
     fn menu() -> Vec<Line> {
         vec![
             choice("Rename"),
-            sub("Shown", vec![choice("Grid"), choice("List"), Line::Gap, sub("Order", vec![choice("Name"), choice("Date")])]),
+            sub(
+                "Shown",
+                vec![
+                    choice("Grid"),
+                    choice("List"),
+                    Line::Gap,
+                    sub("Order", vec![choice("Name"), choice("Date")]),
+                ],
+            ),
             Line::Gap,
             sub("Look", vec![choice("Solid")]),
             choice("Away"),
@@ -327,7 +376,9 @@ mod tests {
         chain.pointed(0, Some(1), 10.0);
         assert_eq!(chain.levels.len(), 1, "not at once");
         assert!(!chain.rested(10.1));
-        assert!(chain.rests_in(10.1).is_some_and(|left| left > 0.0 && left < REST));
+        assert!(chain
+            .rests_in(10.1)
+            .is_some_and(|left| left > 0.0 && left < REST));
         assert!(chain.rested(10.0 + REST));
         assert_eq!(chain.levels.len(), 2);
         assert_eq!(open_lines(&chain), [Some(1), None]);
@@ -427,9 +478,17 @@ mod tests {
         chain.key(Key::Down);
         chain.key(Key::Into);
         assert_eq!(chain.levels.len(), 2);
-        assert_eq!(chain.levels[1].at, Some(0), "the keys are on its first line");
+        assert_eq!(
+            chain.levels[1].at,
+            Some(0),
+            "the keys are on its first line"
+        );
         chain.key(Key::Last);
-        assert_eq!(chain.key(Key::Choose), None, "Enter on a line with an arrow goes in");
+        assert_eq!(
+            chain.key(Key::Choose),
+            None,
+            "Enter on a line with an arrow goes in"
+        );
         assert_eq!(chain.levels.len(), 3);
         // Left: one back, and the keys are on the line that led there.
         chain.key(Key::Back);
@@ -476,7 +535,10 @@ mod tests {
         let lines = menu();
         let rows = rows(&lines);
         assert_eq!(rows.len(), lines.len());
-        assert_eq!(rows[0], Rect::from_min_size(pos2(6.0, 6.0), vec2(224.0, 28.0)));
+        assert_eq!(
+            rows[0],
+            Rect::from_min_size(pos2(6.0, 6.0), vec2(224.0, 28.0))
+        );
         assert_eq!(rows[1].top(), 36.0);
         // The gap is lower than a line.
         assert_eq!((rows[2].top(), rows[2].height()), (66.0, 7.0));

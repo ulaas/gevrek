@@ -20,7 +20,12 @@ pub enum Direction {
 }
 
 impl Direction {
-    pub const ALL: [Direction; 4] = [Direction::Left, Direction::Right, Direction::Up, Direction::Down];
+    pub const ALL: [Direction; 4] = [
+        Direction::Left,
+        Direction::Right,
+        Direction::Up,
+        Direction::Down,
+    ];
 }
 
 /// A step among the items of a zone.
@@ -38,7 +43,9 @@ pub enum Step {
 }
 
 /// How a choice of items changes what is chosen.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SelectMode {
     /// These and no others.
@@ -72,11 +79,19 @@ pub struct Focus {
 
 impl Focus {
     pub fn on_zone(zone: &ZoneId, item: Option<ItemId>) -> Self {
-        Self { zone: zone.clone(), item, desk: None }
+        Self {
+            zone: zone.clone(),
+            item,
+            desk: None,
+        }
     }
 
     pub fn on_desk(display: &DisplayId, item: Option<ItemId>) -> Self {
-        Self { zone: ZoneId::new(DESK), item, desk: Some(display.clone()) }
+        Self {
+            zone: ZoneId::new(DESK),
+            item,
+            desk: Some(display.clone()),
+        }
     }
 }
 
@@ -144,7 +159,11 @@ pub fn step(items: &[PlacedItem], from: Option<&ItemId>, step: Step) -> Option<u
     }
     let at = from.and_then(|from| items.iter().position(|placed| &placed.item == from));
     let Some(at) = at else {
-        return Some(if step == Step::Last { items.len() - 1 } else { 0 });
+        return Some(if step == Step::Last {
+            items.len() - 1
+        } else {
+            0
+        });
     };
     let direction = match step {
         Step::First => return Some(0),
@@ -180,7 +199,11 @@ pub fn step_free(items: &[PlacedItem], from: Option<&ItemId>, step: Step) -> Opt
     }
     let at = from.and_then(|from| items.iter().position(|placed| &placed.item == from));
     let Some(at) = at else {
-        return Some(if step == Step::Last { items.len() - 1 } else { 0 });
+        return Some(if step == Step::Last {
+            items.len() - 1
+        } else {
+            0
+        });
     };
     let direction = match step {
         Step::First => return Some(0),
@@ -219,9 +242,18 @@ mod tests {
     fn loose_items_are_walked_to_the_nearest_in_the_direction() {
         // Two down the first column, one far right at the top, one in the middle.
         let at = |name: &str, x: i32, y: i32| {
-            PlacedItem::at(ItemId::new(name), Rect::new(x, y, 76, 82), Cell { column: 0, row: 0 })
+            PlacedItem::at(
+                ItemId::new(name),
+                Rect::new(x, y, 76, 82),
+                Cell { column: 0, row: 0 },
+            )
         };
-        let items = [at("a", 0, 0), at("b", 0, 86), at("far", 900, 10), at("mid", 400, 300)];
+        let items = [
+            at("a", 0, 0),
+            at("b", 0, 86),
+            at("far", 900, 10),
+            at("mid", 400, 300),
+        ];
         let id = |name: &str| ItemId::new(name);
         for (from, step_taken, to) in [
             (Some("a"), Step::Down, "b"),
@@ -240,11 +272,15 @@ mod tests {
             (Some("gone"), Step::Last, "mid"),
         ] {
             let from_id = from.map(id);
-            let found = step_free(&items, from_id.as_ref(), step_taken).map(|index| items[index].item.as_str());
+            let found = step_free(&items, from_id.as_ref(), step_taken)
+                .map(|index| items[index].item.as_str());
             assert_eq!(found, Some(to), "{step_taken:?} from {from:?}");
         }
         assert_eq!(step_free(&[], None, Step::Down), None);
-        assert_eq!(around(items.iter().map(|placed| placed.rect)), Some(Rect::new(0, 0, 976, 382)));
+        assert_eq!(
+            around(items.iter().map(|placed| placed.rect)),
+            Some(Rect::new(0, 0, 976, 382))
+        );
         assert_eq!(around([]), None);
     }
 
@@ -271,7 +307,11 @@ mod tests {
             (4, Direction::Up, Some(2)),
             (4, Direction::Left, Some(3)),
         ] {
-            assert_eq!(neighbour(rects[from], &rects, direction), to, "{direction:?} of {from}");
+            assert_eq!(
+                neighbour(rects[from], &rects, direction),
+                to,
+                "{direction:?} of {from}"
+            );
         }
         assert_eq!(first(&rects), Some(0));
         assert_eq!(first(&[]), None);
@@ -284,7 +324,10 @@ mod tests {
                 PlacedItem::at(
                     ItemId::new(format!("item-{index}")),
                     Rect::new(column as i32 * 80, row as i32 * 90, 76, 82),
-                    Cell { column: column as u32, row: row as u32 },
+                    Cell {
+                        column: column as u32,
+                        row: row as u32,
+                    },
                 )
             })
             .collect()
@@ -315,11 +358,18 @@ mod tests {
             (None, Step::Last, 7),
         ] {
             let from_id = from.map(id);
-            assert_eq!(step(&items, from_id.as_ref(), step_taken), Some(to), "{step_taken:?} from {from:?}");
+            assert_eq!(
+                step(&items, from_id.as_ref(), step_taken),
+                Some(to),
+                "{step_taken:?} from {from:?}"
+            );
         }
         assert_eq!(step(&[], None, Step::Right), None);
         // An item that is gone is as good as none.
-        assert_eq!(step(&items, Some(&ItemId::new("gone")), Step::Right), Some(0));
+        assert_eq!(
+            step(&items, Some(&ItemId::new("gone")), Step::Right),
+            Some(0)
+        );
     }
 
     #[test]

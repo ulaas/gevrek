@@ -51,7 +51,8 @@ pub struct XDrag {
     /// What the X11 program asks its drag to do, as gevrek's own drag
     /// has it: the actions allowed, and the one asked for as the keys
     /// would ask (`xdnd::wayland_actions`).
-    allowed: Option<smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction>,
+    allowed:
+        Option<smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction>,
     wish: Option<smithay::reexports::wayland_server::protocol::wl_data_device_manager::DndAction>,
 }
 

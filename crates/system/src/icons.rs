@@ -371,12 +371,14 @@ pub(crate) mod shell {
     /// # Safety
     /// Called on a thread that is set up for the shell's objects, with an
     /// item that was made on it.
-    pub unsafe fn picture_from(item: &IShellItemImageFactory, size: u32, what: SIIGBF) -> Option<Picture> {
+    pub unsafe fn picture_from(
+        item: &IShellItemImageFactory,
+        size: u32,
+        what: SIIGBF,
+    ) -> Option<Picture> {
         let size = size.clamp(8, 512) as i32;
         {
-            let bitmap = item
-                .GetImage(SIZE { cx: size, cy: size }, what)
-                .ok()?;
+            let bitmap = item.GetImage(SIZE { cx: size, cy: size }, what).ok()?;
             let mut read = None;
             let mut what = BITMAP::default();
             let told = GetObjectW(

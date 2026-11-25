@@ -69,7 +69,6 @@ impl MasterStackLayout {
     pub fn adjust_ratio(&mut self, delta: f32) {
         self.master_ratio = (self.master_ratio + delta).clamp(0.1, 0.9);
     }
-
 }
 
 impl Default for MasterStackLayout {

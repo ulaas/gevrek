@@ -202,7 +202,12 @@ mod tests {
             file_of("file:///home/ada/My%20Music/cover.png"),
             Some("/home/ada/My Music/cover.png".into())
         );
-        for no_file in ["https://i.scdn.co/image/ab67", "file://relative", "file:///a%2", ""] {
+        for no_file in [
+            "https://i.scdn.co/image/ab67",
+            "file://relative",
+            "file:///a%2",
+            "",
+        ] {
             assert_eq!(file_of(no_file), None, "{no_file}");
         }
         assert_eq!(

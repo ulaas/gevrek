@@ -12,12 +12,12 @@
 use super::event_coalescing::coalesce_window_events;
 use super::test_support::{finish, test_runtime, TestWindow, MONITOR};
 use super::Runtime;
-use gevrek_host::wm::commands::Commands as _;
-use gevrek_host::wm::configuration::Configuration as _;
 use crate::config::Config;
 use crate::dwm::layouts::LayoutType;
 use crate::dwm::{hidden_journal, MonitorHandle, MonitorInfo, WindowEvent, WindowHandle};
 use crate::runtime::{DispatchCommand, WindowSelector, WorkspaceSelector};
+use gevrek_host::wm::commands::Commands as _;
+use gevrek_host::wm::configuration::Configuration as _;
 use std::mem::ManuallyDrop;
 
 fn drive(runtime: &mut Runtime, events: Vec<WindowEvent>) {

@@ -103,13 +103,21 @@ pub struct Chosen {
 /// displays that are also as large as they were, then having nothing that
 /// is not there, then the workspace, then what was used last.
 fn nearness(candidate: &Profile, wanted: &ProfileKey) -> (usize, usize, bool, bool, u64) {
-    let shared = wanted.displays.iter().filter(|display| candidate.key.has(&display.id)).count();
+    let shared = wanted
+        .displays
+        .iter()
+        .filter(|display| candidate.key.has(&display.id))
+        .count();
     let same = wanted
         .displays
         .iter()
         .filter(|display| candidate.key.displays.contains(display))
         .count();
-    let nothing_missing = candidate.key.displays.iter().all(|display| wanted.has(&display.id));
+    let nothing_missing = candidate
+        .key
+        .displays
+        .iter()
+        .all(|display| wanted.has(&display.id));
     (
         shared,
         same,
@@ -137,7 +145,10 @@ pub fn rehome(profile: &mut Profile, displays: &[Display]) -> Vec<ZoneId> {
     };
     let mut moved = Vec::new();
     for (zone, geometry) in &mut profile.geometry {
-        if !displays.iter().any(|display| display.id == geometry.display) {
+        if !displays
+            .iter()
+            .any(|display| display.id == geometry.display)
+        {
             geometry.display = fallback.id.clone();
             moved.push(zone.clone());
         }
@@ -164,7 +175,9 @@ pub fn choose(
         Some(index) => (index, None),
         None => {
             let from = nearest(profiles, &key);
-            let mut profile = from.map(|index| profiles[index].clone()).unwrap_or_default();
+            let mut profile = from
+                .map(|index| profiles[index].clone())
+                .unwrap_or_default();
             // Where the zones are comes from the nearest displays; which
             // zones a workspace shows is the workspace's own, and comes
             // from the arrangement it was last seen with.
@@ -219,7 +232,10 @@ mod tests {
     }
 
     fn laptop() -> Display {
-        Display { primary: true, ..display("laptop", 0, 1920, 1080) }
+        Display {
+            primary: true,
+            ..display("laptop", 0, 1920, 1080)
+        }
     }
 
     #[test]
@@ -230,7 +246,13 @@ mod tests {
         // Another size, another scale, another workspace: another set.
         let larger = [laptop(), display("desk", 1920, 3840, 2160)];
         assert_ne!(ProfileKey::of(&one, None), ProfileKey::of(&larger, None));
-        let scaled = [laptop(), Display { scale: 1.5, ..display("desk", 1920, 2560, 1440) }];
+        let scaled = [
+            laptop(),
+            Display {
+                scale: 1.5,
+                ..display("desk", 1920, 2560, 1440)
+            },
+        ];
         assert_ne!(ProfileKey::of(&one, None), ProfileKey::of(&scaled, None));
         assert_ne!(ProfileKey::of(&one, None), ProfileKey::of(&one, Some("2")));
     }
@@ -239,11 +261,25 @@ mod tests {
     fn the_first_arrangement_is_made_from_nothing() {
         let mut profiles = Vec::new();
         let chosen = choose(&mut profiles, &[laptop()], None, 1).unwrap();
-        assert_eq!(chosen, Chosen { index: 0, made: Some(None), moved: vec![] });
+        assert_eq!(
+            chosen,
+            Chosen {
+                index: 0,
+                made: Some(None),
+                moved: vec![]
+            }
+        );
         assert_eq!(profiles.len(), 1);
         // The same displays again: the same one, nothing made.
         let again = choose(&mut profiles, &[laptop()], None, 2).unwrap();
-        assert_eq!(again, Chosen { index: 0, made: None, moved: vec![] });
+        assert_eq!(
+            again,
+            Chosen {
+                index: 0,
+                made: None,
+                moved: vec![]
+            }
+        );
         assert_eq!(profiles[0].last_used, 2);
         // No display: nothing is chosen and nothing changes.
         assert_eq!(choose(&mut profiles, &[], None, 3), None);
@@ -255,8 +291,12 @@ mod tests {
         let both = [laptop(), display("desk", 1920, 2560, 1440)];
         let mut profiles = Vec::new();
         choose(&mut profiles, &both, None, 1).unwrap();
-        profiles[0].geometry.insert(ZoneId::new("left"), geometry("laptop", Anchor::TopLeft));
-        profiles[0].geometry.insert(ZoneId::new("right"), geometry("desk", Anchor::BottomRight));
+        profiles[0]
+            .geometry
+            .insert(ZoneId::new("left"), geometry("laptop", Anchor::TopLeft));
+        profiles[0]
+            .geometry
+            .insert(ZoneId::new("right"), geometry("desk", Anchor::BottomRight));
         let docked = profiles[0].clone();
 
         let alone = choose(&mut profiles, &[laptop()], None, 2).unwrap();
@@ -287,11 +327,19 @@ mod tests {
         };
         let alone = mark(&mut profiles, &[laptop()], 1, "from-alone");
         let docked = mark(&mut profiles, &[laptop(), desk.clone()], 2, "from-docked");
-        let _presenting = mark(&mut profiles, &[laptop(), beamer.clone()], 3, "from-presenting");
+        let _presenting = mark(
+            &mut profiles,
+            &[laptop(), beamer.clone()],
+            3,
+            "from-presenting",
+        );
 
         // The desk display at another resolution: nearest is the one with
         // the desk display, though the one with the beamer was used last.
-        let sharper = Display { rect: Rect::new(1920, 0, 3840, 2160), ..desk.clone() };
+        let sharper = Display {
+            rect: Rect::new(1920, 0, 3840, 2160),
+            ..desk.clone()
+        };
         let chosen = choose(&mut profiles, &[laptop(), sharper], None, 4).unwrap();
         assert_eq!(chosen.made, Some(Some(docked.clone())));
         assert!(chosen.moved.is_empty());
@@ -311,7 +359,10 @@ mod tests {
         assert!(chosen.made.is_some());
         assert!(!chosen.moved.is_empty());
         let profile = &profiles[chosen.index];
-        assert!(profile.geometry.values().all(|geometry| geometry.display.as_str() == "stranger"));
+        assert!(profile
+            .geometry
+            .values()
+            .all(|geometry| geometry.display.as_str() == "stranger"));
     }
 
     #[test]
@@ -329,7 +380,11 @@ mod tests {
         assert_eq!(profiles.len(), MOST);
         assert_eq!(new.index, MOST - 1);
         assert_eq!(profiles[new.index].key, ProfileKey::of(&sized(5000), None));
-        let kept = |width: i32| profiles.iter().any(|profile| profile.key == ProfileKey::of(&sized(width), None));
+        let kept = |width: i32| {
+            profiles
+                .iter()
+                .any(|profile| profile.key == ProfileKey::of(&sized(width), None))
+        };
         assert!(kept(1000) && !kept(1001) && kept(1002));
     }
 
@@ -337,11 +392,16 @@ mod tests {
     fn a_workspace_without_an_arrangement_takes_after_the_same_displays() {
         let mut profiles = Vec::new();
         let first = choose(&mut profiles, &[laptop()], Some("1"), 1).unwrap();
-        profiles[first.index].geometry.insert(ZoneId::new("z"), geometry("laptop", Anchor::Top));
+        profiles[first.index]
+            .geometry
+            .insert(ZoneId::new("z"), geometry("laptop", Anchor::Top));
         profiles[first.index].hidden.insert(ZoneId::new("hidden"));
         let second = choose(&mut profiles, &[laptop()], Some("2"), 2).unwrap();
         assert_ne!(second.index, first.index);
-        assert_eq!(profiles[second.index].geometry, profiles[first.index].geometry);
+        assert_eq!(
+            profiles[second.index].geometry,
+            profiles[first.index].geometry
+        );
         assert_eq!(profiles[second.index].hidden, profiles[first.index].hidden);
         // Each is its own from then on.
         profiles[second.index].geometry.clear();
@@ -354,7 +414,9 @@ mod tests {
         let mut profiles = Vec::new();
         // Docked: the first workspace hides nothing, the second hides one zone.
         let one = choose(&mut profiles, &both, Some("1"), 1).unwrap();
-        profiles[one.index].geometry.insert(ZoneId::new("z"), geometry("desk", Anchor::Top));
+        profiles[one.index]
+            .geometry
+            .insert(ZoneId::new("z"), geometry("desk", Anchor::Top));
         let two = choose(&mut profiles, &both, Some("2"), 2).unwrap();
         profiles[two.index].hidden.insert(ZoneId::new("z"));
         // Undocked on the first workspace, then over to the second: its
@@ -363,8 +425,14 @@ mod tests {
         let alone_one = choose(&mut profiles, &[laptop()], Some("1"), 3).unwrap();
         assert!(profiles[alone_one.index].hidden.is_empty());
         let alone_two = choose(&mut profiles, &[laptop()], Some("2"), 4).unwrap();
-        assert_eq!(alone_two.made, Some(Some(ProfileKey::of(&[laptop()], Some("1")))));
+        assert_eq!(
+            alone_two.made,
+            Some(Some(ProfileKey::of(&[laptop()], Some("1"))))
+        );
         assert_eq!(profiles[alone_two.index].hidden, [ZoneId::new("z")].into());
-        assert_eq!(profiles[alone_two.index].geometry, profiles[alone_one.index].geometry);
+        assert_eq!(
+            profiles[alone_two.index].geometry,
+            profiles[alone_one.index].geometry
+        );
     }
 }

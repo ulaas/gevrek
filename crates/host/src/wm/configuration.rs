@@ -7,8 +7,8 @@
 //! from a key) is published at the end of the pass, or before a request is
 //! judged, so that it has a revision of its own.
 
-use super::reload::Reload;
 use super::published::Published;
+use super::reload::Reload;
 use super::WmHost;
 use gevrek_model::config::Config;
 

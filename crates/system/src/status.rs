@@ -137,7 +137,10 @@ pub fn battery() -> Option<Battery> {
     extern "C" {
         fn IOPSCopyPowerSourcesInfo() -> cf::CFTypeRef;
         fn IOPSCopyPowerSourcesList(blob: cf::CFTypeRef) -> cf::CFTypeRef;
-        fn IOPSGetPowerSourceDescription(blob: cf::CFTypeRef, source: cf::CFTypeRef) -> cf::CFTypeRef;
+        fn IOPSGetPowerSourceDescription(
+            blob: cf::CFTypeRef,
+            source: cf::CFTypeRef,
+        ) -> cf::CFTypeRef;
     }
     // SAFETY: Copy calls (owned), the descriptions lent by the blob while it
     // is held, read at once.
@@ -303,13 +306,23 @@ mod mac_net {
         pub fn SCNetworkInterfaceCopyAll() -> cf::CFTypeRef;
         pub fn SCNetworkInterfaceGetBSDName(interface: cf::CFTypeRef) -> cf::CFTypeRef;
         pub fn SCNetworkInterfaceGetInterfaceType(interface: cf::CFTypeRef) -> cf::CFTypeRef;
-        pub fn SCNetworkInterfaceGetLocalizedDisplayName(interface: cf::CFTypeRef) -> cf::CFTypeRef;
+        pub fn SCNetworkInterfaceGetLocalizedDisplayName(interface: cf::CFTypeRef)
+            -> cf::CFTypeRef;
     }
 
-    pub fn store(callout: Option<extern "C" fn(cf::CFTypeRef, cf::CFTypeRef, *mut std::ffi::c_void)>) -> Option<Cf> {
+    pub fn store(
+        callout: Option<extern "C" fn(cf::CFTypeRef, cf::CFTypeRef, *mut std::ffi::c_void)>,
+    ) -> Option<Cf> {
         let name = Cf::string("gevrek");
         // SAFETY: an owned store (a Create call).
-        unsafe { Cf::owned(SCDynamicStoreCreate(std::ptr::null(), name.as_ptr(), callout, std::ptr::null_mut())) }
+        unsafe {
+            Cf::owned(SCDynamicStoreCreate(
+                std::ptr::null(),
+                name.as_ptr(),
+                callout,
+                std::ptr::null_mut(),
+            ))
+        }
     }
 
     /// A value of the dynamic store, owned.
@@ -327,12 +340,15 @@ mod mac_net {
             let all = Cf::owned(SCNetworkInterfaceCopyAll())?;
             (0..cf::CFArrayGetCount(all.as_ptr())).find_map(|index| {
                 let interface = cf::CFArrayGetValueAtIndex(all.as_ptr(), index);
-                (cf::string_of(SCNetworkInterfaceGetBSDName(interface)).as_deref() == Some(bsd)).then(|| {
-                    (
-                        cf::string_of(SCNetworkInterfaceGetInterfaceType(interface)).unwrap_or_default(),
-                        cf::string_of(SCNetworkInterfaceGetLocalizedDisplayName(interface)).unwrap_or_default(),
-                    )
-                })
+                (cf::string_of(SCNetworkInterfaceGetBSDName(interface)).as_deref() == Some(bsd))
+                    .then(|| {
+                        (
+                            cf::string_of(SCNetworkInterfaceGetInterfaceType(interface))
+                                .unwrap_or_default(),
+                            cf::string_of(SCNetworkInterfaceGetLocalizedDisplayName(interface))
+                                .unwrap_or_default(),
+                        )
+                    })
             })
         }
     }
@@ -358,7 +374,12 @@ pub fn network() -> Option<Network> {
     let (kind, shown) = mac_net::interface(&primary).unwrap_or_default();
     let wireless = kind == "IEEE80211";
     let ssid = wireless
-        .then(|| mac_net::read(&store, &format!("State:/Network/Interface/{primary}/AirPort")))
+        .then(|| {
+            mac_net::read(
+                &store,
+                &format!("State:/Network/Interface/{primary}/AirPort"),
+            )
+        })
         .flatten()
         // SAFETY: a dictionary held while it is read.
         .and_then(|airport| unsafe { cf::string_of(cf::value(airport.as_ptr(), "SSID_STR")) })
@@ -376,7 +397,12 @@ pub fn network() -> Option<Network> {
 #[cfg(target_os = "macos")]
 pub fn wait_for_network_change() -> bool {
     use crate::macos_cf::{self as cf, Cf};
-    extern "C" fn changed(_store: cf::CFTypeRef, _keys: cf::CFTypeRef, _info: *mut std::ffi::c_void) {}
+    extern "C" fn changed(
+        _store: cf::CFTypeRef,
+        _keys: cf::CFTypeRef,
+        _info: *mut std::ffi::c_void,
+    ) {
+    }
     let Some(store) = mac_net::store(Some(changed)) else {
         return false;
     };
@@ -398,10 +424,18 @@ pub fn wait_for_network_change() -> bool {
         )) else {
             return false;
         };
-        if !mac_net::SCDynamicStoreSetNotificationKeys(store.as_ptr(), std::ptr::null(), patterns.as_ptr()) {
+        if !mac_net::SCDynamicStoreSetNotificationKeys(
+            store.as_ptr(),
+            std::ptr::null(),
+            patterns.as_ptr(),
+        ) {
             return false;
         }
-        let Some(source) = Cf::owned(mac_net::SCDynamicStoreCreateRunLoopSource(std::ptr::null(), store.as_ptr(), 0)) else {
+        let Some(source) = Cf::owned(mac_net::SCDynamicStoreCreateRunLoopSource(
+            std::ptr::null(),
+            store.as_ptr(),
+            0,
+        )) else {
             return false;
         };
         let run_loop = cf::CFRunLoopGetCurrent();
@@ -607,7 +641,10 @@ mod tests {
             connected,
             name: name.to_string(),
         };
-        let both = [adapter(true, true, "Home"), adapter(false, true, "Network 2")];
+        let both = [
+            adapter(true, true, "Home"),
+            adapter(false, true, "Network 2"),
+        ];
         assert_eq!(
             network_of(&both),
             Some(Network {
@@ -616,13 +653,19 @@ mod tests {
                 name: "Network 2".to_string()
             })
         );
-        let radio = [adapter(false, false, "Ethernet"), adapter(true, true, "Home")];
+        let radio = [
+            adapter(false, false, "Ethernet"),
+            adapter(true, true, "Home"),
+        ];
         assert_eq!(
             network_of(&radio).map(|network| (network.wireless, network.name)),
             Some((true, "Home".to_string()))
         );
         let none = [adapter(false, false, "Ethernet")];
-        assert_eq!(network_of(&none).map(|network| network.connected), Some(false));
+        assert_eq!(
+            network_of(&none).map(|network| network.connected),
+            Some(false)
+        );
         assert_eq!(network_of(&[]), None);
     }
 

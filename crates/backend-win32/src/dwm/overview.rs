@@ -79,7 +79,9 @@ static SHARED: Mutex<Shared> = Mutex::new(Shared {
 });
 
 fn shared() -> std::sync::MutexGuard<'static, Shared> {
-    SHARED.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    SHARED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn note(said: Said) {
@@ -181,7 +183,12 @@ unsafe fn paint(hwnd: HWND) {
     let _ = EndPaint(hwnd, &painted);
 }
 
-unsafe extern "system" fn procedure(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+unsafe extern "system" fn procedure(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
     match message {
         WM_ERASEBKGND => LRESULT(1),
         WM_PAINT => {

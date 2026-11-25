@@ -416,7 +416,12 @@ mod tests {
             height: 1442,
         };
         assert!(covers_display("UnrealWindow", over, second));
-        for class in ["Progman", "WorkerW", "Gevrek_Shell_gevrek-zones", "Gevrek_Border"] {
+        for class in [
+            "Progman",
+            "WorkerW",
+            "Gevrek_Shell_gevrek-zones",
+            "Gevrek_Border",
+        ] {
             assert!(!covers_display(class, second, second), "{class}");
         }
         // A maximized window leaves the bar's strip.
@@ -712,10 +717,16 @@ mod tests {
         // The line: 224 wide at 500, 300 (of a menu that begins at 494).
         let line = Area::new(500, 300, 224, 28);
         // To its right, their tops in line, three pixels over the rim.
-        assert_eq!(beside_line(line, (236, 200), display, -3), Area::new(721, 300, 236, 200));
+        assert_eq!(
+            beside_line(line, (236, 200), display, -3),
+            Area::new(721, 300, 236, 200)
+        );
         // No room at the right: to the left of the line.
         let far = Area::new(1650, 300, 224, 28);
-        assert_eq!(beside_line(far, (236, 200), display, -3), Area::new(1417, 300, 236, 200));
+        assert_eq!(
+            beside_line(far, (236, 200), display, -3),
+            Area::new(1417, 300, 236, 200)
+        );
         // No room below: slid up until it ends with the display.
         let low = Area::new(500, 1000, 224, 28);
         assert_eq!(beside_line(low, (236, 200), display, -3).y, 880);

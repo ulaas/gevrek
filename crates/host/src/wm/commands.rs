@@ -299,7 +299,10 @@ pub trait Commands: WmHost {
                     let parts = self.parts();
                     parts.config.desktop.work_area_offset = offset;
                     parts.host.config_dirty = true;
-                    parts.core.monitor_manager.set_global_work_area_offset(offset);
+                    parts
+                        .core
+                        .monitor_manager
+                        .set_global_work_area_offset(offset);
                 }
                 mark_every_output(self);
                 log::info!(

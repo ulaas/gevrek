@@ -54,7 +54,12 @@ enum Phase {
     /// The scene is set, in this order: the workspace shown, its layout
     /// asked for there, the practice windows opened (`opened`), the
     /// keyboard put on the first of them (`aimed`).
-    Setting { since: Instant, began: Instant, opened: bool, aimed: bool },
+    Setting {
+        since: Instant,
+        began: Instant,
+        opened: bool,
+        aimed: bool,
+    },
     Running(Box<Run>),
     /// A lesson was finished: the next of the tour, if there is one.
     Between(Option<&'static Lesson>),
@@ -114,11 +119,7 @@ pub type Around = (i32, i32, i32, i32);
 /// tutorial's display). Nothing where the step is about nothing that has
 /// a place (or about a surface of the shell's own, which the shell
 /// shows where it likes), and where what it is about is not there.
-pub fn ring_around(
-    spot: crate::Spot,
-    facts: &Facts,
-    panel: Option<Around>,
-) -> Option<Around> {
+pub fn ring_around(spot: crate::Spot, facts: &Facts, panel: Option<Around>) -> Option<Around> {
     use crate::Spot;
     let sized = |around: &Around| around.2 > 0 && around.3 > 0;
     match spot {
@@ -210,7 +211,9 @@ impl Tutoring {
         let mut progress = Progress::load(&file);
         let (lesson, from) = match wanted.and_then(crate::lessons::lesson) {
             Some(lesson) => (lesson, 0),
-            None => progress.next().or_else(|| lessons().first().map(|first| (first, 0)))?,
+            None => progress
+                .next()
+                .or_else(|| lessons().first().map(|first| (first, 0)))?,
         };
         progress.welcomed = true;
         progress.running = true;
@@ -330,7 +333,10 @@ impl Tutoring {
     /// Whether the workspace beside the tutorial's own is there, as far
     /// as the desktop was last seen.
     pub fn beside_there(&self) -> bool {
-        self.facts.workspaces.iter().any(|name| name == crate::WORKSPACE_BESIDE)
+        self.facts
+            .workspaces
+            .iter()
+            .any(|name| name == crate::WORKSPACE_BESIDE)
     }
 
     /// A lesson that goes to the next workspace has one to go to that is
@@ -445,11 +451,18 @@ impl Tutoring {
         let have = self.practice();
         let laid_again = self.workspace_laid();
         match &mut self.phase {
-            Phase::Setting { since, began, opened, aimed } => {
+            Phase::Setting {
+                since,
+                began,
+                opened,
+                aimed,
+            } => {
                 if !*opened {
                     let wanted = layout_named(self.lesson.scene.layout);
                     let on = self.facts.workspace == crate::WORKSPACE;
-                    let laid = wanted.as_str().is_some_and(|name| name == self.facts.layout);
+                    let laid = wanted
+                        .as_str()
+                        .is_some_and(|name| name == self.facts.layout);
                     // (Not waited for longer than this: the lesson is
                     // not held up by a layout that does not come.)
                     let waited = now.saturating_duration_since(*began) >= LAID_AT_MOST;
@@ -498,7 +511,9 @@ impl Tutoring {
                         *aimed = true;
                         *since = now;
                         let go = |direction: &str| {
-                            command(serde_json::json!({"command": "focus_direction", "direction": direction}))
+                            command(
+                                serde_json::json!({"command": "focus_direction", "direction": direction}),
+                            )
                         };
                         return vec![go("up"), go("up"), go("left"), go("left")];
                     }
@@ -625,10 +640,16 @@ pub fn tidy_commands(before: &str, own: &[u64], beside: bool) -> Vec<serde_json:
 pub fn left_behind(wm: &serde_json::Value) -> Option<String> {
     let monitors = wm["monitors"].as_array()?;
     let own = |workspace: &&serde_json::Value| {
-        workspace["name"].as_str().is_some_and(crate::is_own_workspace)
+        workspace["name"]
+            .as_str()
+            .is_some_and(crate::is_own_workspace)
     };
     let monitor = monitors.iter().find(|monitor| {
-        monitor["workspaces"].as_array().into_iter().flatten().any(|workspace| own(&workspace))
+        monitor["workspaces"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|workspace| own(&workspace))
     })?;
     let shown = Facts::of(wm).workspace;
     if !crate::is_own_workspace(&shown) {
@@ -711,12 +732,21 @@ mod tests {
         facts.windows[0].at = (0, 40, 900, 1000);
         facts.windows[1].at = (900, 40, 1020, 1000);
         let panel = Some((0, 0, 1920, 36));
-        assert_eq!(ring_around(Spot::Focused, &facts, panel), Some((900, 40, 1020, 1000)));
-        assert_eq!(ring_around(Spot::Windows, &facts, panel), Some((0, 40, 1920, 1000)));
+        assert_eq!(
+            ring_around(Spot::Focused, &facts, panel),
+            Some((900, 40, 1020, 1000))
+        );
+        assert_eq!(
+            ring_around(Spot::Windows, &facts, panel),
+            Some((0, 40, 1920, 1000))
+        );
         assert_eq!(ring_around(Spot::Panel, &facts, panel), panel);
         // About nothing with a place, or about what is not there: none.
         assert_eq!(ring_around(Spot::None, &facts, panel), None);
-        assert_eq!(ring_around(Spot::Surface("gevrek-launcher"), &facts, panel), None);
+        assert_eq!(
+            ring_around(Spot::Surface("gevrek-launcher"), &facts, panel),
+            None
+        );
         assert_eq!(ring_around(Spot::Panel, &facts, None), None);
         let empty = desk(crate::WORKSPACE, 0, 0);
         assert_eq!(ring_around(Spot::Focused, &empty, panel), None);
@@ -744,7 +774,10 @@ mod tests {
             assert!(apart, "{side:?} lies on {around:?}");
         }
         let area: i32 = sides.iter().map(|side| side.2 * side.3).sum();
-        assert_eq!(area, outer.2 * outer.3 - (outer.2 - 2 * RING) * (outer.3 - 2 * RING));
+        assert_eq!(
+            area,
+            outer.2 * outer.3 - (outer.2 - 2 * RING) * (outer.3 - 2 * RING)
+        );
     }
 
     #[test]
@@ -790,9 +823,13 @@ mod tests {
             .iter()
             .all(|target| *target == MonitorTarget::Name("DELL (2)".to_string())));
         // Where the desktop does not say which display that is: the main one.
-        let (_, todo) =
-            Tutoring::begin(None, file("display-unknown"), &desk("mail", 0, 0), Instant::now())
-                .expect("begun");
+        let (_, todo) = Tutoring::begin(
+            None,
+            file("display-unknown"),
+            &desk("mail", 0, 0),
+            Instant::now(),
+        )
+        .expect("begun");
         let asked = targets(&todo);
         assert!(!asked.is_empty());
         assert!(asked.iter().all(|target| *target == MonitorTarget::Primary));
@@ -846,7 +883,8 @@ mod tests {
         let _ = std::fs::remove_file(&file);
         let start = Instant::now();
         let (mut tutoring, todo) =
-            Tutoring::begin(Some("focus"), file.clone(), &desk("1", 2, 1), start).expect("a lesson");
+            Tutoring::begin(Some("focus"), file.clone(), &desk("1", 2, 1), start)
+                .expect("a lesson");
         // Its workspace is made and shown; its layout and its windows are
         // not asked for yet.
         let said: Vec<String> = todo
@@ -856,10 +894,18 @@ mod tests {
                 other => format!("{other:?}"),
             })
             .collect();
-        assert!(said.iter().any(|one| one.contains("ensure_named_workspace") && one.contains("Tutorial")));
-        assert!(said.iter().any(|one| one.contains("switch_workspace_selector")));
-        assert!(said.iter().any(|one| one.contains("ensure_named_workspace") && one.contains("Dwindle")));
-        assert!(said.iter().all(|one| !one.contains("set_layout") && !one.contains("OpenPractice")));
+        assert!(said
+            .iter()
+            .any(|one| one.contains("ensure_named_workspace") && one.contains("Tutorial")));
+        assert!(said
+            .iter()
+            .any(|one| one.contains("switch_workspace_selector")));
+        assert!(said
+            .iter()
+            .any(|one| one.contains("ensure_named_workspace") && one.contains("Dwindle")));
+        assert!(said
+            .iter()
+            .all(|one| !one.contains("set_layout") && !one.contains("OpenPractice")));
         assert_eq!(tutoring.before, "1");
         assert!(matches!(tutoring.shown(start), Shown::Setting(_)));
         assert!(Progress::load(&file).running);
@@ -875,30 +921,51 @@ mod tests {
             "{asked:?}"
         );
         // The layout is there: a moment, and the windows are opened.
-        assert!(tutoring.facts(desk("Tutorial", 0, 0), start + ASKED * 2).is_empty());
+        assert!(tutoring
+            .facts(desk("Tutorial", 0, 0), start + ASKED * 2)
+            .is_empty());
         assert_eq!(
-            tutoring.facts(desk("Tutorial", 0, 0), start + ASKED + SHOWN).last(),
+            tutoring
+                .facts(desk("Tutorial", 0, 0), start + ASKED + SHOWN)
+                .last(),
             Some(&Do::OpenPractice(3))
         );
         // They are not there yet: nothing begins.
-        assert!(tutoring.facts(desk("Tutorial", 1, 1), start + SETTLE).is_empty());
+        assert!(tutoring
+            .facts(desk("Tutorial", 1, 1), start + SETTLE)
+            .is_empty());
         assert!(matches!(tutoring.shown(start + SETTLE), Shown::Setting(_)));
         // There, and settled: the keyboard is put on the first window.
         let then = start + ASKED + SHOWN + SETTLE + Duration::from_millis(100);
         let aimed = tutoring.facts(desk("Tutorial", 3, 3), then);
         assert_eq!(aimed.len(), 4);
-        assert!(aimed.iter().all(|one| matches!(one, Do::Dispatch(command) if command.contains("focus_direction"))));
+        assert!(aimed.iter().all(
+            |one| matches!(one, Do::Dispatch(command) if command.contains("focus_direction"))
+        ));
         // (Once: not again with the next look.)
         assert!(tutoring.tick(then + Duration::from_millis(100)).is_empty());
         // And a moment later the lesson's first step waits.
         let begun = then + AIMED;
         tutoring.facts(desk("Tutorial", 3, 1), begun - Duration::from_millis(10));
         assert!(tutoring.tick(begun).is_empty());
-        assert!(matches!(tutoring.shown(begun), Shown::Step { at: 0, state: StepState::Waiting, .. }));
+        assert!(matches!(
+            tutoring.shown(begun),
+            Shown::Step {
+                at: 0,
+                state: StepState::Waiting,
+                ..
+            }
+        ));
         // What happened while the scene was set is nothing done: the
         // step is measured from the desktop as the lesson began.
         tutoring.facts(desk("Tutorial", 3, 2), begun + Duration::from_secs(1));
-        assert!(matches!(tutoring.shown(begun), Shown::Step { state: StepState::Done, .. }));
+        assert!(matches!(
+            tutoring.shown(begun),
+            Shown::Step {
+                state: StepState::Done,
+                ..
+            }
+        ));
         let _ = std::fs::remove_dir_all(file.parent().unwrap());
     }
 
@@ -921,14 +988,20 @@ mod tests {
         let Shown::Between { done, next, count } = tutoring.shown(late + AIMED) else {
             panic!("between two lessons");
         };
-        assert_eq!((done.id, next.map(|next| next.id)), ("move", Some("workspaces")));
+        assert_eq!(
+            (done.id, next.map(|next| next.id)),
+            ("move", Some("workspaces"))
+        );
         assert_eq!(count.0, 1);
         assert!(Progress::load(&file).has_finished(done));
         // On: the next lesson's scene, with the windows that are there kept.
         tutoring.facts(desk("Tutorial", 3, 1), late + AIMED);
         let todo = tutoring.pressed(Input::Next, late + AIMED);
         assert_eq!(tutoring.lesson().id, "workspaces");
-        assert!(todo.iter().all(|one| !matches!(one, Do::OpenPractice(_))), "{todo:?}");
+        assert!(
+            todo.iter().all(|one| !matches!(one, Do::OpenPractice(_))),
+            "{todo:?}"
+        );
         assert!(matches!(tutoring.shown(late + AIMED), Shown::Setting(_)));
         // Left in the middle of a lesson: remembered where.
         tutoring.tick(late + AIMED + SHOWN);
@@ -940,7 +1013,8 @@ mod tests {
         assert_eq!(kept.left_at, Some(("workspaces".to_string(), 1)));
         assert!(!kept.running);
         // Taken up again: that lesson, at that step.
-        let (again, _) = Tutoring::begin(None, file.clone(), &desk("1", 0, 0), start).expect("a lesson");
+        let (again, _) =
+            Tutoring::begin(None, file.clone(), &desk("1", 0, 0), start).expect("a lesson");
         assert_eq!((again.lesson().id, again.from), ("workspaces", 1));
         let _ = std::fs::remove_dir_all(file.parent().unwrap());
     }

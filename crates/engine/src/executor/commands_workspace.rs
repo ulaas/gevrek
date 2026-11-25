@@ -84,9 +84,12 @@ impl Executor {
                 snap_zone_manager,
                 target,
             ),
-            DispatchCommand::SwapActiveWorkspaces { target } => {
-                self.swap_active_workspaces(window_manager, monitor_manager, snap_zone_manager, target)
-            }
+            DispatchCommand::SwapActiveWorkspaces { target } => self.swap_active_workspaces(
+                window_manager,
+                monitor_manager,
+                snap_zone_manager,
+                target,
+            ),
             DispatchCommand::ToggleWindowCentered { window, target } => {
                 let window =
                     self.resolve_window_selector(window_manager, monitor_manager, &window)?;
@@ -121,9 +124,11 @@ impl Executor {
             DispatchCommand::EnsureWorkspaces { target, count } => {
                 self.ensure_workspaces(window_manager, monitor_manager, target, count)
             }
-            DispatchCommand::EnsureNamedWorkspace { target, name, layout } => {
-                self.ensure_named_workspace(window_manager, monitor_manager, target, name, layout)
-            }
+            DispatchCommand::EnsureNamedWorkspace {
+                target,
+                name,
+                layout,
+            } => self.ensure_named_workspace(window_manager, monitor_manager, target, name, layout),
             DispatchCommand::ToggleWindowContainerBehaviour => {
                 self.toggle_window_container_behaviour(window_manager, monitor_manager)
             }

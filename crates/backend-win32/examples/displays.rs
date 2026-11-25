@@ -20,7 +20,11 @@ fn main() {
             display.x,
             display.y,
             display.turned,
-            if display.primary { ", the main one" } else { "" },
+            if display.primary {
+                ", the main one"
+            } else {
+                ""
+            },
             display.modes.len()
         );
         // Who the display is wherever it is plugged in, and what that is
@@ -81,7 +85,11 @@ fn main() {
                     display.x,
                     display.y,
                     display.turned,
-                    if display.primary { ", the main one" } else { "" }
+                    if display.primary {
+                        ", the main one"
+                    } else {
+                        ""
+                    }
                 );
             }
             match gevrek_win32::display_settings::test(&wanted) {

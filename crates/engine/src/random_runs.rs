@@ -16,10 +16,10 @@ use crate::executor::Executor;
 use crate::focus_manager::FocusManager;
 use crate::layouts::LayoutType;
 use crate::outputs::{MonitorHandle, Outputs};
-use crate::spoil::Chance;
 use crate::rules::RuleEngine;
-use crate::testing::fake_desktop::FakeDesktop;
 use crate::snap_zones::SnapZoneManager;
+use crate::spoil::Chance;
+use crate::testing::fake_desktop::FakeDesktop;
 use crate::{Rect, WindowHandle};
 use gevrek_model::command::DispatchCommand;
 use gevrek_model::graph::NodeGraph;
@@ -29,7 +29,12 @@ use std::sync::{Arc, Mutex};
 const OUTPUT: MonitorHandle = MonitorHandle(1);
 const SECOND: MonitorHandle = MonitorHandle(2);
 /// Where the second display is, beside the first.
-const SECOND_AT: Rect = Rect { x: 1920, y: 0, width: 2560, height: 1440 };
+const SECOND_AT: Rect = Rect {
+    x: 1920,
+    y: 0,
+    width: 2560,
+    height: 1440,
+};
 
 fn second() -> crate::outputs::MonitorInfo {
     crate::outputs::MonitorInfo {
@@ -117,8 +122,18 @@ pub(crate) fn commands() -> Vec<serde_json::Value> {
         }
     }
     let layouts = [
-        "BSP", "Grid", "Columns", "Rows", "Monocle", "UltrawideVerticalStack", "MasterStack",
-        "CenteredMaster", "Spiral", "Dwindle", "Scrolling", "Floating",
+        "BSP",
+        "Grid",
+        "Columns",
+        "Rows",
+        "Monocle",
+        "UltrawideVerticalStack",
+        "MasterStack",
+        "CenteredMaster",
+        "Spiral",
+        "Dwindle",
+        "Scrolling",
+        "Floating",
     ];
     // One of nearly every command there is, those that choose a
     // window, a workspace or a display among them.
@@ -190,8 +205,11 @@ fn desk(two: bool) -> (WmCore, FakeDesktop, Arc<Mutex<RuleEngine>>) {
             .collect(),
     );
     let rules = Arc::new(Mutex::new(engine));
-    let mut executor =
-        Executor::new(NodeGraph::new(), Arc::new(Mutex::new(Vec::new())), rules.clone());
+    let mut executor = Executor::new(
+        NodeGraph::new(),
+        Arc::new(Mutex::new(Vec::new())),
+        rules.clone(),
+    );
     executor.set_scratchpad_profiles(
         examples
             .iter()
@@ -217,9 +235,9 @@ fn desk(two: bool) -> (WmCore, FakeDesktop, Arc<Mutex<RuleEngine>>) {
         monitors.push(second());
         core.monitor_manager.replace_monitors(monitors);
         for name in ["side", "more"] {
-            let _ = core
-                .monitor_manager
-                .create_workspace(SECOND, name.to_string(), LayoutType::BSP);
+            let _ =
+                core.monitor_manager
+                    .create_workspace(SECOND, name.to_string(), LayoutType::BSP);
         }
         desktop.more_outputs.push((SECOND, SECOND_AT));
     }
@@ -292,7 +310,10 @@ fn broken(core: &WmCore, desktop: &FakeDesktop) -> Option<String> {
                 .iter()
                 .any(|container| container.windows.is_empty())
             {
-                return Some(format!("a tile with no window on workspace {}", workspace.name));
+                return Some(format!(
+                    "a tile with no window on workspace {}",
+                    workspace.name
+                ));
             }
             // The tiles of the workspace that is shown have a size.
             // (Not while the tiling is held: nothing is laid out then.)
@@ -379,7 +400,9 @@ fn broken(core: &WmCore, desktop: &FakeDesktop) -> Option<String> {
             .flat_map(|workspace| &workspace.detailed_windows)
             .any(|listed| listed.handle == window && listed.is_minimized);
         if !told {
-            return Some(format!("{window:?} was minimized and is not published as such"));
+            return Some(format!(
+                "{window:?} was minimized and is not published as such"
+            ));
         }
     }
     None
@@ -442,7 +465,9 @@ fn desktop_broken(
         else {
             continue;
         };
-        let shows_it = crate::workspaces::reveal_of(workspace).shown.contains(window);
+        let shows_it = crate::workspaces::reveal_of(workspace)
+            .shown
+            .contains(window);
         let minimized = desktop.windows.get(window).is_none_or(|w| w.minimized);
         if shows_it && !minimized && !in_sight(*window) {
             return Some(format!(
@@ -505,7 +530,14 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
                     }
                 }
                 let _ = core.handle_window_event(&mut desktop, WindowEvent::Created(id));
-                format!("{id:?} ({title}) opens{}", if on_second { " on the second display" } else { "" })
+                format!(
+                    "{id:?} ({title}) opens{}",
+                    if on_second {
+                        " on the second display"
+                    } else {
+                        ""
+                    }
+                )
             }
             4 => match some(&mut chance) {
                 Some(id) => {
@@ -566,10 +598,8 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
                     if let Some(window) = desktop.windows.get_mut(&id) {
                         window.rect = rect;
                     }
-                    let _ = core.handle_window_event(
-                        &mut desktop,
-                        WindowEvent::Moved(id, rect.x, rect.y),
-                    );
+                    let _ = core
+                        .handle_window_event(&mut desktop, WindowEvent::Moved(id, rect.x, rect.y));
                     let _ = core.handle_window_event(
                         &mut desktop,
                         WindowEvent::Resized(id, rect.width, rect.height),
@@ -616,7 +646,11 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
                 format!(
                     "the configuration {} is read{}",
                     example.id,
-                    if of_chance { ", with a graph of chance" } else { "" }
+                    if of_chance {
+                        ", with a graph of chance"
+                    } else {
+                        ""
+                    }
                 )
             }
             // A key the graph waits for is pressed.
@@ -674,16 +708,18 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
                     if let Some(window) = desktop.windows.get_mut(&id) {
                         window.rect = rect;
                     }
-                    let _ = core.handle_window_event(
-                        &mut desktop,
-                        WindowEvent::Moved(id, rect.x, rect.y),
-                    );
+                    let _ = core
+                        .handle_window_event(&mut desktop, WindowEvent::Moved(id, rect.x, rect.y));
                     desktop.animating.clear();
                     let rested = chance.below(4) != 0;
                     let now = std::time::Instant::now();
                     let joined = core.settle_moved_windows(
                         &mut desktop,
-                        if rested { now + std::time::Duration::from_secs(1) } else { now },
+                        if rested {
+                            now + std::time::Duration::from_secs(1)
+                        } else {
+                            now
+                        },
                     );
                     format!(
                         "{id:?} moved by its program to {rect:?} (sliding: {sliding}, at rest: {rested}); joined another display: {joined:?}"
@@ -741,10 +777,15 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
                             .iter()
                             .flat_map(|container| container.windows.elements().iter().map(|w| w.0))
                             .collect();
-                        let floating: Vec<isize> =
-                            workspace.floating_windows.elements().iter().map(|w| w.0).collect();
+                        let floating: Vec<isize> = workspace
+                            .floating_windows
+                            .elements()
+                            .iter()
+                            .map(|w| w.0)
+                            .collect();
                         if !tiled.is_empty() || !floating.is_empty() || !shown.is_empty() {
-                            places.push(format!("{}{shown} {tiled:?} {floating:?}", workspace.name));
+                            places
+                                .push(format!("{}{shown} {tiled:?} {floating:?}", workspace.name));
                         }
                     }
                 }
@@ -755,8 +796,11 @@ fn run(seed: u64, steps: usize, commands: &[serde_json::Value]) -> Result<(), St
                 .filter(|(_, window)| window.hidden_by_wm)
                 .map(|(id, _)| id.0)
                 .collect();
-            println!("{step:>3} {said}
-      {} | hidden {hidden:?}", places.join("; "));
+            println!(
+                "{step:>3} {said}
+      {} | hidden {hidden:?}",
+                places.join("; ")
+            );
         }
         trail.push(said);
         let what = broken(&core, &desktop)
@@ -852,7 +896,10 @@ fn graph_of_chance(chance: &mut Chance) -> NodeGraph {
         let mut last = graph.add_node(head, [0.0, 0.0]);
         for _ in 0..1 + chance.below(6) {
             let next = graph.add_node(kinds[chance.below(kinds.len())].clone(), [0.0, 0.0]);
-            let (outs, ins) = (pins(&graph, last, true, true), pins(&graph, next, false, true));
+            let (outs, ins) = (
+                pins(&graph, last, true, true),
+                pins(&graph, next, false, true),
+            );
             if outs.is_empty() || ins.is_empty() {
                 // (One that is not run, and has what others may want.)
                 continue;
@@ -873,7 +920,10 @@ fn graph_of_chance(chance: &mut Chance) -> NodeGraph {
     // Some rows lead into others, back into themselves too.
     for _ in 0..chance.below(5) {
         let (from, to) = (ids[chance.below(ids.len())], ids[chance.below(ids.len())]);
-        let (outs, ins) = (pins(&graph, from, true, true), pins(&graph, to, false, true));
+        let (outs, ins) = (
+            pins(&graph, from, true, true),
+            pins(&graph, to, false, true),
+        );
         if !outs.is_empty() && !ins.is_empty() {
             graph.add_connection(Connection {
                 from_node: from,
@@ -983,7 +1033,10 @@ fn a_node_that_is_asked_for_its_own_value_is_not_followed_for_ever() {
 
     // A sum that is its own first number.
     let mut own = NodeGraph::new();
-    let (on_key, log) = (own.add_node(key(), [0.0, 0.0]), own.add_node(said(), [0.0, 0.0]));
+    let (on_key, log) = (
+        own.add_node(key(), [0.0, 0.0]),
+        own.add_node(said(), [0.0, 0.0]),
+    );
     let (text, sum) = (
         own.add_node(NodeType::ToString, [0.0, 0.0]),
         own.add_node(NodeType::Add, [0.0, 0.0]),
@@ -991,11 +1044,17 @@ fn a_node_that_is_asked_for_its_own_value_is_not_followed_for_ever() {
     assert!(wire(&mut own, on_key, log, 0));
     assert!(wire(&mut own, text, log, 1));
     assert!(wire(&mut own, sum, text, 0));
-    assert!(wire(&mut own, sum, sum, 0), "a wire that goes round is one a file may have");
+    assert!(
+        wire(&mut own, sum, sum, 0),
+        "a wire that goes round is one a file may have"
+    );
 
     // Two that each want the other's first.
     let mut two = NodeGraph::new();
-    let (on_key, log) = (two.add_node(key(), [0.0, 0.0]), two.add_node(said(), [0.0, 0.0]));
+    let (on_key, log) = (
+        two.add_node(key(), [0.0, 0.0]),
+        two.add_node(said(), [0.0, 0.0]),
+    );
     let (text, sum, product) = (
         two.add_node(NodeType::ToString, [0.0, 0.0]),
         two.add_node(NodeType::Add, [0.0, 0.0]),
@@ -1010,7 +1069,10 @@ fn a_node_that_is_asked_for_its_own_value_is_not_followed_for_ever() {
     // A row of sums longer than anybody draws: followed to its end, or
     // given up; the program lives.
     let mut long = NodeGraph::new();
-    let (on_key, log) = (long.add_node(key(), [0.0, 0.0]), long.add_node(said(), [0.0, 0.0]));
+    let (on_key, log) = (
+        long.add_node(key(), [0.0, 0.0]),
+        long.add_node(said(), [0.0, 0.0]),
+    );
     let text = long.add_node(NodeType::ToString, [0.0, 0.0]);
     assert!(wire(&mut long, on_key, log, 0));
     assert!(wire(&mut long, text, log, 1));
@@ -1135,10 +1197,17 @@ fn a_scratchpads_window_given_a_place_is_the_scratchpads_no_longer() {
     core.handle_window_event(&mut desktop, WindowEvent::Created(notes))
         .expect("opened");
     press_f13(&mut core, &mut desktop);
-    assert!(core.monitor_manager.find_window(notes).is_none(), "the scratchpad has it");
+    assert!(
+        core.monitor_manager.find_window(notes).is_none(),
+        "the scratchpad has it"
+    );
     assert_eq!(desktop.focused, Some(notes));
 
-    asked(&mut core, &mut desktop, serde_json::json!({"command": "toggle_floating"}));
+    asked(
+        &mut core,
+        &mut desktop,
+        serde_json::json!({"command": "toggle_floating"}),
+    );
     assert!(
         core.monitor_manager.find_window(notes).is_some(),
         "it has a place on a workspace"
@@ -1148,7 +1217,10 @@ fn a_scratchpads_window_given_a_place_is_the_scratchpads_no_longer() {
         &mut desktop,
         serde_json::json!({"command": "switch_workspace_selector", "selector": {"kind": "name", "value": "3"}}),
     );
-    assert!(desktop.window(notes).hidden_by_wm, "it went with its workspace");
+    assert!(
+        desktop.window(notes).hidden_by_wm,
+        "it went with its workspace"
+    );
 
     // Asked for again, the scratchpad takes it as it takes any window
     // that is its kind: off its workspace, and shown.
@@ -1175,16 +1247,25 @@ fn a_scratchpads_window_that_is_restored_is_given_no_tile() {
     press_f13(&mut core, &mut desktop);
     assert!(core.monitor_manager.find_window(notes).is_none());
     press_f13(&mut core, &mut desktop);
-    assert!(desktop.window(notes).hidden_by_wm, "the scratchpad is put away");
+    assert!(
+        desktop.window(notes).hidden_by_wm,
+        "the scratchpad is put away"
+    );
 
     desktop.windows.get_mut(&notes).expect("it").minimized = false;
     core.handle_window_event(&mut desktop, WindowEvent::Restored(notes))
         .expect("restored");
     let _ = core.flush_pending_layouts(&mut desktop);
-    assert!(core.monitor_manager.find_window(notes).is_none(), "on no workspace");
+    assert!(
+        core.monitor_manager.find_window(notes).is_none(),
+        "on no workspace"
+    );
     assert!(desktop.window(notes).hidden_by_wm, "and put away still");
     press_f13(&mut core, &mut desktop);
-    assert!(!desktop.window(notes).hidden_by_wm, "it comes when it is asked for");
+    assert!(
+        !desktop.window(notes).hidden_by_wm,
+        "it comes when it is asked for"
+    );
     assert_eq!(broken(&core, &desktop), None);
 }
 
@@ -1315,7 +1396,10 @@ fn a_window_comes_to_the_middle_and_goes_back_as_it_was() {
         })
     };
     let tiles = |core: &WmCore, workspace: usize| -> Vec<WindowHandle> {
-        core.monitor_manager.get_workspaces(OUTPUT).expect("workspaces").elements()[workspace]
+        core.monitor_manager
+            .get_workspaces(OUTPUT)
+            .expect("workspaces")
+            .elements()[workspace]
             .containers
             .elements()
             .iter()
@@ -1342,8 +1426,14 @@ fn a_window_comes_to_the_middle_and_goes_back_as_it_was() {
         .get_adjusted_work_area(OUTPUT, &desktop)
         .expect("the display's room");
     let now = desktop.window(second).rect;
-    assert!((now.x + now.width / 2 - (area.x + area.width / 2)).abs() <= 1, "{now:?} in {area:?}");
-    assert!((now.y + now.height / 2 - (area.y + area.height / 2)).abs() <= 1, "{now:?} in {area:?}");
+    assert!(
+        (now.x + now.width / 2 - (area.x + area.width / 2)).abs() <= 1,
+        "{now:?} in {area:?}"
+    );
+    assert!(
+        (now.y + now.height / 2 - (area.y + area.height / 2)).abs() <= 1,
+        "{now:?} in {area:?}"
+    );
     assert_eq!(desktop.focused, Some(second));
     assert_eq!(tiles(&core, 0), [first, third]);
 
@@ -1353,13 +1443,20 @@ fn a_window_comes_to_the_middle_and_goes_back_as_it_was() {
     assert_eq!(core.monitor_manager.find_window(second), Some((OUTPUT, 0)));
     assert!(!core.monitor_manager.is_window_floating(second));
     assert_eq!(tiles(&core, 0), [first, second, third]);
-    assert!(desktop.window(second).hidden_by_wm, "its workspace is not shown");
+    assert!(
+        desktop.window(second).hidden_by_wm,
+        "its workspace is not shown"
+    );
     asked(
         &mut core,
         &mut desktop,
         serde_json::json!({"command": "switch_workspace_selector", "selector": {"kind": "name", "value": "1"}}),
     );
-    assert_eq!(desktop.window(second).rect, was, "where it was, as large as it was");
+    assert_eq!(
+        desktop.window(second).rect,
+        was,
+        "where it was, as large as it was"
+    );
 
     // One that floated: to the middle, and back to where it floated.
     asked(
@@ -1395,9 +1492,7 @@ fn a_window_comes_to_the_middle_and_goes_back_as_it_was() {
 /// at a size that can be seen.
 #[test]
 fn a_minimized_window_is_given_no_place_and_a_lost_one_is_found() {
-    let show = |name: &str| {
-        serde_json::json!({"command": "switch_workspace_selector", "selector": {"kind": "name", "value": name}})
-    };
+    let show = |name: &str| serde_json::json!({"command": "switch_workspace_selector", "selector": {"kind": "name", "value": name}});
     let on_the_display = |core: &WmCore, desktop: &FakeDesktop, window: WindowHandle| {
         let now = desktop.window(window).rect;
         let area = core
@@ -1469,7 +1564,11 @@ fn a_minimized_window_is_given_no_place_and_a_lost_one_is_found() {
         .came
         .concat()
         .contains(&(floats, desktop.window(floats).rect)));
-    assert_eq!(desktop.window(other).rect, before, "one in sight stays where it is");
+    assert_eq!(
+        desktop.window(other).rect,
+        before,
+        "one in sight stays where it is"
+    );
 
     // Minimized behind gevrek's back while its workspace is away (told
     // of it or not): it comes back with its workspace.
@@ -1498,7 +1597,10 @@ fn a_minimized_window_is_given_no_place_and_a_lost_one_is_found() {
         })
         .collect();
     let _ = core.flush_pending_layouts(&mut desktop);
-    let were: Vec<Rect> = tiles.iter().map(|window| desktop.window(*window).rect).collect();
+    let were: Vec<Rect> = tiles
+        .iter()
+        .map(|window| desktop.window(*window).rect)
+        .collect();
     asked(&mut core, &mut desktop, show("2"));
     for window in &tiles {
         minimized_by_the_system(&mut desktop, *window);
@@ -1554,6 +1656,15 @@ fn long_runs_of_chance_leave_the_desktop_whole() {
         wrong.is_empty(),
         "{} of the runs went wrong; the first:\n{}",
         wrong.len(),
-        wrong.iter().take(if std::env::var_os("GEVREK_ALL").is_some() { 1000 } else { 3 }).cloned().collect::<Vec<_>>().join("\n\n")
+        wrong
+            .iter()
+            .take(if std::env::var_os("GEVREK_ALL").is_some() {
+                1000
+            } else {
+                3
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n\n")
     );
 }

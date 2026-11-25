@@ -4,10 +4,10 @@
 
 mod common;
 
-use gevrek_host::wm::commands::Commands as _;
 use common::{Harness, SCREEN};
 use gevrek_engine::layouts::LayoutType;
 use gevrek_engine::{Rect, WindowQueries};
+use gevrek_host::wm::commands::Commands as _;
 use gevrek_model::command::{DispatchCommand, WorkspaceSelector};
 use gevrek_model::config::Config;
 
@@ -696,14 +696,19 @@ fn a_dialog_opens_on_the_workspace_of_the_window_it_belongs_to() {
     let (terminal_window, terminal) = harness.open(client, "terminal", "org.test.terminal");
     assert_eq!(harness.state.desktop.focused, Some(terminal));
 
-    let (_, question) = harness.open_dialog(client, "Save changes?", "org.test.editor", editor_window);
+    let (_, question) =
+        harness.open_dialog(client, "Save changes?", "org.test.editor", editor_window);
     assert_eq!(harness.state.desktop.parent(question), Some(editor));
     assert_eq!(
         harness.state.core.monitor_manager.find_window(question),
         home,
         "on its window's workspace"
     );
-    assert!(harness.state.core.monitor_manager.is_window_floating(question));
+    assert!(harness
+        .state
+        .core
+        .monitor_manager
+        .is_window_floating(question));
     assert!(!harness.shown(question), "out of sight with it");
     assert_eq!(
         harness.state.desktop.focused,
@@ -785,10 +790,15 @@ fn under_the_floating_layout_a_dialog_stays_over_its_window() {
     let corner = harness.rect(editor);
     assert_eq!((corner.x, corner.y), (60, 80));
 
-    let (_, question) = harness.open_dialog(client, "Save changes?", "org.test.editor", editor_window);
+    let (_, question) =
+        harness.open_dialog(client, "Save changes?", "org.test.editor", editor_window);
     harness.finish_transitions();
     assert!(harness.state.desktop.placed_itself(question));
-    assert!(harness.state.core.monitor_manager.is_window_floating(question));
+    assert!(harness
+        .state
+        .core
+        .monitor_manager
+        .is_window_floating(question));
     let over = harness.rect(question);
     assert!(
         near(middle_of(over), middle_of(corner)),

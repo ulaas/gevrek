@@ -38,13 +38,13 @@
 //!
 //! Seeds as in `random_runs`: `GEVREK_RUNS`, `GEVREK_SEED`.
 
+use crate::backend::BackendError;
 use crate::backend::BackendEvent;
 use crate::config::{
     ExpandOn, Matcher, RollUpSettings, Rule, RuleAction, SmartSource, ZoneKind, ZonesConfig,
 };
 use crate::core::{Command, Effect, Scene, ZonesCore, ZonesEvent};
 use crate::export;
-use crate::backend::BackendError;
 use crate::focus::{Direction, SelectMode, Step, DESK};
 use crate::geometry::Display;
 use crate::host::Host;
@@ -167,7 +167,10 @@ impl World {
                     self.begun.remove(request);
                     count(&SEEN.ended, 1);
                 }
-                ZonesEvent::OperationFailed { error: BackendError::Cancelled, .. } => count(&SEEN.called_off, 1),
+                ZonesEvent::OperationFailed {
+                    error: BackendError::Cancelled,
+                    ..
+                } => count(&SEEN.called_off, 1),
                 ZonesEvent::ReservedChanged { regions } => self.told_reserved = regions.clone(),
                 _ => {}
             }
@@ -175,7 +178,11 @@ impl World {
     }
 
     fn desktop(&self) -> BTreeSet<ItemId> {
-        self.backend.in_folder(DESKTOP).into_iter().map(|item| item.id).collect()
+        self.backend
+            .in_folder(DESKTOP)
+            .into_iter()
+            .map(|item| item.id)
+            .collect()
     }
 
     /// The program ends and is started again from what it wrote. What it
@@ -223,14 +230,18 @@ impl World {
         self.backend.finish_operations();
         effects.extend(self.pump());
         if self.desktop() != before {
-            return Err(format!("brought in and taken back, the desktop is {:?}, not {before:?}", self.desktop()));
+            return Err(format!(
+                "brought in and taken back, the desktop is {:?}, not {before:?}",
+                self.desktop()
+            ));
         }
         count(&SEEN.taken_back, 1);
         Ok(effects)
     }
 
     fn ask(&mut self, command: Command) -> Vec<Effect> {
-        self.host.command(&mut self.core, &mut self.backend, command, self.now)
+        self.host
+            .command(&mut self.core, &mut self.backend, command, self.now)
     }
 
     fn pump(&mut self) -> Vec<Effect> {
@@ -238,7 +249,12 @@ impl World {
     }
 
     fn zones(&self) -> Vec<ZoneId> {
-        self.core.config().zones.iter().map(|zone| zone.id.clone()).collect()
+        self.core
+            .config()
+            .zones
+            .iter()
+            .map(|zone| zone.id.clone())
+            .collect()
     }
 
     fn a_zone(&self, chance: &mut Chance) -> ZoneId {
@@ -252,7 +268,10 @@ impl World {
 
     fn portals(&self) -> Vec<ZoneId> {
         let zones = self.core.config().zones.iter();
-        zones.filter(|zone| matches!(zone.kind, ZoneKind::Portal { .. })).map(|zone| zone.id.clone()).collect()
+        zones
+            .filter(|zone| matches!(zone.kind, ZoneKind::Portal { .. }))
+            .map(|zone| zone.id.clone())
+            .collect()
     }
 
     fn a_portal(&self, chance: &mut Chance) -> ZoneId {
@@ -291,7 +310,10 @@ impl World {
     fn a_file(&mut self, folder: &str, chance: &mut Chance) -> Item {
         self.made += 1;
         let extension = *chance.pick(&["png", "txt", "pdf", "jpg"]);
-        let mut item = Item::file(&crate::paths::join(folder, &format!("f{}.{extension}", self.made)));
+        let mut item = Item::file(&crate::paths::join(
+            folder,
+            &format!("f{}.{extension}", self.made),
+        ));
         item.facts.modified = Some(self.now.saturating_sub(chance.below(6) as u64 * 24 * HOUR));
         item
     }
@@ -308,7 +330,9 @@ impl World {
 }
 
 fn refused(effects: &[Effect]) -> bool {
-    effects.iter().any(|effect| matches!(effect, Effect::Notify(ZonesEvent::Refused { .. })))
+    effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::Notify(ZonesEvent::Refused { .. })))
 }
 
 fn heard(effects: &[Effect]) -> impl Iterator<Item = &ZonesEvent> {
@@ -325,13 +349,19 @@ fn the_rules() -> Vec<Rule> {
         Rule {
             name: "stale".to_string(),
             matchers: vec![Matcher::Untouched { days: 2 }],
-            action: RuleAction::AssignToZone { zone: ZoneId::new("zone-2") },
+            action: RuleAction::AssignToZone {
+                zone: ZoneId::new("zone-2"),
+            },
             ..Rule::default()
         },
         Rule {
             name: "pictures".to_string(),
-            matchers: vec![Matcher::Extension { any_of: vec!["png".to_string(), "jpg".to_string()] }],
-            action: RuleAction::AssignToZone { zone: ZoneId::new("zone-1") },
+            matchers: vec![Matcher::Extension {
+                any_of: vec!["png".to_string(), "jpg".to_string()],
+            }],
+            action: RuleAction::AssignToZone {
+                zone: ZoneId::new("zone-1"),
+            },
             ..Rule::default()
         },
     ]
@@ -348,7 +378,12 @@ fn rules_step(world: &mut World, chance: &mut Chance) -> Result<(String, Vec<Eff
     if (world.core.config(), world.core.state()) != (&before.0, &before.1) {
         return Err("a dry run changed something".to_string());
     }
-    if effects.iter().any(|effect| matches!(effect, Effect::SaveConfig | Effect::SaveState | Effect::Ask(_))) {
+    if effects.iter().any(|effect| {
+        matches!(
+            effect,
+            Effect::SaveConfig | Effect::SaveState | Effect::Ask(_)
+        )
+    }) {
         return Err("a dry run asked for something to be done".to_string());
     }
     if lines.len() != plan.steps.len() + plan.held.len() {
@@ -356,8 +391,14 @@ fn rules_step(world: &mut World, chance: &mut Chance) -> Result<(String, Vec<Eff
     }
     for (step, line) in plan.steps.iter().zip(&lines) {
         let from = world.core.zone_of(&step.item);
-        if line.item != step.item || line.from.as_ref() != from || line.decided != step.decided || line.held.is_some() {
-            return Err(format!("a line of the dry run says other than its step: {line:?}"));
+        if line.item != step.item
+            || line.from.as_ref() != from
+            || line.decided != step.decided
+            || line.held.is_some()
+        {
+            return Err(format!(
+                "a line of the dry run says other than its step: {line:?}"
+            ));
         }
     }
     count(&SEEN.dry_runs, 1);
@@ -367,11 +408,16 @@ fn rules_step(world: &mut World, chance: &mut Chance) -> Result<(String, Vec<Eff
         _ => None,
     });
     if applied.as_ref() != Some(&plan) {
-        return Err(format!("what was applied is not what was previewed: {applied:?} for {plan:?}"));
+        return Err(format!(
+            "what was applied is not what was previewed: {applied:?} for {plan:?}"
+        ));
     }
     let left = world.core.plan(scope, world.now);
     if !left.steps.is_empty() {
-        return Err(format!("after applying, the rules would still do {:?}", left.steps));
+        return Err(format!(
+            "after applying, the rules would still do {:?}",
+            left.steps
+        ));
     }
     if !plan.steps.is_empty() && chance.one_in_a_hundred(70) {
         effects.extend(world.ask(Command::UndoRules));
@@ -379,24 +425,42 @@ fn rules_step(world: &mut World, chance: &mut Chance) -> Result<(String, Vec<Eff
             return Err("taking the rules back did not give the placements there were".to_string());
         }
     }
-    Ok((format!("the rules, previewed and applied ({scope:?})"), effects))
+    Ok((
+        format!("the rules, previewed and applied ({scope:?})"),
+        effects,
+    ))
 }
 
 /// Zones by type: asked for, made and (mostly) taken back, each held
 /// against the others.
 fn auto_step(world: &mut World, chance: &mut Chance) -> Result<(String, Vec<Effect>), String> {
     let scope = *chance.pick(&[Scope::Loose, Scope::All]);
-    let min_items = chance.one_in_a_hundred(50).then(|| chance.between(1, 4) as u32);
-    let add_rules = chance.one_in_a_hundred(50).then(|| chance.one_in_a_hundred(50));
+    let min_items = chance
+        .one_in_a_hundred(50)
+        .then(|| chance.between(1, 4) as u32);
+    let add_rules = chance
+        .one_in_a_hundred(50)
+        .then(|| chance.one_in_a_hundred(50));
     let display = (world.second && chance.one_in_a_hundred(40)).then(|| DisplayId::new("fake-2"));
-    let ask = |dry_run: bool| Command::AutoCreate { scope, min_items, display: display.clone(), add_rules, dry_run };
+    let ask = |dry_run: bool| Command::AutoCreate {
+        scope,
+        min_items,
+        display: display.clone(),
+        add_rules,
+        dry_run,
+    };
     let what = format!("zones by type ({scope:?}, at least {min_items:?})");
     let before = (world.core.config().clone(), world.core.state().clone());
     let effects = world.ask(ask(true));
     if (world.core.config(), world.core.state()) != (&before.0, &before.1) {
         return Err("asking what zones would be made changed something".to_string());
     }
-    if effects.iter().any(|effect| matches!(effect, Effect::SaveConfig | Effect::SaveState | Effect::Ask(_))) {
+    if effects.iter().any(|effect| {
+        matches!(
+            effect,
+            Effect::SaveConfig | Effect::SaveState | Effect::Ask(_)
+        )
+    }) {
         return Err("asking what zones would be made asked for something to be done".to_string());
     }
     let Some(ZonesEvent::AutoPlanned { plan }) = heard(&effects).next().cloned() else {
@@ -409,54 +473,103 @@ fn auto_step(world: &mut World, chance: &mut Chance) -> Result<(String, Vec<Effe
     };
     // (The core, asked without a command, gives rules as the
     // configuration has it; the command may have said otherwise.)
-    let mut asked = world.core.auto_plan(scope, min_items, display.as_ref(), world.now);
+    let mut asked = world
+        .core
+        .auto_plan(scope, min_items, display.as_ref(), world.now);
     for (given, said) in asked.zones.iter_mut().zip(&plan.zones) {
-        given.rule = if add_rules.is_some() { said.rule } else { given.rule };
+        given.rule = if add_rules.is_some() {
+            said.rule
+        } else {
+            given.rule
+        };
     }
     if plan != asked {
         return Err("the plan that was said is not the plan the core gives".to_string());
     }
     // Nothing of a plan is outside its display, and no item is in it twice.
-    let area = world.core.displays().iter().find(|shown| Some(&shown.id) == plan.display.as_ref()).map(|shown| shown.rect);
+    let area = world
+        .core
+        .displays()
+        .iter()
+        .find(|shown| Some(&shown.id) == plan.display.as_ref())
+        .map(|shown| shown.rect);
     let mut seen = BTreeSet::new();
     for planned in &plan.zones {
         let inside = area.is_some_and(|area| crate::snap::within(planned.rect, area));
         if planned.zone.is_none() && !inside {
-            return Err(format!("a zone would be made at {:?}, outside its display", planned.rect));
+            return Err(format!(
+                "a zone would be made at {:?}, outside its display",
+                planned.rect
+            ));
         }
         if planned.items.is_empty() || planned.items.iter().any(|item| !seen.insert(item.clone())) {
-            return Err(format!("{} would be made for nothing, or for an item twice", planned.title));
+            return Err(format!(
+                "{} would be made for nothing, or for an item twice",
+                planned.title
+            ));
         }
     }
     let mut effects = world.ask(ask(false));
     let made = heard(&effects).find_map(|event| match event {
-        ZonesEvent::AutoCreated { zones, items, rules } => Some((zones.clone(), *items, *rules)),
+        ZonesEvent::AutoCreated {
+            zones,
+            items,
+            rules,
+        } => Some((zones.clone(), *items, *rules)),
         _ => None,
     });
     let Some((made, items, rules)) = made else {
         return Err("making the zones said nothing".to_string());
     };
-    let new: Vec<_> = plan.zones.iter().filter(|planned| planned.zone.is_none()).collect();
-    if made.len() != new.len() || items != seen.len() || rules != new.iter().filter(|planned| planned.rule).count() {
+    let new: Vec<_> = plan
+        .zones
+        .iter()
+        .filter(|planned| planned.zone.is_none())
+        .collect();
+    if made.len() != new.len()
+        || items != seen.len()
+        || rules != new.iter().filter(|planned| planned.rule).count()
+    {
         return Err(format!("what was made ({made:?}, {items} items, {rules} rules) is not what was planned: {plan:?}"));
     }
     let mut fresh = made.iter();
     for planned in &plan.zones {
-        let zone = planned.zone.as_ref().or_else(|| fresh.next()).ok_or("a planned zone was not made")?;
-        let definition = world.core.config().zone(zone).ok_or("a zone that was planned is not there")?;
+        let zone = planned
+            .zone
+            .as_ref()
+            .or_else(|| fresh.next())
+            .ok_or("a planned zone was not made")?;
+        let definition = world
+            .core
+            .config()
+            .zone(zone)
+            .ok_or("a zone that was planned is not there")?;
         if definition.auto.as_deref() != Some(planned.category.as_str()) {
             return Err(format!("{zone} is not the zone of {}", planned.category));
         }
         if planned.zone.is_none() && world.core.zone_rect(zone) != Some(planned.rect) {
-            return Err(format!("{zone} is at {:?}, and {:?} was planned", world.core.zone_rect(zone), planned.rect));
+            return Err(format!(
+                "{zone} is at {:?}, and {:?} was planned",
+                world.core.zone_rect(zone),
+                planned.rect
+            ));
         }
-        if let Some(stray) = planned.items.iter().find(|item| world.core.zone_of(item) != Some(zone)) {
+        if let Some(stray) = planned
+            .items
+            .iter()
+            .find(|item| world.core.zone_of(item) != Some(zone))
+        {
             return Err(format!("{stray} was planned for {zone} and is not in it"));
         }
     }
-    let left = world.core.auto_plan(scope, min_items, display.as_ref(), world.now);
+    let left = world
+        .core
+        .auto_plan(scope, min_items, display.as_ref(), world.now);
     if !left.zones.is_empty() {
-        return Err(format!("after making the zones, more would be made: {:?}", left.zones));
+        return Err(format!(
+            "after making the zones, more would be made: {:?}",
+            left.zones
+        ));
     }
     if plan.zones.is_empty() {
         return Ok((what, effects));
@@ -466,10 +579,15 @@ fn auto_step(world: &mut World, chance: &mut Chance) -> Result<(String, Vec<Effe
         effects.extend(world.ask(Command::UndoAutoCreate));
         let (config, state) = (world.core.config(), world.core.state());
         if config.zones != before.0.zones || config.rules != before.0.rules {
-            return Err("taking the zones by type back did not give the zones and rules there were".to_string());
+            return Err(
+                "taking the zones by type back did not give the zones and rules there were"
+                    .to_string(),
+            );
         }
         if state.placements != before.1.placements || state.auto_undo.is_some() {
-            return Err("taking the zones by type back did not give the placements there were".to_string());
+            return Err(
+                "taking the zones by type back did not give the placements there were".to_string(),
+            );
         }
         count(&SEEN.unmade, 1);
     }
@@ -479,13 +597,18 @@ fn auto_step(world: &mut World, chance: &mut Chance) -> Result<(String, Vec<Effe
 /// One step of chance.
 fn step(world: &mut World, chance: &mut Chance) -> Result<(Kind, String, Vec<Effect>), String> {
     let zone = world.a_zone(chance);
-    let outside = |world: &mut World, what: &str| Ok((Kind::Change, what.to_string(), world.pump()));
+    let outside =
+        |world: &mut World, what: &str| Ok((Kind::Change, what.to_string(), world.pump()));
     let command = match chance.below(81) {
         78 => {
             let (what, effects) = auto_step(world, chance)?;
             return Ok((Kind::Change, what, effects));
         }
-        79 => Command::GreyIcons { on: chance.one_in_a_hundred(60).then(|| chance.one_in_a_hundred(50)) },
+        79 => Command::GreyIcons {
+            on: chance
+                .one_in_a_hundred(60)
+                .then(|| chance.one_in_a_hundred(50)),
+        },
         // (Whatever was last made by type and not taken back in its step.)
         80 => Command::UndoAutoCreate,
         68 => {
@@ -506,7 +629,9 @@ fn step(world: &mut World, chance: &mut Chance) -> Result<(Kind, String, Vec<Eff
         }
         71 | 72 => {
             if chance.one_in_a_hundred(60) && !world.backend.under_way.is_empty() {
-                world.backend.fail_next = Some(BackendError::Refused { what: "the disk is full".to_string() });
+                world.backend.fail_next = Some(BackendError::Refused {
+                    what: "the disk is full".to_string(),
+                });
                 count(&SEEN.failed_later, 1);
             }
             world.backend.finish_operations();
@@ -515,21 +640,39 @@ fn step(world: &mut World, chance: &mut Chance) -> Result<(Kind, String, Vec<Eff
         }
         73 | 76 | 77 => {
             let under_way: Vec<u64> = world.begun.iter().copied().collect();
-            let request = if under_way.is_empty() { 99 } else { *chance.pick(&under_way) };
+            let request = if under_way.is_empty() {
+                99
+            } else {
+                *chance.pick(&under_way)
+            };
             if chance.one_in_a_hundred(30) {
-                world.backend.progress(request, chance.below(50) as u64, 100);
+                world
+                    .backend
+                    .progress(request, chance.below(50) as u64, 100);
                 return outside(world, "an operation says how far it is");
             }
             let effects = world.ask(Command::CancelOperation { request });
-            return Ok((Kind::Change, format!("operation {request} is called off"), effects));
+            return Ok((
+                Kind::Change,
+                format!("operation {request} is called off"),
+                effects,
+            ));
         }
         74 => {
             let effects = world.start_anew(chance)?;
-            return Ok((Kind::Change, "the program is started anew".to_string(), effects));
+            return Ok((
+                Kind::Change,
+                "the program is started anew".to_string(),
+                effects,
+            ));
         }
         75 => {
             let effects = world.in_and_back(chance)?;
-            return Ok((Kind::Change, "a file is brought in and taken back".to_string(), effects));
+            return Ok((
+                Kind::Change,
+                "a file is brought in and taken back".to_string(),
+                effects,
+            ));
         }
         0 => {
             let item = world.a_file(DESKTOP, chance);
@@ -549,8 +692,12 @@ fn step(world: &mut World, chance: &mut Chance) -> Result<(Kind, String, Vec<Eff
         }
         4 => {
             let folder = *chance.pick(&TREE);
-            let files: Vec<Item> =
-                world.backend.in_folder(folder).into_iter().filter(|item| item.kind == ItemKind::File).collect();
+            let files: Vec<Item> = world
+                .backend
+                .in_folder(folder)
+                .into_iter()
+                .filter(|item| item.kind == ItemKind::File)
+                .collect();
             if let Some(gone) = (!files.is_empty()).then(|| chance.pick(&files).id.clone()) {
                 world.backend.remove(&gone);
             }
@@ -573,7 +720,9 @@ fn step(world: &mut World, chance: &mut Chance) -> Result<(Kind, String, Vec<Eff
         }
         9 => {
             world.recent = world.fresh_recent(chance);
-            world.backend.set_source(SmartSource::Recent, world.recent.clone());
+            world
+                .backend
+                .set_source(SmartSource::Recent, world.recent.clone());
             return outside(world, "other files were used last");
         }
         10 => {
@@ -583,14 +732,18 @@ fn step(world: &mut World, chance: &mut Chance) -> Result<(Kind, String, Vec<Eff
         }
         11 => {
             let name = Some(chance.between(1, 2).to_string());
-            let mut effects = world.core.event(BackendEvent::Workspace { name }, world.now);
+            let mut effects = world
+                .core
+                .event(BackendEvent::Workspace { name }, world.now);
             effects.extend(world.pump());
             return Ok((Kind::Change, "another workspace".to_string(), effects));
         }
         12 => {
             world.second = !world.second;
             if world.second {
-                world.backend.plug(Display::new("fake-2", Rect::new(1920, 0, 1600, 900)));
+                world
+                    .backend
+                    .plug(Display::new("fake-2", Rect::new(1920, 0, 1600, 900)));
             } else {
                 world.backend.unplug(&DisplayId::new("fake-2"));
             }
@@ -606,7 +759,9 @@ fn step(world: &mut World, chance: &mut Chance) -> Result<(Kind, String, Vec<Eff
         }
         15 | 16 if world.zones().len() < 9 => {
             let kind = match chance.below(10) {
-                0..=2 => ZoneKind::Portal { directory: chance.pick(&TREE).to_string() },
+                0..=2 => ZoneKind::Portal {
+                    directory: chance.pick(&TREE).to_string(),
+                },
                 3 | 4 => ZoneKind::Smart { query: Vec::new() },
                 _ => ZoneKind::Manual,
             };
@@ -619,7 +774,11 @@ fn step(world: &mut World, chance: &mut Chance) -> Result<(Kind, String, Vec<Eff
                     chance.between(60, 500),
                 )
             });
-            let mut effects = world.ask(Command::CreateZone { title: format!("Zone {}", chance.below(50)), kind, rect });
+            let mut effects = world.ask(Command::CreateZone {
+                title: format!("Zone {}", chance.below(50)),
+                kind,
+                rect,
+            });
             let made = heard(&effects).find_map(|event| match event {
                 ZonesEvent::ZoneCreated { zone } => Some(zone.clone()),
                 _ => None,
@@ -638,9 +797,21 @@ fn step(world: &mut World, chance: &mut Chance) -> Result<(Kind, String, Vec<Eff
             y: chance.between(-200, 1200),
             snap: chance.one_in_a_hundred(60),
         },
-        20..=22 => Command::AddItem { zone, item: world.a_desktop_item(chance), index: None, cell: None },
-        23 => Command::RemoveItem { item: world.a_desktop_item(chance) },
-        24 | 25 => Command::RollUp { zone, rolled_up: chance.one_in_a_hundred(60).then(|| chance.one_in_a_hundred(70)) },
+        20..=22 => Command::AddItem {
+            zone,
+            item: world.a_desktop_item(chance),
+            index: None,
+            cell: None,
+        },
+        23 => Command::RemoveItem {
+            item: world.a_desktop_item(chance),
+        },
+        24 | 25 => Command::RollUp {
+            zone,
+            rolled_up: chance
+                .one_in_a_hundred(60)
+                .then(|| chance.one_in_a_hundred(70)),
+        },
         26..=28 => {
             world.at_ms += chance.below(300) as u64;
             Command::PointerOver {
@@ -653,8 +824,16 @@ fn step(world: &mut World, chance: &mut Chance) -> Result<(Kind, String, Vec<Eff
             world.at_ms += chance.below(600) as u64;
             Command::Tick { at_ms: world.at_ms }
         }
-        31 => Command::Expand { zone, expanded: chance.one_in_a_hundred(50).then(|| chance.one_in_a_hundred(60)) },
-        32 | 33 => Command::Tab { zone, with: world.a_zone(chance) },
+        31 => Command::Expand {
+            zone,
+            expanded: chance
+                .one_in_a_hundred(50)
+                .then(|| chance.one_in_a_hundred(60)),
+        },
+        32 | 33 => Command::Tab {
+            zone,
+            with: world.a_zone(chance),
+        },
         34 => {
             if chance.one_in_a_hundred(40) {
                 Command::Untab { zone }
@@ -662,22 +841,33 @@ fn step(world: &mut World, chance: &mut Chance) -> Result<(Kind, String, Vec<Eff
                 Command::ActivateTab { zone }
             }
         }
-        35 => Command::MoveTab { zone, index: chance.below(4) },
+        35 => Command::MoveTab {
+            zone,
+            index: chance.below(4),
+        },
         36 => Command::SplitTab {
             zone,
             x: chance.between(0, 1500),
             y: chance.between(0, 800),
             snap: chance.one_in_a_hundred(50),
         },
-        37 => Command::NextTab { zone, backwards: chance.one_in_a_hundred(50) },
+        37 => Command::NextTab {
+            zone,
+            backwards: chance.one_in_a_hundred(50),
+        },
         38 => Command::AlwaysVisible { zone, on: None },
-        39 => Command::ItemAlwaysVisible { item: world.a_desktop_item(chance), on: None },
+        39 => Command::ItemAlwaysVisible {
+            item: world.a_desktop_item(chance),
+            on: None,
+        },
         40 => Command::QuickHide { hidden: None },
         41 => {
             if chance.one_in_a_hundred(50) {
                 Command::TogglePeek
             } else {
-                Command::Peek { on: chance.one_in_a_hundred(50) }
+                Command::Peek {
+                    on: chance.one_in_a_hundred(50),
+                }
             }
         }
         42 => Command::Dismiss,
@@ -688,19 +878,28 @@ fn step(world: &mut World, chance: &mut Chance) -> Result<(Kind, String, Vec<Eff
         },
         44 => Command::Lock {
             zone,
-            geometry: chance.one_in_a_hundred(50).then(|| chance.one_in_a_hundred(25)),
-            members: chance.one_in_a_hundred(50).then(|| chance.one_in_a_hundred(25)),
+            geometry: chance
+                .one_in_a_hundred(50)
+                .then(|| chance.one_in_a_hundred(25)),
+            members: chance
+                .one_in_a_hundred(50)
+                .then(|| chance.one_in_a_hundred(25)),
         },
         45 => {
             // Mostly unlocked again: a run in which everything is locked
             // for long sees little.
             let lock = chance.one_in_a_hundred(25);
-            Command::LockAll { geometry: Some(lock && chance.one_in_a_hundred(50)), members: Some(lock) }
+            Command::LockAll {
+                geometry: Some(lock && chance.one_in_a_hundred(50)),
+                members: Some(lock),
+            }
         }
         46 | 47 => {
             let changes = match chance.below(7) {
                 0 => json!({"private": chance.one_in_a_hundred(50)}),
-                1 => json!({"workspaces": if chance.one_in_a_hundred(50) { vec!["1"] } else { vec![] }}),
+                1 => {
+                    json!({"workspaces": if chance.one_in_a_hundred(50) { vec!["1"] } else { vec![] }})
+                }
                 2 => json!({"reserves_space": chance.one_in_a_hundred(60)}),
                 3 => json!({"limit": chance.below(5)}),
                 4 => json!({"expand_on": *chance.pick(&[Some("click"), Some("hover"), None])}),
@@ -718,21 +917,36 @@ fn step(world: &mut World, chance: &mut Chance) -> Result<(Kind, String, Vec<Eff
                 .filter(|item| item.kind == ItemKind::Folder)
                 .map(|item| item.id.clone())
                 .collect();
-            let item = if folders.is_empty() { world.an_item(chance) } else { chance.pick(&folders).clone() };
+            let item = if folders.is_empty() {
+                world.an_item(chance)
+            } else {
+                chance.pick(&folders).clone()
+            };
             Command::EnterFolder { zone: portal, item }
         }
-        51 => Command::NavigateUp { zone: world.a_portal(chance) },
-        52 => Command::NavigateBack { zone: world.a_portal(chance) },
-        53 => Command::NavigateForward { zone: world.a_portal(chance) },
+        51 => Command::NavigateUp {
+            zone: world.a_portal(chance),
+        },
+        52 => Command::NavigateBack {
+            zone: world.a_portal(chance),
+        },
+        53 => Command::NavigateForward {
+            zone: world.a_portal(chance),
+        },
         54 => Command::NavigateTo {
             zone: world.a_portal(chance),
-            directory: chance.pick(&["/tree", "/tree/a", "/tree/a/b", "/tree/c", "/elsewhere"]).to_string(),
+            directory: chance
+                .pick(&["/tree", "/tree/a", "/tree/a/b", "/tree/c", "/elsewhere"])
+                .to_string(),
         },
         55 => Command::RefreshZone { zone },
         56 => {
             if chance.one_in_a_hundred(40) {
                 world.made += 1;
-                Command::NewFolder { zone: world.a_portal(chance), name: format!("n{}", world.made) }
+                Command::NewFolder {
+                    zone: world.a_portal(chance),
+                    name: format!("n{}", world.made),
+                }
             } else if chance.one_in_a_hundred(50) {
                 Command::UndoFileOperation
             } else {
@@ -753,61 +967,123 @@ fn step(world: &mut World, chance: &mut Chance) -> Result<(Kind, String, Vec<Eff
         }
         57 | 58 => Command::Filter {
             zone: chance.one_in_a_hundred(70).then_some(zone),
-            typed: chance.pick(&["", "f", "t", "1", "png", "nothing fits this"]).to_string(),
+            typed: chance
+                .pick(&["", "f", "t", "1", "png", "nothing fits this"])
+                .to_string(),
         },
         59 => Command::CheckTimedRules,
         60 => match chance.below(5) {
-            0 | 1 => Command::SaveSnapshot { name: format!("s{}", chance.below(3)) },
-            2 => Command::RenameSnapshot { name: format!("s{}", chance.below(3)), to: format!("s{}", chance.below(3)) },
-            3 => Command::DeleteSnapshot { name: format!("s{}", chance.below(3)) },
-            _ => Command::ExportLayout { name: chance.one_in_a_hundred(30).then(|| format!("s{}", chance.below(3))) },
+            0 | 1 => Command::SaveSnapshot {
+                name: format!("s{}", chance.below(3)),
+            },
+            2 => Command::RenameSnapshot {
+                name: format!("s{}", chance.below(3)),
+                to: format!("s{}", chance.below(3)),
+            },
+            3 => Command::DeleteSnapshot {
+                name: format!("s{}", chance.below(3)),
+            },
+            _ => Command::ExportLayout {
+                name: chance
+                    .one_in_a_hundred(30)
+                    .then(|| format!("s{}", chance.below(3))),
+            },
         },
         61 | 66 | 67 => {
             if world.exported.is_empty() || chance.one_in_a_hundred(40) {
-                Command::RestoreSnapshot { name: format!("s{}", chance.below(3)) }
+                Command::RestoreSnapshot {
+                    name: format!("s{}", chance.below(3)),
+                }
             } else {
                 let mut document = chance.pick(&world.exported).clone();
                 // Now and then one that cannot be right.
                 if chance.one_in_a_hundred(15) {
                     document["version"] = 99.into();
                 }
-                Command::ImportLayout { document, apply: chance.one_in_a_hundred(70) }
+                Command::ImportLayout {
+                    document,
+                    apply: chance.one_in_a_hundred(70),
+                }
             }
         }
         62 => match chance.below(3) {
             0 => {
-                let zone = if chance.one_in_a_hundred(35) { ZoneId::new(DESK) } else { zone };
-                Command::FocusZone { zone: chance.one_in_a_hundred(85).then_some(zone) }
+                let zone = if chance.one_in_a_hundred(35) {
+                    ZoneId::new(DESK)
+                } else {
+                    zone
+                };
+                Command::FocusZone {
+                    zone: chance.one_in_a_hundred(85).then_some(zone),
+                }
             }
-            1 => Command::FocusItem { item: chance.one_in_a_hundred(85).then(|| world.an_item(chance)) },
-            _ => Command::FocusNeighbour { direction: *chance.pick(&Direction::ALL) },
+            1 => Command::FocusItem {
+                item: chance.one_in_a_hundred(85).then(|| world.an_item(chance)),
+            },
+            _ => Command::FocusNeighbour {
+                direction: *chance.pick(&Direction::ALL),
+            },
         },
         63 => Command::MoveItemFocus {
-            step: *chance.pick(&[Step::Left, Step::Right, Step::Up, Step::Down, Step::First, Step::Last]),
+            step: *chance.pick(&[
+                Step::Left,
+                Step::Right,
+                Step::Up,
+                Step::Down,
+                Step::First,
+                Step::Last,
+            ]),
             extend: chance.one_in_a_hundred(30),
         },
         64 => match chance.below(4) {
             0 => Command::Select {
                 items: vec![world.an_item(chance), world.an_item(chance)],
-                mode: *chance.pick(&[SelectMode::Replace, SelectMode::Add, SelectMode::Remove, SelectMode::Toggle]),
+                mode: *chance.pick(&[
+                    SelectMode::Replace,
+                    SelectMode::Add,
+                    SelectMode::Remove,
+                    SelectMode::Toggle,
+                ]),
             },
             1 => Command::OpenFocused,
-            2 => Command::MoveFocusedItems { direction: Some(*chance.pick(&Direction::ALL)), zone: None },
+            2 => Command::MoveFocusedItems {
+                direction: Some(*chance.pick(&Direction::ALL)),
+                zone: None,
+            },
             _ => {
-                let zone = if chance.one_in_a_hundred(35) { ZoneId::new(DESK) } else { zone };
-                Command::MoveFocusedItems { direction: None, zone: Some(zone) }
+                let zone = if chance.one_in_a_hundred(35) {
+                    ZoneId::new(DESK)
+                } else {
+                    zone
+                };
+                Command::MoveFocusedItems {
+                    direction: None,
+                    zone: Some(zone),
+                }
             }
         },
         _ => match chance.below(4) {
             0 => Command::Mask { masked: None },
-            1 => Command::Reveal { zone: Some(zone), revealed: None },
-            2 => Command::Reveal { zone: None, revealed: chance.one_in_a_hundred(50).then(|| chance.one_in_a_hundred(50)) },
-            _ => Command::Search { typed: chance.pick(&["f", "t", "r", "png", "n"]).to_string() },
+            1 => Command::Reveal {
+                zone: Some(zone),
+                revealed: None,
+            },
+            2 => Command::Reveal {
+                zone: None,
+                revealed: chance
+                    .one_in_a_hundred(50)
+                    .then(|| chance.one_in_a_hundred(50)),
+            },
+            _ => Command::Search {
+                typed: chance.pick(&["f", "t", "r", "png", "n"]).to_string(),
+            },
         },
     };
     let kind = match &command {
         Command::DeleteZone { .. } | Command::UndoAutoCreate => Kind::Deletes,
-        Command::RestoreSnapshot { .. } | Command::ImportLayout { apply: true, .. } => Kind::Replaces,
+        Command::RestoreSnapshot { .. } | Command::ImportLayout { apply: true, .. } => {
+            Kind::Replaces
+        }
         Command::PointerOver { .. }
         | Command::Tick { .. }
         | Command::Expand { .. }
@@ -835,13 +1111,21 @@ fn step(world: &mut World, chance: &mut Chance) -> Result<(Kind, String, Vec<Eff
         match &command {
             Command::Tick { at_ms } => {
                 if world.core.wake_at_ms().is_some_and(|due| due <= *at_ms) {
-                    return Err(format!("after a tick at {at_ms}, something still waits for {:?}", world.core.wake_at_ms()));
+                    return Err(format!(
+                        "after a tick at {at_ms}, something still waits for {:?}",
+                        world.core.wake_at_ms()
+                    ));
                 }
             }
-            Command::ImportLayout { document, apply: true } => {
+            Command::ImportLayout {
+                document,
+                apply: true,
+            } => {
                 let read = export::read(document)?;
                 if world.core.config().zones != read.layout.zones {
-                    return Err("a layout was brought in, and the zones are not its zones".to_string());
+                    return Err(
+                        "a layout was brought in, and the zones are not its zones".to_string()
+                    );
                 }
             }
             Command::CheckTimedRules => {
@@ -855,15 +1139,22 @@ fn step(world: &mut World, chance: &mut Chance) -> Result<(Kind, String, Vec<Eff
                         Decided::CatchAll => false,
                     };
                     if plan.steps.iter().any(|step| !timed(&step.decided)) {
-                        return Err("the timed check carried out a rule that asks nothing of the time".to_string());
+                        return Err(
+                            "the timed check carried out a rule that asks nothing of the time"
+                                .to_string(),
+                        );
                     }
                 }
             }
-            Command::MoveTab { .. } | Command::SplitTab { .. } | Command::NextTab { .. } => count(&SEEN.tabs, 1),
+            Command::MoveTab { .. } | Command::SplitTab { .. } | Command::NextTab { .. } => {
+                count(&SEEN.tabs, 1)
+            }
             Command::GreyIcons { on } => {
                 count(&SEEN.grey, 1);
                 let grey = world.core.grey_icons();
-                let told = heard(&effects).any(|event| matches!(event, ZonesEvent::GreyIconsChanged { on } if *on == grey));
+                let told = heard(&effects).any(
+                    |event| matches!(event, ZonesEvent::GreyIconsChanged { on } if *on == grey),
+                );
                 if on.is_some_and(|on| on != grey) || told != effects.contains(&Effect::SaveState) {
                     return Err("icons are grey otherwise than was asked, or it was not told as it was saved".to_string());
                 }
@@ -898,15 +1189,25 @@ fn look_over(world: &World, scene: &Scene) -> Result<(), String> {
         // and on one of them.
         Some(focus) if focus.desk.is_some() => {
             count(&SEEN.on_the_desk, 1);
-            let lying = scene.loose.iter().find(|loose| Some(&loose.display) == focus.desk.as_ref());
+            let lying = scene
+                .loose
+                .iter()
+                .find(|loose| Some(&loose.display) == focus.desk.as_ref());
             let Some(lying) = lying.filter(|loose| loose.focused && !loose.items.is_empty()) else {
                 return Err("the desktop has the keyboard and nothing lies loose there".to_string());
             };
             if focus.zone.as_str() != DESK || scene.loose_hidden {
-                return Err("the desktop has the keyboard and is put away, or is called otherwise".to_string());
+                return Err(
+                    "the desktop has the keyboard and is put away, or is called otherwise"
+                        .to_string(),
+                );
             }
             if let Some(item) = &focus.item {
-                if !lying.items.iter().any(|placed| &placed.item == item && placed.focused) {
+                if !lying
+                    .items
+                    .iter()
+                    .any(|placed| &placed.item == item && placed.focused)
+                {
                     return Err(format!("{item} has the keyboard and does not lie loose"));
                 }
             }
@@ -917,9 +1218,15 @@ fn look_over(world: &World, scene: &Scene) -> Result<(), String> {
             }
             if let Some(item) = &focus.item {
                 if core.is_masked(&focus.zone)
-                    || !core.zone_items(&focus.zone, now).iter().any(|shown| &shown.id == item)
+                    || !core
+                        .zone_items(&focus.zone, now)
+                        .iter()
+                        .any(|shown| &shown.id == item)
                 {
-                    return Err(format!("{item} has the keyboard and {} does not show it", focus.zone));
+                    return Err(format!(
+                        "{item} has the keyboard and {} does not show it",
+                        focus.zone
+                    ));
                 }
             }
         }
@@ -928,27 +1235,58 @@ fn look_over(world: &World, scene: &Scene) -> Result<(), String> {
     // The desktop the core knows is the desktop there is: nothing that is
     // not there, and nothing missing. (Each item once: loose, or in the
     // one zone it was put into.)
-    let mut known: Vec<ItemId> = core.loose_items().into_iter().map(|item| item.id.clone()).collect();
-    for zone in core.config().zones.iter().filter(|zone| zone.kind == ZoneKind::Manual) {
-        known.extend(core.zone_holds(&zone.id, now).into_iter().map(|item| item.id.clone()));
+    let mut known: Vec<ItemId> = core
+        .loose_items()
+        .into_iter()
+        .map(|item| item.id.clone())
+        .collect();
+    for zone in core
+        .config()
+        .zones
+        .iter()
+        .filter(|zone| zone.kind == ZoneKind::Manual)
+    {
+        known.extend(
+            core.zone_holds(&zone.id, now)
+                .into_iter()
+                .map(|item| item.id.clone()),
+        );
     }
     let there = world.desktop();
     if known.len() != there.len() || known.iter().cloned().collect::<BTreeSet<_>>() != there {
-        return Err(format!("the core knows {known:?} on the desktop, and there is {there:?}"));
+        return Err(format!(
+            "the core knows {known:?} on the desktop, and there is {there:?}"
+        ));
     }
     // Every operation that was begun is under way until it has ended.
-    let shown: BTreeSet<u64> = scene.operations.iter().map(|operation| operation.request).collect();
-    let under_way: BTreeSet<u64> = world.backend.under_way.iter().map(|(request, _)| *request).collect();
+    let shown: BTreeSet<u64> = scene
+        .operations
+        .iter()
+        .map(|operation| operation.request)
+        .collect();
+    let under_way: BTreeSet<u64> = world
+        .backend
+        .under_way
+        .iter()
+        .map(|(request, _)| *request)
+        .collect();
     if shown != world.begun || shown != under_way {
         return Err(format!(
             "under way: the scene says {shown:?}, {:?} were begun and not ended, the backend has {under_way:?}",
             world.begun
         ));
     }
-    if let Some(stray) = core.selection().iter().find(|item| core.item(item).is_none()) {
+    if let Some(stray) = core
+        .selection()
+        .iter()
+        .find(|item| core.item(item).is_none())
+    {
         return Err(format!("{stray} is chosen and is not there"));
     }
-    let hidden_here = |zone: &ZoneId| core.profile().is_some_and(|profile| profile.hidden.contains(zone));
+    let hidden_here = |zone: &ZoneId| {
+        core.profile()
+            .is_some_and(|profile| profile.hidden.contains(zone))
+    };
     for shown in &scene.zones {
         let Some(definition) = core.config().zone(&shown.zone) else {
             return Err(format!("{} is in the scene and is no zone", shown.zone));
@@ -957,10 +1295,16 @@ fn look_over(world: &World, scene: &Scene) -> Result<(), String> {
         // otherwise everything that belongs here is.
         let belongs = !hidden_here(&shown.zone)
             && (definition.workspaces.is_empty()
-                || core.workspace().is_none_or(|workspace| definition.workspaces.iter().any(|name| name == workspace)));
-        let expected = belongs && (scene.peeking || !scene.quick_hidden || definition.always_visible);
+                || core.workspace().is_none_or(|workspace| {
+                    definition.workspaces.iter().any(|name| name == workspace)
+                }));
+        let expected =
+            belongs && (scene.peeking || !scene.quick_hidden || definition.always_visible);
         if shown.shown != expected {
-            return Err(format!("{} is shown: {}, and should be: {expected}", shown.zone, shown.shown));
+            return Err(format!(
+                "{} is shown: {}, and should be: {expected}",
+                shown.zone, shown.shown
+            ));
         }
         if scene.quick_hidden && !scene.peeking {
             count(&SEEN.put_away, 1);
@@ -969,23 +1313,39 @@ fn look_over(world: &World, scene: &Scene) -> Result<(), String> {
         if shown.masked {
             count(&SEEN.covered, 1);
             if !shown.items.items.is_empty() {
-                return Err(format!("{} is covered and its items are in the scene", shown.zone));
+                return Err(format!(
+                    "{} is covered and its items are in the scene",
+                    shown.zone
+                ));
             }
         }
         if shown.rolled_up != definition.rolled_up || (shown.expanded && !shown.rolled_up) {
-            return Err(format!("{} is said to be rolled up otherwise than it is", shown.zone));
+            return Err(format!(
+                "{} is said to be rolled up otherwise than it is",
+                shown.zone
+            ));
         }
         // A portal whose folder is listed shows exactly what is in it.
         if let Some(portal) = &shown.portal {
             if !crate::portal::within(&portal.root, &portal.directory) {
-                return Err(format!("{} stands in {}, outside {}", shown.zone, portal.directory, portal.root));
+                return Err(format!(
+                    "{} stands in {}, outside {}",
+                    shown.zone, portal.directory, portal.root
+                ));
             }
             match &portal.listing {
                 Listing::Ready => {
-                    let there: BTreeSet<ItemId> =
-                        world.backend.in_folder(&portal.directory).into_iter().map(|item| item.id).collect();
-                    let held: BTreeSet<ItemId> =
-                        core.zone_holds(&shown.zone, now).into_iter().map(|item| item.id.clone()).collect();
+                    let there: BTreeSet<ItemId> = world
+                        .backend
+                        .in_folder(&portal.directory)
+                        .into_iter()
+                        .map(|item| item.id)
+                        .collect();
+                    let held: BTreeSet<ItemId> = core
+                        .zone_holds(&shown.zone, now)
+                        .into_iter()
+                        .map(|item| item.id.clone())
+                        .collect();
                     if there != held {
                         return Err(format!(
                             "{} shows {held:?} of {}, which holds {there:?}",
@@ -997,27 +1357,50 @@ fn look_over(world: &World, scene: &Scene) -> Result<(), String> {
                 Listing::Unavailable { .. } => {
                     count(&SEEN.unavailable, 1);
                     if shown.item_count != 0 {
-                        return Err(format!("{} shows items of a folder that could not be listed", shown.zone));
+                        return Err(format!(
+                            "{} shows items of a folder that could not be listed",
+                            shown.zone
+                        ));
                     }
                 }
                 Listing::Loading => {}
             }
         }
         // A zone that fills itself from the files used last shows some of them.
-        if matches!(definition.kind, ZoneKind::Smart { .. }) && definition.source == SmartSource::Recent {
+        if matches!(definition.kind, ZoneKind::Smart { .. })
+            && definition.source == SmartSource::Recent
+        {
             let held = core.zone_holds(&shown.zone, now);
-            if let Some(stray) = held.iter().find(|item| !world.recent.iter().any(|recent| recent.id == item.id)) {
-                return Err(format!("{} shows {}, which is not among the files used last", shown.zone, stray.id));
+            if let Some(stray) = held
+                .iter()
+                .find(|item| !world.recent.iter().any(|recent| recent.id == item.id))
+            {
+                return Err(format!(
+                    "{} shows {}, which is not among the files used last",
+                    shown.zone, stray.id
+                ));
             }
-            let most = if definition.limit == 0 { world.recent.len() } else { definition.limit as usize };
+            let most = if definition.limit == 0 {
+                world.recent.len()
+            } else {
+                definition.limit as usize
+            };
             if shown.source == Some(Listing::Ready) && held.len() != most.min(world.recent.len()) {
-                return Err(format!("{} shows {} of the files used last", shown.zone, held.len()));
+                return Err(format!(
+                    "{} shows {} of the files used last",
+                    shown.zone,
+                    held.len()
+                ));
             }
             count(&SEEN.sources, 1);
         }
     }
     // What is covered is not found.
-    for hit in core.search("f", now).into_iter().chain(core.search("r", now)) {
+    for hit in core
+        .search("f", now)
+        .into_iter()
+        .chain(core.search("r", now))
+    {
         let covered = match &hit.zone {
             Some(zone) => core.is_masked(zone),
             None => core.loose_masked(),
@@ -1026,19 +1409,35 @@ fn look_over(world: &World, scene: &Scene) -> Result<(), String> {
             return Err(format!("{} was found, and is covered", hit.item));
         }
     }
-    if scene.loose.iter().any(|loose| loose.masked && !loose.items.is_empty()) {
+    if scene
+        .loose
+        .iter()
+        .any(|loose| loose.masked && !loose.items.is_empty())
+    {
         return Err("the loose items are covered and are in the scene".to_string());
     }
     // The loose items are put away with the zones (and seen again by
     // whoever peeks); and icons are grey as kept.
     let away = scene.quick_hidden && !scene.peeking;
     if scene.loose_hidden != away || scene.grey_icons != core.state().grey_icons {
-        return Err("the scene says otherwise than is kept whether loose items are away, or icons grey".to_string());
+        return Err(
+            "the scene says otherwise than is kept whether loose items are away, or icons grey"
+                .to_string(),
+        );
     }
     // A zone made by type is one filled by hand, and its type's only one.
     let mut types = BTreeSet::new();
-    for zone in core.config().zones.iter().filter(|zone| zone.kind == ZoneKind::Manual) {
-        if zone.auto.as_ref().is_some_and(|category| !types.insert(category.clone())) {
+    for zone in core
+        .config()
+        .zones
+        .iter()
+        .filter(|zone| zone.kind == ZoneKind::Manual)
+    {
+        if zone
+            .auto
+            .as_ref()
+            .is_some_and(|category| !types.insert(category.clone()))
+        {
             return Err(format!("{} is a second zone for {:?}", zone.id, zone.auto));
         }
     }
@@ -1095,25 +1494,37 @@ fn later_run(seed: u64) -> Result<(), String> {
         let item = world.a_file(DESKTOP, &mut chance);
         world.backend.add(DESKTOP, item);
     }
-    world.host.start(&mut world.core, &mut world.backend, world.now);
+    world
+        .host
+        .start(&mut world.core, &mut world.backend, world.now);
     for kind in [
         ZoneKind::Manual,
         ZoneKind::Manual,
-        ZoneKind::Portal { directory: "/tree".to_string() },
+        ZoneKind::Portal {
+            directory: "/tree".to_string(),
+        },
         ZoneKind::Smart { query: Vec::new() },
     ] {
         let smart = matches!(kind, ZoneKind::Smart { .. });
-        world.ask(Command::CreateZone { title: "Zone".to_string(), kind, rect: None });
+        world.ask(Command::CreateZone {
+            title: "Zone".to_string(),
+            kind,
+            rect: None,
+        });
         if smart {
             let zone = world.zones().pop().unwrap_or_default();
-            world.ask(Command::ModifyZone { zone, changes: json!({"source": {"from": "recent"}}) });
+            world.ask(Command::ModifyZone {
+                zone,
+                changes: json!({"source": {"from": "recent"}}),
+            });
         }
     }
 
     for number in 0..240 {
         let zones_before: BTreeSet<ZoneId> = world.zones().into_iter().collect();
         let layout_before = world.core.current_layout("", world.now);
-        let (kind, what, effects) = step(&mut world, &mut chance).map_err(|problem| format!("step {number}: {problem}"))?;
+        let (kind, what, effects) =
+            step(&mut world, &mut chance).map_err(|problem| format!("step {number}: {problem}"))?;
         let wrong = |problem: String| Err(format!("step {number} ({what}): {problem}"));
         let core = &world.core;
         let now = world.now;
@@ -1129,8 +1540,16 @@ fn later_run(seed: u64) -> Result<(), String> {
             Kind::Deletes => {}
             Kind::Replaces if carried_out => {
                 count(&SEEN.layouts_replaced, 1);
-                if !core.state().snapshots.iter().any(|kept| kept.same_layout(&layout_before)) {
-                    return wrong("the whole layout was replaced, and the one there was is in no snapshot".to_string());
+                if !core
+                    .state()
+                    .snapshots
+                    .iter()
+                    .any(|kept| kept.same_layout(&layout_before))
+                {
+                    return wrong(
+                        "the whole layout was replaced, and the one there was is in no snapshot"
+                            .to_string(),
+                    );
                 }
             }
             _ => {
@@ -1145,8 +1564,13 @@ fn later_run(seed: u64) -> Result<(), String> {
         // What is so only for the moment asks for nothing to be saved.
         if kind == Kind::View {
             count(&SEEN.not_saved, 1);
-            if effects.iter().any(|effect| matches!(effect, Effect::SaveConfig | Effect::SaveState)) {
-                return wrong("something that is so for the moment only asked to be saved".to_string());
+            if effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::SaveConfig | Effect::SaveState))
+            {
+                return wrong(
+                    "something that is so for the moment only asked to be saved".to_string(),
+                );
             }
         }
         // The room kept free of windows is what was last told.
@@ -1170,7 +1594,9 @@ fn later_run(seed: u64) -> Result<(), String> {
         // zone that is not filled by hand, and no file used last anywhere.
         let written = store::encode(core.state());
         for zone in &core.config().zones {
-            if zone.kind != ZoneKind::Manual && !core.state().placements.items_of(&zone.id).is_empty() {
+            if zone.kind != ZoneKind::Manual
+                && !core.state().placements.items_of(&zone.id).is_empty()
+            {
                 return wrong(format!("{} fills itself and has placements", zone.id));
             }
         }
@@ -1180,12 +1606,18 @@ fn later_run(seed: u64) -> Result<(), String> {
         // Everything survives its text.
         match store::decode(&written) {
             Ok((state, None)) if &state == core.state() => {}
-            other => return wrong(format!("the state does not come back from its text: {other:?}")),
+            other => {
+                return wrong(format!(
+                    "the state does not come back from its text: {other:?}"
+                ))
+            }
         }
         for effect in &effects {
             let text = serde_json::to_string(effect).map_err(|error| error.to_string())?;
             if serde_json::from_str::<Effect>(&text).ok().as_ref() != Some(effect) {
-                return wrong(format!("an effect does not come back from its JSON: {text}"));
+                return wrong(format!(
+                    "an effect does not come back from its JSON: {text}"
+                ));
             }
         }
         let text = serde_json::to_string(&scene).map_err(|error| error.to_string())?;
@@ -1202,30 +1634,59 @@ fn later_run(seed: u64) -> Result<(), String> {
             .and_then(|text| serde_json::from_str(&text).ok())
             .ok_or("the configuration does not come back from its JSON")?;
         if &config != core.config() || !config.problems().is_empty() {
-            return wrong(format!("the configuration came to be one that cannot be right: {:?}", config.problems()));
+            return wrong(format!(
+                "the configuration came to be one that cannot be right: {:?}",
+                config.problems()
+            ));
         }
         // A program started anew from what was written has the zones
         // where they are, put away if they were, and nothing of the moment.
         if number % 8 == 0 {
             let (state, _) = store::decode(&written).map_err(|error| format!("{error:?}"))?;
             let mut again = ZonesCore::new(config, state);
-            again.event(BackendEvent::Workspace { name: core.workspace().map(str::to_string) }, now);
-            again.event(BackendEvent::Displays { displays: core.displays().to_vec(), reserved: Vec::new() }, now);
+            again.event(
+                BackendEvent::Workspace {
+                    name: core.workspace().map(str::to_string),
+                },
+                now,
+            );
+            again.event(
+                BackendEvent::Displays {
+                    displays: core.displays().to_vec(),
+                    reserved: Vec::new(),
+                },
+                now,
+            );
             let anew = again.scene(now);
-            let kept = anew.quick_hidden == scene.quick_hidden && anew.grey_icons == scene.grey_icons;
+            let kept =
+                anew.quick_hidden == scene.quick_hidden && anew.grey_icons == scene.grey_icons;
             if !kept || anew.focus.is_some() || anew.masked {
-                return wrong("started anew, what is kept is not kept or what is not is".to_string());
+                return wrong(
+                    "started anew, what is kept is not kept or what is not is".to_string(),
+                );
             }
             for (was, is) in scene.zones.iter().zip(&anew.zones) {
-                let whole = |shown: &crate::core::ZoneScene| (shown.zone.clone(), shown.display.clone(), shown.rolled_up);
+                let whole = |shown: &crate::core::ZoneScene| {
+                    (shown.zone.clone(), shown.display.clone(), shown.rolled_up)
+                };
                 if whole(was) != whole(is) || is.expanded || is.filter.is_some() {
                     return wrong(format!("started anew, {} is shown otherwise", was.zone));
                 }
                 if !was.expanded && was.rect != is.rect {
-                    return wrong(format!("started anew, {} is at {:?}, not {:?}", was.zone, is.rect, was.rect));
+                    return wrong(format!(
+                        "started anew, {} is at {:?}, not {:?}",
+                        was.zone, is.rect, was.rect
+                    ));
                 }
-                if is.portal.as_ref().is_some_and(|portal| portal.directory != portal.root) {
-                    return wrong(format!("started anew, {} does not stand in its own folder", is.zone));
+                if is
+                    .portal
+                    .as_ref()
+                    .is_some_and(|portal| portal.directory != portal.root)
+                {
+                    return wrong(format!(
+                        "started anew, {} does not stand in its own folder",
+                        is.zone
+                    ));
                 }
             }
         }
@@ -1272,6 +1733,9 @@ fn long_runs_of_everything_that_came_later_hold_what_must_hold() {
             ("grey", &SEEN.grey),
         ]
         .map(|(what, counter)| (what, counted(counter)));
-        assert!(seen.iter().all(|(_, times)| *times >= 20), "the runs saw too little: {seen:?}");
+        assert!(
+            seen.iter().all(|(_, times)| *times >= 20),
+            "the runs saw too little: {seen:?}"
+        );
     }
 }

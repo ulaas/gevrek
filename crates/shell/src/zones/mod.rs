@@ -37,13 +37,13 @@ pub mod view;
 
 use egui::Pos2;
 use gesture::{Act, Doing, Gestures, Pointer};
-use gevrek_zones::focus::SelectMode;
 use gevrek_system::icons::Picture;
 use gevrek_zones::backend::{
     BackendError, BackendEvent, DragActions, DropPayload, FileOperation, IconHandle, ZonesBackend,
 };
 use gevrek_zones::config::ZonesConfig;
 use gevrek_zones::core::{Command, Effect, ZonesCore, ZonesEvent};
+use gevrek_zones::focus::SelectMode;
 use gevrek_zones::host::Host;
 use gevrek_zones::store::{LoadReport, Store};
 use gevrek_zones::{DisplayId, ItemId, ZoneId};
@@ -297,41 +297,75 @@ pub struct Search {
 /// menu, or the box a name is typed into. [`surfaces`] opens them.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Ask {
-    ItemMenu { items: Vec<ItemId>, at: Pos2, lines: Vec<DeskAction> },
-    ZoneMenu { zone: ZoneId, at: Pos2 },
+    ItemMenu {
+        items: Vec<ItemId>,
+        at: Pos2,
+        lines: Vec<DeskAction>,
+    },
+    ZoneMenu {
+        zone: ZoneId,
+        at: Pos2,
+    },
     /// How a zone shows and orders what it holds, as a menu of its own
     /// (asked for by the button of its title).
-    ViewMenu { zone: ZoneId, at: Pos2 },
+    ViewMenu {
+        zone: ZoneId,
+        at: Pos2,
+    },
     /// What the rules would do, to be looked over before it is done.
-    Rules { scope: gevrek_zones::rules::Scope },
+    Rules {
+        scope: gevrek_zones::rules::Scope,
+    },
     /// The zones that would be made for the types of what lies on the
     /// desktop, to be looked over before they are made; the new ones on
     /// this display.
-    AutoZones { display: DisplayId },
+    AutoZones {
+        display: DisplayId,
+    },
     /// The box the name of a new folder in a portal is typed into.
-    NewFolder { zone: ZoneId },
+    NewFolder {
+        zone: ZoneId,
+    },
     /// The same for a folder made in a folder that is named (the
     /// desktop's own, from an item's menu).
-    NewFolderIn { parent: String },
+    NewFolderIn {
+        parent: String,
+    },
     /// Something to be read on a sheet: a heading, and lines of a name
     /// and a value (what there is to say of some items; why something
     /// could not be done).
-    Sheet { heading: String, lines: Vec<(String, String)> },
+    Sheet {
+        heading: String,
+        lines: Vec<(String, String)>,
+    },
     /// The box the name is typed into under which this arrangement is kept.
     SaveLayout,
     /// The box a kept arrangement's new name is typed into.
-    RenameLayout { name: String },
+    RenameLayout {
+        name: String,
+    },
     /// The box for the file an arrangement is written to (a kept one, or
     /// without a name the one in use).
-    ExportLayout { name: Option<String> },
+    ExportLayout {
+        name: Option<String>,
+    },
     /// The box for the file an arrangement is taken from.
     ImportLayout,
     /// The box a folder's path is typed into, to make a portal of at a point.
-    NewPortal { at: Pos2 },
-    DeskMenu { display: DisplayId, at: Pos2 },
-    Rename { zone: ZoneId },
+    NewPortal {
+        at: Pos2,
+    },
+    DeskMenu {
+        display: DisplayId,
+        at: Pos2,
+    },
+    Rename {
+        zone: ZoneId,
+    },
     /// The box a file's new name is typed into.
-    RenameItem { item: ItemId },
+    RenameItem {
+        item: ItemId,
+    },
     Filter,
 }
 
@@ -426,7 +460,8 @@ pub struct Zones {
     pub laid_out: u64,
     /// The items' names broken into lines, by item and the width they
     /// were broken for: kept until the layout is made anew.
-    labels: std::collections::HashMap<u32, std::collections::HashMap<ItemId, std::rc::Rc<[String]>>>,
+    labels:
+        std::collections::HashMap<u32, std::collections::HashMap<ItemId, std::rc::Rc<[String]>>>,
     /// What is typed to find items by; those that do not fit are dimmed.
     pub filter: String,
     /// Where the pointer is, on the desktop.
@@ -510,10 +545,19 @@ impl Zones {
         let traced = std::env::var_os(TRACE).is_some_and(|value| !value.is_empty() && value != "0");
         let trace_file = traced.then(|| folder.join(TRACE_FILE)).filter(|file| {
             let begun = std::fs::create_dir_all(&folder).and_then(|()| {
-                std::fs::write(file, format!("gevrek zones trace, begun at {} (seconds since 1970)\n", now()))
+                std::fs::write(
+                    file,
+                    format!(
+                        "gevrek zones trace, begun at {} (seconds since 1970)\n",
+                        now()
+                    ),
+                )
             });
             if let Err(error) = &begun {
-                log::warn!("the zones' trace cannot be written to {}: {error}", file.display());
+                log::warn!(
+                    "the zones' trace cannot be written to {}: {error}",
+                    file.display()
+                );
             }
             begun.is_ok()
         });
@@ -551,10 +595,12 @@ impl Zones {
                 return wake();
             }
             let wake = wake.clone();
-            let slept = std::thread::Builder::new().name("gevrek-zones-wake".to_string()).spawn(move || {
-                std::thread::sleep(after);
-                wake();
-            });
+            let slept = std::thread::Builder::new()
+                .name("gevrek-zones-wake".to_string())
+                .spawn(move || {
+                    std::thread::sleep(after);
+                    wake();
+                });
             if let Err(error) = slept {
                 log::warn!("the zones are not woken to write their state: {error}");
             }
@@ -659,7 +705,9 @@ impl Zones {
         if self.icons != before {
             if let Some(reason) = self.icons.refusal() {
                 log::error!("the zones are not shown: {reason}");
-                self.heard.push(ZonesEvent::Refused { reason: reason.to_string() });
+                self.heard.push(ZonesEvent::Refused {
+                    reason: reason.to_string(),
+                });
             }
             self.stale = true;
             self.redraw = true;
@@ -707,7 +755,9 @@ impl Zones {
         if self.core.config() == config {
             return;
         }
-        let effects = self.host.set_config(&mut self.core, &mut *self.desk, config.clone(), now());
+        let effects = self
+            .host
+            .set_config(&mut self.core, &mut *self.desk, config.clone(), now());
         self.take(effects);
         // Switched on: the system's icons are away before a surface is
         // opened (`spots` gives none until then). Switched off: back.
@@ -731,7 +781,12 @@ impl Zones {
     /// backend says another for the display, zones would lie beside where
     /// the core thinks they are, and that is said (once).
     pub fn surface_scale(&mut self, display: &DisplayId, scale: f32) -> bool {
-        let said = self.core.displays().iter().find(|known| &known.id == display).map(|known| known.scale);
+        let said = self
+            .core
+            .displays()
+            .iter()
+            .find(|known| &known.id == display)
+            .map(|known| known.scale);
         let fits = said.is_none_or(|said| (said - f64::from(scale)).abs() < 0.01);
         if !fits && !self.odd_scales.contains(display) {
             log::warn!(
@@ -756,7 +811,10 @@ impl Zones {
     fn desktop_folder(&mut self) -> Option<String> {
         if self.desktop.is_none() {
             let desktop = self.desk.desktop();
-            log::debug!("the desktop's folder for the zones is {}", desktop.as_deref().unwrap_or("not known"));
+            log::debug!(
+                "the desktop's folder for the zones is {}",
+                desktop.as_deref().unwrap_or("not known")
+            );
             self.desktop = Some(desktop);
         }
         self.desktop.clone().flatten()
@@ -794,7 +852,9 @@ impl Zones {
     /// Carry out a command: from a menu here, a key, or another program.
     /// Everything the pointer changes goes through here too.
     pub fn command(&mut self, command: Command) -> Vec<Effect> {
-        let effects = self.host.command(&mut self.core, &mut *self.desk, command, now());
+        let effects = self
+            .host
+            .command(&mut self.core, &mut *self.desk, command, now());
         self.take(effects.clone());
         effects
     }
@@ -847,7 +907,11 @@ impl Zones {
         let Some((zone, dragging)) = over else {
             return;
         };
-        self.command(Command::PointerOver { zone, at_ms: self.at_ms(), dragging });
+        self.command(Command::PointerOver {
+            zone,
+            at_ms: self.at_ms(),
+            dragging,
+        });
     }
 
     /// The zone a point of the desktop is on.
@@ -876,11 +940,18 @@ impl Zones {
             use std::io::Write;
             // (A trace that cannot be written is no reason to stop.)
             // (Said once, when it first fails.)
-            static FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-            let written = std::fs::OpenOptions::new().append(true).open(file).and_then(|mut file| writeln!(file, "{line}"));
+            static FAILED: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            let written = std::fs::OpenOptions::new()
+                .append(true)
+                .open(file)
+                .and_then(|mut file| writeln!(file, "{line}"));
             if let Err(error) = written {
                 if !FAILED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                    log::debug!("the zones' trace could not be written to {}: {error}", file.display());
+                    log::debug!(
+                        "the zones' trace could not be written to {}: {error}",
+                        file.display()
+                    );
                 }
             }
         }
@@ -958,7 +1029,13 @@ impl Zones {
             return None;
         }
         match layout.hit(self.hover?) {
-            view::Hit::Edge(zone, edges) if layout.shown_for(&zone).is_some_and(|shown| !shown.locked_place) => Some((zone, edges)),
+            view::Hit::Edge(zone, edges)
+                if layout
+                    .shown_for(&zone)
+                    .is_some_and(|shown| !shown.locked_place) =>
+            {
+                Some((zone, edges))
+            }
             _ => None,
         }
     }
@@ -970,7 +1047,8 @@ impl Zones {
             _ => None,
         };
         match (&self.rested, on) {
-            (Some((zone, button, _)), Some((on_zone, on_button))) if *zone == on_zone && *button == on_button => {}
+            (Some((zone, button, _)), Some((on_zone, on_button)))
+                if *zone == on_zone && *button == on_button => {}
             (_, on) => self.rested = on.map(|(zone, button)| (zone, button, self.seconds())),
         }
     }
@@ -992,15 +1070,32 @@ impl Zones {
             return None;
         }
         let layout = self.layout();
-        let shown = layout.zone(&zone).filter(|shown| &shown.display == display)?;
-        let origin = layout.desks.iter().find(|desk| &desk.display == display)?.rect.min;
-        let placed = shown.buttons.iter().find(|placed| placed.button == button)?;
-        Some((placed.rect.translate(-origin.to_vec2()), view::button_says(shown, button).to_string()))
+        let shown = layout
+            .zone(&zone)
+            .filter(|shown| &shown.display == display)?;
+        let origin = layout
+            .desks
+            .iter()
+            .find(|desk| &desk.display == display)?
+            .rect
+            .min;
+        let placed = shown
+            .buttons
+            .iter()
+            .find(|placed| placed.button == button)?;
+        Some((
+            placed.rect.translate(-origin.to_vec2()),
+            view::button_says(shown, button).to_string(),
+        ))
     }
 
     /// The zones that would be made for the types of what lies on the
     /// desktop, for the person to look over: nothing is changed by asking.
-    pub fn auto_preview(&mut self, scope: gevrek_zones::rules::Scope, display: &DisplayId) -> AutoPreview {
+    pub fn auto_preview(
+        &mut self,
+        scope: gevrek_zones::rules::Scope,
+        display: &DisplayId,
+    ) -> AutoPreview {
         let plan = self.core.auto_plan(scope, None, Some(display), now());
         let on = plan.display.clone().unwrap_or_else(|| display.clone());
         let names = plan
@@ -1014,8 +1109,17 @@ impl Zones {
         AutoPreview {
             scope,
             names,
-            display: layout.desks.iter().find(|desk| desk.display == on).map_or(egui::Rect::ZERO, |desk| desk.rect),
-            there: layout.zones.iter().filter(|zone| zone.display == on).map(|zone| zone.rect).collect(),
+            display: layout
+                .desks
+                .iter()
+                .find(|desk| desk.display == on)
+                .map_or(egui::Rect::ZERO, |desk| desk.rect),
+            there: layout
+                .zones
+                .iter()
+                .filter(|zone| zone.display == on)
+                .map(|zone| zone.rect)
+                .collect(),
             can_undo,
             plan,
         }
@@ -1053,7 +1157,9 @@ impl Zones {
                         }
                         // What was refused shows on the zone it was about,
                         // also when it was asked by a key or from outside.
-                        ZonesEvent::RefusedAbout { zone: Some(zone), .. } => {
+                        ZonesEvent::RefusedAbout {
+                            zone: Some(zone), ..
+                        } => {
                             let shown = self.layout.shown_for(zone).map(|shown| shown.zone.clone());
                             if let Some(shown) = shown {
                                 let at = self.began.elapsed().as_secs_f64() + self.ahead;
@@ -1136,7 +1242,12 @@ impl Zones {
             .layout()
             .zones
             .iter()
-            .filter(|zone| matches!(zone.listing, Some(gevrek_zones::portal::Listing::Unavailable { .. })))
+            .filter(|zone| {
+                matches!(
+                    zone.listing,
+                    Some(gevrek_zones::portal::Listing::Unavailable { .. })
+                )
+            })
             .map(|zone| zone.zone.clone())
             .collect();
         let at = Instant::now();
@@ -1166,13 +1277,18 @@ impl Zones {
         }
         if let Some((first, last)) = self.unsaved {
             let at = Instant::now();
-            if at.duration_since(last) >= SAVE_WHEN_QUIET || at.duration_since(first) >= SAVE_AT_LATEST {
+            if at.duration_since(last) >= SAVE_WHEN_QUIET
+                || at.duration_since(first) >= SAVE_AT_LATEST
+            {
                 self.flush();
             } else {
                 (self.wake_later)(SAVE_WHEN_QUIET.saturating_sub(at.duration_since(last)));
             }
         }
-        Tick { config: self.config_out.take(), redraw: std::mem::take(&mut self.redraw) }
+        Tick {
+            config: self.config_out.take(),
+            redraw: std::mem::take(&mut self.redraw),
+        }
     }
 
     /// Write the state now (the shell ends, the zones are switched off).
@@ -1201,9 +1317,14 @@ impl Zones {
         let mut heard: Vec<ZonesEvent> = Vec::new();
         for event in std::mem::take(&mut self.heard) {
             let same_again = match (heard.last(), &event) {
-                (Some(ZonesEvent::ZonePlaced { zone: before, .. }), ZonesEvent::ZonePlaced { zone, .. }) => before == zone,
                 (
-                    Some(ZonesEvent::OperationProgress { request: before, .. }),
+                    Some(ZonesEvent::ZonePlaced { zone: before, .. }),
+                    ZonesEvent::ZonePlaced { zone, .. },
+                ) => before == zone,
+                (
+                    Some(ZonesEvent::OperationProgress {
+                        request: before, ..
+                    }),
                     ZonesEvent::OperationProgress { request, .. },
                 ) => before == request,
                 _ => false,
@@ -1226,7 +1347,12 @@ impl Zones {
         if !self.core.enabled() || !self.icons.lets_zones_show() {
             return Vec::new();
         }
-        let displays: Vec<DisplayId> = self.core.displays().iter().map(|display| display.id.clone()).collect();
+        let displays: Vec<DisplayId> = self
+            .core
+            .displays()
+            .iter()
+            .map(|display| display.id.clone())
+            .collect();
         displays
             .into_iter()
             .filter_map(|display| {
@@ -1245,19 +1371,32 @@ impl Zones {
             self.said = None;
             self.gestures.settle(&self.layout);
             // (Names are broken into lines once and kept; not without end.)
-            if self.labels.values().map(std::collections::HashMap::len).sum::<usize>() > 8192 {
+            if self
+                .labels
+                .values()
+                .map(std::collections::HashMap::len)
+                .sum::<usize>()
+                > 8192
+            {
                 self.labels.clear();
             }
             // Each zone as it is with its items to be seen, for when it
             // rolls shut; and nothing of zones that are gone.
-            for zone in self.layout.zones.iter().filter(|zone| !(zone.rolled_up && !zone.expanded)) {
+            for zone in self
+                .layout
+                .zones
+                .iter()
+                .filter(|zone| !(zone.rolled_up && !zone.expanded))
+            {
                 self.ghosts.insert(zone.zone.clone(), zone.clone());
             }
             let core = &self.core;
-            self.ghosts.retain(|zone, _| core.config().zone(zone).is_some());
-            self.motion.settle(self.began.elapsed().as_secs_f64() + self.ahead, &|zone| {
-                core.config().zone(zone).is_some()
-            });
+            self.ghosts
+                .retain(|zone, _| core.config().zone(zone).is_some());
+            self.motion
+                .settle(self.began.elapsed().as_secs_f64() + self.ahead, &|zone| {
+                    core.config().zone(zone).is_some()
+                });
         }
         &self.layout
     }
@@ -1279,7 +1418,9 @@ impl Zones {
         let acts = self.gestures.pointer(&self.layout, pointer);
         // (After the press was taken in: a button that is held says nothing.)
         self.rest_on(pointer.at);
-        if self.trace && (pointer.pressed || pointer.released || pointer.menu || pointer.middle_double) {
+        if self.trace
+            && (pointer.pressed || pointer.released || pointer.menu || pointer.middle_double)
+        {
             let hit = pointer.at.map(|at| self.layout.hit(at));
             self.traced(|| {
                 format!(
@@ -1306,7 +1447,8 @@ impl Zones {
                     .collect();
                 if paths.len() == items.len() || self.desk.drags_everything() {
                     self.outgoing = items.clone();
-                    self.drag_out = Some((items.iter().map(|(item, _)| item.clone()).collect(), paths));
+                    self.drag_out =
+                        Some((items.iter().map(|(item, _)| item.clone()).collect(), paths));
                     self.gestures.doing = Doing::Nothing;
                 }
             }
@@ -1340,28 +1482,57 @@ impl Zones {
         self.redraw = true;
         // While the zones are looked at and something was typed, the
         // keys go to what was found.
-        if self.search.as_ref().is_some_and(|search| !search.typed.is_empty()) {
+        if self
+            .search
+            .as_ref()
+            .is_some_and(|search| !search.typed.is_empty())
+        {
             use gevrek_zones::focus::Step;
             match key {
-                gesture::Key::Step { step: Step::Down, .. } | gesture::Key::Step { step: Step::Up, .. } => {
-                    let down = matches!(key, gesture::Key::Step { step: Step::Down, .. });
+                gesture::Key::Step {
+                    step: Step::Down, ..
+                }
+                | gesture::Key::Step { step: Step::Up, .. } => {
+                    let down = matches!(
+                        key,
+                        gesture::Key::Step {
+                            step: Step::Down,
+                            ..
+                        }
+                    );
                     if let Some(search) = &mut self.search {
                         let most = search.hits.len().min(MOST_FOUND).saturating_sub(1);
-                        search.at = if down { (search.at + 1).min(most) } else { search.at.saturating_sub(1) };
+                        search.at = if down {
+                            (search.at + 1).min(most)
+                        } else {
+                            search.at.saturating_sub(1)
+                        };
                     }
                     return;
                 }
                 gesture::Key::Enter => {
-                    let found = self.search.as_ref().and_then(|search| search.hits.get(search.at).cloned());
+                    let found = self
+                        .search
+                        .as_ref()
+                        .and_then(|search| search.hits.get(search.at).cloned());
                     if let Some(hit) = found {
                         // To where it is (its tab comes forward, a rolled-up
                         // zone opens), and open it: the core ends the look.
                         if hit.zone.is_some() {
-                            self.command(Command::FocusItem { item: Some(hit.item.clone()) });
+                            self.command(Command::FocusItem {
+                                item: Some(hit.item.clone()),
+                            });
                         } else {
-                            self.command(Command::Select { items: vec![hit.item.clone()], mode: SelectMode::Replace });
+                            self.command(Command::Select {
+                                items: vec![hit.item.clone()],
+                                mode: SelectMode::Replace,
+                            });
                         }
-                        self.command(Command::Open { items: vec![hit.item], with: None, in_place: true });
+                        self.command(Command::Open {
+                            items: vec![hit.item],
+                            with: None,
+                            in_place: true,
+                        });
                     }
                     return;
                 }
@@ -1421,7 +1592,11 @@ impl Zones {
 
     /// Look everywhere for what is typed while the zones are looked at.
     fn look_for(&mut self, typed: String) {
-        let hits = if typed.trim().is_empty() { Vec::new() } else { self.core.search(&typed, now()) };
+        let hits = if typed.trim().is_empty() {
+            Vec::new()
+        } else {
+            self.core.search(&typed, now())
+        };
         self.search = Some(Search { typed, hits, at: 0 });
         self.redraw = true;
     }
@@ -1430,12 +1605,19 @@ impl Zones {
     /// for everywhere, or of the filter of the zone that has the keyboard.
     fn erase(&mut self) {
         if self.core.peeking() {
-            let mut typed = self.search.as_ref().map(|search| search.typed.clone()).unwrap_or_default();
+            let mut typed = self
+                .search
+                .as_ref()
+                .map(|search| search.typed.clone())
+                .unwrap_or_default();
             typed.pop();
             self.look_for(typed);
         } else if let Some((zone, mut typed)) = self.filtered() {
             if typed.pop().is_some() {
-                self.command(Command::Filter { zone: Some(zone), typed });
+                self.command(Command::Filter {
+                    zone: Some(zone),
+                    typed,
+                });
             }
         }
     }
@@ -1448,38 +1630,66 @@ impl Zones {
     /// chosen.
     pub fn typed(&mut self, text: &str) {
         if self.core.peeking() {
-            let typed = self.search.as_ref().map(|search| search.typed.clone()).unwrap_or_default();
+            let typed = self
+                .search
+                .as_ref()
+                .map(|search| search.typed.clone())
+                .unwrap_or_default();
             self.look_for(typed + text);
             return;
         }
         if let Some((zone, typed)) = self.filtered() {
-            self.command(Command::Filter { zone: Some(zone), typed: typed + text });
+            self.command(Command::Filter {
+                zone: Some(zone),
+                typed: typed + text,
+            });
             return;
         }
         let at = Instant::now();
-        if self.typed.1.is_none_or(|last| at.duration_since(last) > TYPED_TOGETHER) {
+        if self
+            .typed
+            .1
+            .is_none_or(|last| at.duration_since(last) > TYPED_TOGETHER)
+        {
             self.typed.0.clear();
         }
         self.typed.0.push_str(&text.to_lowercase());
         self.typed.1 = Some(at);
         self.layout();
         let among: Vec<ItemId> = match &self.gestures.anchor {
-            Some(item) => self.layout.beside(item).iter().map(|shown| shown.item.clone()).collect(),
-            None => self.layout.every_item().map(|shown| shown.item.clone()).collect(),
+            Some(item) => self
+                .layout
+                .beside(item)
+                .iter()
+                .map(|shown| shown.item.clone())
+                .collect(),
+            None => self
+                .layout
+                .every_item()
+                .map(|shown| shown.item.clone())
+                .collect(),
         };
         let begins = |item: &&ItemId| {
-            self.core.item(item).is_some_and(|item| item.name.to_lowercase().starts_with(&self.typed.0))
+            self.core
+                .item(item)
+                .is_some_and(|item| item.name.to_lowercase().starts_with(&self.typed.0))
         };
         if let Some(found) = among.iter().find(begins).cloned() {
             self.gestures.anchor = Some(found.clone());
-            self.command(Command::Select { items: vec![found], mode: SelectMode::Replace });
+            self.command(Command::Select {
+                items: vec![found],
+                mode: SelectMode::Replace,
+            });
         }
     }
 
     /// The wheel turned over a zone.
     pub fn scroll(&mut self, at: Pos2, by: f32) {
         let zone = match self.layout().hit(at) {
-            view::Hit::Item { zone: Some(zone), .. } | view::Hit::Body(zone) => zone,
+            view::Hit::Item {
+                zone: Some(zone), ..
+            }
+            | view::Hit::Body(zone) => zone,
             _ => return,
         };
         let Some(shown) = self.layout.zone(&zone) else {
@@ -1502,14 +1712,27 @@ impl Zones {
                 }
                 Act::Refuse(zone) => self.refused(&zone),
                 Act::IntoFolder { items, folder } => {
-                    match self.core.item(&folder).and_then(|folder| folder.path.clone()) {
+                    match self
+                        .core
+                        .item(&folder)
+                        .and_then(|folder| folder.path.clone())
+                    {
                         Some(folder) => {
-                            self.command(Command::MoveItemsToFolder { items, folder, copy: false });
+                            self.command(Command::MoveItemsToFolder {
+                                items,
+                                folder,
+                                copy: false,
+                            });
                         }
                         None => log::warn!("{folder} is no folder that files could go into"),
                     }
                 }
-                Act::BringOut { items, zone, at, copy } => {
+                Act::BringOut {
+                    items,
+                    zone,
+                    at,
+                    copy,
+                } => {
                     // (What is no file, a program that runs, has no path
                     // and stays where it is.)
                     let paths: Vec<String> = items
@@ -1517,7 +1740,13 @@ impl Zones {
                         .filter_map(|item| self.core.item(item).and_then(|item| item.path.clone()))
                         .collect();
                     if let (Some(folder), false) = (self.desktop_folder(), paths.is_empty()) {
-                        self.command(Command::BringIn { paths, folder, copy, zone, at });
+                        self.command(Command::BringIn {
+                            paths,
+                            folder,
+                            copy,
+                            zone,
+                            at,
+                        });
                     }
                 }
                 Act::ItemMenu { items, at, ours } => {
@@ -1535,7 +1764,10 @@ impl Zones {
                             self.asks.push(Ask::ItemMenu { items, at, lines })
                         }
                         None => {
-                            let point = gevrek_model::geometry::Point { x: at.x.round() as i32, y: at.y.round() as i32 };
+                            let point = gevrek_model::geometry::Point {
+                                x: at.x.round() as i32,
+                                y: at.y.round() as i32,
+                            };
                             if let Err(error) = self.desk.context_menu(&items, point) {
                                 log::warn!("the menu could not be shown: {error}");
                             }
@@ -1558,7 +1790,10 @@ impl Zones {
     /// so for a moment (it shakes, and its lock is marked).
     pub fn refused(&mut self, zone: &ZoneId) {
         // (Tabs are one thing on the desktop: the one in front shows it.)
-        let shown = self.layout().shown_for(zone).map_or_else(|| zone.clone(), |shown| shown.zone.clone());
+        let shown = self
+            .layout()
+            .shown_for(zone)
+            .map_or_else(|| zone.clone(), |shown| shown.zone.clone());
         let at = self.seconds();
         self.motion.refused(&shown, at);
         self.redraw = true;
@@ -1567,10 +1802,15 @@ impl Zones {
 
     /// Carry out a line of a menu the shell drew for some items.
     pub fn act(&mut self, items: &[ItemId], action: &str) {
-        log::debug!("the menu's line {action} is carried out for {}", gevrek_zones::timed::count(items.len(), "item", "items"));
+        log::debug!(
+            "the menu's line {action} is carried out for {}",
+            gevrek_zones::timed::count(items.len(), "item", "items")
+        );
         // The two that are commands of the zones, and can be taken back.
         if action == TRASH {
-            self.command(Command::TrashItems { items: items.to_vec() });
+            self.command(Command::TrashItems {
+                items: items.to_vec(),
+            });
             return;
         }
         if action == RENAME {
@@ -1581,9 +1821,14 @@ impl Zones {
         }
         if action == STAY {
             // All of them the same: the other of what the first is.
-            let stays = items.first().is_some_and(|item| self.core.state().always_visible_items.contains(item));
+            let stays = items
+                .first()
+                .is_some_and(|item| self.core.state().always_visible_items.contains(item));
             for item in items {
-                self.command(Command::ItemAlwaysVisible { item: item.clone(), on: Some(!stays) });
+                self.command(Command::ItemAlwaysVisible {
+                    item: item.clone(),
+                    on: Some(!stays),
+                });
             }
             return;
         }
@@ -1598,7 +1843,11 @@ impl Zones {
             // where the first one was.
             let lines = self.desk.programs(items);
             if !lines.is_empty() {
-                self.asks.push(Ask::ItemMenu { items: items.to_vec(), at: self.menu_at, lines });
+                self.asks.push(Ask::ItemMenu {
+                    items: items.to_vec(),
+                    at: self.menu_at,
+                    lines,
+                });
                 self.redraw = true;
             }
             return;
@@ -1606,19 +1855,27 @@ impl Zones {
         if action == PROPERTIES {
             let lines = self.desk.properties(items);
             if !lines.is_empty() {
-                self.asks.push(Ask::Sheet { heading: "Properties".to_string(), lines });
+                self.asks.push(Ask::Sheet {
+                    heading: "Properties".to_string(),
+                    lines,
+                });
                 self.redraw = true;
             }
             return;
         }
         if let Some(parent) = action.strip_prefix(NEW_FOLDER) {
-            self.asks.push(Ask::NewFolderIn { parent: parent.to_string() });
+            self.asks.push(Ask::NewFolderIn {
+                parent: parent.to_string(),
+            });
             self.redraw = true;
             return;
         }
         if action == PIN {
             let pinned = self.desk.pinned();
-            for program in items.iter().filter_map(|item| item.as_str().strip_prefix("app:")) {
+            for program in items
+                .iter()
+                .filter_map(|item| item.as_str().strip_prefix("app:"))
+            {
                 let pin = !pinned.iter().any(|known| known == program);
                 if let Err(error) = self.desk.pin(program, pin) {
                     log::warn!("{program} could not be pinned or let go: {error}");
@@ -1635,16 +1892,29 @@ impl Zones {
     /// The lines of an item's menu that are the zones' own: whether it
     /// stays when the rest is put away, and out of its zone.
     fn own_lines(&self, items: &[ItemId]) -> Vec<DeskAction> {
-        let stays = items.first().is_some_and(|item| self.core.state().always_visible_items.contains(item));
+        let stays = items
+            .first()
+            .is_some_and(|item| self.core.state().always_visible_items.contains(item));
         let mut lines = vec![DeskAction {
             id: STAY.to_string(),
-            label: if stays { "No longer stays when the rest is hidden" } else { "Stays when the rest is hidden" }.to_string(),
+            label: if stays {
+                "No longer stays when the rest is hidden"
+            } else {
+                "Stays when the rest is hidden"
+            }
+            .to_string(),
         }];
         if items.iter().any(|item| self.core.zone_of(item).is_some()) {
-            lines.push(DeskAction { id: LOOSEN.to_string(), label: "Out of its zone".to_string() });
+            lines.push(DeskAction {
+                id: LOOSEN.to_string(),
+                label: "Out of its zone".to_string(),
+            });
         }
         // A program among the launchers: pinned, or let go again.
-        if let Some(program) = items.first().and_then(|item| item.as_str().strip_prefix("app:")) {
+        if let Some(program) = items
+            .first()
+            .and_then(|item| item.as_str().strip_prefix("app:"))
+        {
             let pinned = self.desk.pinned().iter().any(|known| known == program);
             lines.push(DeskAction {
                 id: PIN.to_string(),
@@ -1663,13 +1933,20 @@ impl Zones {
         rect: Option<gevrek_zones::Rect>,
         changes: Option<serde_json::Value>,
     ) -> Option<ZoneId> {
-        let effects = self.command(Command::CreateZone { title: title.to_string(), kind, rect });
+        let effects = self.command(Command::CreateZone {
+            title: title.to_string(),
+            kind,
+            rect,
+        });
         let zone = effects.iter().find_map(|effect| match effect {
             Effect::Notify(ZonesEvent::ZoneCreated { zone }) => Some(zone.clone()),
             _ => None,
         })?;
         if let Some(changes) = changes {
-            self.command(Command::ModifyZone { zone: zone.clone(), changes });
+            self.command(Command::ModifyZone {
+                zone: zone.clone(),
+                changes,
+            });
         }
         Some(zone)
     }
@@ -1677,7 +1954,9 @@ impl Zones {
     /// The system says the screen is shown to others, or no longer: the
     /// core covers what is not for other eyes, as the configuration says.
     pub fn screen_shared(&mut self, shared: bool) {
-        let effects = self.core.event(BackendEvent::ScreenShared { shared }, now());
+        let effects = self
+            .core
+            .event(BackendEvent::ScreenShared { shared }, now());
         self.take(effects);
         (self.wake_later)(Duration::ZERO);
     }
@@ -1694,13 +1973,18 @@ impl Zones {
         match config.privacy.when_shared {
             WhenShared::Nothing => false,
             WhenShared::Everything => true,
-            WhenShared::Private => config.privacy.everything || config.zones.iter().any(|zone| zone.private),
+            WhenShared::Private => {
+                config.privacy.everything || config.zones.iter().any(|zone| zone.private)
+            }
         }
     }
 
     /// Something to be read by the person, on a sheet.
     pub fn say(&mut self, heading: &str, lines: Vec<(String, String)>) {
-        self.asks.push(Ask::Sheet { heading: heading.to_string(), lines });
+        self.asks.push(Ask::Sheet {
+            heading: heading.to_string(),
+            lines,
+        });
         self.redraw = true;
         (self.wake_later)(Duration::ZERO);
     }
@@ -1716,7 +2000,9 @@ impl Zones {
             _ => None,
         });
         let Some(document) = document else {
-            return Err(gevrek_zones::ipc::Answer::of(&effects).error.unwrap_or_else(|| "nothing was given to write".to_string()));
+            return Err(gevrek_zones::ipc::Answer::of(&effects)
+                .error
+                .unwrap_or_else(|| "nothing was given to write".to_string()));
         };
         let text = serde_json::to_string_pretty(&document).map_err(|error| error.to_string())?;
         let path = std::path::Path::new(path);
@@ -1740,16 +2026,23 @@ impl Zones {
             |read| gevrek_zones::timed::result(read, |text| format!("{} bytes", text.len())),
         )
         .map_err(|error| format!("{path} could not be read: {error}"))?;
-        let document: serde_json::Value =
-            serde_json::from_str(&text).map_err(|error| format!("{path} is no arrangement: {error}"))?;
-        let effects = self.command(Command::ImportLayout { document, apply: true });
+        let document: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|error| format!("{path} is no arrangement: {error}"))?;
+        let effects = self.command(Command::ImportLayout {
+            document,
+            apply: true,
+        });
         effects
             .iter()
             .find_map(|effect| match effect {
                 Effect::Notify(ZonesEvent::LayoutImported { name, .. }) => Some(name.clone()),
                 _ => None,
             })
-            .ok_or_else(|| gevrek_zones::ipc::Answer::of(&effects).error.unwrap_or_else(|| "it was not taken in".to_string()))
+            .ok_or_else(|| {
+                gevrek_zones::ipc::Answer::of(&effects)
+                    .error
+                    .unwrap_or_else(|| "it was not taken in".to_string())
+            })
     }
 
     /// Make a folder in a folder that is named (the desktop's own, from
@@ -1757,7 +2050,10 @@ impl Zones {
     /// made in a portal is: it can be taken back like any other change
     /// to a file.
     pub fn new_folder_in(&mut self, parent: &str, name: &str) {
-        self.command(Command::NewFolderIn { folder: parent.to_string(), name: name.to_string() });
+        self.command(Command::NewFolderIn {
+            folder: parent.to_string(),
+            name: name.to_string(),
+        });
         (self.wake_later)(Duration::ZERO);
     }
 
@@ -1812,7 +2108,12 @@ impl Zones {
         let Some(moved) = self.layout.zone(&zone) else {
             return;
         };
-        let Some(desk) = self.layout.desks.iter().find(|desk| desk.display == moved.display) else {
+        let Some(desk) = self
+            .layout
+            .desks
+            .iter()
+            .find(|desk| desk.display == moved.display)
+        else {
             return;
         };
         let others: Vec<egui::Rect> = self
@@ -1824,9 +2125,16 @@ impl Zones {
             .collect();
         let snap = &self.core.config().snap;
         let on = snap.enabled && self.gestures.tab_onto().is_none();
-        self.guides =
-            if on { view::guides(moved.rect, desk.area, desk.rect, &others, snap.gap as f32) } else { Vec::new() };
-        self.grid_marks = if on { view::grid_marks(moved.rect, desk.area, snap.grid as f32) } else { Vec::new() };
+        self.guides = if on {
+            view::guides(moved.rect, desk.area, desk.rect, &others, snap.gap as f32)
+        } else {
+            Vec::new()
+        };
+        self.grid_marks = if on {
+            view::grid_marks(moved.rect, desk.area, snap.grid as f32)
+        } else {
+            Vec::new()
+        };
     }
 
     /// The drag the surface is to begin now, if items were just taken up:
@@ -1874,7 +2182,11 @@ impl Zones {
         log::debug!(
             "the drag of {} out of the zones ended{}",
             gevrek_zones::timed::count(outgoing.len(), "item", "items"),
-            if remove { "; whoever took them leaves the originals to the bin" } else { "" }
+            if remove {
+                "; whoever took them leaves the originals to the bin"
+            } else {
+                ""
+            }
         );
         if remove {
             for (item, _) in outgoing {
@@ -1899,15 +2211,28 @@ impl Zones {
     /// What a drag from the system carries, as the zones see it: the
     /// paths that are items of ours (of the desktop, or of a portal's
     /// folder) are those items, the others are files from elsewhere.
-    pub fn payload_of(&self, paths: &[String], text: Option<String>, allowed: DragActions) -> DropPayload {
-        let mut payload = DropPayload { text, allowed, ..DropPayload::default() };
+    pub fn payload_of(
+        &self,
+        paths: &[String],
+        text: Option<String>,
+        allowed: DragActions,
+    ) -> DropPayload {
+        let mut payload = DropPayload {
+            text,
+            allowed,
+            ..DropPayload::default()
+        };
         for path in paths {
             let ours = self
                 .outgoing
                 .iter()
                 .map(|(item, _)| item)
                 .chain(self.layout.every_item().map(|shown| &shown.item))
-                .find(|item| self.core.item(item).is_some_and(|item| item.path.as_ref() == Some(path)));
+                .find(|item| {
+                    self.core
+                        .item(item)
+                        .is_some_and(|item| item.path.as_ref() == Some(path))
+                });
             match ours {
                 Some(item) => payload.items.push(item.clone()),
                 None => payload.paths.push(path.clone()),
@@ -1949,10 +2274,18 @@ impl Zones {
         let over = self.zone_at(at);
         self.pointer_over(over, true);
         let would = match self.layout().target(at) {
-            Target::Nowhere | Target::Zone { locked: true, .. } | Target::Zone { fills: Fills::Query, .. } => none,
+            Target::Nowhere
+            | Target::Zone { locked: true, .. }
+            | Target::Zone {
+                fills: Fills::Query,
+                ..
+            } => none,
             // Into a folder: whatever the source allows, moved rather
             // than copied.
-            Target::Zone { fills: Fills::Folder, .. } => DragActions {
+            Target::Zone {
+                fills: Fills::Folder,
+                ..
+            } => DragActions {
                 moving: payload.allowed.moving,
                 copy: payload.allowed.copy && !payload.allowed.moving,
                 link: false,
@@ -1963,7 +2296,10 @@ impl Zones {
             // where the source lets it, else copied).
             Target::Zone { .. } | Target::Desk { .. } => {
                 if !payload.items.is_empty() {
-                    DragActions { moving: true, ..none }
+                    DragActions {
+                        moving: true,
+                        ..none
+                    }
                 } else if !payload.paths.is_empty() && self.desktop_folder().is_some() {
                     DragActions {
                         moving: payload.allowed.moving,
@@ -1993,7 +2329,10 @@ impl Zones {
                 .items
                 .iter()
                 .map(|item| {
-                    let held = outgoing.iter().find(|(known, _)| known == item).map(|(_, held)| *held);
+                    let held = outgoing
+                        .iter()
+                        .find(|(known, _)| known == item)
+                        .map(|(_, held)| *held);
                     (item.clone(), held.unwrap_or(egui::Vec2::ZERO))
                 })
                 .collect();
@@ -2001,15 +2340,28 @@ impl Zones {
             // (A zone that takes nothing says so, and nothing is placed.)
             let placed = acts.iter().any(|act| matches!(act, Act::Do(_)));
             if placed {
-                log::debug!("{} of the zones were let go, and are placed", gevrek_zones::timed::count(items.len(), "item", "items"));
+                log::debug!(
+                    "{} of the zones were let go, and are placed",
+                    gevrek_zones::timed::count(items.len(), "item", "items")
+                );
             } else {
-                log::debug!("{} of the zones were let go where nothing takes them", gevrek_zones::timed::count(items.len(), "item", "items"));
+                log::debug!(
+                    "{} of the zones were let go where nothing takes them",
+                    gevrek_zones::timed::count(items.len(), "item", "items")
+                );
             }
             self.perform(acts);
-            return if placed { Dropped::Placed } else { Dropped::Refused };
+            return if placed {
+                Dropped::Placed
+            } else {
+                Dropped::Refused
+            };
         }
         if payload.paths.is_empty() || !(payload.allowed.moving || payload.allowed.copy) {
-            log::debug!("a drop of {} is refused: no files, or neither moved nor copied", payload.summary());
+            log::debug!(
+                "a drop of {} is refused: no files, or neither moved nor copied",
+                payload.summary()
+            );
             return Dropped::Refused;
         }
         let moved = payload.allowed.moving;
@@ -2017,8 +2369,19 @@ impl Zones {
         // a zone filled by hand or the bare desktop, into the desktop's
         // folder first, and from there to where they were let go.
         let (zone, into) = match self.layout.target(at) {
-            Target::Zone { zone, fills: Fills::Folder, locked: false, into, .. } => (zone, into),
-            Target::Zone { zone, fills: Fills::ByHand, locked: false, .. } => {
+            Target::Zone {
+                zone,
+                fills: Fills::Folder,
+                locked: false,
+                into,
+                ..
+            } => (zone, into),
+            Target::Zone {
+                zone,
+                fills: Fills::ByHand,
+                locked: false,
+                ..
+            } => {
                 return self.bring_in(payload, Some(zone), None);
             }
             Target::Desk { display, origin } => {
@@ -2031,17 +2394,31 @@ impl Zones {
                 return self.bring_in(payload, None, Some(at));
             }
             target => {
-                log::debug!("a drop of {} is refused: {target:?} takes no files", payload.summary());
+                log::debug!(
+                    "a drop of {} is refused: {target:?} takes no files",
+                    payload.summary()
+                );
                 return Dropped::Refused;
             }
         };
         // Into the folder the portal stands in (not its own, where it has
         // gone further in), or into a folder it shows that lies under the
         // pointer. Asked of the core, so that it can be taken back.
-        let under = into.and_then(|folder| self.core.item(&folder).and_then(|folder| folder.path.clone()));
-        let stands_in = self.layout.zone(&zone).and_then(|shown| shown.portal.as_ref()).map(|portal| portal.directory.clone());
+        let under = into.and_then(|folder| {
+            self.core
+                .item(&folder)
+                .and_then(|folder| folder.path.clone())
+        });
+        let stands_in = self
+            .layout
+            .zone(&zone)
+            .and_then(|shown| shown.portal.as_ref())
+            .map(|portal| portal.directory.clone());
         let Some(folder) = under.or(stands_in) else {
-            log::debug!("a drop of {} on the portal {zone} is refused: it stands in no folder", payload.summary());
+            log::debug!(
+                "a drop of {} on the portal {zone} is refused: it stands in no folder",
+                payload.summary()
+            );
             return Dropped::Refused;
         };
         log::debug!(
@@ -2049,7 +2426,13 @@ impl Zones {
             payload.summary(),
             if moved { "moved" } else { "copied" }
         );
-        self.command(Command::BringIn { paths: payload.paths.clone(), folder, copy: !moved, zone: None, at: None });
+        self.command(Command::BringIn {
+            paths: payload.paths.clone(),
+            folder,
+            copy: !moved,
+            zone: None,
+            at: None,
+        });
         // (What came into the folder is told by the backend, as any change of it.)
         (self.wake_later)(Duration::ZERO);
         Dropped::Filed { moved }
@@ -2066,17 +2449,29 @@ impl Zones {
         at: Option<gevrek_zones::placement::LoosePosition>,
     ) -> Dropped {
         let Some(folder) = self.desktop_folder() else {
-            log::debug!("a drop of {} is refused: the desktop has no folder to bring files to", payload.summary());
+            log::debug!(
+                "a drop of {} is refused: the desktop has no folder to bring files to",
+                payload.summary()
+            );
             return Dropped::Refused;
         };
         let moved = payload.allowed.moving;
         log::debug!(
             "a drop of {} {}: {} into {folder}",
             payload.summary(),
-            zone.as_ref().map_or_else(|| "on the desktop".to_string(), |zone| format!("on the zone {zone}")),
+            zone.as_ref().map_or_else(
+                || "on the desktop".to_string(),
+                |zone| format!("on the zone {zone}")
+            ),
             if moved { "moved" } else { "copied" }
         );
-        self.command(Command::BringIn { paths: payload.paths.clone(), folder, copy: !moved, zone, at });
+        self.command(Command::BringIn {
+            paths: payload.paths.clone(),
+            folder,
+            copy: !moved,
+            zone,
+            at,
+        });
         (self.wake_later)(Duration::ZERO);
         Dropped::Filed { moved }
     }
@@ -2105,15 +2500,28 @@ mod tests {
     use gevrek_zones::Rect;
 
     fn press(x: f32, y: f32) -> Pointer {
-        Pointer { at: Some(pos2(x, y)), pressed: true, down: true, ..Pointer::default() }
+        Pointer {
+            at: Some(pos2(x, y)),
+            pressed: true,
+            down: true,
+            ..Pointer::default()
+        }
     }
 
     fn hold(x: f32, y: f32) -> Pointer {
-        Pointer { at: Some(pos2(x, y)), down: true, ..Pointer::default() }
+        Pointer {
+            at: Some(pos2(x, y)),
+            down: true,
+            ..Pointer::default()
+        }
     }
 
     fn release(x: f32, y: f32) -> Pointer {
-        Pointer { at: Some(pos2(x, y)), released: true, ..Pointer::default() }
+        Pointer {
+            at: Some(pos2(x, y)),
+            released: true,
+            ..Pointer::default()
+        }
     }
 
     /// A desk with two files on it, an archive folder beside it, and two
@@ -2144,10 +2552,16 @@ mod tests {
         // By its title, to the right and down; near nothing, so nothing pulls.
         zones.pointer(&press(400.0, 112.0));
         zones.pointer(&hold(700.0, 412.0));
-        assert_eq!(zones.core().zone_rect(&papers), Some(Rect::new(600, 400, 400, 300)));
+        assert_eq!(
+            zones.core().zone_rect(&papers),
+            Some(Rect::new(600, 400, 400, 300))
+        );
         // Near the display's left side it comes to rest on it, and a line shows where.
         zones.pointer(&hold(105.0, 412.0));
-        assert_eq!(zones.core().zone_rect(&papers), Some(Rect::new(0, 400, 400, 300)));
+        assert_eq!(
+            zones.core().zone_rect(&papers),
+            Some(Rect::new(0, 400, 400, 300))
+        );
         assert_eq!(zones.guides.len(), 1);
         assert_eq!(zones.guides[0].from.x, 0.0);
         zones.pointer(&release(105.0, 412.0));
@@ -2158,7 +2572,11 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&file).unwrap(), written);
         assert!(*woken.lock().unwrap() > 0);
         zones.tick();
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), written, "too soon after the last change");
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            written,
+            "too soon after the last change"
+        );
         // Quiet for long enough: written.
         let long_ago = Instant::now() - SAVE_WHEN_QUIET - Duration::from_millis(50);
         zones.unsaved = Some((long_ago, long_ago));
@@ -2167,12 +2585,25 @@ mod tests {
         let now_written = std::fs::read_to_string(&file).unwrap();
         assert_ne!(now_written, written);
         // Changed without pause for too long: written all the same.
-        zones.command(Command::MoveZone { zone: papers.clone(), x: 50, y: 50, snap: false });
-        zones.unsaved = Some((Instant::now() - SAVE_AT_LATEST - Duration::from_millis(50), Instant::now()));
+        zones.command(Command::MoveZone {
+            zone: papers.clone(),
+            x: 50,
+            y: 50,
+            snap: false,
+        });
+        zones.unsaved = Some((
+            Instant::now() - SAVE_AT_LATEST - Duration::from_millis(50),
+            Instant::now(),
+        ));
         zones.tick();
         assert_ne!(std::fs::read_to_string(&file).unwrap(), now_written);
         // And what is not written when the zones end is written then.
-        zones.command(Command::MoveZone { zone: papers, x: 90, y: 90, snap: false });
+        zones.command(Command::MoveZone {
+            zone: papers,
+            x: 90,
+            y: 90,
+            snap: false,
+        });
         let before_the_end = std::fs::read_to_string(&file).unwrap();
         drop(zones);
         assert_ne!(std::fs::read_to_string(&file).unwrap(), before_the_end);
@@ -2184,7 +2615,10 @@ mod tests {
         let (mut zones, _) = zones_on(backend(), "config");
         assert!(zones.tick().config.is_none());
         let papers = zone(&mut zones, "Papers", ZoneKind::Manual, (300, 100, 400, 300));
-        let changed = zones.tick().config.expect("a zone was made: the configuration has it");
+        let changed = zones
+            .tick()
+            .config
+            .expect("a zone was made: the configuration has it");
         assert_eq!(changed.zones[0].id, papers);
         assert!(zones.tick().config.is_none(), "only once");
         // It comes back from the window manager as the running
@@ -2192,7 +2626,12 @@ mod tests {
         zones.configure(&changed);
         assert!(zones.tick().config.is_none());
         // Moving a zone is no change of the configuration.
-        zones.command(Command::MoveZone { zone: papers.clone(), x: 10, y: 10, snap: false });
+        zones.command(Command::MoveZone {
+            zone: papers.clone(),
+            x: 10,
+            y: 10,
+            snap: false,
+        });
         assert!(zones.tick().config.is_none());
         // A change from outside (the file was edited) is taken in and not
         // sent back.
@@ -2213,24 +2652,56 @@ mod tests {
         let said = std::sync::Arc::clone(&desk.said);
         let (mut zones, _) = zones_with(desk, "open");
         let papers = zone(&mut zones, "Papers", ZoneKind::Manual, (300, 100, 400, 300));
-        zones.command(Command::AddItem { zone: papers.clone(), item: id("a.txt"), index: None, cell: None });
+        zones.command(Command::AddItem {
+            zone: papers.clone(),
+            item: id("a.txt"),
+            index: None,
+            cell: None,
+        });
         let item = zones.layout().item(&id("a.txt")).unwrap().rect.center();
-        zones.pointer(&Pointer { double: true, ..press(item.x, item.y) });
-        zones.pointer(&Pointer { menu: true, at: Some(item), ..Pointer::default() });
+        zones.pointer(&Pointer {
+            double: true,
+            ..press(item.x, item.y)
+        });
+        zones.pointer(&Pointer {
+            menu: true,
+            at: Some(item),
+            ..Pointer::default()
+        });
         // (After what was done about the system's own icons at the start.)
         assert_eq!(
             said.lock().unwrap()[2..],
-            ["open /desk/a.txt".to_string(), format!("menu of 1 at {},{}", item.x.round(), item.y.round())]
+            [
+                "open /desk/a.txt".to_string(),
+                format!("menu of 1 at {},{}", item.x.round(), item.y.round())
+            ]
         );
-        assert!(zones.take_asks().is_empty(), "the system showed its own menu");
+        assert!(
+            zones.take_asks().is_empty(),
+            "the system showed its own menu"
+        );
         // A zone's menu and the desktop's are ours.
-        zones.pointer(&Pointer { menu: true, at: Some(pos2(400.0, 112.0)), ..Pointer::default() });
-        zones.pointer(&Pointer { menu: true, at: Some(pos2(1500.0, 900.0)), ..Pointer::default() });
+        zones.pointer(&Pointer {
+            menu: true,
+            at: Some(pos2(400.0, 112.0)),
+            ..Pointer::default()
+        });
+        zones.pointer(&Pointer {
+            menu: true,
+            at: Some(pos2(1500.0, 900.0)),
+            ..Pointer::default()
+        });
         assert_eq!(
             zones.take_asks(),
             [
-                Ask::ZoneMenu { zone: papers, at: pos2(400.0, 112.0) },
-                Ask::DeskMenu { display: DisplayId::new("fake-1"), at: pos2(1500.0, 900.0) },
+                Ask::ZoneMenu {
+                    zone: papers,
+                    at: pos2(400.0, 112.0)
+                },
+                Ask::DeskMenu {
+                    display: DisplayId::new("fake-1"),
+                    at: pos2(1500.0, 900.0)
+                },
             ]
         );
     }
@@ -2244,7 +2715,12 @@ mod tests {
         let (mut zones, _) = zones_on(backend, "wheel");
         let papers = zone(&mut zones, "Papers", ZoneKind::Manual, (300, 100, 200, 160));
         for number in 0..12 {
-            zones.command(Command::AddItem { zone: papers.clone(), item: id(&format!("file-{number}.txt")), index: None, cell: None });
+            zones.command(Command::AddItem {
+                zone: papers.clone(),
+                item: id(&format!("file-{number}.txt")),
+                index: None,
+                cell: None,
+            });
         }
         let extent = zones.layout().zone(&papers).unwrap().scroll_extent;
         assert!(extent > 100.0);
@@ -2263,15 +2739,37 @@ mod tests {
     fn a_drop_from_outside_goes_to_the_right_command() {
         let (mut zones, _) = zones_on(backend(), "drop");
         let papers = zone(&mut zones, "Papers", ZoneKind::Manual, (300, 100, 400, 300));
-        let archive = zone(&mut zones, "Archive", ZoneKind::Portal { directory: "/archive".to_string() }, (800, 100, 400, 300));
-        let smart = zone(&mut zones, "All", ZoneKind::Smart { query: Vec::new() }, (300, 500, 400, 300));
-        let ours = DropPayload { items: vec![id("a.txt")], allowed: DragActions::ALL, ..DropPayload::default() };
-        let foreign = DropPayload {
-            paths: vec!["/elsewhere/c.txt".to_string()],
-            allowed: DragActions { copy: true, ..DragActions::default() },
+        let archive = zone(
+            &mut zones,
+            "Archive",
+            ZoneKind::Portal {
+                directory: "/archive".to_string(),
+            },
+            (800, 100, 400, 300),
+        );
+        let smart = zone(
+            &mut zones,
+            "All",
+            ZoneKind::Smart { query: Vec::new() },
+            (300, 500, 400, 300),
+        );
+        let ours = DropPayload {
+            items: vec![id("a.txt")],
+            allowed: DragActions::ALL,
             ..DropPayload::default()
         };
-        let moving = DragActions { moving: true, ..DragActions::default() };
+        let foreign = DropPayload {
+            paths: vec!["/elsewhere/c.txt".to_string()],
+            allowed: DragActions {
+                copy: true,
+                ..DragActions::default()
+            },
+            ..DropPayload::default()
+        };
+        let moving = DragActions {
+            moving: true,
+            ..DragActions::default()
+        };
         let none = DragActions::default();
         let on_papers = pos2(500.0, 250.0);
         let on_archive = pos2(1000.0, 250.0);
@@ -2283,9 +2781,16 @@ mod tests {
         assert_eq!(zones.drag_over(Some(on_desk), &ours), moving);
         assert_eq!(zones.drag_over(Some(on_archive), &ours), moving);
         assert_eq!(zones.drag_over(Some(on_smart), &ours), none);
-        assert_eq!(zones.drag_over(Some(on_papers), &foreign), DragActions { copy: true, ..none }, "brought to the desktop");
+        assert_eq!(
+            zones.drag_over(Some(on_papers), &foreign),
+            DragActions { copy: true, ..none },
+            "brought to the desktop"
+        );
         assert_eq!(zones.drag_over(Some(on_smart), &foreign), none);
-        assert_eq!(zones.drag_over(Some(on_archive), &foreign), DragActions { copy: true, ..none });
+        assert_eq!(
+            zones.drag_over(Some(on_archive), &foreign),
+            DragActions { copy: true, ..none }
+        );
         assert_eq!(zones.incoming, Some((on_archive, true)));
         assert_eq!(zones.drag_over(None, &foreign), none);
         assert_eq!(zones.incoming, None);
@@ -2301,30 +2806,48 @@ mod tests {
         // Onto a portal: the file itself goes into the folder.
         assert_eq!(zones.drop_at(on_archive, &ours), Dropped::Placed);
         zones.tick();
-        assert_eq!(zones.layout().zone(&archive).unwrap().items[0].item, ItemId::new("/archive/a.txt"));
+        assert_eq!(
+            zones.layout().zone(&archive).unwrap().items[0].item,
+            ItemId::new("/archive/a.txt")
+        );
         // A file of another program, onto a zone filled by hand: copied
         // to the desktop's folder, and put into the zone when it is there.
         assert_eq!(zones.drop_at(on_smart, &foreign), Dropped::Refused);
-        assert_eq!(zones.drop_at(on_papers, &foreign), Dropped::Filed { moved: false });
+        assert_eq!(
+            zones.drop_at(on_papers, &foreign),
+            Dropped::Filed { moved: false }
+        );
         zones.tick();
         assert_eq!(zones.core().zone_of(&id("c.txt")), Some(&papers));
         // Onto the bare desktop, moved: it lies where it was let go.
         let moved = DropPayload {
             paths: vec!["/elsewhere/d.txt".to_string()],
-            allowed: DragActions { moving: true, ..DragActions::default() },
+            allowed: DragActions {
+                moving: true,
+                ..DragActions::default()
+            },
             ..DropPayload::default()
         };
-        assert_eq!(zones.drop_at(on_desk, &moved), Dropped::Filed { moved: true });
+        assert_eq!(
+            zones.drop_at(on_desk, &moved),
+            Dropped::Filed { moved: true }
+        );
         zones.tick();
         assert_eq!(zones.layout().item(&id("d.txt")).unwrap().rect.min, on_desk);
         // Into a portal: as it is, into the portal's folder.
-        assert_eq!(zones.drop_at(on_archive, &foreign), Dropped::Filed { moved: false });
+        assert_eq!(
+            zones.drop_at(on_archive, &foreign),
+            Dropped::Filed { moved: false }
+        );
         zones.tick();
         assert_eq!(zones.layout().zone(&archive).unwrap().items.len(), 2);
         // What allows nothing we do is not taken.
         let link_only = DropPayload {
             paths: vec!["/elsewhere/c.txt".to_string()],
-            allowed: DragActions { link: true, ..DragActions::default() },
+            allowed: DragActions {
+                link: true,
+                ..DragActions::default()
+            },
             ..DropPayload::default()
         };
         assert_eq!(zones.drop_at(on_papers, &link_only), Dropped::Refused);
@@ -2336,7 +2859,12 @@ mod tests {
         let mut backend = backend();
         backend.add(
             "/desk",
-            Item { id: ItemId::new("::computer"), kind: gevrek_zones::item::ItemKind::Virtual, name: "This PC".to_string(), ..Item::default() },
+            Item {
+                id: ItemId::new("::computer"),
+                kind: gevrek_zones::item::ItemKind::Virtual,
+                name: "This PC".to_string(),
+                ..Item::default()
+            },
         );
         let (mut zones, _) = zones_with(FakeDesk::new(backend), "system-drag");
         zones.system_drags = true;
@@ -2345,12 +2873,18 @@ mod tests {
         let held = item.center();
         zones.pointer(&press(held.x, held.y));
         zones.pointer(&hold(held.x + 30.0, held.y + 30.0));
-        assert_eq!(zones.take_drag_out(), Some((vec![id("a.txt")], vec!["/desk/a.txt".to_string()], None)));
+        assert_eq!(
+            zones.take_drag_out(),
+            Some((vec![id("a.txt")], vec!["/desk/a.txt".to_string()], None))
+        );
         assert_eq!(zones.take_drag_out(), None, "begun once");
         assert!(!zones.gestures.busy(), "the drag is the system's now");
         // (The surface is told the button came up as the drag begins:
         // that is not the end of it.)
-        zones.pointer(&Pointer { released: true, ..Pointer::default() });
+        zones.pointer(&Pointer {
+            released: true,
+            ..Pointer::default()
+        });
         assert_eq!(zones.outgoing.len(), 1);
         // What the system hands back are paths: the one that is ours is
         // our item again, another is a file from elsewhere.
@@ -2359,11 +2893,21 @@ mod tests {
             None,
             DragActions::ALL,
         );
-        assert_eq!((payload.items.clone(), payload.paths.clone()), (vec![id("a.txt")], vec!["/elsewhere/z.txt".to_string()]));
+        assert_eq!(
+            (payload.items.clone(), payload.paths.clone()),
+            (vec![id("a.txt")], vec!["/elsewhere/z.txt".to_string()])
+        );
         // Let go on the bare desktop: it lies where it was held, not with
         // its corner under the pointer.
-        let payload = DropPayload { items: vec![id("a.txt")], allowed: DragActions::ALL, ..DropPayload::default() };
-        assert_eq!(zones.drop_at(pos2(1500.0, 900.0), &payload), Dropped::Placed);
+        let payload = DropPayload {
+            items: vec![id("a.txt")],
+            allowed: DragActions::ALL,
+            ..DropPayload::default()
+        };
+        assert_eq!(
+            zones.drop_at(pos2(1500.0, 900.0), &payload),
+            Dropped::Placed
+        );
         let now_at = zones.layout().item(&id("a.txt")).unwrap().rect.min;
         assert_eq!(now_at, pos2(1500.0, 900.0) + (item.min - held));
         // And into a zone.
@@ -2384,7 +2928,12 @@ mod tests {
         assert!(zones.core().item(&id("b.txt")).is_none());
         // What is no file cannot be handed to the system: the shell
         // carries it itself.
-        let computer = zones.layout().item(&ItemId::new("::computer")).unwrap().rect.center();
+        let computer = zones
+            .layout()
+            .item(&ItemId::new("::computer"))
+            .unwrap()
+            .rect
+            .center();
         zones.pointer(&press(computer.x, computer.y));
         zones.pointer(&hold(computer.x + 30.0, computer.y));
         assert_eq!(zones.take_drag_out(), None);
@@ -2452,14 +3001,18 @@ mod tests {
     #[test]
     fn where_the_icons_cannot_be_put_away_no_zone_is_shown_and_it_is_said_why() {
         let mut desk = FakeDesk::new(backend());
-        desk.fail_hide = Some(BackendError::Refused { what: "Explorer said no".to_string() });
+        desk.fail_hide = Some(BackendError::Refused {
+            what: "Explorer said no".to_string(),
+        });
         let said = std::sync::Arc::clone(&desk.said);
         let (mut zones, _) = zones_with(desk, "icons-refused");
         assert_eq!(*said.lock().unwrap(), ["journal", "hide", "restore"]);
         assert!(zones.spots().is_empty(), "no surface is opened");
         let why = zones.not_shown().expect("it is said why");
         assert!(why.contains("Explorer said no"), "{why}");
-        assert!(zones.take_heard().contains(&ZonesEvent::Refused { reason: why }));
+        assert!(zones
+            .take_heard()
+            .contains(&ZonesEvent::Refused { reason: why }));
         // With the switch off the same zones show, and nothing is touched.
         zones.set_hide_icons(false);
         assert_eq!(zones.not_shown(), None);
@@ -2494,11 +3047,17 @@ mod tests {
         // F2: the box for its new name; the name is a command.
         zones.key(gesture::Key::Rename);
         assert_eq!(zones.take_asks(), [Ask::RenameItem { item: id("a.txt") }]);
-        zones.command(Command::RenameItem { item: id("a.txt"), name: "first.txt".to_string() });
+        zones.command(Command::RenameItem {
+            item: id("a.txt"),
+            name: "first.txt".to_string(),
+        });
         zones.tick();
         assert!(zones.core().item(&id("first.txt")).is_some());
         // Delete: into the bin, and back out of it.
-        zones.command(Command::Select { items: vec![id("b.txt")], mode: SelectMode::Replace });
+        zones.command(Command::Select {
+            items: vec![id("b.txt")],
+            mode: SelectMode::Replace,
+        });
         zones.key(gesture::Key::Delete);
         zones.tick();
         assert!(zones.core().item(&id("b.txt")).is_none());
@@ -2506,7 +3065,10 @@ mod tests {
         zones.tick();
         assert!(zones.core().item(&id("b.txt")).is_some());
         // Nothing selected: the keys do nothing.
-        zones.command(Command::Select { items: Vec::new(), mode: SelectMode::Replace });
+        zones.command(Command::Select {
+            items: Vec::new(),
+            mode: SelectMode::Replace,
+        });
         zones.key(gesture::Key::Delete);
         zones.key(gesture::Key::Rename);
         assert!(zones.take_asks().is_empty());
@@ -2515,17 +3077,33 @@ mod tests {
         zones.tick();
         assert!(zones.core().item(&id("b.txt")).is_none());
         zones.act(&[id("budget.xlsx")], RENAME);
-        assert_eq!(zones.take_asks(), [Ask::RenameItem { item: id("budget.xlsx") }]);
+        assert_eq!(
+            zones.take_asks(),
+            [Ask::RenameItem {
+                item: id("budget.xlsx")
+            }]
+        );
     }
 
     #[test]
     fn a_rolled_up_zone_opens_under_the_pointer_after_a_moment_and_shuts_when_it_left() {
         let (mut zones, woken) = zones_on(backend(), "roll");
         let papers = zone(&mut zones, "Papers", ZoneKind::Manual, (300, 100, 400, 300));
-        zones.command(Command::AddItem { zone: papers.clone(), item: id("a.txt"), index: None, cell: None });
-        zones.command(Command::RollUp { zone: papers.clone(), rolled_up: Some(true) });
+        zones.command(Command::AddItem {
+            zone: papers.clone(),
+            item: id("a.txt"),
+            index: None,
+            cell: None,
+        });
+        zones.command(Command::RollUp {
+            zone: papers.clone(),
+            rolled_up: Some(true),
+        });
         let open = |zones: &mut Zones| zones.layout().zone(&papers).unwrap().expanded;
-        let over = |x: f32, y: f32| Pointer { at: Some(pos2(x, y)), ..Pointer::default() };
+        let over = |x: f32, y: f32| Pointer {
+            at: Some(pos2(x, y)),
+            ..Pointer::default()
+        };
         // Onto its title: nothing yet, and the zones ask to be woken
         // when the moment is over (no clock is looked at meanwhile).
         zones.pointer(&over(400.0, 112.0));
@@ -2546,7 +3124,10 @@ mod tests {
         assert!(open(&mut zones));
         let shown = zones.layout().zone(&papers).unwrap().clone();
         assert!(shown.rolled_up && shown.items.len() == 1 && shown.rect.height() == 300.0);
-        assert!(zones.core().config().zone(&papers).unwrap().rolled_up, "nothing that is kept changed");
+        assert!(
+            zones.core().config().zone(&papers).unwrap().rolled_up,
+            "nothing that is kept changed"
+        );
         // Into what opened, out over its rim and back in time: open still.
         zones.pointer(&over(400.0, 300.0));
         zones.pointer(&over(1500.0, 900.0));
@@ -2562,7 +3143,10 @@ mod tests {
         zones.later(0.5);
         zones.tick();
         assert!(!open(&mut zones));
-        assert_eq!(zones.ghosts.get(&papers).map(|was| was.items.len()), Some(1));
+        assert_eq!(
+            zones.ghosts.get(&papers).map(|was| was.items.len()),
+            Some(1)
+        );
         // The pointer leaving every surface of ours counts as leaving it.
         zones.pointer(&over(400.0, 112.0));
         zones.later(0.2);
@@ -2573,13 +3157,22 @@ mod tests {
         zones.tick();
         assert!(!open(&mut zones));
         // Something carried over its title opens it whichever way it opens.
-        zones.command(Command::ModifySettings { changes: serde_json::json!({"roll_up": {"expand_on": "click"}}) });
+        zones.command(Command::ModifySettings {
+            changes: serde_json::json!({"roll_up": {"expand_on": "click"}}),
+        });
         zones.pointer(&over(400.0, 112.0));
         zones.later(0.5);
         zones.tick();
-        assert!(!open(&mut zones), "it opens at a press, not under the pointer");
+        assert!(
+            !open(&mut zones),
+            "it opens at a press, not under the pointer"
+        );
         zones.pointer(&over(1500.0, 900.0));
-        let carried = DropPayload { items: vec![id("b.txt")], allowed: DragActions::ALL, ..DropPayload::default() };
+        let carried = DropPayload {
+            items: vec![id("b.txt")],
+            allowed: DragActions::ALL,
+            ..DropPayload::default()
+        };
         zones.drag_over(Some(pos2(400.0, 112.0)), &carried);
         zones.later(0.2);
         zones.tick();
@@ -2594,16 +3187,26 @@ mod tests {
         let said = std::sync::Arc::clone(&desk.said);
         let (mut zones, _) = zones_with(desk, "refuse");
         let papers = zone(&mut zones, "Papers", ZoneKind::Manual, (300, 100, 400, 300));
-        zones.command(Command::Lock { zone: papers.clone(), geometry: Some(true), members: Some(true) });
+        zones.command(Command::Lock {
+            zone: papers.clone(),
+            geometry: Some(true),
+            members: Some(true),
+        });
         // Dragged by its title: it stays, and shows that it is held.
         zones.pointer(&press(400.0, 112.0));
         zones.pointer(&hold(500.0, 212.0));
-        assert_eq!(zones.core().zone_rect(&papers), Some(Rect::new(300, 100, 400, 300)));
+        assert_eq!(
+            zones.core().zone_rect(&papers),
+            Some(Rect::new(300, 100, 400, 300))
+        );
         let now = zones.seconds();
         assert!(zones.motion.refusal(&papers, now).is_some() && zones.motion.busy(now));
         zones.pointer(&release(500.0, 212.0));
         zones.later(1.0);
-        assert!(zones.motion.refusal(&papers, zones.seconds()).is_none() && !zones.motion.busy(zones.seconds()));
+        assert!(
+            zones.motion.refusal(&papers, zones.seconds()).is_none()
+                && !zones.motion.busy(zones.seconds())
+        );
         // An item let go on it: not taken, and it says so again.
         let item = zones.layout().item(&id("a.txt")).unwrap().rect.center();
         zones.pointer(&press(item.x, item.y));
@@ -2614,15 +3217,32 @@ mod tests {
         // With movement reduced it is marked, does not shake, and one
         // wake-up is asked for when the mark is to go.
         zones.motion.still = true;
-        assert_eq!(zones.motion.refusal(&papers, zones.seconds()).map(|(aside, _)| aside), Some(0.0));
-        assert!(!zones.motion.busy(zones.seconds()) && zones.motion.ends_in(zones.seconds()).is_some());
+        assert_eq!(
+            zones
+                .motion
+                .refusal(&papers, zones.seconds())
+                .map(|(aside, _)| aside),
+            Some(0.0)
+        );
+        assert!(
+            !zones.motion.busy(zones.seconds()) && zones.motion.ends_in(zones.seconds()).is_some()
+        );
         // Enter opens what is chosen: asked of the core, which says when
         // it is to be started; only then is the system asked.
-        zones.command(Command::Select { items: vec![id("b.txt")], mode: SelectMode::Replace });
+        zones.command(Command::Select {
+            items: vec![id("b.txt")],
+            mode: SelectMode::Replace,
+        });
         let before = said.lock().unwrap().len();
         zones.key(gesture::Key::Enter);
-        assert_eq!(said.lock().unwrap()[before..], ["open /desk/b.txt".to_string()]);
-        assert!(zones.take_heard().iter().any(|event| matches!(event, ZonesEvent::OpenRequested { .. })));
+        assert_eq!(
+            said.lock().unwrap()[before..],
+            ["open /desk/b.txt".to_string()]
+        );
+        assert!(zones
+            .take_heard()
+            .iter()
+            .any(|event| matches!(event, ZonesEvent::OpenRequested { .. })));
     }
 
     #[test]
@@ -2630,14 +3250,27 @@ mod tests {
         let (mut zones, _) = zones_on(backend(), "filter");
         let papers = zone(&mut zones, "Papers", ZoneKind::Manual, (300, 100, 400, 300));
         for name in ["a.txt", "b.txt"] {
-            zones.command(Command::AddItem { zone: papers.clone(), item: id(name), index: None, cell: None });
+            zones.command(Command::AddItem {
+                zone: papers.clone(),
+                item: id(name),
+                index: None,
+                cell: None,
+            });
         }
-        zones.command(Command::FocusZone { zone: Some(papers.clone()) });
+        zones.command(Command::FocusZone {
+            zone: Some(papers.clone()),
+        });
         zones.typed("b");
         let shown = zones.layout().zone(&papers).unwrap().clone();
-        assert_eq!((shown.filter.as_deref(), shown.items.len(), shown.item_count), (Some("b"), 1, 2));
+        assert_eq!(
+            (shown.filter.as_deref(), shown.items.len(), shown.item_count),
+            (Some("b"), 1, 2)
+        );
         zones.typed(".t");
-        assert_eq!(zones.layout().zone(&papers).unwrap().filter.as_deref(), Some("b.t"));
+        assert_eq!(
+            zones.layout().zone(&papers).unwrap().filter.as_deref(),
+            Some("b.t")
+        );
         zones.key(gesture::Key::Erase);
         zones.key(gesture::Key::Erase);
         zones.key(gesture::Key::Erase);
@@ -2655,26 +3288,58 @@ mod tests {
         let (mut zones, _) = zones_on(backend(), "stays");
         let papers = zone(&mut zones, "Papers", ZoneKind::Manual, (300, 100, 400, 300));
         let keeps = zone(&mut zones, "Keeps", ZoneKind::Manual, (800, 100, 300, 200));
-        zones.command(Command::AddItem { zone: papers.clone(), item: id("a.txt"), index: None, cell: None });
+        zones.command(Command::AddItem {
+            zone: papers.clone(),
+            item: id("a.txt"),
+            index: None,
+            cell: None,
+        });
         let was = zones.layout().item(&id("a.txt")).unwrap().rect;
-        zones.command(Command::AlwaysVisible { zone: keeps.clone(), on: Some(true) });
+        zones.command(Command::AlwaysVisible {
+            zone: keeps.clone(),
+            on: Some(true),
+        });
         zones.act(&[id("a.txt")], STAY);
         zones.command(Command::QuickHide { hidden: Some(true) });
         let layout = zones.layout().clone();
         // The zone that stays, and of the other only the item that does.
-        assert_eq!(layout.zones.iter().map(|zone| zone.zone.clone()).collect::<Vec<_>>(), [keeps]);
+        assert_eq!(
+            layout
+                .zones
+                .iter()
+                .map(|zone| zone.zone.clone())
+                .collect::<Vec<_>>(),
+            [keeps]
+        );
         let desk = &layout.desks[0];
         assert!(desk.items.is_empty(), "the loose item is put away");
         assert_eq!(desk.stays.len(), 1);
-        assert_eq!((desk.stays[0].shown.rect, &desk.stays[0].zone), (was, &papers));
-        assert_eq!(layout.hit(was.center()), view::Hit::Item { item: id("a.txt"), zone: Some(papers.clone()) });
+        assert_eq!(
+            (desk.stays[0].shown.rect, &desk.stays[0].zone),
+            (was, &papers)
+        );
+        assert_eq!(
+            layout.hit(was.center()),
+            view::Hit::Item {
+                item: id("a.txt"),
+                zone: Some(papers.clone())
+            }
+        );
         // The same line of its menu takes it back; and out of its zone.
         let lines = zones.own_lines(&[id("a.txt")]);
-        assert_eq!(lines.iter().map(|line| line.id.as_str()).collect::<Vec<_>>(), [STAY, LOOSEN]);
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| line.id.as_str())
+                .collect::<Vec<_>>(),
+            [STAY, LOOSEN]
+        );
         assert!(lines[0].label.starts_with("No longer"));
         zones.act(&[id("a.txt")], STAY);
         assert!(zones.layout().desks[0].stays.is_empty());
-        zones.command(Command::QuickHide { hidden: Some(false) });
+        zones.command(Command::QuickHide {
+            hidden: Some(false),
+        });
         zones.act(&[id("a.txt")], LOOSEN);
         assert_eq!(zones.core().zone_of(&id("a.txt")), None);
     }
@@ -2686,23 +3351,48 @@ mod tests {
         backend.add_folder_in("/archive", "sub");
         backend.add_file_in("/archive/sub", "in.txt");
         let (mut zones, _) = zones_on(backend, name);
-        let archive = zone(&mut zones, "Archive", ZoneKind::Portal { directory: "/archive".to_string() }, (800, 100, 400, 300));
+        let archive = zone(
+            &mut zones,
+            "Archive",
+            ZoneKind::Portal {
+                directory: "/archive".to_string(),
+            },
+            (800, 100, 400, 300),
+        );
         zones.tick();
         (zones, archive)
     }
 
     fn names_in(zones: &mut Zones, zone: &ZoneId) -> Vec<String> {
-        zones.layout().zone(zone).unwrap().items.iter().map(|item| item.name.clone()).collect()
+        zones
+            .layout()
+            .zone(zone)
+            .unwrap()
+            .items
+            .iter()
+            .map(|item| item.name.clone())
+            .collect()
     }
 
     #[test]
     fn a_portal_goes_into_its_folders_in_place_and_back_by_its_title() {
         let (mut zones, archive) = with_a_portal("portal-way");
         assert_eq!(names_in(&mut zones, &archive), ["old.txt", "sub"]);
-        assert!(zones.layout().zone(&archive).unwrap().nav.is_empty(), "in its own folder its title is its name");
+        assert!(
+            zones.layout().zone(&archive).unwrap().nav.is_empty(),
+            "in its own folder its title is its name"
+        );
         // Twice on a folder: into it, in the same zone.
-        let folder = zones.layout().item(&ItemId::new("/archive/sub")).unwrap().rect.center();
-        zones.pointer(&Pointer { double: true, ..press(folder.x, folder.y) });
+        let folder = zones
+            .layout()
+            .item(&ItemId::new("/archive/sub"))
+            .unwrap()
+            .rect
+            .center();
+        zones.pointer(&Pointer {
+            double: true,
+            ..press(folder.x, folder.y)
+        });
         zones.pointer(&release(folder.x, folder.y));
         zones.tick();
         assert_eq!(names_in(&mut zones, &archive), ["in.txt"]);
@@ -2711,11 +3401,19 @@ mod tests {
         let way: Vec<&view::Nav> = shown.nav.iter().map(|part| &part.nav).collect();
         assert_eq!(
             way,
-            [&view::Nav::Back, &view::Nav::Up, &view::Nav::To("/archive".to_string()), &view::Nav::To("/archive/sub".to_string())]
+            [
+                &view::Nav::Back,
+                &view::Nav::Up,
+                &view::Nav::To("/archive".to_string()),
+                &view::Nav::To("/archive/sub".to_string())
+            ]
         );
         // A press on the first folder of the way goes there.
         let first = shown.nav[2].rect.center();
-        assert_eq!(zones.layout().hit(first), view::Hit::Nav(archive.clone(), view::Nav::To("/archive".to_string())));
+        assert_eq!(
+            zones.layout().hit(first),
+            view::Hit::Nav(archive.clone(), view::Nav::To("/archive".to_string()))
+        );
         zones.pointer(&press(first.x, first.y));
         zones.pointer(&release(first.x, first.y));
         zones.tick();
@@ -2732,7 +3430,13 @@ mod tests {
         zones.pointer(&press(up.x, up.y));
         zones.pointer(&hold(up.x - 200.0, up.y + 200.0));
         zones.pointer(&release(up.x - 200.0, up.y + 200.0));
-        assert_eq!(zones.core().zone_rect(&archive).map(|rect| (rect.x, rect.y)), Some((600, 300)));
+        assert_eq!(
+            zones
+                .core()
+                .zone_rect(&archive)
+                .map(|rect| (rect.x, rect.y)),
+            Some((600, 300))
+        );
         assert_eq!(names_in(&mut zones, &archive), ["in.txt"]);
         // What is where it stands is where it stands: no way to go.
         let here = zones.layout().zone(&archive).unwrap().nav[3].rect.center();
@@ -2743,18 +3447,34 @@ mod tests {
     fn files_go_into_a_portals_folders_and_out_of_them_and_each_can_be_taken_back() {
         let (mut zones, archive) = with_a_portal("portal-files");
         let carry = |zones: &mut Zones, item: &str, to: Pos2| {
-            let from = zones.layout().item(&ItemId::new(item)).unwrap_or_else(|| panic!("{item} is shown")).rect.center();
+            let from = zones
+                .layout()
+                .item(&ItemId::new(item))
+                .unwrap_or_else(|| panic!("{item} is shown"))
+                .rect
+                .center();
             zones.pointer(&press(from.x, from.y));
             zones.pointer(&hold(to.x, to.y));
             zones.pointer(&release(to.x, to.y));
             zones.tick();
         };
         // A file of the desktop onto a folder the portal shows: into that folder.
-        let onto = zones.layout().item(&ItemId::new("/archive/sub")).unwrap().rect.center();
+        let onto = zones
+            .layout()
+            .item(&ItemId::new("/archive/sub"))
+            .unwrap()
+            .rect
+            .center();
         carry(&mut zones, "/desk/a.txt", onto);
-        assert!(zones.core().item(&id("a.txt")).is_none(), "it is no longer on the desktop");
+        assert!(
+            zones.core().item(&id("a.txt")).is_none(),
+            "it is no longer on the desktop"
+        );
         assert_eq!(names_in(&mut zones, &archive), ["old.txt", "sub"]);
-        zones.command(Command::EnterFolder { zone: archive.clone(), item: ItemId::new("/archive/sub") });
+        zones.command(Command::EnterFolder {
+            zone: archive.clone(),
+            item: ItemId::new("/archive/sub"),
+        });
         zones.tick();
         assert_eq!(names_in(&mut zones, &archive), ["a.txt", "in.txt"]);
         // Ctrl+Z: back on the desktop.
@@ -2765,32 +3485,57 @@ mod tests {
         // A file of the portal onto the bare desktop: the file itself
         // comes to the desktop's folder, and lies where it was let go.
         carry(&mut zones, "/archive/sub/in.txt", pos2(300.0, 700.0));
-        let came = zones.layout().item(&id("in.txt")).expect("it is on the desktop now").rect;
-        assert!(came.contains(pos2(310.0, 710.0)) || (came.min.x - 300.0).abs() < 60.0, "{came:?}");
+        let came = zones
+            .layout()
+            .item(&id("in.txt"))
+            .expect("it is on the desktop now")
+            .rect;
+        assert!(
+            came.contains(pos2(310.0, 710.0)) || (came.min.x - 300.0).abs() < 60.0,
+            "{came:?}"
+        );
         assert_eq!(names_in(&mut zones, &archive), Vec::<String>::new());
         // A file of another program let go on the portal goes into the
         // folder it stands in, not into its own.
         let foreign = DropPayload {
             paths: vec!["/elsewhere/c.txt".to_string()],
-            allowed: DragActions { copy: true, ..DragActions::default() },
+            allowed: DragActions {
+                copy: true,
+                ..DragActions::default()
+            },
             ..DropPayload::default()
         };
-        assert_eq!(zones.drop_at(pos2(1000.0, 300.0), &foreign), Dropped::Filed { moved: false });
+        assert_eq!(
+            zones.drop_at(pos2(1000.0, 300.0), &foreign),
+            Dropped::Filed { moved: false }
+        );
         zones.tick();
         assert_eq!(names_in(&mut zones, &archive), ["c.txt"]);
-        zones.command(Command::NavigateUp { zone: archive.clone() });
+        zones.command(Command::NavigateUp {
+            zone: archive.clone(),
+        });
         zones.tick();
         assert_eq!(names_in(&mut zones, &archive), ["old.txt", "sub"]);
         // A folder made in it, by the name typed.
-        zones.command(Command::NewFolder { zone: archive.clone(), name: "Letters".to_string() });
+        zones.command(Command::NewFolder {
+            zone: archive.clone(),
+            name: "Letters".to_string(),
+        });
         zones.tick();
         assert!(names_in(&mut zones, &archive).contains(&"Letters".to_string()));
         // A folder made on the desktop itself is an item of the desktop,
         // and Ctrl+Z takes it back as it takes back anything else.
-        let desktop = zones.desktop_known().expect("the backend names the desktop's folder");
+        let desktop = zones
+            .desktop_known()
+            .expect("the backend names the desktop's folder");
         zones.new_folder_in(&desktop, "Sorted");
         zones.tick();
-        let made = |zones: &mut Zones| zones.layout().every_item().any(|shown| shown.name == "Sorted");
+        let made = |zones: &mut Zones| {
+            zones
+                .layout()
+                .every_item()
+                .any(|shown| shown.name == "Sorted")
+        };
         assert!(made(&mut zones));
         zones.key(gesture::Key::Undo);
         zones.tick();
@@ -2802,28 +3547,60 @@ mod tests {
         use gevrek_zones::rules::{Destination, Reason, Scope};
         let mut zones = crate::zones::draw::tests::a_desk_with_rules("rules-preview");
         let preview = zones.rules_preview(Scope::All);
-        let of = |name: &str| preview.lines.iter().find(|line| line.name == name).unwrap_or_else(|| panic!("{name}"));
-        assert!(matches!(&of("Holiday.png").destination, Destination::Zone { title, .. } if title == "Pictures"));
+        let of = |name: &str| {
+            preview
+                .lines
+                .iter()
+                .find(|line| line.name == name)
+                .unwrap_or_else(|| panic!("{name}"))
+        };
+        assert!(
+            matches!(&of("Holiday.png").destination, Destination::Zone { title, .. } if title == "Pictures")
+        );
         assert_eq!(of("Holiday.png").rule, "Pictures");
-        assert!(matches!(&of("setup.exe").destination, Destination::Folder { folder } if folder == "/home/ada/Archive"));
+        assert!(
+            matches!(&of("setup.exe").destination, Destination::Folder { folder } if folder == "/home/ada/Archive")
+        );
         assert_eq!(of("main.rs").held, Some(Reason::Locked));
         assert_eq!(of("song.mp3").held, Some(Reason::NoSuchZone));
         // A rule asks how old a file is: it is said how often such are tried.
         assert_eq!(preview.timed_every, Some(3600));
         assert!(!preview.timed_move_files && !preview.can_undo);
         // Nothing was done by looking.
-        assert!(zones.core().loose_items().iter().any(|item| item.name == "Holiday.png"));
+        assert!(zones
+            .core()
+            .loose_items()
+            .iter()
+            .any(|item| item.name == "Holiday.png"));
         // Done, and taken back.
         zones.command(Command::ApplyRules { scope: Scope::All });
         zones.tick();
         let after = zones.rules_preview(Scope::All);
         assert!(after.can_undo);
-        assert!(after.lines.iter().all(|line| line.held.is_some() || line.name != "Holiday.png"), "{:?}", after.lines);
-        assert!(!zones.core().loose_items().iter().any(|item| item.name == "Holiday.png"));
+        assert!(
+            after
+                .lines
+                .iter()
+                .all(|line| line.held.is_some() || line.name != "Holiday.png"),
+            "{:?}",
+            after.lines
+        );
+        assert!(!zones
+            .core()
+            .loose_items()
+            .iter()
+            .any(|item| item.name == "Holiday.png"));
         zones.command(Command::UndoRules);
         zones.tick();
-        assert!(zones.core().loose_items().iter().any(|item| item.name == "Holiday.png"));
-        assert_eq!(zones.rules_preview(Scope::All).lines.len(), preview.lines.len());
+        assert!(zones
+            .core()
+            .loose_items()
+            .iter()
+            .any(|item| item.name == "Holiday.png"));
+        assert_eq!(
+            zones.rules_preview(Scope::All).lines.len(),
+            preview.lines.len()
+        );
     }
 
     #[test]
@@ -2833,10 +3610,22 @@ mod tests {
         let lines = surfaces::smart_menu(pos2(300.0, 200.0));
         let mut made = Vec::new();
         for line in lines {
-            let surfaces::Line::Choice { does: surfaces::Does::Make { title, kind, rect, changes }, .. } = line else {
+            let surfaces::Line::Choice {
+                does:
+                    surfaces::Does::Make {
+                        title,
+                        kind,
+                        rect,
+                        changes,
+                    },
+                ..
+            } = line
+            else {
                 panic!("every line makes a zone");
             };
-            let zone = zones.make_zone(&title, kind, rect, changes).expect("the zone is made");
+            let zone = zones
+                .make_zone(&title, kind, rect, changes)
+                .expect("the zone is made");
             let definition = zones.core().config().zone(&zone).unwrap().clone();
             assert!(matches!(definition.kind, ZoneKind::Smart { .. }));
             made.push((definition.title.clone(), definition.source.clone()));
@@ -2859,7 +3648,10 @@ mod tests {
         let recent = zones.core().config().zones[0].id.clone();
         assert!(zones.layout().zone(&recent).unwrap().outside);
         assert_eq!(surfaces::portal_title("/home/ada/Downloads/"), "Downloads");
-        assert_eq!(surfaces::portal_title(r"C:\Users\ada\Documents"), "Documents");
+        assert_eq!(
+            surfaces::portal_title(r"C:\Users\ada\Documents"),
+            "Documents"
+        );
         assert_eq!(surfaces::portal_title("/"), "/");
     }
 
@@ -2871,41 +3663,84 @@ mod tests {
         let papers = zone(&mut zones, "Papers", ZoneKind::Manual, (300, 100, 400, 300));
         let foreign = DropPayload {
             paths: vec!["/elsewhere/c.txt".to_string()],
-            allowed: DragActions { copy: true, ..DragActions::default() },
+            allowed: DragActions {
+                copy: true,
+                ..DragActions::default()
+            },
             ..DropPayload::default()
         };
         // Into a zone: the zone says that something is under way.
-        assert_eq!(zones.drop_at(pos2(500.0, 250.0), &foreign), Dropped::Filed { moved: false });
+        assert_eq!(
+            zones.drop_at(pos2(500.0, 250.0), &foreign),
+            Dropped::Filed { moved: false }
+        );
         zones.tick();
-        let busy = zones.layout().zone(&papers).unwrap().busy.clone().expect("the copy is under way");
+        let busy = zones
+            .layout()
+            .zone(&papers)
+            .unwrap()
+            .busy
+            .clone()
+            .expect("the copy is under way");
         assert_eq!((busy.what.as_str(), busy.part), ("Copying c.txt", None));
-        assert!(zones.layout().under_way.is_empty(), "said on the zone, not at the desktop's foot");
-        assert!(zones.core().item(&id("c.txt")).is_none(), "not there before it has ended");
+        assert!(
+            zones.layout().under_way.is_empty(),
+            "said on the zone, not at the desktop's foot"
+        );
+        assert!(
+            zones.core().item(&id("c.txt")).is_none(),
+            "not there before it has ended"
+        );
         // Called off: nothing came, and nothing is under way.
-        zones.command(Command::CancelOperation { request: busy.request });
+        zones.command(Command::CancelOperation {
+            request: busy.request,
+        });
         zones.tick();
         assert!(zones.layout().zone(&papers).unwrap().busy.is_none());
         assert!(zones.core().item(&id("c.txt")).is_none());
         // Onto the bare desktop: said at the desktop's foot.
-        assert_eq!(zones.drop_at(pos2(1500.0, 900.0), &foreign), Dropped::Filed { moved: false });
+        assert_eq!(
+            zones.drop_at(pos2(1500.0, 900.0), &foreign),
+            Dropped::Filed { moved: false }
+        );
         zones.tick();
-        assert_eq!(zones.layout().under_way.iter().map(|busy| busy.what.as_str()).collect::<Vec<_>>(), ["Copying c.txt"]);
+        assert_eq!(
+            zones
+                .layout()
+                .under_way
+                .iter()
+                .map(|busy| busy.what.as_str())
+                .collect::<Vec<_>>(),
+            ["Copying c.txt"]
+        );
     }
 
     #[test]
     fn a_refusal_that_came_by_a_key_or_from_outside_shows_on_its_zone_too() {
         let (mut zones, _) = zones_on(backend(), "refused-about");
         let papers = zone(&mut zones, "Papers", ZoneKind::Manual, (300, 100, 400, 300));
-        zones.command(Command::Lock { zone: papers.clone(), geometry: Some(true), members: None });
+        zones.command(Command::Lock {
+            zone: papers.clone(),
+            geometry: Some(true),
+            members: None,
+        });
         zones.layout();
         assert!(zones.motion.refusal(&papers, zones.seconds()).is_none());
         // As `gevrek zones send` or a bound key would ask.
-        let effects = zones.command(Command::MoveZone { zone: papers.clone(), x: 10, y: 10, snap: false });
+        let effects = zones.command(Command::MoveZone {
+            zone: papers.clone(),
+            x: 10,
+            y: 10,
+            snap: false,
+        });
         assert!(!gevrek_zones::ipc::Answer::of(&effects).ok);
         assert!(zones.motion.refusal(&papers, zones.seconds()).is_some());
         // A refusal about a zone that is not shown shakes nothing.
         zones.later(1.0);
-        zones.command(Command::RollUp { zone: ZoneId::new("no-such"), rolled_up: None });
+        zones.command(Command::RollUp {
+            zone: ZoneId::new("no-such"),
+            rolled_up: None,
+        });
         assert!(!zones.motion.busy(zones.seconds()));
     }
 
@@ -2913,73 +3748,129 @@ mod tests {
     fn an_arrangement_is_kept_gone_back_to_written_to_a_file_and_taken_from_one() {
         let (mut zones, _) = zones_on(backend(), "arrangements");
         let papers = zone(&mut zones, "Papers", ZoneKind::Manual, (300, 100, 400, 300));
-        zones.command(Command::AddItem { zone: papers.clone(), item: id("a.txt"), index: None, cell: None });
+        zones.command(Command::AddItem {
+            zone: papers.clone(),
+            item: id("a.txt"),
+            index: None,
+            cell: None,
+        });
         let labels = |zones: &Zones| -> Vec<String> {
             surfaces::layouts_menu(zones)
                 .into_iter()
                 .filter_map(|line| match line {
-                    surfaces::Line::Choice { label, .. } | surfaces::Line::Sub { label, .. } => Some(label),
+                    surfaces::Line::Choice { label, .. } | surfaces::Line::Sub { label, .. } => {
+                        Some(label)
+                    }
                     surfaces::Line::Gap => None,
                 })
                 .collect()
         };
         assert_eq!(
             labels(&zones),
-            ["Keep this arrangement as\u{2026}", "Write this arrangement to a file\u{2026}", "Take an arrangement from a file\u{2026}"]
+            [
+                "Keep this arrangement as\u{2026}",
+                "Write this arrangement to a file\u{2026}",
+                "Take an arrangement from a file\u{2026}"
+            ]
         );
         // Kept under a name; then the zone is moved and the item taken out.
-        zones.command(Command::SaveSnapshot { name: "Tidy".to_string() });
+        zones.command(Command::SaveSnapshot {
+            name: "Tidy".to_string(),
+        });
         // (What can be done with it is a menu beside its line.)
         assert!(labels(&zones).contains(&"\u{201c}Tidy\u{201d}".to_string()));
         assert!(surfaces::layouts_menu(&zones).iter().any(
             |line| matches!(line, surfaces::Line::Sub { label, lines } if label == "\u{201c}Tidy\u{201d}" && lines == &surfaces::layout_menu("Tidy"))
         ));
-        zones.command(Command::MoveZone { zone: papers.clone(), x: 900, y: 500, snap: false });
+        zones.command(Command::MoveZone {
+            zone: papers.clone(),
+            x: 900,
+            y: 500,
+            snap: false,
+        });
         zones.command(Command::RemoveItem { item: id("a.txt") });
         // Back to it, by the line of its menu.
-        let surfaces::Line::Choice { does: surfaces::Does::Command(back), .. } = &surfaces::layout_menu("Tidy")[0] else {
+        let surfaces::Line::Choice {
+            does: surfaces::Does::Command(back),
+            ..
+        } = &surfaces::layout_menu("Tidy")[0]
+        else {
             panic!("the first line goes back to it");
         };
         zones.command(back.clone());
-        assert_eq!(zones.core().zone_rect(&papers), Some(Rect::new(300, 100, 400, 300)));
+        assert_eq!(
+            zones.core().zone_rect(&papers),
+            Some(Rect::new(300, 100, 400, 300))
+        );
         assert_eq!(zones.core().zone_of(&id("a.txt")), Some(&papers));
         // What there was before going back was kept too, by the zones themselves.
-        assert!(zones.core().state().snapshots.iter().any(|snapshot| snapshot.automatic));
+        assert!(zones
+            .core()
+            .state()
+            .snapshots
+            .iter()
+            .any(|snapshot| snapshot.automatic));
         // Written to a file, whole.
-        let folder = std::env::temp_dir().join(format!("gevrek-shell-zones-export-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("gevrek-shell-zones-export-{}", std::process::id()));
         std::fs::create_dir_all(&folder).unwrap();
         let file = folder.join("tidy.json");
         let path = file.to_string_lossy().into_owned();
         assert_eq!(zones.export_to(Some("Tidy".to_string()), &path), Ok(()));
-        let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        let written: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(written["format"], "gevrek-zones-layout");
         assert_eq!(written["layout"]["name"], "Tidy");
-        assert!(!folder.join("tidy.json.writing").exists(), "nothing half written is left beside it");
+        assert!(
+            !folder.join("tidy.json.writing").exists(),
+            "nothing half written is left beside it"
+        );
         // One that is not there cannot be written, and no file is made.
         let none = folder.join("none.json");
-        assert!(zones.export_to(Some("No such".to_string()), &none.to_string_lossy()).is_err());
+        assert!(zones
+            .export_to(Some("No such".to_string()), &none.to_string_lossy())
+            .is_err());
         assert!(!none.exists());
         // Taken from the file again after everything was changed: in
         // force, kept under a name of its own, and what there was kept.
-        zones.command(Command::DeleteZone { zone: papers.clone() });
+        zones.command(Command::DeleteZone {
+            zone: papers.clone(),
+        });
         assert!(zones.layout().zones.is_empty());
-        let name = zones.import_from(&path).expect("the file is an arrangement");
+        let name = zones
+            .import_from(&path)
+            .expect("the file is an arrangement");
         assert_eq!(name, "Tidy (2)");
         assert_eq!(zones.layout().zones.len(), 1);
         assert_eq!(zones.core().zone_of(&id("a.txt")), Some(&papers));
         // A file that is no arrangement changes nothing, and says why.
         std::fs::write(&none, "{\"format\": \"something else\"}").unwrap();
         let before = zones.core().config().clone();
-        let why = zones.import_from(&none.to_string_lossy()).expect_err("it is no arrangement");
+        let why = zones
+            .import_from(&none.to_string_lossy())
+            .expect_err("it is no arrangement");
         assert!(!why.is_empty());
         assert_eq!(zones.core().config(), &before);
-        assert!(zones.import_from(&folder.join("missing.json").to_string_lossy()).is_err());
+        assert!(zones
+            .import_from(&folder.join("missing.json").to_string_lossy())
+            .is_err());
         // What came of writing or taking in is said on a sheet.
-        zones.say("The arrangement was written", vec![("File".to_string(), path.clone())]);
-        assert!(matches!(zones.take_asks().as_slice(), [Ask::Sheet { heading, .. }] if heading == "The arrangement was written"));
+        zones.say(
+            "The arrangement was written",
+            vec![("File".to_string(), path.clone())],
+        );
+        assert!(
+            matches!(zones.take_asks().as_slice(), [Ask::Sheet { heading, .. }] if heading == "The arrangement was written")
+        );
         // The file offered lies beside the desktop's folder, not in it.
-        assert_eq!(surfaces::export_path(Some("/home/ada/Desktop"), Some("Tidy up!")), "/home/ada/gevrek-zones-tidy-up.json");
-        assert_eq!(surfaces::export_path(Some(r"C:\Users\ada\Desktop"), None), r"C:\Users\ada\gevrek-zones-now.json");
+        assert_eq!(
+            surfaces::export_path(Some("/home/ada/Desktop"), Some("Tidy up!")),
+            "/home/ada/gevrek-zones-tidy-up.json"
+        );
+        assert_eq!(
+            surfaces::export_path(Some(r"C:\Users\ada\Desktop"), None),
+            r"C:\Users\ada\gevrek-zones-now.json"
+        );
         assert_eq!(surfaces::export_path(None, None), "gevrek-zones-now.json");
         let _ = std::fs::remove_dir_all(&folder);
     }
@@ -2987,10 +3878,25 @@ mod tests {
     #[test]
     fn another_workspace_shows_its_own_zones_at_once_and_nothing_fades() {
         let (mut zones, _) = zones_on(backend(), "workspaces");
-        let everywhere = zone(&mut zones, "Everywhere", ZoneKind::Manual, (300, 100, 400, 300));
+        let everywhere = zone(
+            &mut zones,
+            "Everywhere",
+            ZoneKind::Manual,
+            (300, 100, 400, 300),
+        );
         let code = zone(&mut zones, "Code", ZoneKind::Manual, (800, 100, 300, 200));
-        zones.command(Command::ModifyZone { zone: code.clone(), changes: serde_json::json!({"workspaces": ["dev"]}) });
-        let shown = |zones: &mut Zones| zones.layout().zones.iter().map(|zone| zone.zone.clone()).collect::<Vec<_>>();
+        zones.command(Command::ModifyZone {
+            zone: code.clone(),
+            changes: serde_json::json!({"workspaces": ["dev"]}),
+        });
+        let shown = |zones: &mut Zones| {
+            zones
+                .layout()
+                .zones
+                .iter()
+                .map(|zone| zone.zone.clone())
+                .collect::<Vec<_>>()
+        };
         // A workspace that was never told hides nothing.
         assert_eq!(shown(&mut zones), [everywhere.clone(), code.clone()]);
         zones.told(&serde_json::json!({ "monitors": [] }), None);
@@ -3004,15 +3910,28 @@ mod tests {
         assert!(zones.fading.is_none());
         // Each workspace its own arrangement: a zone moved on the one
         // is where it was on the other.
-        zones.command(Command::ModifySettings { changes: serde_json::json!({"profile_per_workspace": true}) });
+        zones.command(Command::ModifySettings {
+            changes: serde_json::json!({"profile_per_workspace": true}),
+        });
         // (A workspace seen for the first time begins as the one before it was.)
         zones.workspace(Some("mail".to_string()));
         zones.workspace(Some("dev".to_string()));
-        zones.command(Command::MoveZone { zone: everywhere.clone(), x: 40, y: 500, snap: false });
+        zones.command(Command::MoveZone {
+            zone: everywhere.clone(),
+            x: 40,
+            y: 500,
+            snap: false,
+        });
         zones.workspace(Some("mail".to_string()));
-        assert_eq!(zones.core().zone_rect(&everywhere), Some(Rect::new(300, 100, 400, 300)));
+        assert_eq!(
+            zones.core().zone_rect(&everywhere),
+            Some(Rect::new(300, 100, 400, 300))
+        );
         zones.workspace(Some("dev".to_string()));
-        assert_eq!(zones.core().zone_rect(&everywhere), Some(Rect::new(40, 500, 400, 300)));
+        assert_eq!(
+            zones.core().zone_rect(&everywhere),
+            Some(Rect::new(40, 500, 400, 300))
+        );
         // A display that comes has a surface asked for it, and one that
         // goes has none.
         assert_eq!(zones.spots().len(), 1);
@@ -3025,12 +3944,26 @@ mod tests {
         backend.add_folder("//nas/films");
         backend.set_reachable("//nas/films", false);
         let (mut zones, _) = zones_on(backend, "away");
-        let films = zone(&mut zones, "Films", ZoneKind::Portal { directory: "//nas/films".to_string() }, (300, 100, 400, 300));
+        let films = zone(
+            &mut zones,
+            "Films",
+            ZoneKind::Portal {
+                directory: "//nas/films".to_string(),
+            },
+            (300, 100, 400, 300),
+        );
         zones.tick();
-        let away = |zones: &mut Zones| matches!(zones.layout().zone(&films).unwrap().listing, Some(Listing::Unavailable { .. }));
+        let away = |zones: &mut Zones| {
+            matches!(
+                zones.layout().zone(&films).unwrap().listing,
+                Some(Listing::Unavailable { .. })
+            )
+        };
         assert!(away(&mut zones));
         let asked_again = |zones: &mut Zones| {
-            zones.take_heard().iter().any(|event| matches!(event, ZonesEvent::ListingChanged { zone, .. } if zone == &films))
+            zones.take_heard().iter().any(
+                |event| matches!(event, ZonesEvent::ListingChanged { zone, .. } if zone == &films),
+            )
         };
         // Seen to be away: a wait begins, and nothing is asked meanwhile.
         zones.tick();
@@ -3039,12 +3972,17 @@ mod tests {
         zones.take_heard();
         zones.tick();
         zones.tick();
-        assert!(!asked_again(&mut zones) && zones.retry_due == Some(due), "not before its time, and one wait at a time");
+        assert!(
+            !asked_again(&mut zones) && zones.retry_due == Some(due),
+            "not before its time, and one wait at a time"
+        );
         // The wait is over: asked again (still away), and the next wait begins.
         zones.retry_due = Some(Instant::now() - Duration::from_secs(1));
         zones.tick();
         assert!(asked_again(&mut zones) && away(&mut zones));
-        assert!(zones.retry_due.is_some_and(|due| due > Instant::now() + Duration::from_secs(50)));
+        assert!(zones
+            .retry_due
+            .is_some_and(|due| due > Instant::now() + Duration::from_secs(50)));
         // Put away, nothing waits for it and nothing is asked.
         zones.command(Command::QuickHide { hidden: Some(true) });
         zones.tick();
@@ -3054,12 +3992,21 @@ mod tests {
         zones.tick();
         assert!(!asked_again(&mut zones));
         // Back in view: asked again with the next look, not a minute later.
-        zones.command(Command::QuickHide { hidden: Some(false) });
+        zones.command(Command::QuickHide {
+            hidden: Some(false),
+        });
         zones.tick();
         assert!(asked_again(&mut zones));
         // A zone whose folder is there starts no wait at all.
         let (mut zones, _) = zones_on(self::backend(), "not-away");
-        zone(&mut zones, "Archive", ZoneKind::Portal { directory: "/archive".to_string() }, (300, 100, 400, 300));
+        zone(
+            &mut zones,
+            "Archive",
+            ZoneKind::Portal {
+                directory: "/archive".to_string(),
+            },
+            (300, 100, 400, 300),
+        );
         zones.tick();
         zones.tick();
         assert!(zones.retry_due.is_none());
@@ -3072,10 +4019,25 @@ mod tests {
         let other = zone(&mut zones, "Other", ZoneKind::Manual, (800, 100, 300, 200));
         zones.take_heard();
         for step in 0..40 {
-            zones.command(Command::MoveZone { zone: papers.clone(), x: 300 + step, y: 400, snap: false });
+            zones.command(Command::MoveZone {
+                zone: papers.clone(),
+                x: 300 + step,
+                y: 400,
+                snap: false,
+            });
         }
-        zones.command(Command::MoveZone { zone: other.clone(), x: 900, y: 500, snap: false });
-        zones.command(Command::MoveZone { zone: papers.clone(), x: 10, y: 10, snap: false });
+        zones.command(Command::MoveZone {
+            zone: other.clone(),
+            x: 900,
+            y: 500,
+            snap: false,
+        });
+        zones.command(Command::MoveZone {
+            zone: papers.clone(),
+            x: 10,
+            y: 10,
+            snap: false,
+        });
         let placed: Vec<(ZoneId, i32)> = zones
             .take_heard()
             .into_iter()
@@ -3105,17 +4067,38 @@ mod tests {
         let papers = zone(&mut zones, "Papers", ZoneKind::Manual, (300, 100, 400, 300));
         let display = DisplayId::new("fake-1");
         let placed = |zones: &mut Zones, button: view::Button| {
-            zones.layout().zone(&papers).unwrap().buttons.iter().find(|placed| placed.button == button).unwrap().rect
+            zones
+                .layout()
+                .zone(&papers)
+                .unwrap()
+                .buttons
+                .iter()
+                .find(|placed| placed.button == button)
+                .unwrap()
+                .rect
         };
-        let over = |rect: egui::Rect| Pointer { at: Some(rect.center()), ..Pointer::default() };
+        let over = |rect: egui::Rect| Pointer {
+            at: Some(rect.center()),
+            ..Pointer::default()
+        };
         let roll = placed(&mut zones, view::Button::Roll);
         zones.pointer(&over(roll));
         // Not at once: only when the pointer has rested there.
         assert_eq!(zones.hint_on(&display), None);
-        assert!(zones.hint_in().is_some_and(|left| left > 0.0 && left <= 0.6), "{:?}", zones.hint_in());
+        assert!(
+            zones
+                .hint_in()
+                .is_some_and(|left| left > 0.0 && left <= 0.6),
+            "{:?}",
+            zones.hint_in()
+        );
         zones.later(0.3);
         zones.pointer(&over(roll));
-        assert_eq!(zones.hint_on(&display), None, "moving on the same button does not begin anew, and is not yet long enough");
+        assert_eq!(
+            zones.hint_on(&display),
+            None,
+            "moving on the same button does not begin anew, and is not yet long enough"
+        );
         zones.later(0.4);
         assert_eq!(zones.hint_on(&display), Some((roll, "Roll up".to_string())));
         assert_eq!(zones.hint_in(), None, "it is said: nothing waits");
@@ -3124,17 +4107,36 @@ mod tests {
         zones.pointer(&over(lock));
         assert_eq!(zones.hint_on(&display), None);
         zones.later(0.7);
-        assert_eq!(zones.hint_on(&display), Some((lock, "Hold it where it is".to_string())));
+        assert_eq!(
+            zones.hint_on(&display),
+            Some((lock, "Hold it where it is".to_string()))
+        );
         // What it says goes by how the zone stands now.
-        zones.command(Command::Lock { zone: papers.clone(), geometry: Some(true), members: None });
-        assert!(zones.hint_on(&display).is_some_and(|(_, words)| words.starts_with("Held where it is")));
+        zones.command(Command::Lock {
+            zone: papers.clone(),
+            geometry: Some(true),
+            members: None,
+        });
+        assert!(zones
+            .hint_on(&display)
+            .is_some_and(|(_, words)| words.starts_with("Held where it is")));
         // Pressed, it says nothing (the press is what it does).
-        zones.pointer(&Pointer { pressed: true, down: true, ..over(lock) });
+        zones.pointer(&Pointer {
+            pressed: true,
+            down: true,
+            ..over(lock)
+        });
         assert_eq!(zones.hint_on(&display), None);
-        zones.pointer(&Pointer { released: true, ..over(lock) });
+        zones.pointer(&Pointer {
+            released: true,
+            ..over(lock)
+        });
         // Off the buttons, and off every surface: nothing.
         zones.later(1.0);
-        zones.pointer(&Pointer { at: Some(pos2(400.0, 300.0)), ..Pointer::default() });
+        zones.pointer(&Pointer {
+            at: Some(pos2(400.0, 300.0)),
+            ..Pointer::default()
+        });
         assert_eq!(zones.hint_on(&display), None);
         zones.pointer(&over(roll));
         zones.later(1.0);
@@ -3151,33 +4153,53 @@ mod tests {
         use egui::CursorIcon;
         let (mut zones, _) = zones_on(backend(), "shape");
         let papers = zone(&mut zones, "Papers", ZoneKind::Manual, (300, 100, 400, 300));
-        assert_eq!(zones.pointer_shape(pos2(698.0, 250.0)), CursorIcon::ResizeHorizontal);
+        assert_eq!(
+            zones.pointer_shape(pos2(698.0, 250.0)),
+            CursorIcon::ResizeHorizontal
+        );
         // Taken by its right side and pulled far beyond it: still the
         // arrows of that side, wherever the pointer is by now.
         zones.pointer(&press(698.0, 250.0));
         zones.pointer(&hold(760.0, 300.0));
-        assert_eq!(zones.pointer_shape(pos2(900.0, 600.0)), CursorIcon::ResizeHorizontal);
-        assert_eq!(zones.grip_shown().map(|(zone, edges)| (zone, edges.right)), Some((papers.clone(), true)));
+        assert_eq!(
+            zones.pointer_shape(pos2(900.0, 600.0)),
+            CursorIcon::ResizeHorizontal
+        );
+        assert_eq!(
+            zones.grip_shown().map(|(zone, edges)| (zone, edges.right)),
+            Some((papers.clone(), true))
+        );
         zones.pointer(&release(760.0, 300.0));
         assert!(zones.core().zone_rect(&papers).unwrap().width > 440);
         // Moved by its title: the four arrows.
         zones.pointer(&press(400.0, 112.0));
         zones.pointer(&hold(450.0, 160.0));
         assert_eq!(zones.pointer_shape(pos2(450.0, 160.0)), CursorIcon::Move);
-        assert_eq!(zones.grip_shown(), None, "no side is shown while something else is under way");
+        assert_eq!(
+            zones.grip_shown(),
+            None,
+            "no side is shown while something else is under way"
+        );
         zones.pointer(&release(450.0, 160.0));
     }
 
     #[test]
     fn a_trace_says_every_press_what_it_hit_and_what_was_decided() {
         let (mut zones, _) = zones_on(backend(), "trace-file");
-        let file = std::env::temp_dir().join(format!("gevrek-shell-zones-trace-{}.log", std::process::id()));
+        let file = std::env::temp_dir().join(format!(
+            "gevrek-shell-zones-trace-{}.log",
+            std::process::id()
+        ));
         std::fs::write(&file, "").unwrap();
         zones.trace = true;
         zones.trace_file = Some(file.clone());
         zone(&mut zones, "Papers", ZoneKind::Manual, (300, 100, 400, 300));
         let main = egui::PointerButton::Primary;
-        let press_seen = |at: Pos2, time_ms: u32| gevrek_shellkit::Press { button: main, at, time_ms };
+        let press_seen = |at: Pos2, time_ms: u32| gevrek_shellkit::Press {
+            button: main,
+            at,
+            time_ms,
+        };
         // A press on the rim and a drag: sized.
         assert!(!zones.pressed_twice(press_seen(pos2(698.0, 398.0), 1_000), 500, 6.0));
         zones.pointer(&press(698.0, 398.0));
@@ -3188,23 +4210,55 @@ mod tests {
         zones.pointer(&press(1500.0, 900.0));
         zones.pointer(&release(1500.0, 900.0));
         assert!(zones.pressed_twice(press_seen(pos2(1501.0, 900.0), 5_180), 500, 6.0));
-        zones.pointer(&Pointer { double: true, ..press(1501.0, 900.0) });
+        zones.pointer(&Pointer {
+            double: true,
+            ..press(1501.0, 900.0)
+        });
         let written = std::fs::read_to_string(&file).unwrap();
         let _ = std::fs::remove_file(&file);
         let lines: Vec<&str> = written.lines().collect();
         // Each line says when; the presses say the system's time, which
         // one of a pair they are, and what a double press is here.
-        assert!(lines.iter().all(|line| line.starts_with('+') && line.contains("s ")), "{written}");
-        assert!(lines[0].contains("press Primary at 698,398 system-time 1000 ms: a first press"), "{written}");
+        assert!(
+            lines
+                .iter()
+                .all(|line| line.starts_with('+') && line.contains("s ")),
+            "{written}"
+        );
+        assert!(
+            lines[0].contains("press Primary at 698,398 system-time 1000 ms: a first press"),
+            "{written}"
+        );
         assert!(lines[0].contains("within 500 ms and 6 points"), "{written}");
         // What the press hit, and what was decided of the drag and the letting go.
-        let has = |parts: &[&str]| lines.iter().any(|line| parts.iter().all(|part| line.contains(part)));
-        assert!(has(&["pressed=true", "hit Some(Edge(", "now Pressed"]), "{written}");
+        let has = |parts: &[&str]| {
+            lines
+                .iter()
+                .any(|line| parts.iter().all(|part| line.contains(part)))
+        };
+        assert!(
+            has(&["pressed=true", "hit Some(Edge(", "now Pressed"]),
+            "{written}"
+        );
         assert!(has(&["released=true", "now Nothing"]), "{written}");
-        assert!(has(&["system-time 5180 ms: the SECOND of a double press"]), "{written}");
-        assert!(has(&["double=true", "hit Some(Desk(", "QuickHide"]), "{written}");
+        assert!(
+            has(&["system-time 5180 ms: the SECOND of a double press"]),
+            "{written}"
+        );
+        assert!(
+            has(&["double=true", "hit Some(Desk(", "QuickHide"]),
+            "{written}"
+        );
         // (A movement alone is not written: a drag would fill the file.)
-        assert!(!has(&["pressed=false", "released=false", "menu=false", "middle-double=false"]), "{written}");
+        assert!(
+            !has(&[
+                "pressed=false",
+                "released=false",
+                "menu=false",
+                "middle-double=false"
+            ]),
+            "{written}"
+        );
     }
 
     #[test]
@@ -3216,9 +4270,20 @@ mod tests {
             zones.pointer(&press(698.0, 398.0));
             zones.pointer(&hold(740.0, 430.0));
             zones.pointer(&release(740.0, 430.0));
-            zones.pointer(&Pointer { double: true, ..press(1500.0, 900.0) });
-            zones.pointer(&Pointer { middle_double: true, at: Some(pos2(1500.0, 900.0)), ..Pointer::default() });
-            (zones.core().zone_rect(&papers), zones.hidden(), zones.core().grey_icons())
+            zones.pointer(&Pointer {
+                double: true,
+                ..press(1500.0, 900.0)
+            });
+            zones.pointer(&Pointer {
+                middle_double: true,
+                at: Some(pos2(1500.0, 900.0)),
+                ..Pointer::default()
+            });
+            (
+                zones.core().zone_rect(&papers),
+                zones.hidden(),
+                zones.core().grey_icons(),
+            )
         };
         assert_eq!(run(true), run(false));
         let (rect, hidden, grey) = run(true);

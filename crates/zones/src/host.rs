@@ -40,7 +40,12 @@ impl Host {
     /// watching the desktop, and do what the core asks for at the start.
     /// With the zones switched off nothing is asked of the backend at all;
     /// it is done when they are switched on (`set_config`).
-    pub fn start<B: ZonesBackend + ?Sized>(&mut self, core: &mut ZonesCore, backend: &mut B, now: u64) -> Vec<Effect> {
+    pub fn start<B: ZonesBackend + ?Sized>(
+        &mut self,
+        core: &mut ZonesCore,
+        backend: &mut B,
+        now: u64,
+    ) -> Vec<Effect> {
         if !core.enabled() || self.started {
             return Vec::new();
         }
@@ -64,7 +69,13 @@ impl Host {
         };
         match backend.list(&Location::Desktop) {
             Ok(items) => {
-                let effects = core.event(BackendEvent::Listed { location: Location::Desktop, items }, now);
+                let effects = core.event(
+                    BackendEvent::Listed {
+                        location: Location::Desktop,
+                        items,
+                    },
+                    now,
+                );
                 left.extend(self.carry_out(core, backend, effects, now));
             }
             Err(error) => log::debug!("the desktop could not be listed at the start: {error}"),
@@ -120,7 +131,12 @@ impl Host {
 
     /// Pass on what the backend has to tell. Called when the backend
     /// wakes its host.
-    pub fn pump<B: ZonesBackend + ?Sized>(&mut self, core: &mut ZonesCore, backend: &mut B, now: u64) -> Vec<Effect> {
+    pub fn pump<B: ZonesBackend + ?Sized>(
+        &mut self,
+        core: &mut ZonesCore,
+        backend: &mut B,
+        now: u64,
+    ) -> Vec<Effect> {
         let mut left = Vec::new();
         if !self.started {
             return left;
@@ -167,7 +183,9 @@ impl Host {
             };
             match request {
                 BackendRequest::Watch { directory } => {
-                    let location = Location::Directory { path: directory.clone() };
+                    let location = Location::Directory {
+                        path: directory.clone(),
+                    };
                     // A folder that is not there (a drive not plugged in)
                     // cannot be watched; its zone stays, and says so.
                     match backend.watch(&location) {
@@ -175,20 +193,32 @@ impl Host {
                             log::debug!("{directory} is watched for a zone (watch {})", watch.0);
                             self.watches.insert(directory, watch);
                         }
-                        Err(error) => log::debug!("{directory} is not watched; its zone says so: {error}"),
+                        Err(error) => {
+                            log::debug!("{directory} is not watched; its zone says so: {error}")
+                        }
                     }
                     queue.extend(Self::listing(core, backend, location, now));
                 }
                 BackendRequest::Relist { directory } => {
-                    let location = Location::Directory { path: directory.clone() };
+                    let location = Location::Directory {
+                        path: directory.clone(),
+                    };
                     // It may be there now, where it was not before.
-                    if let std::collections::btree_map::Entry::Vacant(unwatched) = self.watches.entry(directory) {
+                    if let std::collections::btree_map::Entry::Vacant(unwatched) =
+                        self.watches.entry(directory)
+                    {
                         match backend.watch(&location) {
                             Ok(watch) => {
-                                log::debug!("{} is watched now (watch {})", unwatched.key(), watch.0);
+                                log::debug!(
+                                    "{} is watched now (watch {})",
+                                    unwatched.key(),
+                                    watch.0
+                                );
                                 unwatched.insert(watch);
                             }
-                            Err(error) => log::debug!("{} is still not watched: {error}", unwatched.key()),
+                            Err(error) => {
+                                log::debug!("{} is still not watched: {error}", unwatched.key())
+                            }
                         }
                     }
                     queue.extend(Self::listing(core, backend, location, now));
@@ -196,7 +226,10 @@ impl Host {
                 BackendRequest::WatchSource { source } => {
                     match backend.watch_source(&source) {
                         Ok(watch) => {
-                            log::debug!("the source {source:?} is watched for a zone (watch {})", watch.0);
+                            log::debug!(
+                                "the source {source:?} is watched for a zone (watch {})",
+                                watch.0
+                            );
                             self.sources.insert(source.clone(), watch);
                         }
                         Err(error) => log::debug!("the source {source:?} is not watched: {error}"),
@@ -208,7 +241,10 @@ impl Host {
                 }
                 BackendRequest::UnwatchSource { source } => {
                     if let Some(watch) = self.sources.remove(&source) {
-                        log::debug!("the source {source:?} is no longer watched (watch {})", watch.0);
+                        log::debug!(
+                            "the source {source:?} is no longer watched (watch {})",
+                            watch.0
+                        );
                         backend.unwatch(watch);
                     }
                 }
@@ -224,15 +260,25 @@ impl Host {
                 }
                 // An operation the backend carries out by itself ends
                 // later, by an event; the core is told that it has begun.
-                BackendRequest::Perform { request, operation } if backend.begin_operation(request, &operation) => {
+                BackendRequest::Perform { request, operation }
+                    if backend.begin_operation(request, &operation) =>
+                {
                     log::debug!("request {request} was begun by the backend, and ends later");
                     queue.extend(core.event(BackendEvent::OperationBegun { request }, now));
                 }
                 BackendRequest::Perform { request, operation } => {
                     log::trace!("request {request} is carried out at once");
                     let done = match backend.perform(&operation) {
-                        Ok(undo) => BackendEvent::OperationDone { request, undo: Some(undo), error: None },
-                        Err(error) => BackendEvent::OperationDone { request, undo: None, error: Some(error) },
+                        Ok(undo) => BackendEvent::OperationDone {
+                            request,
+                            undo: Some(undo),
+                            error: None,
+                        },
+                        Err(error) => BackendEvent::OperationDone {
+                            request,
+                            undo: None,
+                            error: Some(error),
+                        },
                     };
                     queue.extend(core.event(done, now));
                 }
@@ -284,11 +330,22 @@ impl Host {
     /// Stop watching everything (the zones are switched off, the program
     /// ends).
     pub fn stop<B: ZonesBackend + ?Sized>(&mut self, backend: &mut B) {
-        let watching = self.started || !self.watches.is_empty() || !self.sources.is_empty() || self.desktop.is_some();
+        let watching = self.started
+            || !self.watches.is_empty()
+            || !self.sources.is_empty()
+            || self.desktop.is_some();
         log::log!(
-            if watching { log::Level::Debug } else { log::Level::Trace },
+            if watching {
+                log::Level::Debug
+            } else {
+                log::Level::Trace
+            },
             "the zones stop: {} and {} are no longer watched",
-            crate::timed::count(self.watches.len() + usize::from(self.desktop.is_some()), "folder", "folders"),
+            crate::timed::count(
+                self.watches.len() + usize::from(self.desktop.is_some()),
+                "folder",
+                "folders"
+            ),
             crate::timed::count(self.sources.len(), "source", "sources")
         );
         for (_, watch) in std::mem::take(&mut self.watches) {

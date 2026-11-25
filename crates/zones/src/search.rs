@@ -118,14 +118,23 @@ mod tests {
 
     #[test]
     fn the_best_fit_is_first_whichever_zone_it_is_in() {
-        let files: Vec<Item> = ["Reports", "report-10.pdf", "report-9.pdf", "Old report.pdf", "Photo.png"]
-            .iter()
-            .map(|name| Item::file(&format!("/desk/{name}")))
-            .collect();
+        let files: Vec<Item> = [
+            "Reports",
+            "report-10.pdf",
+            "report-9.pdf",
+            "Old report.pdf",
+            "Photo.png",
+        ]
+        .iter()
+        .map(|name| Item::file(&format!("/desk/{name}")))
+        .collect();
         let papers = ZoneId::new("papers");
         let hits = search(
             "report",
-            files.iter().enumerate().map(|(index, item)| (item, (index % 2 == 0).then_some(&papers))),
+            files
+                .iter()
+                .enumerate()
+                .map(|(index, item)| (item, (index % 2 == 0).then_some(&papers))),
         );
         let found: Vec<(&str, Option<&str>)> = hits
             .iter()

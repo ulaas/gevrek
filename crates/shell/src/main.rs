@@ -40,9 +40,6 @@ mod control;
 #[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 #[allow(dead_code)]
 mod coach;
-#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
-#[allow(dead_code)]
-mod tutoring;
 mod frost;
 #[cfg(target_os = "linux")]
 mod inhibit;
@@ -50,6 +47,9 @@ mod inhibit;
 mod launcher;
 #[cfg(target_os = "linux")]
 mod media;
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
+#[allow(dead_code)]
+mod tutoring;
 // (On Windows: the keyboard's own keys for what plays.)
 #[cfg(any(windows, target_os = "macos"))]
 #[path = "media_keys.rs"]
@@ -99,12 +99,12 @@ mod shortcuts;
 // The overview of every workspace, where the shell draws it (a
 // compositor shows the workspaces themselves).
 // The zones of the desktop: containers that hold its icons.
-#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
-mod zones;
 #[cfg(any(windows, target_os = "macos"))]
 mod overview;
 #[cfg(any(windows, target_os = "macos"))]
 mod windows;
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
+mod zones;
 
 #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 fn main() {
@@ -382,7 +382,11 @@ mod linux {
         tidy_asked: bool,
         /// The tutorial, while it is taken: its card's surface, how far
         /// it is, and its practice windows.
-        tutorial: Option<(SurfaceId, crate::tutoring::Tutoring, Vec<std::process::Child>)>,
+        tutorial: Option<(
+            SurfaceId,
+            crate::tutoring::Tutoring,
+            Vec<std::process::Child>,
+        )>,
         /// What the tutorial knows of the desktop.
         facts: gevrek_tutorial::Facts,
         /// The request for a password that is shown, and those waiting.
@@ -716,15 +720,15 @@ mod linux {
                                 file.display()
                             );
                             tell(
-                            &listening,
-                            "Recording saved",
-                            &format!(
-                                "{} ({} s)",
-                                file.display(),
-                                pictures / u64::from(crate::record::RATE)
-                            ),
-                            control,
-                        )
+                                &listening,
+                                "Recording saved",
+                                &format!(
+                                    "{} ({} s)",
+                                    file.display(),
+                                    pictures / u64::from(crate::record::RATE)
+                                ),
+                                control,
+                            )
                         }
                         Err(why) => {
                             log::warn!("the recording was not saved: {why}");
@@ -824,7 +828,9 @@ mod linux {
                             // (A request that is not on the screen any
                             // more: taken back.)
                             None => {
-                                log::debug!("polkit asked about a request that is not shown any more");
+                                log::debug!(
+                                    "polkit asked about a request that is not shown any more"
+                                );
                                 let _ = answer.send(None);
                             }
                         }
@@ -948,7 +954,10 @@ mod linux {
                         .iter()
                         .find(|(name, _)| name == "action")
                         .map(|(_, value)| value.as_str());
-                    log::debug!("the window manager asks the shell for {}", action.unwrap_or("nothing"));
+                    log::debug!(
+                        "the window manager asks the shell for {}",
+                        action.unwrap_or("nothing")
+                    );
                     match action {
                         Some("launcher") => toggle_launcher(state, control),
                         Some("welcome") => {
@@ -1283,7 +1292,11 @@ mod linux {
             if !shared.panels.is_empty() {
                 log::debug!(
                     "the panels are closed: {}",
-                    if wanted.is_some() { "they go to another place" } else { "the panel is switched off" }
+                    if wanted.is_some() {
+                        "they go to another place"
+                    } else {
+                        "the panel is switched off"
+                    }
                 );
             }
             for (_, id) in shared.panels.drain() {
@@ -1454,7 +1467,11 @@ mod linux {
                         let beside = bar.edge.is_upright();
                         let surface = control.hint(*panel, anchor, size, beside, move |ui, _| {
                             if !fonts {
-                                theme::install_fonts_for(ui.ctx(), &settings, gevrek_ui::fonts::Area::Panel);
+                                theme::install_fonts_for(
+                                    ui.ctx(),
+                                    &settings,
+                                    gevrek_ui::fonts::Area::Panel,
+                                );
                                 fonts = true;
                             }
                             crate::panel::draw_hint(ui, &look, &said);
@@ -1532,7 +1549,10 @@ mod linux {
             .or(asked.notices.map(|anchor| (Menu::Notices, anchor)))
             .or(asked.sound_menu.map(|anchor| (Menu::Sound, anchor)))
             .or(asked.task_menu.as_ref().map(|(anchor, windows)| {
-                (Menu::Windows(windows.first().copied().unwrap_or(0)), *anchor)
+                (
+                    Menu::Windows(windows.first().copied().unwrap_or(0)),
+                    *anchor,
+                )
             }))
             .or(asked
                 .task_actions
@@ -1546,9 +1566,11 @@ mod linux {
         // (The window the other button was pressed on, as it is now, and
         // what each line of its menu sends.)
         let acted = asked.task_actions.and_then(|(_, window)| {
-            let task = crate::panel::tasks_of_ids(&view, &[window]).into_iter().next()?;
-            let commands = crate::panel::TaskAction::ALL
-                .map(|action| (action, action.command(&view, &task)));
+            let task = crate::panel::tasks_of_ids(&view, &[window])
+                .into_iter()
+                .next()?;
+            let commands =
+                crate::panel::TaskAction::ALL.map(|action| (action, action.command(&view, &task)));
             Some((task, commands))
         });
         let pressed = asked.pressed;
@@ -1685,7 +1707,15 @@ mod linux {
                 let Some((task, commands)) = acted else {
                     return Flow::Continue;
                 };
-                open_task_actions(shared, panel, anchor, task, commands, Rc::clone(&alive), control)
+                open_task_actions(
+                    shared,
+                    panel,
+                    anchor,
+                    task,
+                    commands,
+                    Rc::clone(&alive),
+                    control,
+                )
             }
             // Opened when its program has answered, not from here.
             Menu::Tray | Menu::TrayList => return Flow::Continue,
@@ -2254,7 +2284,11 @@ mod linux {
                 in_card,
                 sender,
             ) {
-                log::debug!("{} is given {} streams of the screen", ask.app, streams.len());
+                log::debug!(
+                    "{} is given {} streams of the screen",
+                    ask.app,
+                    streams.len()
+                );
                 let _ = ask.answer.send_blocking(Some(crate::portal::Answer {
                     streams,
                     remember: Some(ask.remembered.clone()),
@@ -2718,7 +2752,10 @@ mod linux {
         });
         // (No configuration known, or a question is up already: refused.)
         let Some(planned) = planned.filter(|_| state.borrow().shortcut_ask.is_none()) else {
-            log::debug!("shortcuts for {} are refused: no configuration, or another question is up", ask.app);
+            log::debug!(
+                "shortcuts for {} are refused: no configuration, or another question is up",
+                ask.app
+            );
             let _ = ask.answer.send_blocking(None);
             return;
         };
@@ -3405,7 +3442,10 @@ mod linux {
     /// chosen by dragging.
     fn screenshot(state: &Rc<RefCell<State>>, which: &str, control: &mut Control) {
         let (output, window, logical) = focused_place(&state.borrow());
-        log::debug!("a screenshot ({which}) of {}", output.as_deref().unwrap_or("the display"));
+        log::debug!(
+            "a screenshot ({which}) of {}",
+            output.as_deref().unwrap_or("the display")
+        );
         let picture = match crate::screenshot::take(output.as_deref()) {
             Ok(picture) => picture,
             Err(error) => {
@@ -3415,7 +3455,7 @@ mod linux {
                     "No picture of the screen",
                     &format!("{error:#}"),
                     control,
-                )
+                );
             }
         };
         // The picture is in the display's own pixels; places are logical.
@@ -3703,7 +3743,11 @@ mod linux {
                     let file = wanted.and_then(|picture| hand_over(&picture));
                     log::debug!(
                         "an application's picture of the screen: {}",
-                        if file.is_some() { "given" } else { "left by the person" }
+                        if file.is_some() {
+                            "given"
+                        } else {
+                            "left by the person"
+                        }
                     );
                     let _ = answer.send_blocking(file);
                 }
@@ -3717,7 +3761,11 @@ mod linux {
                     });
                     log::debug!(
                         "an application's colour: {}",
-                        if colour.is_some() { "picked" } else { "left by the person" }
+                        if colour.is_some() {
+                            "picked"
+                        } else {
+                            "left by the person"
+                        }
                     );
                     let _ = answer.send_blocking(colour);
                 }
@@ -3786,7 +3834,11 @@ mod linux {
             let context = ui.ctx().clone();
             let mut state = shared.borrow_mut();
             if !fonts {
-                theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Notifications);
+                theme::install_fonts_for(
+                    &context,
+                    &state.settings,
+                    gevrek_ui::fonts::Area::Notifications,
+                );
                 fonts = true;
             }
             let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -3875,7 +3927,11 @@ mod linux {
                 let mut state = shared.borrow_mut();
                 let state = &mut *state;
                 if !fonts {
-                    theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::ControlCentre);
+                    theme::install_fonts_for(
+                        &context,
+                        &state.settings,
+                        gevrek_ui::fonts::Area::ControlCentre,
+                    );
                     fonts = true;
                 }
                 let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -4163,7 +4219,11 @@ mod linux {
     fn zones_configured(state: &Rc<RefCell<State>>, control: &mut Control) {
         let mut shared = state.borrow_mut();
         let shared = &mut *shared;
-        let Some(config) = shared.running.as_ref().map(|(config, _)| config.desktop.zones.clone()) else {
+        let Some(config) = shared
+            .running
+            .as_ref()
+            .map(|(config, _)| config.desktop.zones.clone())
+        else {
             return;
         };
         let Some(sender) = shared.verdicts.clone() else {
@@ -4182,7 +4242,11 @@ mod linux {
                     let state = look.borrow();
                     let context = ui.ctx();
                     if !*fonts {
-                        theme::install_fonts_for(context, &state.settings, gevrek_ui::fonts::Area::Zones);
+                        theme::install_fonts_for(
+                            context,
+                            &state.settings,
+                            gevrek_ui::fonts::Area::Zones,
+                        );
                         *fonts = true;
                     }
                     let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -4252,7 +4316,11 @@ mod linux {
             let context = ui.ctx().clone();
             let mut state = shared.borrow_mut();
             if !fonts {
-                theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::ControlCentre);
+                theme::install_fonts_for(
+                    &context,
+                    &state.settings,
+                    gevrek_ui::fonts::Area::ControlCentre,
+                );
                 fonts = true;
             }
             let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -4406,8 +4474,7 @@ mod linux {
             }
             Flow::Continue
         });
-        state.borrow_mut().rename =
-            Some((id, label.to_string(), label.to_string(), String::new()));
+        state.borrow_mut().rename = Some((id, label.to_string(), label.to_string(), String::new()));
     }
 
     /// How long the on-screen display stays after the last key.
@@ -4750,7 +4817,11 @@ mod linux {
         let context = ui.ctx().clone();
         let mut state = shared.borrow_mut();
         if !*fonts {
-            theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Notifications);
+            theme::install_fonts_for(
+                &context,
+                &state.settings,
+                gevrek_ui::fonts::Area::Notifications,
+            );
             *fonts = true;
         }
         let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -4852,7 +4923,11 @@ mod linux {
             let context = ui.ctx().clone();
             let mut state = shared.borrow_mut();
             if !fonts {
-                theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Switcher);
+                theme::install_fonts_for(
+                    &context,
+                    &state.settings,
+                    gevrek_ui::fonts::Area::Switcher,
+                );
                 fonts = true;
             }
             let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -4925,7 +5000,10 @@ mod linux {
             log::warn!("the tutorial has no lesson to take");
             return;
         };
-        log::info!("the tutorial begins with the lesson {}", tutoring.lesson().id);
+        log::info!(
+            "the tutorial begins with the lesson {}",
+            tutoring.lesson().id
+        );
         let place = Place {
             name: "gevrek-coach".to_string(),
             edge: Edge::Bottom,
@@ -4945,7 +5023,11 @@ mod linux {
             let mut state = shared.borrow_mut();
             let state = &mut *state;
             if !fonts {
-                theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Dialogs);
+                theme::install_fonts_for(
+                    &context,
+                    &state.settings,
+                    gevrek_ui::fonts::Area::Dialogs,
+                );
                 fonts = true;
             }
             let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
@@ -5011,7 +5093,8 @@ mod linux {
             }
             // (Looked at again a few times a second: a step is done, help
             // comes, by time and by what the window manager says.)
-            ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(200));
             Flow::Continue
         });
         let mut state = state.borrow_mut();
@@ -5036,12 +5119,12 @@ mod linux {
                     if let Some((_, tutoring, windows)) = state.tutorial.take() {
                         log::info!("the tutorial ends");
                         crate::tutoring::tidy(
-                        tutoring.before.clone(),
-                        windows,
-                        tutoring.own_windows(),
-                        tutoring.beside_there(),
-                        state.link.teller(),
-                    );
+                            tutoring.before.clone(),
+                            windows,
+                            tutoring.own_windows(),
+                            tutoring.beside_there(),
+                            state.link.teller(),
+                        );
                     }
                 }
             }
@@ -5089,7 +5172,11 @@ mod linux {
             let context = ui.ctx().clone();
             let mut state = shared.borrow_mut();
             if !fonts {
-                theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Launcher);
+                theme::install_fonts_for(
+                    &context,
+                    &state.settings,
+                    gevrek_ui::fonts::Area::Launcher,
+                );
                 fonts = true;
             }
             let palette = state.settings.resolve(egui::Theme::Dark, state.accent);

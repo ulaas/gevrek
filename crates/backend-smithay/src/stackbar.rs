@@ -128,7 +128,11 @@ pub fn font_of(family: &str) -> Option<&'static ab_glyph::FontVec> {
     };
     let font = *found.entry(family.to_owned()).or_insert_with(|| {
         let output = std::process::Command::new("fc-match")
-            .args(["-f", "%{family}\t%{file}", &format!("{family}:style=Regular")])
+            .args([
+                "-f",
+                "%{family}\t%{file}",
+                &format!("{family}:style=Regular"),
+            ])
             .output()
             .ok()?;
         let said = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -138,7 +142,9 @@ pub fn font_of(family: &str) -> Option<&'static ab_glyph::FontVec> {
             .split(',')
             .any(|one| one.trim().eq_ignore_ascii_case(family))
         {
-            log::warn!("No font of the family {family:?} for the stackbar titles: the system's is used");
+            log::warn!(
+                "No font of the family {family:?} for the stackbar titles: the system's is used"
+            );
             return None;
         }
         let font = std::fs::read(path)

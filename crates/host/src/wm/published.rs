@@ -44,10 +44,13 @@ pub trait Published: WmHost {
         }
         let (mut monitors, total_windows) = {
             let parts = self.parts();
-            parts.core.monitor_data(parts.desktop, &parts.config.desktop)
+            parts
+                .core
+                .monitor_data(parts.desktop, &parts.config.desktop)
         };
         self.adjust_published_monitors(&mut monitors);
-        let changes = gevrek_engine::overlay_data::changes(&self.host().published_monitors, &monitors);
+        let changes =
+            gevrek_engine::overlay_data::changes(&self.host().published_monitors, &monitors);
         for (kind, fields) in changes {
             self.host().emit(kind, None, fields);
         }
@@ -124,7 +127,9 @@ pub trait Published: WmHost {
         // (The whole of each: a notice whose text changes is news too.)
         let notices = data.notices.clone();
         if let Some(overlay) = &parts.host.overlay {
-            *overlay.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(data);
+            *overlay
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(data);
         }
         // Whoever shows the notices (the panel) hears that they are others
         // now and asks for the state, instead of at its next question.

@@ -322,8 +322,8 @@ mod system {
     use super::Ramp;
     use windows::core::PCWSTR;
     use windows::Win32::Graphics::Gdi::{
-        CreateDCW, DeleteDC, EnumDisplayDevicesW, DISPLAY_DEVICEW, DISPLAY_DEVICE_ATTACHED_TO_DESKTOP,
-        DISPLAY_DEVICE_MIRRORING_DRIVER,
+        CreateDCW, DeleteDC, EnumDisplayDevicesW, DISPLAY_DEVICEW,
+        DISPLAY_DEVICE_ATTACHED_TO_DESKTOP, DISPLAY_DEVICE_MIRRORING_DRIVER,
     };
     use windows::Win32::UI::ColorSystem::{GetDeviceGammaRamp, SetDeviceGammaRamp};
 
@@ -397,7 +397,10 @@ mod tests {
     #[test]
     fn a_ramp_left_warm_is_not_taken_for_a_displays_own() {
         let plain = super::plain_ramp();
-        assert_eq!((plain[0], plain[255], plain[256], plain[767]), (0, 65535, 0, 65535));
+        assert_eq!(
+            (plain[0], plain[255], plain[256], plain[767]),
+            (0, 65535, 0, 65535)
+        );
         assert!(!super::left_warm(&plain));
         // As the night light leaves it: less green, much less blue.
         assert!(super::left_warm(&super::warmed(&plain, (1.0, 0.8, 0.6))));

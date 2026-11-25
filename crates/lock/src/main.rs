@@ -255,7 +255,12 @@ mod linux {
         let greeter = std::env::args().nth(1).as_deref() == Some("--greeter");
         // (As the greeter, it is nobody's yet: no configuration is read.)
         let logging = gevrek_logging::Logging::new("gevrek-lock", log::LevelFilter::Warn);
-        if greeter { logging.without_setting() } else { logging }.init();
+        if greeter {
+            logging.without_setting()
+        } else {
+            logging
+        }
+        .init();
         let socket = std::env::var_os(gevrek_dm::SOCKET_VARIABLE).map(std::path::PathBuf::from);
         anyhow::ensure!(
             !greeter || socket.is_some(),
@@ -281,7 +286,11 @@ mod linux {
         if greeter {
             log::debug!(
                 "the greeter is started{}",
-                if user.is_empty() { ", with no name known" } else { ", with the last name known" }
+                if user.is_empty() {
+                    ", with no name known"
+                } else {
+                    ", with the last name known"
+                }
             );
         } else {
             log::debug!("the screen of {user} is to be locked");
@@ -722,7 +731,11 @@ mod linux {
     fn draw(state: &mut State, ui: &mut egui::Ui, fonts: &mut bool, layout_in_use: u32) {
         let context = ui.ctx().clone();
         if !*fonts {
-            theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::LockScreen);
+            theme::install_fonts_for(
+                &context,
+                &state.settings,
+                gevrek_ui::fonts::Area::LockScreen,
+            );
             *fonts = true;
         }
         let palette = state.settings.resolve(egui::Theme::Dark, state.accent);

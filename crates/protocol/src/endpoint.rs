@@ -205,11 +205,11 @@ pub fn bind_local(instance: &str) -> std::io::Result<LocalIncoming> {
     // and the system write to it; remote clients are refused.
     let rights = pipe_rights();
     let mut server = make_pipe(&name, true, rights).map_err(|error| {
-            std::io::Error::new(
-                error.kind(),
-                format!("another gevrek already answers on {name} ({error})"),
-            )
-        })?;
+        std::io::Error::new(
+            error.kind(),
+            format!("another gevrek already answers on {name} ({error})"),
+        )
+    })?;
     log::debug!("listening on {name}");
     let (sender, receiver) = tokio::sync::mpsc::channel(8);
     tokio::spawn(async move {
@@ -287,9 +287,8 @@ fn pipe_rights() -> usize {
                 ConvertSidToStringSidW(user.User.Sid, &mut text)?;
                 let person = text.to_string().unwrap_or_default();
                 let _ = LocalFree(HLOCAL(text.0.cast()));
-                let words = HSTRING::from(format!(
-                    "D:P(A;;GA;;;SY)(A;;GA;;;{person})S:(ML;;NW;;;ME)"
-                ));
+                let words =
+                    HSTRING::from(format!("D:P(A;;GA;;;SY)(A;;GA;;;{person})S:(ML;;NW;;;ME)"));
                 let mut descriptor = PSECURITY_DESCRIPTOR::default();
                 ConvertStringSecurityDescriptorToSecurityDescriptorW(
                     &words,

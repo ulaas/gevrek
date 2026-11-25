@@ -96,7 +96,13 @@ impl Executor {
         match on.unwrap_or(!shown) {
             true if !shown => self.put_windows_away(window_manager, monitor_manager),
             false if shown => {
-                self.end_show_desktop(window_manager, monitor_manager, None, true, DesktopEnds::Command);
+                self.end_show_desktop(
+                    window_manager,
+                    monitor_manager,
+                    None,
+                    true,
+                    DesktopEnds::Command,
+                );
                 Ok(())
             }
             _ => Ok(()),
@@ -386,7 +392,10 @@ impl Executor {
                 RuntimeEventKind::DesktopHidden,
                 [
                     ("windows".to_string(), "0".to_string()),
-                    ("reason".to_string(), DesktopEnds::Restore.word().to_string()),
+                    (
+                        "reason".to_string(),
+                        DesktopEnds::Restore.word().to_string(),
+                    ),
                 ],
             );
         }

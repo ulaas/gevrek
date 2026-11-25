@@ -29,7 +29,11 @@ pub struct Watch {
 
 /// The entry of `profile` whose corner of one of `displays` the point is
 /// in, by its place among the entries.
-pub fn corner_at(profile: &HotCornersProfile, displays: &[Rect], point: (i32, i32)) -> Option<usize> {
+pub fn corner_at(
+    profile: &HotCornersProfile,
+    displays: &[Rect],
+    point: (i32, i32),
+) -> Option<usize> {
     let size = profile.reach();
     displays.iter().find_map(|display| {
         if display.width <= 0 || display.height <= 0 {
@@ -150,7 +154,9 @@ mod tests {
         let displays = [DISPLAY];
         // In the corner from the start, as when a session begins: nobody
         // put it there, and however long it rests nothing runs.
-        assert!(watch.step(&profile, &displays, (0, 0), false, start).is_none());
+        assert!(watch
+            .step(&profile, &displays, (0, 0), false, start)
+            .is_none());
         assert!(watch
             .step(&profile, &displays, (0, 0), false, after(start, 5000))
             .is_none());
@@ -161,7 +167,9 @@ mod tests {
             .is_none());
         let start = after(start, 6000);
         // Come: not yet. Stayed for the moment: once. Stayed on: no more.
-        assert!(watch.step(&profile, &displays, (1, 1), false, start).is_none());
+        assert!(watch
+            .step(&profile, &displays, (1, 1), false, start)
+            .is_none());
         assert!(watch
             .step(&profile, &displays, (1, 1), false, after(start, 50))
             .is_none());
@@ -179,7 +187,10 @@ mod tests {
         assert!(watch
             .step(&profile, &displays, (0, 0), false, after(start, 1100))
             .is_none());
-        assert!(watch.waits(), "it is in the corner, and its moment is not over");
+        assert!(
+            watch.waits(),
+            "it is in the corner, and its moment is not over"
+        );
         assert!(watch
             .step(&profile, &displays, (0, 0), false, after(start, 1500))
             .is_some());
@@ -191,9 +202,13 @@ mod tests {
         let mut watch = Watch::default();
         let start = Instant::now();
         let displays = [DISPLAY];
-        assert!(watch.step(&profile, &displays, (500, 500), false, start).is_none());
+        assert!(watch
+            .step(&profile, &displays, (500, 500), false, start)
+            .is_none());
         // Dragged into the corner and held there.
-        assert!(watch.step(&profile, &displays, (0, 0), true, start).is_none());
+        assert!(watch
+            .step(&profile, &displays, (0, 0), true, start)
+            .is_none());
         assert!(watch
             .step(&profile, &displays, (0, 0), true, after(start, 800))
             .is_none());
@@ -207,7 +222,9 @@ mod tests {
 
         profile.enabled = false;
         let mut watch = Watch::default();
-        assert!(watch.step(&profile, &displays, (0, 0), false, start).is_none());
+        assert!(watch
+            .step(&profile, &displays, (0, 0), false, start)
+            .is_none());
         assert!(watch
             .step(&profile, &displays, (0, 0), false, after(start, 800))
             .is_none());

@@ -73,7 +73,13 @@ pub fn own_elevated() -> bool {
 pub fn helper_task_name(instance: &str) -> String {
     let plain: String = instance
         .chars()
-        .map(|letter| if letter.is_ascii_alphanumeric() { letter } else { '-' })
+        .map(|letter| {
+            if letter.is_ascii_alphanumeric() {
+                letter
+            } else {
+                '-'
+            }
+        })
         .collect();
     format!("gevrek elevated helper ({plain})")
 }
@@ -162,7 +168,10 @@ pub fn install_helper_task(
     window_manager: &std::path::Path,
     person: &str,
 ) -> anyhow::Result<()> {
-    anyhow::ensure!(own_elevated(), "only an administrator can register the task");
+    anyhow::ensure!(
+        own_elevated(),
+        "only an administrator can register the task"
+    );
     let kept = kept_helper();
     let own = std::env::current_exe()?;
     if own != kept {
@@ -191,7 +200,8 @@ pub fn install_helper_task(
     // (As Windows' own tools write it: two bytes a letter, marked.)
     let mut bytes = vec![0xFF, 0xFE];
     bytes.extend(written.encode_utf16().flat_map(u16::to_le_bytes));
-    let file = std::env::temp_dir().join(format!("gevrek-elevated-task-{}.xml", std::process::id()));
+    let file =
+        std::env::temp_dir().join(format!("gevrek-elevated-task-{}.xml", std::process::id()));
     std::fs::write(&file, bytes)?;
     let made = task_tool(&[
         "/create",

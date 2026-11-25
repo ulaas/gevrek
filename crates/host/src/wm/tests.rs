@@ -80,11 +80,23 @@ impl TestHost {
     }
 
     fn told(&self, kind: RuntimeEventKind) -> usize {
-        self.events.lock().unwrap().iter().filter(|told| **told == kind).count()
+        self.events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|told| **told == kind)
+            .count()
     }
 
     fn published(&self) -> gevrek_engine::overlay_data::OverlayData {
-        self.host.overlay.as_ref().unwrap().lock().unwrap().clone().expect("published")
+        self.host
+            .overlay
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("published")
     }
 }
 
@@ -163,7 +175,10 @@ fn with_submap() -> Config {
 }
 
 fn installed_keys(host: &TestHost) -> Vec<String> {
-    host.installed.iter().map(|(_, hotkey)| hotkey.key.clone()).collect()
+    host.installed
+        .iter()
+        .map(|(_, hotkey)| hotkey.key.clone())
+        .collect()
 }
 
 #[test]
@@ -184,7 +199,8 @@ fn a_submap_is_taken_with_its_keys_and_told_at_once() {
     assert_eq!(host.published().active_binding_submap, "resize");
     assert_eq!(host.told(RuntimeEventKind::DispatchSucceeded), 1);
 
-    host.run_command(DispatchCommand::ResetBindingSubmap).unwrap();
+    host.run_command(DispatchCommand::ResetBindingSubmap)
+        .unwrap();
     assert_eq!(host.host.active_submap, "default");
 }
 
@@ -255,7 +271,8 @@ fn a_toggle_is_kept_in_the_configuration_and_published() {
     let before = watch.borrow().revision;
     let transparency = host.config.desktop.appearance.transparency_enabled;
 
-    host.run_command(DispatchCommand::ToggleTransparency).unwrap();
+    host.run_command(DispatchCommand::ToggleTransparency)
+        .unwrap();
     assert!(host.host.config_dirty);
     host.publish_config_if_changed();
     let snapshot = watch.borrow().clone();
@@ -267,7 +284,10 @@ fn a_toggle_is_kept_in_the_configuration_and_published() {
     // A reload of what runs (as the file watcher would) does not undo it.
     let running = host.config.clone();
     host.reload_configuration(running);
-    assert_eq!(host.config.desktop.appearance.transparency_enabled, !transparency);
+    assert_eq!(
+        host.config.desktop.appearance.transparency_enabled,
+        !transparency
+    );
 }
 
 #[test]
@@ -297,7 +317,11 @@ fn an_apply_based_on_a_revision_that_no_longer_runs_is_refused() {
         .unwrap();
     host.apply_configuration_changes();
     let snapshot = watch.borrow().clone();
-    assert_eq!(snapshot.revision, published + 1, "the toggle got its revision");
+    assert_eq!(
+        snapshot.revision,
+        published + 1,
+        "the toggle got its revision"
+    );
     assert_eq!(
         (snapshot.requests_applied, snapshot.last_request_revision),
         (1, REFUSED)
@@ -433,7 +457,10 @@ fn a_batch_of_commands_settles_once_after_the_last() {
     sender
         .send(crate::command::ManualCommand {
             command: crate::command::RuntimeCommand::DispatchBatch {
-                commands: vec![DispatchCommand::ToggleStackbar, DispatchCommand::ToggleStackbar],
+                commands: vec![
+                    DispatchCommand::ToggleStackbar,
+                    DispatchCommand::ToggleStackbar,
+                ],
                 stop_on_error: false,
             },
             response,
@@ -445,4 +472,3 @@ fn a_batch_of_commands_settles_once_after_the_last() {
     assert_eq!(host.told(RuntimeEventKind::DispatchSucceeded), 2);
     drop(answer);
 }
-

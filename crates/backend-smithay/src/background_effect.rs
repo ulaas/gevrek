@@ -108,12 +108,7 @@ pub fn parts_within(
 /// The parts of a surface the desktop is soft behind now.
 pub fn blur_parts(surface: &WlSurface) -> Vec<Rectangle<i32, Logical>> {
     with_states(surface, |states| {
-        states
-            .cached_state
-            .get::<BlurParts>()
-            .current()
-            .0
-            .clone()
+        states.cached_state.get::<BlurParts>().current().0.clone()
     })
 }
 

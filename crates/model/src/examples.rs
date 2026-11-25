@@ -379,7 +379,11 @@ pub fn standard_bindings() -> Vec<BindingProfile> {
         // The tutorial: begun or taken up again, and left (its card never
         // has the keyboard, so these are keys of the window manager).
         binding("The tutorial", "F2", shell(ShellAction::Tutorial)),
-        shifted_binding("Leave the tutorial", "F2", shell(ShellAction::TutorialLeave)),
+        shifted_binding(
+            "Leave the tutorial",
+            "F2",
+            shell(ShellAction::TutorialLeave),
+        ),
         plain(
             "Screenshot of a region",
             "PRINTSCREEN",
@@ -2378,7 +2382,8 @@ mod tests {
                 && binding.normalized_submap() == "default"
         };
         let standard = standard_bindings();
-        let on_it: Vec<&BindingProfile> = standard.iter().filter(|binding| is_it(binding)).collect();
+        let on_it: Vec<&BindingProfile> =
+            standard.iter().filter(|binding| is_it(binding)).collect();
         assert_eq!(on_it.len(), 1);
         assert_eq!(on_it[0].command, DispatchCommand::ShowDesktop { on: None });
         assert_eq!(on_it[0].trigger, BindingTrigger::Press);
@@ -2394,7 +2399,12 @@ mod tests {
                     );
                 }
                 if matches!(binding.command, DispatchCommand::ShowDesktop { .. }) {
-                    assert!(is_it(binding), "{}: {} shows the desktop", example.id, binding.name);
+                    assert!(
+                        is_it(binding),
+                        "{}: {} shows the desktop",
+                        example.id,
+                        binding.name
+                    );
                 }
             }
             // (Where an example has the standard keys, it has this one.)
@@ -2432,7 +2442,11 @@ mod tests {
             .iter()
             .filter(|binding| binding.normalized_key() == "Z")
             .map(|binding| {
-                assert!(binding.win && !binding.ctrl && !binding.alt, "{}", binding.name);
+                assert!(
+                    binding.win && !binding.ctrl && !binding.alt,
+                    "{}",
+                    binding.name
+                );
                 let DispatchCommand::Zones { action } = &binding.command else {
                     panic!("{} is on Z and is not the zones'", binding.name);
                 };
@@ -2442,8 +2456,16 @@ mod tests {
         assert_eq!(
             on_z,
             [
-                (false, BindingTrigger::Press, r#"{"command":"toggle_peek"}"#.to_string()),
-                (true, BindingTrigger::Press, r#"{"command":"quick_hide"}"#.to_string()),
+                (
+                    false,
+                    BindingTrigger::Press,
+                    r#"{"command":"toggle_peek"}"#.to_string()
+                ),
+                (
+                    true,
+                    BindingTrigger::Press,
+                    r#"{"command":"quick_hide"}"#.to_string()
+                ),
             ]
         );
         // The mode of the Advanced Binding Lab: entered, walked, left.
@@ -2459,7 +2481,9 @@ mod tests {
             .filter(|binding| binding.normalized_submap() == "zones")
             .collect();
         assert_eq!(in_mode.len(), 8 + 12);
-        assert!(in_mode.iter().all(|binding| !binding.win && !binding.ctrl && !binding.alt));
+        assert!(in_mode
+            .iter()
+            .all(|binding| !binding.win && !binding.ctrl && !binding.alt));
         assert!(in_mode.iter().any(|binding| {
             binding.normalized_key() == "ESCAPE"
                 && binding.trigger == BindingTrigger::Release
@@ -2482,11 +2506,15 @@ mod tests {
                     example.id,
                     binding.name
                 );
-                if binding.normalized_key() == "Z" && binding.win && binding.normalized_submap() == "default" {
+                if binding.normalized_key() == "Z"
+                    && binding.win
+                    && binding.normalized_submap() == "default"
+                {
                     assert!(
                         matches!(
                             binding.command,
-                            DispatchCommand::Zones { .. } | DispatchCommand::SetBindingSubmap { .. }
+                            DispatchCommand::Zones { .. }
+                                | DispatchCommand::SetBindingSubmap { .. }
                         ),
                         "{}: {}",
                         example.id,

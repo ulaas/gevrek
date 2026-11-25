@@ -66,12 +66,16 @@ fn changes_of(event: notify::Event) -> Vec<Change> {
     match event.kind {
         EventKind::Create(_) => vec![Change::Created(path)],
         EventKind::Remove(_) => vec![Change::Removed(path)],
-        EventKind::Modify(ModifyKind::Name(RenameMode::From)) => vec![Change::MovedFrom(path, tracker)],
+        EventKind::Modify(ModifyKind::Name(RenameMode::From)) => {
+            vec![Change::MovedFrom(path, tracker)]
+        }
         EventKind::Modify(ModifyKind::Name(RenameMode::To)) => vec![Change::MovedTo(path, tracker)],
         // Both halves in one, which is told in addition to the halves:
         // they were told already.
         EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => Vec::new(),
-        EventKind::Modify(ModifyKind::Name(_)) => vec![Change::Lost(path.parent().map(Path::to_path_buf))],
+        EventKind::Modify(ModifyKind::Name(_)) => {
+            vec![Change::Lost(path.parent().map(Path::to_path_buf))]
+        }
         EventKind::Modify(_) => vec![Change::Changed(path)],
         // Opening, reading and closing change nothing that is shown.
         EventKind::Access(_) => Vec::new(),
@@ -166,10 +170,19 @@ pub trait Look {
 impl Folders {
     /// Note a watch. The answer is whether the folder was not watched
     /// before, and so has to be given to the kernel.
-    pub fn add(&mut self, watch: WatchId, location: Location, folder: PathBuf, look: &impl Look) -> bool {
+    pub fn add(
+        &mut self,
+        watch: WatchId,
+        location: Location,
+        folder: PathBuf,
+        look: &impl Look,
+    ) -> bool {
         let new = !self.known.contains_key(&folder);
         if new {
-            let there = look.list(&folder).into_iter().filter_map(|item| item.path.map(PathBuf::from));
+            let there = look
+                .list(&folder)
+                .into_iter()
+                .filter_map(|item| item.path.map(PathBuf::from));
             self.known.insert(folder.clone(), there.collect());
         }
         self.watches.insert(watch, Watched { location, folder });
@@ -179,7 +192,10 @@ impl Folders {
     /// Note a watch of a folder that was just read (off this thread):
     /// `items` is what the reading found.
     pub fn adopt(&mut self, watch: WatchId, location: Location, folder: PathBuf, items: &[Item]) {
-        let there = items.iter().filter_map(|item| item.path.as_ref().map(PathBuf::from)).collect();
+        let there = items
+            .iter()
+            .filter_map(|item| item.path.as_ref().map(PathBuf::from))
+            .collect();
         self.known.insert(folder.clone(), there);
         self.watches.insert(watch, Watched { location, folder });
     }
@@ -194,7 +210,11 @@ impl Folders {
     /// any more, and the kernel need not either.
     pub fn remove(&mut self, watch: WatchId) -> Option<PathBuf> {
         let gone = self.watches.remove(&watch)?;
-        if self.watches.values().any(|other| other.folder == gone.folder) {
+        if self
+            .watches
+            .values()
+            .any(|other| other.folder == gone.folder)
+        {
             return None;
         }
         self.known.remove(&gone.folder);
@@ -208,7 +228,11 @@ impl Folders {
     /// The locations a folder is watched as.
     fn locations(&self, folder: &Path) -> Vec<Location> {
         let mut found: Vec<Location> = Vec::new();
-        for watched in self.watches.values().filter(|watched| watched.folder == folder) {
+        for watched in self
+            .watches
+            .values()
+            .filter(|watched| watched.folder == folder)
+        {
             if !found.contains(&watched.location) {
                 found.push(watched.location.clone());
             }
@@ -222,7 +246,9 @@ impl Folders {
         let mut changes = changes.into_iter().peekable();
         while let Some(change) = changes.next() {
             match change {
-                Change::Created(path) | Change::Changed(path) => self.appeared(&path, look, &mut out),
+                Change::Created(path) | Change::Changed(path) => {
+                    self.appeared(&path, look, &mut out)
+                }
                 Change::Removed(path) => self.went(&path, look, &mut out),
                 Change::MovedFrom(from, number) => {
                     // The other half follows at once where there is one.
@@ -256,7 +282,9 @@ impl Folders {
     /// is a watched folder itself is told apart by the caller.
     fn folder_of(&self, path: &Path) -> Option<PathBuf> {
         let folder = path.parent()?;
-        self.known.contains_key(folder).then(|| folder.to_path_buf())
+        self.known
+            .contains_key(folder)
+            .then(|| folder.to_path_buf())
     }
 
     /// Something is at `path` that was not, or is other than it was.
@@ -274,12 +302,22 @@ impl Folders {
             // something was shown, it is not any more.
             return self.went(path, look, out);
         };
-        let was_known = !self.known.entry(folder.clone()).or_default().insert(path.to_path_buf());
+        let was_known = !self
+            .known
+            .entry(folder.clone())
+            .or_default()
+            .insert(path.to_path_buf());
         for location in self.locations(&folder) {
             out.push(if was_known {
-                BackendEvent::ItemChanged { location, item: item.clone() }
+                BackendEvent::ItemChanged {
+                    location,
+                    item: item.clone(),
+                }
             } else {
-                BackendEvent::ItemAdded { location, item: item.clone() }
+                BackendEvent::ItemAdded {
+                    location,
+                    item: item.clone(),
+                }
             });
         }
     }
@@ -296,25 +334,38 @@ impl Folders {
             return;
         }
         for location in self.locations(&folder) {
-            out.push(BackendEvent::ItemRemoved { location, item: look.id(path) });
+            out.push(BackendEvent::ItemRemoved {
+                location,
+                item: look.id(path),
+            });
         }
     }
 
     /// What was at `from` is at `to` now.
     fn moved(&mut self, from: &Path, to: &Path, look: &impl Look, out: &mut Vec<BackendEvent>) {
         let same_folder = from.parent() == to.parent();
-        let from_known = self.folder_of(from).is_some_and(|folder| self.known[&folder].contains(from));
-        let to_known = self.folder_of(to).is_some_and(|folder| self.known[&folder].contains(to));
+        let from_known = self
+            .folder_of(from)
+            .is_some_and(|folder| self.known[&folder].contains(from));
+        let to_known = self
+            .folder_of(to)
+            .is_some_and(|folder| self.known[&folder].contains(to));
         let item = look.item(to);
         // One item with another name, in one folder: the only case that
         // is a rename to the core. Everything else is said as what left
         // and what came (or changed: a save by renaming over the file).
-        if let (true, true, false, Some(item), Some(folder)) = (same_folder, from_known, to_known, &item, self.folder_of(to)) {
+        if let (true, true, false, Some(item), Some(folder)) =
+            (same_folder, from_known, to_known, &item, self.folder_of(to))
+        {
             let known = self.known.entry(folder.clone()).or_default();
             known.remove(from);
             known.insert(to.to_path_buf());
             for location in self.locations(&folder) {
-                out.push(BackendEvent::ItemRenamed { location, from: look.id(from), item: item.clone() });
+                out.push(BackendEvent::ItemRenamed {
+                    location,
+                    from: look.id(from),
+                    item: item.clone(),
+                });
             }
             return;
         }
@@ -325,13 +376,19 @@ impl Folders {
     /// Tell a folder whole, as it is now.
     fn relist(&mut self, folder: &Path, look: &impl Look, out: &mut Vec<BackendEvent>) {
         let items = look.list(folder);
-        let there = items.iter().filter_map(|item| item.path.as_ref().map(PathBuf::from)).collect();
+        let there = items
+            .iter()
+            .filter_map(|item| item.path.as_ref().map(PathBuf::from))
+            .collect();
         self.known.insert(folder.to_path_buf(), there);
         if !self.shaken.iter().any(|known| known == folder) {
             self.shaken.push(folder.to_path_buf());
         }
         for location in self.locations(folder) {
-            out.push(BackendEvent::Listed { location, items: items.clone() });
+            out.push(BackendEvent::Listed {
+                location,
+                items: items.clone(),
+            });
         }
     }
 }
@@ -344,7 +401,10 @@ fn once(events: Vec<BackendEvent>) -> Vec<BackendEvent> {
     let mut out: Vec<BackendEvent> = Vec::with_capacity(events.len());
     for event in events {
         if let BackendEvent::ItemChanged { location, item } = &event {
-            let last = out.iter().rev().find(|earlier| touches(earlier, location, &item.id));
+            let last = out
+                .iter()
+                .rev()
+                .find(|earlier| touches(earlier, location, &item.id));
             if last.is_some_and(|earlier| !matches!(earlier, BackendEvent::ItemRemoved { .. })) {
                 continue;
             }
@@ -357,11 +417,14 @@ fn once(events: Vec<BackendEvent>) -> Vec<BackendEvent> {
 /// Whether an event tells the listener at `location` of the item `id`.
 fn touches(event: &BackendEvent, location: &Location, id: &gevrek_zones::ids::ItemId) -> bool {
     match event {
-        BackendEvent::ItemAdded { location: at, item } | BackendEvent::ItemChanged { location: at, item } => {
-            at == location && &item.id == id
-        }
+        BackendEvent::ItemAdded { location: at, item }
+        | BackendEvent::ItemChanged { location: at, item } => at == location && &item.id == id,
         BackendEvent::ItemRemoved { location: at, item } => at == location && item == id,
-        BackendEvent::ItemRenamed { location: at, from, item } => at == location && (from == id || &item.id == id),
+        BackendEvent::ItemRenamed {
+            location: at,
+            from,
+            item,
+        } => at == location && (from == id || &item.id == id),
         BackendEvent::Listed { location: at, .. } => at == location,
         _ => false,
     }
@@ -425,10 +488,16 @@ mod tests {
             .iter()
             .map(|event| match event {
                 BackendEvent::ItemAdded { item, .. } => format!("added {}", item.name),
-                BackendEvent::ItemRemoved { item, .. } => format!("removed {}", gevrek_zones::paths::file_name(item.as_str())),
+                BackendEvent::ItemRemoved { item, .. } => {
+                    format!("removed {}", gevrek_zones::paths::file_name(item.as_str()))
+                }
                 BackendEvent::ItemChanged { item, .. } => format!("changed {}", item.name),
                 BackendEvent::ItemRenamed { from, item, .. } => {
-                    format!("renamed {} to {}", gevrek_zones::paths::file_name(from.as_str()), item.name)
+                    format!(
+                        "renamed {} to {}",
+                        gevrek_zones::paths::file_name(from.as_str()),
+                        item.name
+                    )
                 }
                 BackendEvent::Listed { items, .. } => format!("listed {}", items.len()),
                 other => format!("{other:?}"),
@@ -488,7 +557,11 @@ mod tests {
         );
         assert_eq!(said(&events), ["renamed old.txt to new.txt"]);
         match &events[0] {
-            BackendEvent::ItemRenamed { location, from, item } => {
+            BackendEvent::ItemRenamed {
+                location,
+                from,
+                item,
+            } => {
                 assert_eq!(location, &Location::Desktop);
                 assert_eq!(from.as_str(), "/desk/old.txt");
                 assert_eq!(item.id.as_str(), "/desk/new.txt");
@@ -579,22 +652,32 @@ mod tests {
     #[test]
     fn a_folder_watched_twice_is_told_to_each_and_let_go_with_the_last() {
         let (files, mut folders) = desk();
-        let as_folder = Location::Directory { path: "/desk".to_string() };
+        let as_folder = Location::Directory {
+            path: "/desk".to_string(),
+        };
         assert!(!folders.add(WatchId(2), as_folder.clone(), path("/desk"), &files));
         files.put("/desk/a.txt");
         let events = folders.translate(vec![Change::Created(path("/desk/a.txt"))], &files);
         assert_eq!(
             events,
             [
-                BackendEvent::ItemAdded { location: Location::Desktop, item: Item::file("/desk/a.txt") },
-                BackendEvent::ItemAdded { location: as_folder, item: Item::file("/desk/a.txt") },
+                BackendEvent::ItemAdded {
+                    location: Location::Desktop,
+                    item: Item::file("/desk/a.txt")
+                },
+                BackendEvent::ItemAdded {
+                    location: as_folder,
+                    item: Item::file("/desk/a.txt")
+                },
             ]
         );
         assert_eq!(folders.remove(WatchId(1)), None);
         assert_eq!(folders.remove(WatchId(2)), Some(path("/desk")));
         assert!(folders.is_empty());
         assert_eq!(folders.remove(WatchId(2)), None);
-        assert!(folders.translate(vec![Change::Created(path("/desk/b.txt"))], &files).is_empty());
+        assert!(folders
+            .translate(vec![Change::Created(path("/desk/b.txt"))], &files)
+            .is_empty());
     }
 
     /// Wait until the kernel has told something and things are quiet.
@@ -627,8 +710,14 @@ mod tests {
 
         std::fs::write(root.join("a.txt"), "a").expect("written");
         let changes = told(&mut watcher, &woken);
-        assert_eq!(changes.first(), Some(&Change::Created(root.join("a.txt"))), "{changes:?}");
-        assert!(changes.iter().all(|change| matches!(change, Change::Created(_) | Change::Changed(_))));
+        assert_eq!(
+            changes.first(),
+            Some(&Change::Created(root.join("a.txt"))),
+            "{changes:?}"
+        );
+        assert!(changes
+            .iter()
+            .all(|change| matches!(change, Change::Created(_) | Change::Changed(_))));
 
         std::fs::rename(root.join("a.txt"), root.join("b.txt")).expect("renamed");
         let changes = told(&mut watcher, &woken);
@@ -641,7 +730,10 @@ mod tests {
         }
 
         std::fs::remove_file(root.join("b.txt")).expect("removed");
-        assert_eq!(told(&mut watcher, &woken), [Change::Removed(root.join("b.txt"))]);
+        assert_eq!(
+            told(&mut watcher, &woken),
+            [Change::Removed(root.join("b.txt"))]
+        );
 
         // Let go: nothing more is told.
         watcher.remove(&root);

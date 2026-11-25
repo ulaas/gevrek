@@ -267,7 +267,11 @@ pub fn floating_to_keep_above(outputs: &Outputs, focused: WindowId) -> Vec<Windo
     let Some(workspace) = workspaces.focused() else {
         return Vec::new();
     };
-    if workspace.floating_windows.iter().any(|window| *window == focused) {
+    if workspace
+        .floating_windows
+        .iter()
+        .any(|window| *window == focused)
+    {
         return Vec::new();
     }
     workspace.floating_windows.iter().copied().collect()

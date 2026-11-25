@@ -96,7 +96,11 @@ extern "C" {
         key_callbacks: *const c_void,
         value_callbacks: *const c_void,
     ) -> CFDictionaryRef;
-    pub fn CFMachPortCreateRunLoopSource(alloc: CFTypeRef, port: CFTypeRef, order: isize) -> CFTypeRef;
+    pub fn CFMachPortCreateRunLoopSource(
+        alloc: CFTypeRef,
+        port: CFTypeRef,
+        order: isize,
+    ) -> CFTypeRef;
     pub fn CFRunLoopGetCurrent() -> CFTypeRef;
     pub fn CFRunLoopAddSource(run_loop: CFTypeRef, source: CFTypeRef, mode: CFStringRef);
     pub fn CFRunLoopRemoveSource(run_loop: CFTypeRef, source: CFTypeRef, mode: CFStringRef);

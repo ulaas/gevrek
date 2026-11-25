@@ -32,12 +32,17 @@ pub fn migrate(config: &mut Value) {
             .get("zones")
             .and_then(Value::as_object)
             .is_some_and(|zones| !SNAP_ZONE_KEYS.iter().any(|key| zones.contains_key(*key))))
-    .then(|| config["desktop"].as_object_mut().and_then(|desktop| desktop.remove("zones")))
+    .then(|| {
+        config["desktop"]
+            .as_object_mut()
+            .and_then(|desktop| desktop.remove("zones"))
+    })
     .flatten();
     run_steps(config, version);
-    if let (Some(zones), Some(desktop)) =
-        (own_zones, config.get_mut("desktop").and_then(Value::as_object_mut))
-    {
+    if let (Some(zones), Some(desktop)) = (
+        own_zones,
+        config.get_mut("desktop").and_then(Value::as_object_mut),
+    ) {
         desktop.insert("zones".to_string(), zones);
     }
 }
@@ -490,7 +495,10 @@ mod tests {
             serde_json::to_value(crate::zones::ZonesConfig::default()).unwrap()
         );
         assert!(!has_snap_zones_under_zones(&saved));
-        assert_eq!(saved["desktop"]["snap_zones"]["default_layout"]["id"], "mine");
+        assert_eq!(
+            saved["desktop"]["snap_zones"]["default_layout"]["id"],
+            "mine"
+        );
 
         // Snap zones already written in the new place win, and the old
         // place is empty all the same.
@@ -516,7 +524,8 @@ mod tests {
             serde_json::json!({ "default_layout": { "id": "mine" } }),
             serde_json::json!({ "monitor_layouts": [] }),
         ] {
-            let document = serde_json::json!({ "desktop": { "schema_version": 26, "zones": zones } });
+            let document =
+                serde_json::json!({ "desktop": { "schema_version": 26, "zones": zones } });
             let mut migrated = document.clone();
             migrate(&mut migrated);
             assert_eq!(migrated, document, "a current file is left as it is");
@@ -528,7 +537,8 @@ mod tests {
             serde_json::json!({}),
             serde_json::json!({ "enabled": false }),
         ] {
-            let document = serde_json::json!({ "desktop": { "schema_version": 26, "zones": zones } });
+            let document =
+                serde_json::json!({ "desktop": { "schema_version": 26, "zones": zones } });
             let config = Config::from_json(&document.to_string()).expect("loads");
             assert_eq!(
                 serde_json::to_value(&config.desktop.snap_zones).unwrap(),
@@ -539,7 +549,9 @@ mod tests {
 
     #[test]
     fn the_zones_of_the_desktop_are_read_and_written_under_zones() {
-        use crate::zones::{Matcher, Rule, RuleAction, ZoneDefinition, ZoneId, ZoneKind, ZonesConfig};
+        use crate::zones::{
+            Matcher, Rule, RuleAction, ZoneDefinition, ZoneId, ZoneKind, ZonesConfig,
+        };
         // Nothing the zones of the desktop are written with is a key that
         // only snap zones have: a file gevrek wrote is never refused.
         let mut filled = ZonesConfig {
@@ -547,25 +559,38 @@ mod tests {
             zones: vec![
                 ZoneDefinition::manual("papers", "Papers"),
                 ZoneDefinition {
-                    kind: ZoneKind::Portal { directory: "/home/ada/Downloads".to_string() },
+                    kind: ZoneKind::Portal {
+                        directory: "/home/ada/Downloads".to_string(),
+                    },
                     tab_group: Some("side".to_string()),
                     ..ZoneDefinition::manual("downloads", "Downloads")
                 },
                 ZoneDefinition {
-                    kind: ZoneKind::Smart { query: vec![Matcher::Untouched { days: 30 }] },
+                    kind: ZoneKind::Smart {
+                        query: vec![Matcher::Untouched { days: 30 }],
+                    },
                     ..ZoneDefinition::manual("stale", "Stale")
                 },
             ],
             rules: vec![Rule {
                 name: "papers".to_string(),
                 matchers: vec![
-                    Matcher::Extension { any_of: vec!["pdf".to_string()] },
-                    Matcher::Size { at_least: Some(1), at_most: None },
+                    Matcher::Extension {
+                        any_of: vec!["pdf".to_string()],
+                    },
+                    Matcher::Size {
+                        at_least: Some(1),
+                        at_most: None,
+                    },
                 ],
-                action: RuleAction::AssignToZone { zone: ZoneId::new("papers") },
+                action: RuleAction::AssignToZone {
+                    zone: ZoneId::new("papers"),
+                },
                 ..Rule::default()
             }],
-            catch_all: Some(RuleAction::MoveToFolder { folder: "/home/ada/Sorted".to_string() }),
+            catch_all: Some(RuleAction::MoveToFolder {
+                folder: "/home/ada/Sorted".to_string(),
+            }),
             ..ZonesConfig::default()
         };
         filled.look.opacity = Some(70);
@@ -581,7 +606,11 @@ mod tests {
             assert!(!has_snap_zones_under_zones(&written));
             let read = Config::from_json(&text).expect("what gevrek wrote is read");
             assert_eq!(read.desktop.zones, zones);
-            assert_eq!(serde_json::to_string_pretty(&read).unwrap(), text, "and written as it was");
+            assert_eq!(
+                serde_json::to_string_pretty(&read).unwrap(),
+                text,
+                "and written as it was"
+            );
             let errors: Vec<_> = read
                 .desktop
                 .validate()
@@ -594,15 +623,30 @@ mod tests {
         // off keeps them off, whatever else it leaves unsaid.
         assert!(Config::new().desktop.zones.enabled);
         let unsaid = serde_json::json!({ "desktop": { "schema_version": 26 } });
-        assert!(Config::from_json(&unsaid.to_string()).expect("read").desktop.zones.enabled);
+        assert!(
+            Config::from_json(&unsaid.to_string())
+                .expect("read")
+                .desktop
+                .zones
+                .enabled
+        );
         // (Also a file from before there were zones: it never said.)
         let old = serde_json::json!({ "desktop": { "schema_version": 25 } });
-        assert!(Config::from_json(&old.to_string()).expect("read").desktop.zones.enabled);
+        assert!(
+            Config::from_json(&old.to_string())
+                .expect("read")
+                .desktop
+                .zones
+                .enabled
+        );
         let off = serde_json::json!({ "desktop": { "schema_version": 26, "zones": { "enabled": false } } });
         let read = Config::from_json(&off.to_string()).expect("read");
         assert!(!read.desktop.zones.enabled);
         let written: Value = serde_json::from_str(&serde_json::to_string(&read).unwrap()).unwrap();
-        assert_eq!(written["desktop"]["zones"]["enabled"], false, "and it is written back as off");
+        assert_eq!(
+            written["desktop"]["zones"]["enabled"], false,
+            "and it is written back as off"
+        );
         // The old shape under the new version is refused all the same, also
         // beside keys that are of the new zones.
         let mixed = serde_json::json!({ "desktop": { "schema_version": 26, "zones": {

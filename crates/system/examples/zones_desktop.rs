@@ -48,16 +48,21 @@ mod windows_side {
         let really_hide = std::env::args().any(|argument| argument == "--really-hide");
         // The journal of this trial is kept apart from gevrek's own.
         let state = std::env::temp_dir().join("gevrek-zones-desktop-example");
-        let explorer = if really_hide { ShellDesktop::new() } else { ShellDesktop::read_only() };
+        let explorer = if really_hide {
+            ShellDesktop::new()
+        } else {
+            ShellDesktop::read_only()
+        };
         let (woken, wakes) = mpsc::channel();
         let woken = std::sync::Mutex::new(woken);
         // (With the person's own Downloads and Recent folders, which are
         // only read.)
-        let mut backend = SystemBackend::with(Places::of_session(&state), Box::new(explorer), move || {
-            if let Ok(woken) = woken.lock() {
-                let _ = woken.send(());
-            }
-        });
+        let mut backend =
+            SystemBackend::with(Places::of_session(&state), Box::new(explorer), move || {
+                if let Ok(woken) = woken.lock() {
+                    let _ = woken.send(());
+                }
+            });
 
         println!("== The displays ==");
         for found in displays::from_system() {
@@ -72,10 +77,16 @@ mod windows_side {
             );
         }
         for display in backend.displays() {
-            println!("  as the core has it: {}  {:?}  scale {}", display.id, display.rect, display.scale);
+            println!(
+                "  as the core has it: {}  {:?}  scale {}",
+                display.id, display.rect, display.scale
+            );
         }
         for kept in backend.reserved_areas() {
-            println!("  kept: {:?} {} of {}", kept.edge, kept.thickness, kept.display);
+            println!(
+                "  kept: {:?} {} of {}",
+                kept.edge, kept.thickness, kept.display
+            );
         }
 
         println!("\n== The desktop, as the shell lists it ==");
@@ -113,7 +124,10 @@ mod windows_side {
         println!("  {} items", items.len());
 
         println!("\n== Icons, asked for and fetched ==");
-        let size = IconSize { size: 48, scale: 1.5 };
+        let size = IconSize {
+            size: 48,
+            scale: 1.5,
+        };
         let asked: Vec<_> = items
             .iter()
             .take(6)
@@ -133,10 +147,19 @@ mod windows_side {
             }
         }
         for (request, name) in &asked {
-            let icon = answers.iter().find(|(answered, _)| answered == request).and_then(|(_, icon)| *icon);
+            let icon = answers
+                .iter()
+                .find(|(answered, _)| answered == request)
+                .and_then(|(_, icon)| *icon);
             match icon.and_then(|icon| backend.picture(icon).map(|picture| (icon, picture))) {
                 Some((icon, picture)) => {
-                    let solid = picture.pixels.as_chunks::<4>().0.iter().filter(|pixel| pixel[3] != 0).count();
+                    let solid = picture
+                        .pixels
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .filter(|pixel| pixel[3] != 0)
+                        .count();
                     println!(
                         "  {name}: handle {} -> {} x {} pixels, {solid} of them not clear",
                         icon.0, picture.width, picture.height
@@ -147,10 +170,17 @@ mod windows_side {
         }
 
         if let Some(item) = items.iter().find(|item| item.path.is_some()) {
-            println!("\n== The shell's menu for {} (not shown, only read) ==", item.name);
+            println!(
+                "\n== The shell's menu for {} (not shown, only read) ==",
+                item.name
+            );
             match launch::menu_entries(std::slice::from_ref(&item.id)) {
                 Ok(entries) => {
-                    let texts: Vec<&str> = entries.iter().map(String::as_str).filter(|text| !text.is_empty()).collect();
+                    let texts: Vec<&str> = entries
+                        .iter()
+                        .map(String::as_str)
+                        .filter(|text| !text.is_empty())
+                        .collect();
                     println!("  {} entries: {}", texts.len(), texts.join(" | "));
                 }
                 Err(error) => println!("  not read: {error}"),
@@ -200,15 +230,31 @@ mod windows_side {
                     shown.view.icon_size
                 );
                 for icon in &shown.icons {
-                    println!("  ({:>5}, {:>5})  {}   [{}]", icon.x, icon.y, icon.name, icon.id);
+                    println!(
+                        "  ({:>5}, {:>5})  {}   [{}]",
+                        icon.x, icon.y, icon.name, icon.id
+                    );
                 }
                 println!("  {} icons", shown.icons.len());
-                let listed = |id: &str| items.iter().any(|item| item.id.as_str().eq_ignore_ascii_case(id));
-                let only_explorer: Vec<&str> =
-                    shown.icons.iter().filter(|icon| !listed(&icon.id)).map(|icon| icon.name.as_str()).collect();
+                let listed = |id: &str| {
+                    items
+                        .iter()
+                        .any(|item| item.id.as_str().eq_ignore_ascii_case(id))
+                };
+                let only_explorer: Vec<&str> = shown
+                    .icons
+                    .iter()
+                    .filter(|icon| !listed(&icon.id))
+                    .map(|icon| icon.name.as_str())
+                    .collect();
                 let only_shell: Vec<&str> = items
                     .iter()
-                    .filter(|item| !shown.icons.iter().any(|icon| icon.id.eq_ignore_ascii_case(item.id.as_str())))
+                    .filter(|item| {
+                        !shown
+                            .icons
+                            .iter()
+                            .any(|icon| icon.id.eq_ignore_ascii_case(item.id.as_str()))
+                    })
                     .map(|item| item.name.as_str())
                     .collect();
                 println!("  only Explorer shows: {only_explorer:?}");
@@ -227,7 +273,9 @@ mod windows_side {
             println!("  written down under {}", state.display());
             match backend.hide_system_icons() {
                 Ok(()) => println!("  put away. Press Enter to bring them back."),
-                Err(error) => println!("  not put away: {error}. Press Enter to put back what was written down."),
+                Err(error) => println!(
+                    "  not put away: {error}. Press Enter to put back what was written down."
+                ),
             }
             let mut line = String::new();
             let _ = std::io::stdin().read_line(&mut line);
@@ -250,7 +298,9 @@ mod linux_side {
     pub fn run() {
         let arguments: Vec<String> = std::env::args().skip(1).collect();
         let flag = |name: &str| arguments.iter().any(|argument| argument == name);
-        let folder = arguments.iter().find(|argument| !argument.starts_with("--"));
+        let folder = arguments
+            .iter()
+            .find(|argument| !argument.starts_with("--"));
         let location = match folder {
             Some(path) => Location::Directory { path: path.clone() },
             None => Location::Desktop,
@@ -269,7 +319,10 @@ mod linux_side {
                 std::process::exit(1);
             }
         };
-        let size = IconSize { size: 48, scale: 1.0 };
+        let size = IconSize {
+            size: 48,
+            scale: 1.0,
+        };
         for item in &items {
             let facts = &item.facts;
             println!("\n{}  ({:?})", item.name, item.kind);
@@ -277,8 +330,14 @@ mod linux_side {
             let said = |value: Option<String>| value.unwrap_or_else(|| "-".to_string());
             println!("  type       {}", said(facts.mime.clone()));
             println!("  extension  {}", said(facts.extension.clone()));
-            println!("  size       {}", said(facts.size.map(|size| size.to_string())));
-            println!("  modified   {}", said(facts.modified.map(|time| time.to_string())));
+            println!(
+                "  size       {}",
+                said(facts.size.map(|size| size.to_string()))
+            );
+            println!(
+                "  modified   {}",
+                said(facts.modified.map(|time| time.to_string()))
+            );
             println!("  leads to   {}", said(facts.shortcut_target.clone()));
             let Some(path) = item.path.as_deref().map(Path::new) else {
                 continue;
@@ -287,18 +346,26 @@ mod linux_side {
             let Some(described) = system.describe(path) else {
                 continue;
             };
-            let program = system.default_program(path).map(|program| format!("{} ({})", program.name, program.id));
+            let program = system
+                .default_program(path)
+                .map(|program| format!("{} ({})", program.name, program.id));
             println!("  opens with {}", said(program));
             let icon = system.icon_file(&described.icon_names, pixels(size));
             println!(
                 "  icon       {}",
-                icon.map_or_else(|| format!("none of {:?}", described.icon_names), |file| file.display().to_string())
+                icon.map_or_else(
+                    || format!("none of {:?}", described.icon_names),
+                    |file| file.display().to_string()
+                )
             );
             if flag("--thumbnails") {
                 let _ = system.thumbnail(path, pixels(size));
             }
             let small = system.thumbnail_file(path, pixels(size));
-            println!("  thumbnail  {}", said(small.map(|file| file.display().to_string())));
+            println!(
+                "  thumbnail  {}",
+                said(small.map(|file| file.display().to_string()))
+            );
         }
         println!("\n{} items", items.len());
         match watching {

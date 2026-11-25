@@ -121,7 +121,9 @@ mod tests {
     }
 
     fn refused() -> BackendError {
-        BackendError::Refused { what: "no".to_string() }
+        BackendError::Refused {
+            what: "no".to_string(),
+        }
     }
 
     #[test]
@@ -131,7 +133,10 @@ mod tests {
         assert_eq!(said(&desk), ["journal", "hide"]);
         assert!(desk.icons_hidden && desk.backend.journal_open);
         // Put back: shown again, the journal closed.
-        assert_eq!(put_back(&mut desk, &SystemIcons::Away), Ok(SystemIcons::Theirs));
+        assert_eq!(
+            put_back(&mut desk, &SystemIcons::Away),
+            Ok(SystemIcons::Theirs)
+        );
         assert!(!desk.icons_hidden && !desk.backend.journal_open);
         assert_eq!(said(&desk), ["journal", "hide", "restore"]);
     }
@@ -164,8 +169,14 @@ mod tests {
         desk.fail_hide = Some(refused());
         desk.fail_restore = Some(refused());
         let now = put_away(&mut desk);
-        assert!(now.refusal().unwrap().contains("restore-explorer"), "{now:?}");
-        assert!(desk.backend.journal_open, "the journal stays open for the next try");
+        assert!(
+            now.refusal().unwrap().contains("restore-explorer"),
+            "{now:?}"
+        );
+        assert!(
+            desk.backend.journal_open,
+            "the journal stays open for the next try"
+        );
         assert_eq!(put_back(&mut desk, &now), Ok(SystemIcons::Theirs));
         assert!(!desk.backend.journal_open);
     }
@@ -199,14 +210,21 @@ mod tests {
         let mut desk = desk();
         // With nothing away: nothing is asked of the system.
         for _ in 0..3 {
-            assert_eq!(put_back(&mut desk, &SystemIcons::Theirs), Ok(SystemIcons::Theirs));
+            assert_eq!(
+                put_back(&mut desk, &SystemIcons::Theirs),
+                Ok(SystemIcons::Theirs)
+            );
         }
         assert_eq!(said(&desk), Vec::<String>::new());
         let away = put_away(&mut desk);
         let back = put_back(&mut desk, &away).unwrap();
         assert_eq!(put_back(&mut desk, &back), Ok(SystemIcons::Theirs));
         assert_eq!(put_back(&mut desk, &back), Ok(SystemIcons::Theirs));
-        assert_eq!(said(&desk), ["journal", "hide", "restore"], "put back once, and no more");
+        assert_eq!(
+            said(&desk),
+            ["journal", "hide", "restore"],
+            "put back once, and no more"
+        );
         // A system that refuses leaves them away, to be asked again.
         let away = put_away(&mut desk);
         desk.fail_restore = Some(refused());

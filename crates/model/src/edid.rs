@@ -420,10 +420,22 @@ mod tests {
             place("y", 0, 5),
         ];
         number_same_ids(&mut ids, &places);
-        assert_eq!(ids, ["GSM-5B7F-noserial#2", "DEL-A0F1-00000001", "GSM-5B7F-noserial#1", "", ""]);
+        assert_eq!(
+            ids,
+            [
+                "GSM-5B7F-noserial#2",
+                "DEL-A0F1-00000001",
+                "GSM-5B7F-noserial#1",
+                "",
+                ""
+            ]
+        );
         // The same path: by the place, then by the handle.
         let mut ids = vec!["A".to_string(), "A".to_string(), "A".to_string()];
-        number_same_ids(&mut ids, &[place("p", 10, 9), place("p", 0, 8), place("p", 10, 7)]);
+        number_same_ids(
+            &mut ids,
+            &[place("p", 10, 9), place("p", 0, 8), place("p", 10, 7)],
+        );
         assert_eq!(ids, ["A#3", "A#1", "A#2"]);
     }
 }

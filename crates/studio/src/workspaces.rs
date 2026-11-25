@@ -22,9 +22,7 @@ use crate::document::Document;
 use crate::form::Form;
 use egui::{RichText, Ui};
 use gevrek_model::layout::{LayoutType, WindowSizes};
-use gevrek_model::settings::{
-    DesktopConfig, DisplayRef, MonitorSelector, Titled,
-};
+use gevrek_model::settings::{DesktopConfig, DisplayRef, MonitorSelector, Titled};
 use gevrek_ui::theme::{self, icons};
 use gevrek_ui::widgets;
 use serde_json::Value;
@@ -217,9 +215,7 @@ pub fn lines(desktop: &DesktopConfig, display: Option<&DisplayRef>, live: &[Live
 /// opened for the moment, gone when they are left empty.
 pub fn of_the_moment(desktop: &DesktopConfig, display: &DisplayRef, live: &[Live]) -> Vec<Live> {
     live.iter()
-        .filter(|live| {
-            !live.name.is_empty() && desktop.workspace_on(display, &live.name).is_none()
-        })
+        .filter(|live| !live.name.is_empty() && desktop.workspace_on(display, &live.name).is_none())
         .cloned()
         .collect()
 }
@@ -1130,7 +1126,12 @@ mod tests {
         assert_eq!(label(&desktop, &right, "2").as_deref(), Some("Web"));
 
         // A workspace of the moment kept, for its display.
-        assert!(ask(&mut desktop, Some(&left), Do::Keep("12".into(), "Music".into())).is_ok());
+        assert!(ask(
+            &mut desktop,
+            Some(&left),
+            Do::Keep("12".into(), "Music".into())
+        )
+        .is_ok());
         assert_eq!(label(&desktop, &left, "12").as_deref(), Some("Music"));
         assert_eq!(label(&desktop, &right, "12"), None);
         assert!(ask(&mut desktop, Some(&left), Do::Keep("12".into(), "x".into())).is_err());

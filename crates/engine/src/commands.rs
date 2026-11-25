@@ -86,7 +86,9 @@ pub fn apply_layout_command(
         }
         SetMasterCount { count } => workspace.master_count = (*count).clamp(1, 8),
         AdjustMasterCount { delta } => {
-            workspace.master_count = (workspace.master_count as i32).saturating_add(*delta).clamp(1, 8) as usize
+            workspace.master_count = (workspace.master_count as i32)
+                .saturating_add(*delta)
+                .clamp(1, 8) as usize
         }
         RotateLayout => workspace.layout_rotation = (workspace.layout_rotation + 1) % 4,
         FlipLayout { axis } => {
@@ -117,7 +119,11 @@ pub fn apply_layout_command(
             workspace.container_padding = Padding::uniform((*gap).clamp(0, 500))
         }
         AdjustLayoutGap { delta } => {
-            let gap = workspace.container_padding.left.saturating_add(*delta).clamp(0, 500);
+            let gap = workspace
+                .container_padding
+                .left
+                .saturating_add(*delta)
+                .clamp(0, 500);
             workspace.container_padding = Padding::uniform(gap);
         }
         SetWorkspacePadding { padding } => {
@@ -131,7 +137,11 @@ pub fn apply_layout_command(
             workspace.container_padding = Padding::uniform((*padding).clamp(0, 500))
         }
         AdjustContainerPadding { delta } => {
-            let padding = workspace.container_padding.left.saturating_add(*delta).clamp(0, 500);
+            let padding = workspace
+                .container_padding
+                .left
+                .saturating_add(*delta)
+                .clamp(0, 500);
             workspace.container_padding = Padding::uniform(padding);
         }
         SetWorkspaceWorkAreaOffset {

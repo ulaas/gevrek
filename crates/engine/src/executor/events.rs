@@ -160,7 +160,9 @@ impl Executor {
             .collect();
         for window in gone {
             if let Some((output, _)) = monitor_manager.find_and_remove_window(window) {
-                log::info!("{window:?} is gone without its end being told: it leaves its workspace");
+                log::info!(
+                    "{window:?} is gone without its end being told: it leaves its workspace"
+                );
                 self.mark_layout_dirty(output);
             }
             snap_zone_manager.remove_window(window);
@@ -568,8 +570,12 @@ impl Executor {
                 self.on_window_created(window_manager, monitor_manager, focus_manager, handle)
             }
             WindowEvent::Destroyed(handle) => {
-                let result =
-                    self.on_window_destroyed(window_manager, monitor_manager, snap_zone_manager, handle);
+                let result = self.on_window_destroyed(
+                    window_manager,
+                    monitor_manager,
+                    snap_zone_manager,
+                    handle,
+                );
                 // What the graph was told of the window is not kept: a
                 // key pressed next would hand a window that has gone to
                 // the nodes behind it.
@@ -709,13 +715,14 @@ impl Executor {
         // workspace that seems empty. Windows itself shows a new window
         // alone and leaves the others minimized.) It takes the keyboard
         // as a new window does.
-        let on_a_shown_workspace = monitor_manager
-            .find_window(handle)
-            .is_some_and(|(output, index)| {
-                monitor_manager
-                    .get_workspaces(output)
-                    .is_some_and(|workspaces| workspaces.focused_idx() == index)
-            });
+        let on_a_shown_workspace =
+            monitor_manager
+                .find_window(handle)
+                .is_some_and(|(output, index)| {
+                    monitor_manager
+                        .get_workspaces(output)
+                        .is_some_and(|workspaces| workspaces.focused_idx() == index)
+                });
         if self.desktop_shown() && on_a_shown_workspace {
             self.end_show_desktop(
                 window_manager,
@@ -1062,7 +1069,9 @@ impl Executor {
                             op: StackOp::Raise,
                         },
                     );
-                    log::debug!("The overview of workspace {workspace_id} is over: a window was chosen");
+                    log::debug!(
+                        "The overview of workspace {workspace_id} is over: a window was chosen"
+                    );
                 }
             }
         }
@@ -1542,7 +1551,11 @@ impl Executor {
                 continue;
             };
             self.floating_window_is_on(window_manager, monitor_manager, handle, Some(to));
-            if monitor_manager.find_window(handle).map(|(output, _)| output) != Some(to) {
+            if monitor_manager
+                .find_window(handle)
+                .map(|(output, _)| output)
+                != Some(to)
+            {
                 continue;
             }
             joined.push(handle);
@@ -1617,7 +1630,8 @@ impl Executor {
         }
 
         if let Some(drag_state) = self.window_state.get_mut(handle).drag.take() {
-            self.window_state.get_mut(handle).dropped_at = queries(window_manager).rect(handle).ok();
+            self.window_state.get_mut(handle).dropped_at =
+                queries(window_manager).rect(handle).ok();
             // EARLY EXIT: Floating and unmanaged windows just stay where the user dropped them.
             // No retiling, no zone snapping, no resize ratio updates.
             let is_floating = monitor_manager.is_window_floating(handle);

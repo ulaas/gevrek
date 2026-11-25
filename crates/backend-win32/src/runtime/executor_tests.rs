@@ -8,8 +8,8 @@ use crate::dwm::HwndExt;
 use crate::dwm::MonitorManagerWin32;
 use crate::dwm::{
     stackbar_content_rect, FocusManager, MonitorHandle, MonitorManager, RuleResolution,
-    RuleResolutionScope, StackbarContainerState, WindowEvent, WindowHandle, WindowManager,
-    SnapZoneManager,
+    RuleResolutionScope, SnapZoneManager, StackbarContainerState, WindowEvent, WindowHandle,
+    WindowManager,
 };
 use crate::node_editor::{
     AnimationType, BorderStyle, LogEntry, NodeGraph, NodeId, NodeType, PinId, RuleDefinition,
@@ -1456,7 +1456,10 @@ mod manual_trigger_tests {
                 Some(LayoutType::Floating),
             )
             .unwrap();
-        assert_eq!(layout_of(&monitor_manager, "chat"), Some(LayoutType::Floating));
+        assert_eq!(
+            layout_of(&monitor_manager, "chat"),
+            Some(LayoutType::Floating)
+        );
         executor
             .ensure_named_workspace(
                 &mut window_manager,
@@ -1466,7 +1469,10 @@ mod manual_trigger_tests {
                 Some(LayoutType::Columns),
             )
             .unwrap();
-        assert_eq!(layout_of(&monitor_manager, "notes"), Some(LayoutType::Columns));
+        assert_eq!(
+            layout_of(&monitor_manager, "notes"),
+            Some(LayoutType::Columns)
+        );
         assert_eq!(monitor_manager.get_workspaces(primary).unwrap().len(), 3);
         // The same name on another monitor is a separate workspace.
         executor

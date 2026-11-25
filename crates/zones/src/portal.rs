@@ -40,7 +40,9 @@ pub struct Crumb {
 
 /// The parts of a path, whichever separator it is written with.
 fn parts(path: &str) -> Vec<&str> {
-    path.split(['/', '\\']).filter(|part| !part.is_empty()).collect()
+    path.split(['/', '\\'])
+        .filter(|part| !part.is_empty())
+        .collect()
 }
 
 /// Whether `directory` is `root` or lies somewhere below it.
@@ -102,7 +104,11 @@ impl PortalView {
         }
         // (The portal's own folder is always written the one way it is
         // configured, so that it is one folder to whoever watches it.)
-        let directory = if paths::same_folder(&self.root, directory) { self.root.clone() } else { directory.to_string() };
+        let directory = if paths::same_folder(&self.root, directory) {
+            self.root.clone()
+        } else {
+            directory.to_string()
+        };
         let from = std::mem::replace(&mut self.current, directory);
         self.back.push(from);
         if self.back.len() > WAY_BACK {
@@ -150,12 +156,17 @@ impl PortalView {
             name: paths::file_name(&self.root).to_string(),
             directory: self.root.clone(),
         }];
-        let below = parts(&self.current).len().saturating_sub(parts(&self.root).len());
+        let below = parts(&self.current)
+            .len()
+            .saturating_sub(parts(&self.root).len());
         let names: Vec<&str> = parts(&self.current);
         let mut directory = self.root.clone();
         for name in &names[names.len() - below..] {
             directory = paths::join(&directory, name);
-            crumbs.push(Crumb { name: name.to_string(), directory: directory.clone() });
+            crumbs.push(Crumb {
+                name: name.to_string(),
+                directory: directory.clone(),
+            });
         }
         crumbs
     }
@@ -211,21 +222,30 @@ mod tests {
     fn a_portal_goes_in_up_back_and_forward_and_never_above_its_own_folder() {
         let mut portal = PortalView::new("/downloads");
         assert!(portal.at_root() && !portal.can_go_back() && !portal.can_go_forward());
-        assert!(!portal.up(), "there is nothing above the portal's own folder");
+        assert!(
+            !portal.up(),
+            "there is nothing above the portal's own folder"
+        );
         assert!(!portal.go("/elsewhere"), "nor beside it");
         assert!(!portal.go("/downloads/"), "and it is there already");
 
         assert!(portal.go("/downloads/2026"));
         assert!(portal.go("/downloads/2026/november"));
         assert_eq!(portal.current(), "/downloads/2026/november");
-        let names: Vec<(String, String)> =
-            portal.crumbs().into_iter().map(|crumb| (crumb.name, crumb.directory)).collect();
+        let names: Vec<(String, String)> = portal
+            .crumbs()
+            .into_iter()
+            .map(|crumb| (crumb.name, crumb.directory))
+            .collect();
         assert_eq!(
             names,
             [
                 ("downloads".to_string(), "/downloads".to_string()),
                 ("2026".to_string(), "/downloads/2026".to_string()),
-                ("november".to_string(), "/downloads/2026/november".to_string()),
+                (
+                    "november".to_string(),
+                    "/downloads/2026/november".to_string()
+                ),
             ]
         );
 
@@ -264,10 +284,18 @@ mod tests {
 
     #[test]
     fn a_listing_is_written_with_its_state() {
-        assert_eq!(serde_json::to_string(&Listing::Ready).unwrap(), r#"{"state":"ready"}"#);
-        let gone = Listing::Unavailable { reason: "the share is not there".to_string() };
+        assert_eq!(
+            serde_json::to_string(&Listing::Ready).unwrap(),
+            r#"{"state":"ready"}"#
+        );
+        let gone = Listing::Unavailable {
+            reason: "the share is not there".to_string(),
+        };
         let text = serde_json::to_string(&gone).unwrap();
-        assert_eq!(text, r#"{"state":"unavailable","reason":"the share is not there"}"#);
+        assert_eq!(
+            text,
+            r#"{"state":"unavailable","reason":"the share is not there"}"#
+        );
         assert_eq!(serde_json::from_str::<Listing>(&text).unwrap(), gone);
     }
 }

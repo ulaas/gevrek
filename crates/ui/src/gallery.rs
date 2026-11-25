@@ -136,10 +136,18 @@ impl Gallery {
                         .color(palette.faint),
                 );
             });
-            widgets::row(ui, "A time", "Its hour and its minute, each chosen.", true, false, |ui| {
-                controls::time_field(ui, &mut self.time)
-            });
-            widgets::caption(ui, "A track that shows what its values are, with set points");
+            widgets::row(
+                ui,
+                "A time",
+                "Its hour and its minute, each chosen.",
+                true,
+                false,
+                |ui| controls::time_field(ui, &mut self.time),
+            );
+            widgets::caption(
+                ui,
+                "A track that shows what its values are, with set points",
+            );
             let warm = |value: f32| {
                 let part = ((value - 1500.0) / 5000.0).clamp(0.0, 1.0);
                 theme::mix(
@@ -236,7 +244,13 @@ impl Gallery {
             controls::list_under(ui, "gallery devices", 3, 6, |ui| {
                 controls::choice_row(ui, None, "Headphones", None, false);
                 controls::choice_row(ui, None, "Speakers (a device with a long name)", None, true);
-                controls::choice_row(ui, Some(icons::WIFI_LOW), "A network", Some(icons::LOCK), false);
+                controls::choice_row(
+                    ui,
+                    Some(icons::WIFI_LOW),
+                    "A network",
+                    Some(icons::LOCK),
+                    false,
+                );
             });
         });
 
@@ -248,10 +262,17 @@ impl Gallery {
                 let mut nothing = String::new();
                 widgets::search_field(ui, &mut nothing, "A setting", 260.0)
             });
-            widgets::row(ui, "A folder", "Said whether it is there.", true, false, |ui| {
-                let mut here = ".".to_string();
-                widgets::path_field(ui, &mut here, widgets::PathKind::Folder, None, 260.0)
-            });
+            widgets::row(
+                ui,
+                "A folder",
+                "Said whether it is there.",
+                true,
+                false,
+                |ui| {
+                    let mut here = ".".to_string();
+                    widgets::path_field(ui, &mut here, widgets::PathKind::Folder, None, 260.0)
+                },
+            );
             widgets::row(ui, "A file that is missing", "", true, false, |ui| {
                 let mut gone = "no/such/picture.png".to_string();
                 widgets::path_field(ui, &mut gone, widgets::PathKind::File, None, 260.0)
@@ -260,11 +281,14 @@ impl Gallery {
                 widgets::number_box(ui, &mut self.count, 1.0)
             });
             widgets::row(ui, "One of many", "", true, false, |ui| {
-                let options: Vec<(&str, String, String)> = ["Dwindle", "Columns", "Grid", "Spiral", "Monocle"]
-                    .iter()
-                    .map(|name| (*name, (*name).to_string(), String::new()))
-                    .collect();
-                if let Some(picked) = widgets::dropdown(ui, "gallery layout", &self.layout, &options, 200.0) {
+                let options: Vec<(&str, String, String)> =
+                    ["Dwindle", "Columns", "Grid", "Spiral", "Monocle"]
+                        .iter()
+                        .map(|name| (*name, (*name).to_string(), String::new()))
+                        .collect();
+                if let Some(picked) =
+                    widgets::dropdown(ui, "gallery layout", &self.layout, &options, 200.0)
+                {
                     self.layout = picked;
                 }
             });
@@ -395,7 +419,10 @@ mod tests {
             mono: Choice::Builtin,
             ..Default::default()
         };
-        fonts.set_area(Area::Panel, Choice::File("/usr/share/fonts/a b/Inter.otf".into()));
+        fonts.set_area(
+            Area::Panel,
+            Choice::File("/usr/share/fonts/a b/Inter.otf".into()),
+        );
         fonts.set_area(Area::LockScreen, Choice::Builtin);
         let saved = Settings {
             preset: Preset::TokyoNight,

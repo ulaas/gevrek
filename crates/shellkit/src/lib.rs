@@ -30,22 +30,22 @@
 //! out of pictures taken of the screen (`exclude_from_capture`).
 
 pub mod dnd;
-pub mod look;
-pub mod place;
-pub mod stall;
 #[cfg(target_os = "linux")]
 pub mod layer;
-#[cfg(windows)]
-pub mod win;
+pub mod look;
 #[cfg(target_os = "macos")]
 pub mod mac;
+pub mod place;
+pub mod stall;
+#[cfg(windows)]
+pub mod win;
 
 #[cfg(target_os = "linux")]
 pub use layer as host;
-#[cfg(windows)]
-pub use win as host;
 #[cfg(target_os = "macos")]
 pub use mac as host;
+#[cfg(windows)]
+pub use win as host;
 
 /// Which edge of the screen a surface is fixed to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,10 +194,14 @@ pub mod presses {
         /// longest time between the two in thousandths of a second and
         /// the farthest they may be apart in points.
         pub fn press(&mut self, press: Press, within_ms: u32, apart: f32) -> bool {
-            let before = self.last.iter().position(|last| last.button == press.button);
+            let before = self
+                .last
+                .iter()
+                .position(|last| last.button == press.button);
             let second = before.is_some_and(|at| {
                 let last = self.last[at];
-                press.time_ms.wrapping_sub(last.time_ms) <= within_ms && last.at.distance(press.at) <= apart
+                press.time_ms.wrapping_sub(last.time_ms) <= within_ms
+                    && last.at.distance(press.at) <= apart
             });
             if let Some(at) = before {
                 self.last.remove(at);
@@ -221,7 +225,11 @@ pub mod presses {
         use egui::{pos2, PointerButton};
 
         fn press(button: PointerButton, x: f32, time_ms: u32) -> Press {
-            Press { button, at: pos2(x, 10.0), time_ms }
+            Press {
+                button,
+                at: pos2(x, 10.0),
+                time_ms,
+            }
         }
 
         #[test]
@@ -240,11 +248,17 @@ pub mod presses {
             let mut counter = Counter::default();
             let main = PointerButton::Primary;
             counter.press(press(main, 100.0, 1000), 500, 6.0);
-            assert!(!counter.press(press(main, 100.0, 1501), 500, 6.0), "too late");
+            assert!(
+                !counter.press(press(main, 100.0, 1501), 500, 6.0),
+                "too late"
+            );
             // (And that one counts as a first: the next in time is its second.)
             assert!(counter.press(press(main, 100.0, 1700), 500, 6.0));
             counter.press(press(main, 100.0, 3000), 500, 6.0);
-            assert!(!counter.press(press(main, 120.0, 3100), 500, 6.0), "too far");
+            assert!(
+                !counter.press(press(main, 120.0, 3100), 500, 6.0),
+                "too far"
+            );
         }
 
         #[test]

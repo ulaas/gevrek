@@ -83,12 +83,17 @@ impl FakeBackend {
 
     /// Whether a folder is watched now.
     pub fn is_watched(&self, folder: &str) -> bool {
-        self.watches.values().any(|location| paths::same_folder(Self::folder_of(location), folder))
+        self.watches
+            .values()
+            .any(|location| paths::same_folder(Self::folder_of(location), folder))
     }
 
     /// Whether a folder can be reached now.
     pub fn is_reachable(&self, folder: &str) -> bool {
-        !self.unreachable.iter().any(|gone| paths::same_folder(gone, folder))
+        !self
+            .unreachable
+            .iter()
+            .any(|gone| paths::same_folder(gone, folder))
     }
 
     fn number(&mut self) -> u64 {
@@ -98,13 +103,20 @@ impl FakeBackend {
 
     /// The folder's own key, however the path is written.
     fn folder_key(&self, folder: &str) -> Option<String> {
-        self.folders.keys().find(|key| paths::same_folder(key, folder)).cloned()
+        self.folders
+            .keys()
+            .find(|key| paths::same_folder(key, folder))
+            .cloned()
     }
 
     /// The location a watched folder is known by, as it was asked for.
     fn watched(&self, folder: &str) -> Option<Location> {
         // (What cannot be reached tells nothing of what happens in it.)
-        if self.unreachable.iter().any(|gone| paths::same_folder(gone, folder)) {
+        if self
+            .unreachable
+            .iter()
+            .any(|gone| paths::same_folder(gone, folder))
+        {
             return None;
         }
         self.watches
@@ -134,8 +146,13 @@ impl FakeBackend {
 
     /// Put an item into a folder, as if something outside had.
     pub fn add(&mut self, folder: &str, item: Item) {
-        let key = self.folder_key(folder).unwrap_or_else(|| folder.to_string());
-        self.folders.entry(key).or_default().insert(item.id.clone(), item.clone());
+        let key = self
+            .folder_key(folder)
+            .unwrap_or_else(|| folder.to_string());
+        self.folders
+            .entry(key)
+            .or_default()
+            .insert(item.id.clone(), item.clone());
         if let Some(location) = self.watched(folder) {
             self.events.push(BackendEvent::ItemAdded { location, item });
         }
@@ -173,8 +190,13 @@ impl FakeBackend {
     /// the programs that run). Whoever watches it is told.
     pub fn set_source(&mut self, source: SmartSource, items: Vec<Item>) {
         self.sources.insert(source.clone(), items.clone());
-        if self.source_watches.values().any(|watched| watched == &source) {
-            self.events.push(BackendEvent::SourceListed { source, items });
+        if self
+            .source_watches
+            .values()
+            .any(|watched| watched == &source)
+        {
+            self.events
+                .push(BackendEvent::SourceListed { source, items });
         }
     }
 
@@ -197,7 +219,9 @@ impl FakeBackend {
         if let Some(location) = self.watched(folder) {
             self.events.push(BackendEvent::ListingFailed {
                 location,
-                error: BackendError::Refused { what: format!("{folder} does not answer") },
+                error: BackendError::Refused {
+                    what: format!("{folder} does not answer"),
+                },
             });
         }
         self.unreachable.insert(folder.to_string());
@@ -218,8 +242,16 @@ impl FakeBackend {
     pub fn finish_operations(&mut self) {
         for (request, operation) in std::mem::take(&mut self.under_way) {
             let done = match self.perform(&operation) {
-                Ok(undo) => BackendEvent::OperationDone { request, undo: Some(undo), error: None },
-                Err(error) => BackendEvent::OperationDone { request, undo: None, error: Some(error) },
+                Ok(undo) => BackendEvent::OperationDone {
+                    request,
+                    undo: Some(undo),
+                    error: None,
+                },
+                Err(error) => BackendEvent::OperationDone {
+                    request,
+                    undo: None,
+                    error: Some(error),
+                },
             };
             self.events.push(done);
         }
@@ -239,7 +271,11 @@ impl FakeBackend {
 
     /// An operation that is under way says how far it has come.
     pub fn progress(&mut self, request: u64, done: u64, total: u64) {
-        self.events.push(BackendEvent::OperationProgress { request, done, total });
+        self.events.push(BackendEvent::OperationProgress {
+            request,
+            done,
+            total,
+        });
     }
 
     /// The system says the screen is shown to others, or no longer.
@@ -250,10 +286,18 @@ impl FakeBackend {
 
     fn listed(&self, location: &Location) -> Result<Vec<Item>, BackendError> {
         let folder = Self::folder_of(location);
-        if self.unreachable.iter().any(|gone| paths::same_folder(gone, folder)) {
-            return Err(BackendError::Refused { what: format!("{folder} does not answer") });
+        if self
+            .unreachable
+            .iter()
+            .any(|gone| paths::same_folder(gone, folder))
+        {
+            return Err(BackendError::Refused {
+                what: format!("{folder} does not answer"),
+            });
         }
-        let key = self.folder_key(folder).ok_or_else(|| Self::missing(folder))?;
+        let key = self
+            .folder_key(folder)
+            .ok_or_else(|| Self::missing(folder))?;
         Ok(self.folders[&key].values().cloned().collect())
     }
 
@@ -261,9 +305,17 @@ impl FakeBackend {
     pub fn remove(&mut self, id: &ItemId) -> bool {
         let folders: Vec<String> = self.folders.keys().cloned().collect();
         for folder in folders {
-            if self.folders.get_mut(&folder).and_then(|items| items.remove(id)).is_some() {
+            if self
+                .folders
+                .get_mut(&folder)
+                .and_then(|items| items.remove(id))
+                .is_some()
+            {
                 if let Some(location) = self.watched(&folder) {
-                    self.events.push(BackendEvent::ItemRemoved { location, item: id.clone() });
+                    self.events.push(BackendEvent::ItemRemoved {
+                        location,
+                        item: id.clone(),
+                    });
                 }
                 return true;
             }
@@ -275,13 +327,18 @@ impl FakeBackend {
     pub fn change(&mut self, id: &ItemId, facts: ItemFacts) {
         let folders: Vec<String> = self.folders.keys().cloned().collect();
         for folder in folders {
-            let Some(item) = self.folders.get_mut(&folder).and_then(|items| items.get_mut(id)) else {
+            let Some(item) = self
+                .folders
+                .get_mut(&folder)
+                .and_then(|items| items.get_mut(id))
+            else {
                 continue;
             };
             item.facts = facts;
             let item = item.clone();
             if let Some(location) = self.watched(&folder) {
-                self.events.push(BackendEvent::ItemChanged { location, item });
+                self.events
+                    .push(BackendEvent::ItemChanged { location, item });
             }
             return;
         }
@@ -329,12 +386,17 @@ impl FakeBackend {
     /// Put `item` into `folder` under a name nothing there has, and tell
     /// of it. Returns the path it got.
     fn arrive(&mut self, folder: &str, mut item: Item) -> String {
-        let taken: Vec<String> = self.folders[folder].values().map(|item| item.name.clone()).collect();
+        let taken: Vec<String> = self.folders[folder]
+            .values()
+            .map(|item| item.name.clone())
+            .collect();
         let mut name = item.name.clone();
         let mut count = 2;
         while taken.contains(&name) {
             name = match item.name.rsplit_once('.') {
-                Some((stem, extension)) if !stem.is_empty() => format!("{stem} ({count}).{extension}"),
+                Some((stem, extension)) if !stem.is_empty() => {
+                    format!("{stem} ({count}).{extension}")
+                }
                 _ => format!("{} ({count})", item.name),
             };
             count += 1;
@@ -348,7 +410,9 @@ impl FakeBackend {
     }
 
     fn missing(what: &str) -> BackendError {
-        BackendError::NotFound { what: what.to_string() }
+        BackendError::NotFound {
+            what: what.to_string(),
+        }
     }
 }
 
@@ -378,7 +442,11 @@ impl ZonesBackend for FakeBackend {
     fn begin_listing(&mut self, location: &Location) -> bool {
         self.calls += 1;
         let folder = Self::folder_of(location);
-        if !self.slow.iter().any(|slow| paths::same_folder(slow, folder)) {
+        if !self
+            .slow
+            .iter()
+            .any(|slow| paths::same_folder(slow, folder))
+        {
             return false;
         }
         self.awaited.push(location.clone());
@@ -387,7 +455,10 @@ impl ZonesBackend for FakeBackend {
 
     fn list_source(&mut self, source: &SmartSource) -> Result<Vec<Item>, BackendError> {
         self.calls += 1;
-        self.sources.get(source).cloned().ok_or(BackendError::Unsupported)
+        self.sources
+            .get(source)
+            .cloned()
+            .ok_or(BackendError::Unsupported)
     }
 
     fn watch_source(&mut self, source: &SmartSource) -> Result<WatchId, BackendError> {
@@ -416,7 +487,8 @@ impl ZonesBackend for FakeBackend {
     fn cancel_operation(&mut self, request: u64) {
         self.calls += 1;
         let before = self.under_way.len();
-        self.under_way.retain(|(under_way, _)| *under_way != request);
+        self.under_way
+            .retain(|(under_way, _)| *under_way != request);
         if self.under_way.len() != before {
             self.events.push(BackendEvent::OperationDone {
                 request,
@@ -433,7 +505,10 @@ impl ZonesBackend for FakeBackend {
 
     fn facts(&mut self, item: &ItemId) -> Option<ItemFacts> {
         self.calls += 1;
-        self.folders.values().find_map(|items| items.get(item)).map(|item| item.facts.clone())
+        self.folders
+            .values()
+            .find_map(|items| items.get(item))
+            .map(|item| item.facts.clone())
     }
 
     fn request_icon(&mut self, item: &ItemId, _size: IconSize) -> IconRequest {
@@ -456,7 +531,10 @@ impl ZonesBackend for FakeBackend {
             return self.request_icon(item, size);
         }
         let request = IconRequest(self.number());
-        self.events.push(BackendEvent::IconReady { request, icon: None });
+        self.events.push(BackendEvent::IconReady {
+            request,
+            icon: None,
+        });
         request
     }
 
@@ -470,7 +548,8 @@ impl ZonesBackend for FakeBackend {
         if self.facts(item).is_none() {
             return Err(Self::missing(item.as_str()));
         }
-        self.opened.push((item.clone(), program.map(str::to_string)));
+        self.opened
+            .push((item.clone(), program.map(str::to_string)));
         Ok(())
     }
 
@@ -487,21 +566,35 @@ impl ZonesBackend for FakeBackend {
         }
         let undo = match operation {
             FileOperation::Move { from, to_folder } => {
-                let target = self.folder_key(to_folder).ok_or_else(|| Self::missing(to_folder))?;
+                let target = self
+                    .folder_key(to_folder)
+                    .ok_or_else(|| Self::missing(to_folder))?;
                 let (folder, item) = self.find(from).ok_or_else(|| Self::missing(from))?;
                 self.remove(&item.id);
                 let path = self.arrive(&target, item);
-                FileOperation::Move { from: path, to_folder: folder }
+                FileOperation::Move {
+                    from: path,
+                    to_folder: folder,
+                }
             }
             FileOperation::Copy { from, to_folder } => {
-                let target = self.folder_key(to_folder).ok_or_else(|| Self::missing(to_folder))?;
+                let target = self
+                    .folder_key(to_folder)
+                    .ok_or_else(|| Self::missing(to_folder))?;
                 let (_, item) = self.find(from).ok_or_else(|| Self::missing(from))?;
-                FileOperation::Trash { path: self.arrive(&target, item) }
+                FileOperation::Trash {
+                    path: self.arrive(&target, item),
+                }
             }
             FileOperation::Rename { path, new_name } => {
                 let (folder, item) = self.find(path).ok_or_else(|| Self::missing(path))?;
-                if self.folders[&folder].values().any(|other| &other.name == new_name) {
-                    return Err(BackendError::Exists { what: new_name.clone() });
+                if self.folders[&folder]
+                    .values()
+                    .any(|other| &other.name == new_name)
+                {
+                    return Err(BackendError::Exists {
+                        what: new_name.clone(),
+                    });
                 }
                 let new_path = paths::join(&folder, new_name);
                 let renamed = Item {
@@ -525,11 +618,22 @@ impl ZonesBackend for FakeBackend {
                         item: renamed,
                     });
                 }
-                FileOperation::Rename { path: new_path, new_name: item.name }
+                FileOperation::Rename {
+                    path: new_path,
+                    new_name: item.name,
+                }
             }
             FileOperation::NewFolder { parent, name } => {
-                let folder = self.folder_key(parent).ok_or_else(|| Self::missing(parent))?;
-                let path = self.arrive(&folder, Item { name: name.clone(), ..Item::folder(&paths::join(parent, name)) });
+                let folder = self
+                    .folder_key(parent)
+                    .ok_or_else(|| Self::missing(parent))?;
+                let path = self.arrive(
+                    &folder,
+                    Item {
+                        name: name.clone(),
+                        ..Item::folder(&paths::join(parent, name))
+                    },
+                );
                 self.folders.entry(path.clone()).or_default();
                 FileOperation::Trash { path }
             }
@@ -544,7 +648,9 @@ impl ZonesBackend for FakeBackend {
                 let folder = paths::parent(path)
                     .and_then(|folder| self.folder_key(folder))
                     .ok_or_else(|| Self::missing(path))?;
-                FileOperation::Trash { path: self.arrive(&folder, item) }
+                FileOperation::Trash {
+                    path: self.arrive(&folder, item),
+                }
             }
         };
         self.performed.push(operation.clone());
@@ -608,13 +714,20 @@ mod tests {
         let item = backend.add_file("seen.txt");
         assert_eq!(
             backend.drain_events(),
-            [BackendEvent::ItemAdded { location: Location::Desktop, item: item.clone() }]
+            [BackendEvent::ItemAdded {
+                location: Location::Desktop,
+                item: item.clone()
+            }]
         );
         assert_eq!(backend.list(&Location::Desktop).unwrap().len(), 2);
         backend.unwatch(watch);
         backend.remove(&item.id);
         assert_eq!(backend.drain_events(), []);
-        assert!(backend.watch(&Location::Directory { path: "/nowhere".to_string() }).is_err());
+        assert!(backend
+            .watch(&Location::Directory {
+                path: "/nowhere".to_string()
+            })
+            .is_err());
     }
 
     #[test]
@@ -625,10 +738,22 @@ mod tests {
         let path = item.path.clone().unwrap();
         let before = (backend.in_folder(DESKTOP), backend.in_folder("/archive"));
         for operation in [
-            FileOperation::Move { from: path.clone(), to_folder: "/archive".to_string() },
-            FileOperation::Copy { from: path.clone(), to_folder: "/archive".to_string() },
-            FileOperation::Rename { path: path.clone(), new_name: "b.md".to_string() },
-            FileOperation::NewFolder { parent: DESKTOP.to_string(), name: "New".to_string() },
+            FileOperation::Move {
+                from: path.clone(),
+                to_folder: "/archive".to_string(),
+            },
+            FileOperation::Copy {
+                from: path.clone(),
+                to_folder: "/archive".to_string(),
+            },
+            FileOperation::Rename {
+                path: path.clone(),
+                new_name: "b.md".to_string(),
+            },
+            FileOperation::NewFolder {
+                parent: DESKTOP.to_string(),
+                name: "New".to_string(),
+            },
             FileOperation::Trash { path: path.clone() },
         ] {
             let undo = backend.perform(&operation).unwrap();
@@ -652,17 +777,28 @@ mod tests {
         backend.add_folder("/archive");
         backend.add("/archive", Item::file("/archive/a.txt"));
         let item = backend.add_file("a.txt");
-        let operation = FileOperation::Move { from: item.path.unwrap(), to_folder: "/archive".to_string() };
+        let operation = FileOperation::Move {
+            from: item.path.unwrap(),
+            to_folder: "/archive".to_string(),
+        };
         let undo = backend.perform(&operation).unwrap();
         assert_eq!(
             undo,
-            FileOperation::Move { from: "/archive/a (2).txt".to_string(), to_folder: DESKTOP.to_string() }
+            FileOperation::Move {
+                from: "/archive/a (2).txt".to_string(),
+                to_folder: DESKTOP.to_string()
+            }
         );
         assert_ne!(Some(undo), operation.reversed());
         // A failure that was asked for happens once.
-        backend.fail_next = Some(BackendError::Refused { what: "in use".to_string() });
+        backend.fail_next = Some(BackendError::Refused {
+            what: "in use".to_string(),
+        });
         assert!(backend.perform(&operation).is_err());
-        assert!(matches!(backend.perform(&operation), Err(BackendError::NotFound { .. })));
+        assert!(matches!(
+            backend.perform(&operation),
+            Err(BackendError::NotFound { .. })
+        ));
     }
 
     #[test]
@@ -670,7 +806,10 @@ mod tests {
         let mut backend = FakeBackend::new();
         let picture = backend.add_file("a.png");
         let text = backend.add_file("a.txt");
-        let size = IconSize { size: 48, scale: 1.0 };
+        let size = IconSize {
+            size: 48,
+            scale: 1.0,
+        };
         let icon = backend.request_icon(&text.id, size);
         let thumbnail = backend.request_thumbnail(&picture.id, size);
         let none = backend.request_thumbnail(&text.id, size);

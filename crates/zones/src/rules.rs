@@ -53,14 +53,22 @@ pub fn holds(matcher: &Matcher, item: &Item, now: u64) -> bool {
     let facts = &item.facts;
     match matcher {
         Matcher::Extension { any_of } => facts.extension.as_ref().is_some_and(|extension| {
-            any_of
-                .iter()
-                .any(|wanted| wanted.trim_start_matches('.').eq_ignore_ascii_case(extension))
+            any_of.iter().any(|wanted| {
+                wanted
+                    .trim_start_matches('.')
+                    .eq_ignore_ascii_case(extension)
+            })
         }),
         Matcher::Mime { pattern } => facts.mime.as_ref().is_some_and(|mime| glob(pattern, mime)),
         Matcher::Name { pattern } => glob(pattern, &item.name),
         Matcher::Kind { any_of } => any_of.contains(&item.kind),
-        Matcher::Date { field, after, before, newer_than_days, older_than_days } => {
+        Matcher::Date {
+            field,
+            after,
+            before,
+            newer_than_days,
+            older_than_days,
+        } => {
             let time = match field {
                 DateField::Created => facts.created,
                 DateField::Modified => facts.modified,
@@ -93,7 +101,10 @@ pub fn holds(matcher: &Matcher, item: &Item, now: u64) -> bool {
 pub fn matches(rule: &Rule, item: &Item, now: u64) -> bool {
     rule.enabled
         && !rule.matchers.is_empty()
-        && rule.matchers.iter().all(|matcher| holds(matcher, item, now))
+        && rule
+            .matchers
+            .iter()
+            .all(|matcher| holds(matcher, item, now))
 }
 
 /// Which rule decided.
@@ -182,11 +193,17 @@ pub fn plan<'a>(
 ) -> Plan {
     let mut plan = Plan::default();
     // (Locked by its own lock, or by the one for all zones.)
-    let locked =
-        |zone: &ZoneId| config.zone(zone).is_some_and(|zone| zone.lock.members || config.lock.members);
+    let locked = |zone: &ZoneId| {
+        config
+            .zone(zone)
+            .is_some_and(|zone| zone.lock.members || config.lock.members)
+    };
     // A zone that is not in the configuration holds nothing that is shown.
-    let shown_zone_of =
-        |item: &ItemId| placements.zone_of(item).filter(|zone| config.zone(zone).is_some());
+    let shown_zone_of = |item: &ItemId| {
+        placements
+            .zone_of(item)
+            .filter(|zone| config.zone(zone).is_some())
+    };
     for item in items {
         let current = shown_zone_of(&item.id);
         if scope == Scope::Loose && current.is_some() {
@@ -197,7 +214,11 @@ pub fn plan<'a>(
             continue;
         };
         let mut hold = |reason: Reason| {
-            plan.held.push(Held { item: item.id.clone(), decided, reason });
+            plan.held.push(Held {
+                item: item.id.clone(),
+                decided,
+                reason,
+            });
         };
         if current.is_some_and(locked) {
             hold(Reason::Locked);
@@ -213,7 +234,9 @@ pub fn plan<'a>(
                     Some(target) if target.kind != ZoneKind::Manual => {
                         hold(Reason::ZoneFillsItself)
                     }
-                    Some(target) if target.lock.members || config.lock.members => hold(Reason::Locked),
+                    Some(target) if target.lock.members || config.lock.members => {
+                        hold(Reason::Locked)
+                    }
                     Some(_) => plan.steps.push(Step {
                         item: item.id.clone(),
                         decided,
@@ -224,7 +247,8 @@ pub fn plan<'a>(
             RuleAction::MoveToFolder { folder } => match &item.path {
                 None => hold(Reason::NotAFile),
                 // Already there (a rule that moves into the desktop's own folder).
-                Some(path) if paths::parent(path).is_some_and(|at| paths::same_folder(at, folder)) => {}
+                Some(path)
+                    if paths::parent(path).is_some_and(|at| paths::same_folder(at, folder)) => {}
                 Some(_) => plan.steps.push(Step {
                     item: item.id.clone(),
                     decided,
@@ -241,9 +265,11 @@ pub fn plan<'a>(
 pub fn asks_the_time(matcher: &Matcher) -> bool {
     match matcher {
         Matcher::Untouched { .. } => true,
-        Matcher::Date { newer_than_days, older_than_days, .. } => {
-            newer_than_days.is_some() || older_than_days.is_some()
-        }
+        Matcher::Date {
+            newer_than_days,
+            older_than_days,
+            ..
+        } => newer_than_days.is_some() || older_than_days.is_some(),
         _ => false,
     }
 }
@@ -272,7 +298,8 @@ pub fn plan_timed<'a>(
         Decided::CatchAll => false,
     };
     plan.steps.retain(|step| {
-        timed(&step.decided) && (move_files || matches!(step.action, RuleAction::AssignToZone { .. }))
+        timed(&step.decided)
+            && (move_files || matches!(step.action, RuleAction::AssignToZone { .. }))
     });
     plan.held.retain(|held| timed(&held.decided));
     plan
@@ -322,34 +349,54 @@ pub fn explain<'a>(
         Decided::Rule(index) => config.rules.get(*index).map(|rule| &rule.action),
         Decided::CatchAll => config.catch_all.as_ref(),
     };
-    let line = |id: &ItemId, decided: Decided, action: Option<&RuleAction>, held: Option<Reason>| {
-        let destination = match action? {
-            RuleAction::AssignToZone { zone } => Destination::Zone {
-                zone: zone.clone(),
-                title: config.zone(zone).map(|zone| zone.title.clone()).unwrap_or_default(),
-            },
-            RuleAction::MoveToFolder { folder } => Destination::Folder { folder: folder.clone() },
+    let line =
+        |id: &ItemId, decided: Decided, action: Option<&RuleAction>, held: Option<Reason>| {
+            let destination = match action? {
+                RuleAction::AssignToZone { zone } => Destination::Zone {
+                    zone: zone.clone(),
+                    title: config
+                        .zone(zone)
+                        .map(|zone| zone.title.clone())
+                        .unwrap_or_default(),
+                },
+                RuleAction::MoveToFolder { folder } => Destination::Folder {
+                    folder: folder.clone(),
+                },
+            };
+            Some(PlanLine {
+                item: id.clone(),
+                name: item(id)
+                    .map(|item| item.name.clone())
+                    .unwrap_or_else(|| paths::file_name(id.as_str()).to_string()),
+                from: placements
+                    .zone_of(id)
+                    .filter(|zone| config.zone(zone).is_some())
+                    .cloned(),
+                destination,
+                decided,
+                rule: match decided {
+                    Decided::Rule(index) => config
+                        .rules
+                        .get(index)
+                        .map(|rule| rule.name.clone())
+                        .unwrap_or_default(),
+                    Decided::CatchAll => String::new(),
+                },
+                held,
+            })
         };
-        Some(PlanLine {
-            item: id.clone(),
-            name: item(id)
-                .map(|item| item.name.clone())
-                .unwrap_or_else(|| paths::file_name(id.as_str()).to_string()),
-            from: placements.zone_of(id).filter(|zone| config.zone(zone).is_some()).cloned(),
-            destination,
-            decided,
-            rule: match decided {
-                Decided::Rule(index) => config.rules.get(index).map(|rule| rule.name.clone()).unwrap_or_default(),
-                Decided::CatchAll => String::new(),
-            },
-            held,
-        })
-    };
-    let steps = plan.steps.iter().filter_map(|step| line(&step.item, step.decided, Some(&step.action), None));
-    let held = plan
-        .held
+    let steps = plan
+        .steps
         .iter()
-        .filter_map(|held| line(&held.item, held.decided, action_of(&held.decided), Some(held.reason.clone())));
+        .filter_map(|step| line(&step.item, step.decided, Some(&step.action), None));
+    let held = plan.held.iter().filter_map(|held| {
+        line(
+            &held.item,
+            held.decided,
+            action_of(&held.decided),
+            Some(held.reason.clone()),
+        )
+    });
     steps.chain(held).collect()
 }
 
@@ -397,9 +444,17 @@ pub struct Applied {
 /// Do what a plan says. Items assigned to a zone come after those that
 /// are there, in the plan's order. A file that is to be moved is taken out
 /// of wherever it was shown; the move itself is returned.
-pub fn apply(plan: &Plan, items: &dyn Fn(&ItemId) -> Option<String>, placements: &mut Placements, now: u64) -> Applied {
+pub fn apply(
+    plan: &Plan,
+    items: &dyn Fn(&ItemId) -> Option<String>,
+    placements: &mut Placements,
+    now: u64,
+) -> Applied {
     let mut applied = Applied {
-        undo: UndoRecord { applied_at: now, ..UndoRecord::default() },
+        undo: UndoRecord {
+            applied_at: now,
+            ..UndoRecord::default()
+        },
         operations: Vec::new(),
     };
     for step in &plan.steps {
@@ -412,7 +467,10 @@ pub fn apply(plan: &Plan, items: &dyn Fn(&ItemId) -> Option<String>, placements:
                 let Some(path) = items(&step.item) else {
                     continue;
                 };
-                let operation = FileOperation::Move { from: path.clone(), to_folder: folder.clone() };
+                let operation = FileOperation::Move {
+                    from: path.clone(),
+                    to_folder: folder.clone(),
+                };
                 applied.undo.moved.push(Moved {
                     item: step.item.clone(),
                     undo: operation.reversed().unwrap_or_else(|| operation.clone()),
@@ -450,7 +508,12 @@ pub fn undo(record: &UndoRecord, placements: &mut Placements) -> Vec<FileOperati
             placements.put_back(&entry.item, &entry.before);
         }
     }
-    record.moved.iter().rev().map(|moved| moved.undo.clone()).collect()
+    record
+        .moved
+        .iter()
+        .rev()
+        .map(|moved| moved.undo.clone())
+        .collect()
 }
 
 #[cfg(test)]
@@ -475,13 +538,17 @@ mod tests {
         Rule {
             name: name.to_string(),
             matchers,
-            action: RuleAction::AssignToZone { zone: ZoneId::new(zone) },
+            action: RuleAction::AssignToZone {
+                zone: ZoneId::new(zone),
+            },
             ..Rule::default()
         }
     }
 
     fn extension(extensions: &[&str]) -> Matcher {
-        Matcher::Extension { any_of: extensions.iter().map(|text| text.to_string()).collect() }
+        Matcher::Extension {
+            any_of: extensions.iter().map(|text| text.to_string()).collect(),
+        }
     }
 
     fn config(rules: Vec<Rule>) -> ZonesConfig {
@@ -496,7 +563,12 @@ mod tests {
     }
 
     fn paths_of(items: &[Item]) -> impl Fn(&ItemId) -> Option<String> + '_ {
-        |id| items.iter().find(|item| &item.id == id).and_then(|item| item.path.clone())
+        |id| {
+            items
+                .iter()
+                .find(|item| &item.id == id)
+                .and_then(|item| item.path.clone())
+        }
     }
 
     #[test]
@@ -549,15 +621,65 @@ mod tests {
             (extension(&["jpg", "png"]), true, false, false),
             (extension(&[".JPG"]), true, false, false),
             (extension(&[]), false, false, false),
-            (Matcher::Mime { pattern: "image/*".to_string() }, true, false, false),
-            (Matcher::Name { pattern: "holi*".to_string() }, true, false, false),
-            (Matcher::Name { pattern: "*".to_string() }, true, true, true),
-            (Matcher::Kind { any_of: vec![ItemKind::Shortcut] }, false, true, false),
-            (Matcher::Kind { any_of: vec![ItemKind::File] }, true, false, true),
+            (
+                Matcher::Mime {
+                    pattern: "image/*".to_string(),
+                },
+                true,
+                false,
+                false,
+            ),
+            (
+                Matcher::Name {
+                    pattern: "holi*".to_string(),
+                },
+                true,
+                false,
+                false,
+            ),
+            (
+                Matcher::Name {
+                    pattern: "*".to_string(),
+                },
+                true,
+                true,
+                true,
+            ),
+            (
+                Matcher::Kind {
+                    any_of: vec![ItemKind::Shortcut],
+                },
+                false,
+                true,
+                false,
+            ),
+            (
+                Matcher::Kind {
+                    any_of: vec![ItemKind::File],
+                },
+                true,
+                false,
+                true,
+            ),
             (date(DateField::Modified, Some(7), None), false, true, false),
-            (date(DateField::Modified, None, Some(30)), true, false, false),
-            (date(DateField::Created, None, Some(365)), true, false, false),
-            (date(DateField::Accessed, Some(60), Some(30)), true, false, false),
+            (
+                date(DateField::Modified, None, Some(30)),
+                true,
+                false,
+                false,
+            ),
+            (
+                date(DateField::Created, None, Some(365)),
+                true,
+                false,
+                false,
+            ),
+            (
+                date(DateField::Accessed, Some(60), Some(30)),
+                true,
+                false,
+                false,
+            ),
             (
                 Matcher::Date {
                     field: DateField::Modified,
@@ -570,17 +692,60 @@ mod tests {
                 false,
                 false,
             ),
-            (Matcher::Size { at_least: Some(1_000_000), at_most: None }, true, false, false),
-            (Matcher::Size { at_least: None, at_most: Some(1_000_000) }, false, false, false),
-            (Matcher::Size { at_least: Some(2_000_000), at_most: Some(2_000_000) }, true, false, false),
-            (Matcher::ShortcutTarget { pattern: "*\\editor.exe".to_string() }, false, true, false),
+            (
+                Matcher::Size {
+                    at_least: Some(1_000_000),
+                    at_most: None,
+                },
+                true,
+                false,
+                false,
+            ),
+            (
+                Matcher::Size {
+                    at_least: None,
+                    at_most: Some(1_000_000),
+                },
+                false,
+                false,
+                false,
+            ),
+            (
+                Matcher::Size {
+                    at_least: Some(2_000_000),
+                    at_most: Some(2_000_000),
+                },
+                true,
+                false,
+                false,
+            ),
+            (
+                Matcher::ShortcutTarget {
+                    pattern: "*\\editor.exe".to_string(),
+                },
+                false,
+                true,
+                false,
+            ),
             (Matcher::Untouched { days: 30 }, true, false, false),
             (Matcher::Untouched { days: 41 }, false, false, false),
             (Matcher::Untouched { days: 1 }, true, true, false),
         ] {
-            assert_eq!(holds(&matcher, &photo, NOW), on_photo, "{matcher:?} on the photo");
-            assert_eq!(holds(&matcher, &link, NOW), on_link, "{matcher:?} on the link");
-            assert_eq!(holds(&matcher, &bare, NOW), on_bare, "{matcher:?} on the bare file");
+            assert_eq!(
+                holds(&matcher, &photo, NOW),
+                on_photo,
+                "{matcher:?} on the photo"
+            );
+            assert_eq!(
+                holds(&matcher, &link, NOW),
+                on_link,
+                "{matcher:?} on the link"
+            );
+            assert_eq!(
+                holds(&matcher, &bare, NOW),
+                on_bare,
+                "{matcher:?} on the bare file"
+            );
         }
     }
 
@@ -597,34 +762,59 @@ mod tests {
     #[test]
     fn the_first_rule_that_matches_decides() {
         let rules = vec![
-            assign("screenshots", vec![Matcher::Name { pattern: "screenshot*".to_string() }], "papers"),
+            assign(
+                "screenshots",
+                vec![Matcher::Name {
+                    pattern: "screenshot*".to_string(),
+                }],
+                "papers",
+            ),
             assign("pictures", vec![extension(&["png", "jpg"])], "pictures"),
             assign("all pngs again", vec![extension(&["png"])], "old"),
         ];
         let decided = |name: &str, rules: &[Rule], catch_all: Option<&RuleAction>| {
             decide(rules, catch_all, &file(name), NOW).map(|(decided, _)| decided)
         };
-        assert_eq!(decided("Screenshot 1.png", &rules, None), Some(Decided::Rule(0)));
+        assert_eq!(
+            decided("Screenshot 1.png", &rules, None),
+            Some(Decided::Rule(0))
+        );
         assert_eq!(decided("cat.png", &rules, None), Some(Decided::Rule(1)));
         assert_eq!(decided("notes.txt", &rules, None), None);
         // The order is what counts: turned around, the last is first.
         let mut turned = rules.clone();
         turned.reverse();
-        assert_eq!(decided("Screenshot 1.png", &turned, None), Some(Decided::Rule(0)));
         assert_eq!(
-            decide(&turned, None, &file("Screenshot 1.png"), NOW).unwrap().1,
-            &RuleAction::AssignToZone { zone: ZoneId::new("old") }
+            decided("Screenshot 1.png", &turned, None),
+            Some(Decided::Rule(0))
+        );
+        assert_eq!(
+            decide(&turned, None, &file("Screenshot 1.png"), NOW)
+                .unwrap()
+                .1,
+            &RuleAction::AssignToZone {
+                zone: ZoneId::new("old")
+            }
         );
         // A rule that is switched off, or asks for nothing, matches nothing.
         let mut off = rules.clone();
         off[0].enabled = false;
         off[1].matchers.clear();
-        assert_eq!(decided("Screenshot 1.png", &off, None), Some(Decided::Rule(2)));
+        assert_eq!(
+            decided("Screenshot 1.png", &off, None),
+            Some(Decided::Rule(2))
+        );
         assert_eq!(decided("cat.jpg", &off, None), None);
         // Every matcher of a rule must hold.
         let both = vec![assign(
             "large pictures",
-            vec![extension(&["png"]), Matcher::Size { at_least: Some(10), at_most: None }],
+            vec![
+                extension(&["png"]),
+                Matcher::Size {
+                    at_least: Some(10),
+                    at_most: None,
+                },
+            ],
             "pictures",
         )];
         assert_eq!(decided("cat.png", &both, None), None);
@@ -632,12 +822,18 @@ mod tests {
 
     #[test]
     fn the_catch_all_takes_what_no_rule_matched() {
-        let mut config = config(vec![assign("pictures", vec![extension(&["png"])], "pictures")]);
+        let mut config = config(vec![assign(
+            "pictures",
+            vec![extension(&["png"])],
+            "pictures",
+        )]);
         let items = [file("cat.png"), file("notes.txt")];
         let placements = Placements::default();
         let without = plan(&config, &items, &placements, Scope::Loose, NOW);
         assert_eq!(without.steps.len(), 1);
-        config.catch_all = Some(RuleAction::AssignToZone { zone: ZoneId::new("rest") });
+        config.catch_all = Some(RuleAction::AssignToZone {
+            zone: ZoneId::new("rest"),
+        });
         let with = plan(&config, &items, &placements, Scope::Loose, NOW);
         assert_eq!(with.steps.len(), 2);
         assert_eq!(with.steps[0].decided, Decided::Rule(0));
@@ -652,14 +848,20 @@ mod tests {
             Rule {
                 name: "old".to_string(),
                 matchers: vec![Matcher::Untouched { days: 90 }],
-                action: RuleAction::MoveToFolder { folder: "/archive".to_string() },
+                action: RuleAction::MoveToFolder {
+                    folder: "/archive".to_string(),
+                },
                 ..Rule::default()
             },
         ]);
-        config.catch_all = Some(RuleAction::AssignToZone { zone: ZoneId::new("rest") });
+        config.catch_all = Some(RuleAction::AssignToZone {
+            zone: ZoneId::new("rest"),
+        });
         let items = [
             file("cat.png"),
-            with("ancient.doc", |facts| facts.modified = Some(NOW - 200 * DAY)),
+            with("ancient.doc", |facts| {
+                facts.modified = Some(NOW - 200 * DAY)
+            }),
             file("notes.txt"),
             file("dog.png"),
         ];
@@ -692,23 +894,46 @@ mod tests {
         assert_eq!(applied.undo.entries.len(), dry.steps.len());
         assert_eq!(placements.broken(), None);
         // And nothing is left to do, for what is still there.
-        let still: Vec<Item> = items.iter().filter(|item| item.name != "ancient.doc").cloned().collect();
-        assert_eq!(plan(&config, &still, &placements, Scope::All, NOW), Plan::default());
+        let still: Vec<Item> = items
+            .iter()
+            .filter(|item| item.name != "ancient.doc")
+            .cloned()
+            .collect();
+        assert_eq!(
+            plan(&config, &still, &placements, Scope::All, NOW),
+            Plan::default()
+        );
     }
 
     #[test]
     fn only_loose_items_are_sorted_unless_all_are_asked_for() {
-        let config = config(vec![assign("pictures", vec![extension(&["png"])], "pictures")]);
+        let config = config(vec![assign(
+            "pictures",
+            vec![extension(&["png"])],
+            "pictures",
+        )]);
         let items = [file("cat.png"), file("dog.png")];
         let mut placements = Placements::default();
         placements.assign(&items[0].id, &ZoneId::new("papers"), None, None);
         let loose = plan(&config, &items, &placements, Scope::Loose, NOW);
-        assert_eq!(loose.steps.iter().map(|step| &step.item).collect::<Vec<_>>(), [&items[1].id]);
+        assert_eq!(
+            loose
+                .steps
+                .iter()
+                .map(|step| &step.item)
+                .collect::<Vec<_>>(),
+            [&items[1].id]
+        );
         let all = plan(&config, &items, &placements, Scope::All, NOW);
         assert_eq!(all.steps.len(), 2);
         // An item in a zone that is no longer there counts as loose.
         placements.assign(&items[0].id, &ZoneId::new("gone"), None, None);
-        assert_eq!(plan(&config, &items, &placements, Scope::Loose, NOW).steps.len(), 2);
+        assert_eq!(
+            plan(&config, &items, &placements, Scope::Loose, NOW)
+                .steps
+                .len(),
+            2
+        );
     }
 
     #[test]
@@ -720,13 +945,19 @@ mod tests {
             assign("out of a locked zone", vec![extension(&["d"])], "pictures"),
             Rule {
                 name: "move".to_string(),
-                matchers: vec![Matcher::Name { pattern: "This PC".to_string() }],
-                action: RuleAction::MoveToFolder { folder: "/archive".to_string() },
+                matchers: vec![Matcher::Name {
+                    pattern: "This PC".to_string(),
+                }],
+                action: RuleAction::MoveToFolder {
+                    folder: "/archive".to_string(),
+                },
                 ..Rule::default()
             },
         ]);
         config.zones.push(ZoneDefinition {
-            kind: ZoneKind::Portal { directory: "/downloads".to_string() },
+            kind: ZoneKind::Portal {
+                directory: "/downloads".to_string(),
+            },
             ..ZoneDefinition::manual("portal", "Portal")
         });
         let mut locked = ZoneDefinition::manual("locked", "Locked");
@@ -743,7 +974,11 @@ mod tests {
         placements.assign(&items[3].id, &ZoneId::new("locked"), None, None);
         let plan = plan(&config, &items, &placements, Scope::All, NOW);
         assert_eq!(plan.steps, []);
-        let reasons: Vec<_> = plan.held.iter().map(|held| (held.item.as_str(), &held.reason)).collect();
+        let reasons: Vec<_> = plan
+            .held
+            .iter()
+            .map(|held| (held.item.as_str(), &held.reason))
+            .collect();
         assert_eq!(
             reasons,
             [
@@ -763,11 +998,15 @@ mod tests {
             Rule {
                 name: "old".to_string(),
                 matchers: vec![Matcher::Untouched { days: 90 }],
-                action: RuleAction::MoveToFolder { folder: "/archive".to_string() },
+                action: RuleAction::MoveToFolder {
+                    folder: "/archive".to_string(),
+                },
                 ..Rule::default()
             },
         ]);
-        config.catch_all = Some(RuleAction::AssignToZone { zone: ZoneId::new("rest") });
+        config.catch_all = Some(RuleAction::AssignToZone {
+            zone: ZoneId::new("rest"),
+        });
         let old = |name: &str| with(name, |facts| facts.modified = Some(NOW - 200 * DAY));
         let items = [
             file("a.png"),
@@ -807,8 +1046,14 @@ mod tests {
         assert_eq!(
             back,
             [
-                FileOperation::Move { from: "/archive/f.doc".to_string(), to_folder: "/desk".to_string() },
-                FileOperation::Move { from: "/archive/d.doc".to_string(), to_folder: "/desk".to_string() },
+                FileOperation::Move {
+                    from: "/archive/f.doc".to_string(),
+                    to_folder: "/desk".to_string()
+                },
+                FileOperation::Move {
+                    from: "/archive/d.doc".to_string(),
+                    to_folder: "/desk".to_string()
+                },
             ]
         );
     }
@@ -829,14 +1074,31 @@ mod tests {
             // A day of the calendar is the same day whenever it is asked.
             (date(None, None, Some(NOW)), false),
             (extension(&["png"]), false),
-            (Matcher::Size { at_least: Some(1), at_most: None }, false),
+            (
+                Matcher::Size {
+                    at_least: Some(1),
+                    at_most: None,
+                },
+                false,
+            ),
         ] {
             assert_eq!(asks_the_time(&matcher), asks, "{matcher:?}");
         }
-        let stale = assign("stale", vec![extension(&["doc"]), Matcher::Untouched { days: 30 }], "old");
+        let stale = assign(
+            "stale",
+            vec![extension(&["doc"]), Matcher::Untouched { days: 30 }],
+            "old",
+        );
         assert!(is_timed(&stale));
-        assert!(!is_timed(&Rule { enabled: false, ..stale }));
-        assert!(!is_timed(&assign("pictures", vec![extension(&["png"])], "pictures")));
+        assert!(!is_timed(&Rule {
+            enabled: false,
+            ..stale
+        }));
+        assert!(!is_timed(&assign(
+            "pictures",
+            vec![extension(&["png"])],
+            "pictures"
+        )));
     }
 
     #[test]
@@ -846,18 +1108,33 @@ mod tests {
             Rule {
                 name: "ancient".to_string(),
                 matchers: vec![extension(&["tmp"]), Matcher::Untouched { days: 1 }],
-                action: RuleAction::MoveToFolder { folder: "/archive".to_string() },
+                action: RuleAction::MoveToFolder {
+                    folder: "/archive".to_string(),
+                },
                 ..Rule::default()
             },
             assign("pictures", vec![extension(&["png"])], "pictures"),
         ]);
-        config.catch_all = Some(RuleAction::AssignToZone { zone: ZoneId::new("rest") });
-        let aged = |name: &str, days: u64| with(name, |facts| facts.modified = Some(NOW - days * DAY));
-        let items = [aged("old.png", 40), aged("new.png", 2), aged("scratch.tmp", 3), aged("note.txt", 2)];
+        config.catch_all = Some(RuleAction::AssignToZone {
+            zone: ZoneId::new("rest"),
+        });
+        let aged =
+            |name: &str, days: u64| with(name, |facts| facts.modified = Some(NOW - days * DAY));
+        let items = [
+            aged("old.png", 40),
+            aged("new.png", 2),
+            aged("scratch.tmp", 3),
+            aged("note.txt", 2),
+        ];
         let mut placements = Placements::default();
         // Sorted by hand long ago: exactly what a timed rule is for.
         placements.assign(&items[0].id, &ZoneId::new("pictures"), None, None);
-        let names = |plan: &Plan| plan.steps.iter().map(|step| step.item.as_str().to_string()).collect::<Vec<_>>();
+        let names = |plan: &Plan| {
+            plan.steps
+                .iter()
+                .map(|step| step.item.as_str().to_string())
+                .collect::<Vec<_>>()
+        };
 
         let timed = plan_timed(&config, &items, &placements, NOW, false);
         assert_eq!(names(&timed), ["/desk/old.png"]);
@@ -873,7 +1150,14 @@ mod tests {
         config.zones.retain(|zone| zone.id.as_str() != "old");
         let held = plan_timed(&config, &items, &placements, NOW, false);
         assert!(held.steps.is_empty());
-        assert_eq!(held.held, [Held { item: items[0].id.clone(), decided: Decided::Rule(0), reason: Reason::NoSuchZone }]);
+        assert_eq!(
+            held.held,
+            [Held {
+                item: items[0].id.clone(),
+                decided: Decided::Rule(0),
+                reason: Reason::NoSuchZone
+            }]
+        );
     }
 
     #[test]
@@ -882,17 +1166,27 @@ mod tests {
             assign("Pictures", vec![extension(&["png"])], "pictures"),
             Rule {
                 matchers: vec![extension(&["doc"])],
-                action: RuleAction::MoveToFolder { folder: "/archive".to_string() },
+                action: RuleAction::MoveToFolder {
+                    folder: "/archive".to_string(),
+                },
                 ..Rule::default()
             },
             assign("Lost", vec![extension(&["lost"])], "nowhere"),
         ]);
-        config.catch_all = Some(RuleAction::AssignToZone { zone: ZoneId::new("rest") });
+        config.catch_all = Some(RuleAction::AssignToZone {
+            zone: ZoneId::new("rest"),
+        });
         config.zones[0].title = "My pictures".to_string();
         let mut drive = file("drive");
         drive.path = None;
         drive.facts.extension = Some("doc".to_string());
-        let items = [file("a.png"), file("b.doc"), drive, file("c.lost"), file("d.txt")];
+        let items = [
+            file("a.png"),
+            file("b.doc"),
+            drive,
+            file("c.lost"),
+            file("d.txt"),
+        ];
         let mut placements = Placements::default();
         placements.assign(&items[0].id, &ZoneId::new("papers"), None, None);
         let dry = plan(&config, &items, &placements, Scope::All, NOW);
@@ -907,7 +1201,11 @@ mod tests {
                     Destination::Zone { zone, title } => format!("{zone} ({title})"),
                     Destination::Folder { folder } => folder.clone(),
                 };
-                let held = line.held.as_ref().map(|reason| format!(", held: {reason:?}")).unwrap_or_default();
+                let held = line
+                    .held
+                    .as_ref()
+                    .map(|reason| format!(", held: {reason:?}"))
+                    .unwrap_or_default();
                 format!("{} from {from} to {to} by [{}]{held}", line.name, line.rule)
             })
             .collect();
@@ -937,24 +1235,45 @@ mod tests {
 
     #[test]
     fn the_lock_for_all_zones_holds_the_rules_back_as_a_zones_own_does() {
-        let mut config = config(vec![assign("pictures", vec![extension(&["png"])], "pictures")]);
+        let mut config = config(vec![assign(
+            "pictures",
+            vec![extension(&["png"])],
+            "pictures",
+        )]);
         let items = [file("a.png"), file("b.png")];
         let mut placements = Placements::default();
         placements.assign(&items[1].id, &ZoneId::new("papers"), None, None);
-        assert_eq!(plan(&config, &items, &placements, Scope::All, NOW).steps.len(), 2);
+        assert_eq!(
+            plan(&config, &items, &placements, Scope::All, NOW)
+                .steps
+                .len(),
+            2
+        );
         config.lock.members = true;
         let locked = plan(&config, &items, &placements, Scope::All, NOW);
         assert!(locked.steps.is_empty());
         assert!(locked.held.iter().all(|held| held.reason == Reason::Locked));
         assert_eq!(locked.held.len(), 2);
         // Where a zone stands is another lock, and none of the rules' concern.
-        config.lock = crate::config::Lock { geometry: true, members: false };
-        assert_eq!(plan(&config, &items, &placements, Scope::All, NOW).steps.len(), 2);
+        config.lock = crate::config::Lock {
+            geometry: true,
+            members: false,
+        };
+        assert_eq!(
+            plan(&config, &items, &placements, Scope::All, NOW)
+                .steps
+                .len(),
+            2
+        );
     }
 
     #[test]
     fn undoing_leaves_what_the_person_moved_since() {
-        let config = config(vec![assign("pictures", vec![extension(&["png"])], "pictures")]);
+        let config = config(vec![assign(
+            "pictures",
+            vec![extension(&["png"])],
+            "pictures",
+        )]);
         let items = [file("a.png"), file("b.png")];
         let mut placements = Placements::default();
         let dry = plan(&config, &items, &placements, Scope::Loose, NOW);
@@ -962,7 +1281,10 @@ mod tests {
         // The person takes one of the two elsewhere.
         placements.assign(&items[0].id, &ZoneId::new("papers"), None, None);
         undo(&applied.undo, &mut placements);
-        assert_eq!(placements.zone_of(&items[0].id), Some(&ZoneId::new("papers")));
+        assert_eq!(
+            placements.zone_of(&items[0].id),
+            Some(&ZoneId::new("papers"))
+        );
         assert_eq!(placements.zone_of(&items[1].id), None);
     }
 }

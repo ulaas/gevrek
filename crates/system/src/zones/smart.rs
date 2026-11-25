@@ -42,17 +42,27 @@ pub type Commander = Box<dyn FnMut(serde_json::Value)>;
 /// [`MOST_DOWNLOADS`].
 pub fn newest_first(mut items: Vec<Item>) -> Vec<Item> {
     let arrived = |item: &Item| item.facts.created.max(item.facts.modified);
-    items.sort_by(|one, other| arrived(other).cmp(&arrived(one)).then_with(|| one.id.cmp(&other.id)));
+    items.sort_by(|one, other| {
+        arrived(other)
+            .cmp(&arrived(one))
+            .then_with(|| one.id.cmp(&other.id))
+    });
     items.truncate(MOST_DOWNLOADS);
     items
 }
 
 /// The event a source is told with, when somebody asked for the source.
-pub fn told_as(source: SmartSource, wanted: &Arc<AtomicBool>) -> impl Fn(Vec<Item>) -> Vec<BackendEvent> + Send + 'static {
+pub fn told_as(
+    source: SmartSource,
+    wanted: &Arc<AtomicBool>,
+) -> impl Fn(Vec<Item>) -> Vec<BackendEvent> + Send + 'static {
     let wanted = Arc::clone(wanted);
     move |items| {
         if wanted.load(Ordering::SeqCst) {
-            vec![BackendEvent::SourceListed { source: source.clone(), items }]
+            vec![BackendEvent::SourceListed {
+                source: source.clone(),
+                items,
+            }]
         } else {
             Vec::new()
         }
@@ -85,7 +95,9 @@ pub struct Smart {
 }
 
 fn locked<T>(shared: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    shared.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    shared
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Work out the programs that run from the state and what is installed;
@@ -93,19 +105,33 @@ fn locked<T>(shared: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 fn rerun(known: &Mutex<Known>, state: &Mutex<Option<serde_json::Value>>) -> Option<Vec<Item>> {
     let state = locked(state);
     let mut known = locked(known);
-    let running = state.as_ref().map(|state| programs::running(state, &known.apps)).unwrap_or_default();
+    let running = state
+        .as_ref()
+        .map(|state| programs::running(state, &known.apps))
+        .unwrap_or_default();
     if running == known.running {
         return None;
     }
     known.running = running;
-    Some(known.running.iter().map(|running| running.item.clone()).collect())
+    Some(
+        known
+            .running
+            .iter()
+            .map(|running| running.item.clone())
+            .collect(),
+    )
 }
 
 impl Smart {
     /// `state_dir` is gevrek's folder for what it keeps; `installed`
     /// reads the programs; `program_folders` are watched for programs
     /// that come and go; `tell` hands events to the backend.
-    pub fn new(state_dir: &std::path::Path, installed: Installed, program_folders: Vec<PathBuf>, tell: Tell) -> Self {
+    pub fn new(
+        state_dir: &std::path::Path,
+        installed: Installed,
+        program_folders: Vec<PathBuf>,
+        tell: Tell,
+    ) -> Self {
         Self {
             tell,
             kept: Kept::under(state_dir),
@@ -141,17 +167,34 @@ impl Smart {
     /// run are named.
     fn launchers(&mut self) -> &Source {
         if self.launchers.is_none() {
-            let (kept, known, installed) = (self.kept.clone(), Arc::clone(&self.known), Arc::clone(&self.installed));
-            let (state, running_wanted, tell) = (Arc::clone(&self.state), Arc::clone(&self.running_wanted), Arc::clone(&self.tell));
+            let (kept, known, installed) = (
+                self.kept.clone(),
+                Arc::clone(&self.known),
+                Arc::clone(&self.installed),
+            );
+            let (state, running_wanted, tell) = (
+                Arc::clone(&self.state),
+                Arc::clone(&self.running_wanted),
+                Arc::clone(&self.tell),
+            );
             let read = move || {
                 let apps = installed();
-                let items = programs::launchers(&apps, &kept.pins(), &kept.counts(), &kept.recent(), programs::MOST_STARTED);
+                let items = programs::launchers(
+                    &apps,
+                    &kept.pins(),
+                    &kept.counts(),
+                    &kept.recent(),
+                    programs::MOST_STARTED,
+                );
                 locked(&known).apps = apps;
                 // With other programs installed, a program that runs may
                 // have another name.
                 if let Some(items) = rerun(&known, &state) {
                     if running_wanted.load(Ordering::SeqCst) {
-                        tell(vec![BackendEvent::SourceListed { source: SmartSource::RunningApps, items }]);
+                        tell(vec![BackendEvent::SourceListed {
+                            source: SmartSource::RunningApps,
+                            items,
+                        }]);
                     }
                 }
                 items
@@ -204,7 +247,10 @@ impl Smart {
                 // (The installed programs are read for the names.)
                 self.launchers();
                 let items = self.running();
-                (self.tell)(vec![BackendEvent::SourceListed { source: SmartSource::RunningApps, items }]);
+                (self.tell)(vec![BackendEvent::SourceListed {
+                    source: SmartSource::RunningApps,
+                    items,
+                }]);
             }
             SmartSource::Desktop | SmartSource::Folder { .. } => {}
         }
@@ -220,7 +266,8 @@ impl Smart {
         if let Some(wanted) = self.wanted(&source) {
             wanted.store(false, Ordering::SeqCst);
         }
-        let programs_wanted = self.launchers_wanted.load(Ordering::SeqCst) || self.running_wanted.load(Ordering::SeqCst);
+        let programs_wanted = self.launchers_wanted.load(Ordering::SeqCst)
+            || self.running_wanted.load(Ordering::SeqCst);
         if !programs_wanted {
             // (Its thread and its watches end with it.)
             self.launchers = None;
@@ -251,7 +298,11 @@ impl Smart {
 
     /// The programs that run, as last worked out.
     pub fn running(&self) -> Vec<Item> {
-        locked(&self.known).running.iter().map(|running| running.item.clone()).collect()
+        locked(&self.known)
+            .running
+            .iter()
+            .map(|running| running.item.clone())
+            .collect()
     }
 
     /// The window manager's state is this now (the JSON the shell has
@@ -261,7 +312,10 @@ impl Smart {
         *locked(&self.state) = Some(state.clone());
         if let Some(items) = rerun(&self.known, &self.state) {
             if self.running_wanted.load(Ordering::SeqCst) {
-                (self.tell)(vec![BackendEvent::SourceListed { source: SmartSource::RunningApps, items }]);
+                (self.tell)(vec![BackendEvent::SourceListed {
+                    source: SmartSource::RunningApps,
+                    items,
+                }]);
             }
         }
     }
@@ -282,7 +336,9 @@ impl Smart {
     pub fn set_pins(&mut self, pins: &[String]) -> Result<(), BackendError> {
         self.kept
             .set_pins(pins)
-            .map_err(|error| BackendError::Refused { what: format!("{}: {error}", self.kept.pins.display()) })?;
+            .map_err(|error| BackendError::Refused {
+                what: format!("{}: {error}", self.kept.pins.display()),
+            })?;
         if let Some(launchers) = &self.launchers {
             launchers.refresh();
         }
@@ -309,7 +365,11 @@ impl Smart {
         if let Some(app) = known.app(item) {
             return Some(programs::launcher_item(app));
         }
-        known.running.iter().find(|running| &running.item.id == item).map(|running| running.item.clone())
+        known
+            .running
+            .iter()
+            .find(|running| &running.item.id == item)
+            .map(|running| running.item.clone())
     }
 
     /// The installed program an item names.
@@ -322,7 +382,9 @@ impl Smart {
     pub fn focus(&mut self, item: &ItemId) -> Result<(), BackendError> {
         let window = locked(&self.known)
             .window_of(item)
-            .ok_or_else(|| BackendError::NotFound { what: item.to_string() })?;
+            .ok_or_else(|| BackendError::NotFound {
+                what: item.to_string(),
+            })?;
         let commander = self.commander.as_mut().ok_or(BackendError::Unsupported)?;
         commander(programs::focus_command(window));
         Ok(())
@@ -354,7 +416,8 @@ mod tests {
     }
 
     fn folder(name: &str) -> PathBuf {
-        let folder = std::env::temp_dir().join(format!("gevrek-zones-smart-{name}-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("gevrek-zones-smart-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(&folder).expect("a folder");
         std::fs::canonicalize(&folder).expect("a real folder")
@@ -403,7 +466,8 @@ mod tests {
         let tell: Tell = Arc::new(move |events| {
             let _ = told.lock().expect("the channel").send(events);
         });
-        let installed: Installed = Arc::new(|| vec![app("mail", "Mail"), app("web", "Web"), app("edit", "Edit")]);
+        let installed: Installed =
+            Arc::new(|| vec![app("mail", "Mail"), app("web", "Web"), app("edit", "Edit")]);
         let mut smart = Smart::new(&state_dir, installed, Vec::new(), tell);
         std::fs::write(state_dir.join("launcher-usage.json"), r#"{"web":2}"#).expect("written");
 
@@ -411,25 +475,44 @@ mod tests {
         smart.set_wm_state(&json!({"monitors": [{"workspaces": [{"detailed_windows": [
             {"window_id": 4, "title": "Inbox", "app_id": "mail"}]}]}]}));
         quiet(&tellings, &SmartSource::RunningApps);
-        assert_eq!(smart.watch(WatchId(1), &SmartSource::Desktop), Err(BackendError::Unsupported));
-        assert_eq!(smart.watch(WatchId(1), &SmartSource::Folder { directory: "/x".to_string() }), Err(BackendError::Unsupported));
+        assert_eq!(
+            smart.watch(WatchId(1), &SmartSource::Desktop),
+            Err(BackendError::Unsupported)
+        );
+        assert_eq!(
+            smart.watch(
+                WatchId(1),
+                &SmartSource::Folder {
+                    directory: "/x".to_string()
+                }
+            ),
+            Err(BackendError::Unsupported)
+        );
 
         // The launchers: nothing pinned yet, so the one that was started.
-        smart.watch(WatchId(1), &SmartSource::Pinned).expect("watched");
+        smart
+            .watch(WatchId(1), &SmartSource::Pinned)
+            .expect("watched");
         expect(&tellings, &SmartSource::Pinned, &["Web"]);
         smart.pin("edit", true).expect("pinned");
         expect(&tellings, &SmartSource::Pinned, &["Edit", "Web"]);
         assert_eq!(smart.pins(), ["edit"]);
         assert_eq!(smart.list(&SmartSource::Pinned).expect("listed").len(), 2);
         // The launcher counts another start (it writes its file anew).
-        std::fs::write(state_dir.join("launcher-usage.json"), r#"{"web":2,"mail":5}"#).expect("written");
+        std::fs::write(
+            state_dir.join("launcher-usage.json"),
+            r#"{"web":2,"mail":5}"#,
+        )
+        .expect("written");
         expect(&tellings, &SmartSource::Pinned, &["Edit", "Mail", "Web"]);
         smart.pin("edit", false).expect("unpinned");
         expect(&tellings, &SmartSource::Pinned, &["Mail", "Web"]);
 
         // The programs that run: told at once when asked for, by the
         // installed program's name; then with every other state.
-        smart.watch(WatchId(2), &SmartSource::RunningApps).expect("watched");
+        smart
+            .watch(WatchId(2), &SmartSource::RunningApps)
+            .expect("watched");
         expect(&tellings, &SmartSource::RunningApps, &["Mail"]);
         smart.set_wm_state(&json!({"monitors": [{"workspaces": [{"detailed_windows": [
             {"window_id": 4, "title": "Inbox", "app_id": "mail"},
@@ -446,19 +529,34 @@ mod tests {
         let running = ItemId::new("running:edit");
         assert!(Smart::is_program(&running));
         assert!(!Smart::is_program(&ItemId::new("/home/ada/a.txt")));
-        assert_eq!(smart.item(&running).map(|item| item.name), Some("Edit".to_string()));
-        assert_eq!(smart.item(&ItemId::new("app:web")).map(|item| item.name), Some("Web".to_string()));
+        assert_eq!(
+            smart.item(&running).map(|item| item.name),
+            Some("Edit".to_string())
+        );
+        assert_eq!(
+            smart.item(&ItemId::new("app:web")).map(|item| item.name),
+            Some("Web".to_string())
+        );
         assert_eq!(smart.focus(&running), Err(BackendError::Unsupported));
         let (sent, commands) = mpsc::channel();
         smart.set_commander(Box::new(move |command| {
             let _ = sent.send(command);
         }));
         smart.focus(&running).expect("sent");
-        assert_eq!(commands.try_recv().expect("a command"), programs::focus_command(5));
-        assert!(matches!(smart.focus(&ItemId::new("running:nothing")), Err(BackendError::NotFound { .. })));
+        assert_eq!(
+            commands.try_recv().expect("a command"),
+            programs::focus_command(5)
+        );
+        assert!(matches!(
+            smart.focus(&ItemId::new("running:nothing")),
+            Err(BackendError::NotFound { .. })
+        ));
 
         // Let go of: nothing more is told.
-        assert_eq!(smart.unwatch(WatchId(2)), Some(Some(SmartSource::RunningApps)));
+        assert_eq!(
+            smart.unwatch(WatchId(2)),
+            Some(Some(SmartSource::RunningApps))
+        );
         assert_eq!(smart.unwatch(WatchId(1)), Some(Some(SmartSource::Pinned)));
         assert_eq!(smart.unwatch(WatchId(9)), None);
         smart.set_wm_state(&json!({}));
@@ -482,8 +580,16 @@ mod tests {
             file("edited", Some(20), Some(400)),
             file("nothing known", None, None),
         ]);
-        assert_eq!(listed.iter().map(|item| item.name.as_str()).collect::<Vec<_>>(), ["arrived", "edited", "old", "nothing known"]);
-        let many: Vec<Item> = (0..MOST_DOWNLOADS as u64 + 50).map(|number| file(&format!("f{number}"), Some(number), None)).collect();
+        assert_eq!(
+            listed
+                .iter()
+                .map(|item| item.name.as_str())
+                .collect::<Vec<_>>(),
+            ["arrived", "edited", "old", "nothing known"]
+        );
+        let many: Vec<Item> = (0..MOST_DOWNLOADS as u64 + 50)
+            .map(|number| file(&format!("f{number}"), Some(number), None))
+            .collect();
         let kept = newest_first(many);
         assert_eq!(kept.len(), MOST_DOWNLOADS);
         assert_eq!(kept[0].name, format!("f{}", MOST_DOWNLOADS + 49));

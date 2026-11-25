@@ -108,37 +108,43 @@ pub(crate) struct ZonesSide {
 /// The report a snapshot travels as.
 pub fn snapshot_report(snapshot: &ZonesSnapshot) -> proto::ZonesReport {
     proto::ZonesReport {
-        report: Some(proto::zones_report::Report::Snapshot(proto::ZonesSnapshotReport {
-            version: snapshot.version,
-            json: serde_json::to_string(snapshot).unwrap_or_default(),
-        })),
+        report: Some(proto::zones_report::Report::Snapshot(
+            proto::ZonesSnapshotReport {
+                version: snapshot.version,
+                json: serde_json::to_string(snapshot).unwrap_or_default(),
+            },
+        )),
     }
 }
 
 /// The report an event travels as.
 pub fn event_report(event: &ZonesEvent) -> proto::ZonesReport {
     proto::ZonesReport {
-        report: Some(proto::zones_report::Report::Event(proto::ZonesEventReport {
-            version: ipc::VERSION,
-            name: ipc::event_name(event),
-            json: serde_json::to_string(event).unwrap_or_default(),
-        })),
+        report: Some(proto::zones_report::Report::Event(
+            proto::ZonesEventReport {
+                version: ipc::VERSION,
+                name: ipc::event_name(event),
+                json: serde_json::to_string(event).unwrap_or_default(),
+            },
+        )),
     }
 }
 
 /// The report an answer travels as.
 pub fn answer_report(request: u64, answer: &Answer) -> proto::ZonesReport {
     proto::ZonesReport {
-        report: Some(proto::zones_report::Report::Answer(proto::ZonesCommandAnswer {
-            request_id: request,
-            success: answer.ok,
-            error: answer.error.clone(),
-            events: answer
-                .events
-                .iter()
-                .filter_map(|event| serde_json::to_string(event).ok())
-                .collect(),
-        })),
+        report: Some(proto::zones_report::Report::Answer(
+            proto::ZonesCommandAnswer {
+                request_id: request,
+                success: answer.ok,
+                error: answer.error.clone(),
+                events: answer
+                    .events
+                    .iter()
+                    .filter_map(|event| serde_json::to_string(event).ok())
+                    .collect(),
+            },
+        )),
     }
 }
 
@@ -157,7 +163,10 @@ pub fn read_request(request: proto::ZonesRequest) -> Result<ZonesAsk, Option<pro
         ipc::Request::from_json(&request.json)
     };
     match read {
-        Ok(ask) => Ok(ZonesAsk { request: number, ask }),
+        Ok(ask) => Ok(ZonesAsk {
+            request: number,
+            ask,
+        }),
         Err(why) => {
             log::warn!("something asked of the zones was not read: {why}");
             Err(number.map(|number| answer_report(number, &Answer::refused(why))))
@@ -278,7 +287,9 @@ impl ZonesSide {
             return;
         }
         if !features.iter().any(|feature| feature == FEATURE) {
-            return self.say("this window manager does not know the zones' call (it is older)".to_string());
+            return self.say(
+                "this window manager does not know the zones' call (it is older)".to_string(),
+            );
         }
         let (reports, outgoing) = tokio::sync::mpsc::channel(WAITING);
         self.latest_sent = match &self.latest {
@@ -286,7 +297,8 @@ impl ZonesSide {
             None => false,
         };
         let outgoing = tokio_stream::wrappers::ReceiverStream::new(outgoing);
-        let made = tokio::time::timeout(Duration::from_secs(5), client.attach_zones(outgoing)).await;
+        let made =
+            tokio::time::timeout(Duration::from_secs(5), client.attach_zones(outgoing)).await;
         match made {
             Ok(Ok(requests)) => {
                 log::debug!("zones: the zones' call is made; this program runs the zones");
@@ -393,7 +405,10 @@ mod tests {
         // Without a number nobody waits; and a version that is not said
         // is read as this one.
         let ask = read_request(request(0, 0, r#"{"command":"restore_system_icons"}"#)).unwrap();
-        assert_eq!((ask.request, ask.ask), (None, ipc::Request::RestoreSystemIcons));
+        assert_eq!(
+            (ask.request, ask.ask),
+            (None, ipc::Request::RestoreSystemIcons)
+        );
     }
 
     #[test]
@@ -407,7 +422,10 @@ mod tests {
         assert_eq!(read_request(request(0, 1, "{")).unwrap_err(), None);
         // A newer shape is not guessed at.
         let newer = read_request(request(4, 99, r#"{"command":"quick_hide"}"#)).unwrap_err();
-        assert!(answer_of(newer.unwrap()).error.unwrap().contains("version 99"));
+        assert!(answer_of(newer.unwrap())
+            .error
+            .unwrap()
+            .contains("version 99"));
     }
 
     #[test]
@@ -421,7 +439,10 @@ mod tests {
         let hide = r#"{"command":"quick_hide"}"#;
         let ask = read_event("shell.command", &fields("zones", hide)).unwrap();
         assert_eq!(ask.request, None);
-        assert_eq!(ask.ask, ipc::Request::Command(Command::QuickHide { hidden: None }));
+        assert_eq!(
+            ask.ask,
+            ipc::Request::Command(Command::QuickHide { hidden: None })
+        );
         // As the window manager writes it for the command of a binding.
         let command: gevrek_model::command::DispatchCommand =
             serde_json::from_str(&format!(r#"{{"command":"zones","action":{hide}}}"#)).unwrap();
@@ -446,11 +467,16 @@ mod tests {
             }
             other => panic!("not a snapshot: {other:?}"),
         }
-        let created = ZonesEvent::ZoneCreated { zone: ZoneId::new("work") };
+        let created = ZonesEvent::ZoneCreated {
+            zone: ZoneId::new("work"),
+        };
         match event_report(&created).report {
             Some(proto::zones_report::Report::Event(report)) => {
                 assert_eq!(report.name, "zone_created");
-                assert_eq!(serde_json::from_str::<ZonesEvent>(&report.json).unwrap(), created);
+                assert_eq!(
+                    serde_json::from_str::<ZonesEvent>(&report.json).unwrap(),
+                    created
+                );
             }
             other => panic!("not an event: {other:?}"),
         }
@@ -464,7 +490,10 @@ mod tests {
         };
         let done = answer_of(answer_report(10, &done));
         assert!(done.success && done.error.is_none());
-        assert_eq!(serde_json::from_str::<ZonesEvent>(&done.events[0]).unwrap(), created);
+        assert_eq!(
+            serde_json::from_str::<ZonesEvent>(&done.events[0]).unwrap(),
+            created
+        );
     }
 
     #[test]

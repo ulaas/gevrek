@@ -628,7 +628,10 @@ mod bus {
                                 .partition(|icon| icon.owner == name || icon.service == name);
                             known = kept;
                             for icon in gone {
-                                log::debug!("tray: {} is removed: its program left the bus", icon.item.key);
+                                log::debug!(
+                                    "tray: {} is removed: its program left the bus",
+                                    icon.item.key
+                                );
                                 let _ = connection.emit_signal(
                                     Option::<&str>::None,
                                     WATCHER_PATH,

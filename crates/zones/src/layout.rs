@@ -60,7 +60,9 @@ impl Metrics {
 
     /// The size of one cell: of a grid, or a line of a list `width` wide.
     pub fn cell(&self, view: View, icon_size: u32, width: i32) -> (i32, i32) {
-        let icon = i32::try_from(icon_size).unwrap_or(i32::MAX / 4).clamp(8, 1024);
+        let icon = i32::try_from(icon_size)
+            .unwrap_or(i32::MAX / 4)
+            .clamp(8, 1024);
         match view {
             View::Grid => (icon + self.label_margin, icon + self.label_height),
             View::List => (width.max(1), self.list_icon.max(1) + self.spacing),
@@ -70,7 +72,12 @@ impl Metrics {
 
 /// What is left of a zone that is rolled up: its title, where it was.
 pub fn rolled_up(rect: Rect, metrics: &Metrics) -> Rect {
-    Rect::new(rect.x, rect.y, rect.width, metrics.title_height.min(rect.height))
+    Rect::new(
+        rect.x,
+        rect.y,
+        rect.width,
+        metrics.title_height.min(rect.height),
+    )
 }
 
 /// The part of a zone its items are laid out in: below the title (and the
@@ -94,7 +101,9 @@ pub fn compare_names(one: &str, other: &str) -> Ordering {
     while at_one < one.len() && at_other < other.len() {
         if one[at_one].is_ascii_digit() && other[at_other].is_ascii_digit() {
             let digits = |text: &[char], from: usize| {
-                let end = (from..text.len()).find(|at| !text[*at].is_ascii_digit()).unwrap_or(text.len());
+                let end = (from..text.len())
+                    .find(|at| !text[*at].is_ascii_digit())
+                    .unwrap_or(text.len());
                 let run: String = text[from..end].iter().collect();
                 (run.trim_start_matches('0').to_string(), end)
             };
@@ -140,7 +149,8 @@ pub fn sorted(mut items: Vec<&Item>, sort: Sort, descending: bool) -> Vec<&Item>
     if sort == Sort::Manual {
         return items;
     }
-    let by_name = |a: &Item, b: &Item| compare_names(&a.name, &b.name).then_with(|| a.id.cmp(&b.id));
+    let by_name =
+        |a: &Item, b: &Item| compare_names(&a.name, &b.name).then_with(|| a.id.cmp(&b.id));
     let key = |a: &Item, b: &Item| match sort {
         Sort::Manual | Sort::Name => Ordering::Equal,
         Sort::Type => kind_rank(a.kind)
@@ -244,7 +254,12 @@ pub fn lay_out(
 ) -> ItemLayout {
     let (cell_width, cell_height) = metrics.cell(view, icon_size, width);
     let step_x = cell_width + metrics.spacing;
-    let step_y = cell_height + if view == View::Grid { metrics.spacing } else { 0 };
+    let step_y = cell_height
+        + if view == View::Grid {
+            metrics.spacing
+        } else {
+            0
+        };
     let columns = match view {
         View::Grid => (((width + metrics.spacing) / step_x).max(1)) as u32,
         View::List => 1,
@@ -265,7 +280,10 @@ pub fn lay_out(
     let mut rows = 0u32;
     for (index, item) in items.iter().enumerate() {
         let cell = at[index].unwrap_or_else(|| loop {
-            let cell = Cell { column: next % columns, row: next / columns };
+            let cell = Cell {
+                column: next % columns,
+                row: next / columns,
+            };
             next += 1;
             if taken.insert(cell) {
                 break cell;
@@ -326,7 +344,11 @@ pub fn lay_out_loose(
             let y = (*y).min(height - cell_height).max(0);
             let cell = cell_at(x, y);
             taken.insert(cell);
-            placed[index] = Some(PlacedItem::at(item.clone(), Rect::new(x, y, cell_width, cell_height), cell));
+            placed[index] = Some(PlacedItem::at(
+                item.clone(),
+                Rect::new(x, y, cell_width, cell_height),
+                cell,
+            ));
         }
     }
     let mut next = 0u32;
@@ -336,7 +358,10 @@ pub fn lay_out_loose(
         .map(|(item, placed)| {
             placed.unwrap_or_else(|| {
                 let cell = loop {
-                    let cell = Cell { column: next / rows, row: next % rows };
+                    let cell = Cell {
+                        column: next / rows,
+                        row: next % rows,
+                    };
                     next += 1;
                     if taken.insert(cell) {
                         break cell;
@@ -375,7 +400,10 @@ pub fn tab_groups(zones: &[ZoneDefinition]) -> Vec<TabGroup> {
         };
         match groups.iter_mut().find(|group| &group.name == name) {
             Some(group) => group.members.push(zone.id.clone()),
-            None => groups.push(TabGroup { name: name.clone(), members: vec![zone.id.clone()] }),
+            None => groups.push(TabGroup {
+                name: name.clone(),
+                members: vec![zone.id.clone()],
+            }),
         }
     }
     groups.retain(|group| group.members.len() > 1);
@@ -417,7 +445,11 @@ mod tests {
             ("file02", "file2", Ordering::Equal),
             ("file", "file1", Ordering::Less),
             ("2024-01", "2024-02", Ordering::Less),
-            ("x99999999999999999999999", "x100000000000000000000000", Ordering::Less),
+            (
+                "x99999999999999999999999",
+                "x100000000000000000000000",
+                Ordering::Less,
+            ),
             ("", "a", Ordering::Less),
         ] {
             assert_eq!(compare_names(one, other), order, "{one} and {other}");
@@ -440,15 +472,51 @@ mod tests {
                 .collect()
         };
         for (sort, descending, expected) in [
-            (Sort::Manual, false, ["b.txt", "Folder", "a.png", "c10.txt", "c9.txt"]),
-            (Sort::Manual, true, ["b.txt", "Folder", "a.png", "c10.txt", "c9.txt"]),
-            (Sort::Name, false, ["a.png", "b.txt", "c9.txt", "c10.txt", "Folder"]),
-            (Sort::Name, true, ["Folder", "c10.txt", "c9.txt", "b.txt", "a.png"]),
-            (Sort::Type, false, ["Folder", "a.png", "b.txt", "c9.txt", "c10.txt"]),
-            (Sort::Date, false, ["c9.txt", "c10.txt", "Folder", "b.txt", "a.png"]),
-            (Sort::Date, true, ["a.png", "b.txt", "Folder", "c9.txt", "c10.txt"]),
-            (Sort::Size, false, ["Folder", "a.png", "c9.txt", "c10.txt", "b.txt"]),
-            (Sort::Size, true, ["b.txt", "c9.txt", "c10.txt", "a.png", "Folder"]),
+            (
+                Sort::Manual,
+                false,
+                ["b.txt", "Folder", "a.png", "c10.txt", "c9.txt"],
+            ),
+            (
+                Sort::Manual,
+                true,
+                ["b.txt", "Folder", "a.png", "c10.txt", "c9.txt"],
+            ),
+            (
+                Sort::Name,
+                false,
+                ["a.png", "b.txt", "c9.txt", "c10.txt", "Folder"],
+            ),
+            (
+                Sort::Name,
+                true,
+                ["Folder", "c10.txt", "c9.txt", "b.txt", "a.png"],
+            ),
+            (
+                Sort::Type,
+                false,
+                ["Folder", "a.png", "b.txt", "c9.txt", "c10.txt"],
+            ),
+            (
+                Sort::Date,
+                false,
+                ["c9.txt", "c10.txt", "Folder", "b.txt", "a.png"],
+            ),
+            (
+                Sort::Date,
+                true,
+                ["a.png", "b.txt", "Folder", "c9.txt", "c10.txt"],
+            ),
+            (
+                Sort::Size,
+                false,
+                ["Folder", "a.png", "c9.txt", "c10.txt", "b.txt"],
+            ),
+            (
+                Sort::Size,
+                true,
+                ["b.txt", "c9.txt", "c10.txt", "a.png", "Folder"],
+            ),
         ] {
             assert_eq!(names(sort, descending), expected, "{sort:?} {descending}");
         }
@@ -459,7 +527,14 @@ mod tests {
         let metrics = Metrics::default();
         // A cell is 76 by 82; with the spacing of 4 three fit into 240.
         let items = ids(&["a", "b", "c", "d", "e", "f", "g"]);
-        let layout = lay_out(View::Grid, 48, &metrics, (240, 150), &items, &BTreeMap::new());
+        let layout = lay_out(
+            View::Grid,
+            48,
+            &metrics,
+            (240, 150),
+            &items,
+            &BTreeMap::new(),
+        );
         assert_eq!((layout.columns, layout.rows), (3, 3));
         assert_eq!(layout.items[0].rect, Rect::new(0, 0, 76, 82));
         assert_eq!(layout.items[2].rect, Rect::new(160, 0, 76, 82));
@@ -468,16 +543,40 @@ mod tests {
         assert_eq!(layout.content_height, 3 * 82 + 2 * 4);
         assert_eq!(layout.scroll_extent, 254 - 150);
         // Everything fits: nothing to scroll.
-        let roomy = lay_out(View::Grid, 48, &metrics, (800, 600), &items, &BTreeMap::new());
+        let roomy = lay_out(
+            View::Grid,
+            48,
+            &metrics,
+            (800, 600),
+            &items,
+            &BTreeMap::new(),
+        );
         assert_eq!((roomy.columns, roomy.rows, roomy.scroll_extent), (10, 1, 0));
         // Narrower than one cell: one column all the same.
-        let narrow = lay_out(View::Grid, 48, &metrics, (10, 100), &items, &BTreeMap::new());
+        let narrow = lay_out(
+            View::Grid,
+            48,
+            &metrics,
+            (10, 100),
+            &items,
+            &BTreeMap::new(),
+        );
         assert_eq!((narrow.columns, narrow.rows), (1, 7));
         // Nothing in it.
         let empty = lay_out(View::Grid, 48, &metrics, (240, 150), &[], &BTreeMap::new());
-        assert_eq!((empty.rows, empty.content_height, empty.scroll_extent), (0, 0, 0));
+        assert_eq!(
+            (empty.rows, empty.content_height, empty.scroll_extent),
+            (0, 0, 0)
+        );
         // Larger icons, fewer columns.
-        let large = lay_out(View::Grid, 96, &metrics, (240, 150), &items, &BTreeMap::new());
+        let large = lay_out(
+            View::Grid,
+            96,
+            &metrics,
+            (240, 150),
+            &items,
+            &BTreeMap::new(),
+        );
         assert_eq!(large.columns, 1);
     }
 
@@ -485,7 +584,14 @@ mod tests {
     fn a_list_has_one_item_a_line() {
         let metrics = Metrics::default();
         let items = ids(&["a", "b", "c"]);
-        let layout = lay_out(View::List, 48, &metrics, (240, 40), &items, &BTreeMap::new());
+        let layout = lay_out(
+            View::List,
+            48,
+            &metrics,
+            (240, 40),
+            &items,
+            &BTreeMap::new(),
+        );
         assert_eq!((layout.columns, layout.rows), (1, 3));
         assert_eq!(layout.items[1].rect, Rect::new(0, 24, 240, 24));
         assert_eq!(layout.content_height, 72);
@@ -502,7 +608,12 @@ mod tests {
         ]);
         let layout = lay_out(View::Grid, 48, &metrics, (240, 300), &items, &cells);
         let cell = |name: &str| {
-            layout.items.iter().find(|placed| placed.item.as_str() == name).unwrap().cell
+            layout
+                .items
+                .iter()
+                .find(|placed| placed.item.as_str() == name)
+                .unwrap()
+                .cell
         };
         assert_eq!(cell("c"), Cell { column: 0, row: 0 });
         assert_eq!(cell("a"), Cell { column: 1, row: 0 });
@@ -518,9 +629,18 @@ mod tests {
         let metrics = Metrics::default();
         let items = ids(&["a", "b", "c", "d"]);
         // Rows of 86: two fit into 200.
-        let own = BTreeMap::from([(ItemId::new("b"), (3, 90)), (ItemId::new("d"), (5000, 5000))]);
+        let own = BTreeMap::from([
+            (ItemId::new("b"), (3, 90)),
+            (ItemId::new("d"), (5000, 5000)),
+        ]);
         let placed = lay_out_loose(48, &metrics, (400, 200), &items, &own);
-        let rect = |name: &str| placed.iter().find(|placed| placed.item.as_str() == name).unwrap().rect;
+        let rect = |name: &str| {
+            placed
+                .iter()
+                .find(|placed| placed.item.as_str() == name)
+                .unwrap()
+                .rect
+        };
         assert_eq!(rect("b"), Rect::new(3, 90, 76, 82));
         assert_eq!(rect("a"), Rect::new(0, 0, 76, 82));
         // The second cell of the first column is b's: c starts the next.
@@ -532,7 +652,10 @@ mod tests {
     #[test]
     fn a_rolled_up_zone_is_its_title() {
         let metrics = Metrics::default();
-        assert_eq!(rolled_up(Rect::new(10, 20, 300, 200), &metrics), Rect::new(10, 20, 300, 28));
+        assert_eq!(
+            rolled_up(Rect::new(10, 20, 300, 200), &metrics),
+            Rect::new(10, 20, 300, 28)
+        );
         assert_eq!(
             content_area(Rect::new(10, 20, 300, 200), false, &metrics),
             Rect::new(18, 56, 284, 156)
@@ -541,7 +664,10 @@ mod tests {
             content_area(Rect::new(10, 20, 300, 200), true, &metrics),
             Rect::new(18, 82, 284, 130)
         );
-        assert_eq!(content_area(Rect::new(0, 0, 10, 10), true, &metrics).height, 0);
+        assert_eq!(
+            content_area(Rect::new(0, 0, 10, 10), true, &metrics).height,
+            0
+        );
     }
 
     #[test]
@@ -559,7 +685,10 @@ mod tests {
         let groups = tab_groups(&zones);
         assert_eq!(
             groups,
-            [TabGroup { name: "one".to_string(), members: vec![ZoneId::new("a"), ZoneId::new("c")] }]
+            [TabGroup {
+                name: "one".to_string(),
+                members: vec![ZoneId::new("a"), ZoneId::new("c")]
+            }]
         );
         assert!(group_of(&groups, &ZoneId::new("c")).is_some());
         assert!(group_of(&groups, &ZoneId::new("d")).is_none());

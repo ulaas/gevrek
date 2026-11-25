@@ -32,14 +32,16 @@ use gevrek_zones::backend::{BackendError, DragActions, DropPayload};
 use gevrek_zones::ids::ItemId;
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::HGLOBAL;
-use windows::Win32::System::Com::{IDataObject, DVASPECT_CONTENT, FORMATETC, STGMEDIUM, TYMED_HGLOBAL};
+use windows::Win32::System::Com::{
+    IDataObject, DVASPECT_CONTENT, FORMATETC, STGMEDIUM, TYMED_HGLOBAL,
+};
 use windows::Win32::System::DataExchange::RegisterClipboardFormatW;
-use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
+use windows::Win32::System::Memory::{
+    GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE,
+};
 use windows::Win32::System::Ole::{ReleaseStgMedium, CF_HDROP, CF_UNICODETEXT};
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
-use windows::Win32::UI::Shell::{
-    BHID_DataObject, ILCombine, SHCreateShellItemArrayFromIDLists,
-};
+use windows::Win32::UI::Shell::{BHID_DataObject, ILCombine, SHCreateShellItemArrayFromIDLists};
 
 /// The name of gevrek's own kind of data.
 const ITEMS: PCWSTR = w!("gevrek.zones.items");
@@ -75,9 +77,14 @@ pub fn encode_items(process: u32, items: &[ItemId]) -> Vec<u8> {
 /// items of a desktop that is not this one.
 pub fn decode_items(bytes: &[u8], process: u32) -> Option<Vec<ItemId>> {
     // (Memory of Windows may be longer than what was put into it.)
-    let end = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
+    let end = bytes
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(bytes.len());
     let read: serde_json::Value = serde_json::from_slice(&bytes[..end])
-        .inspect_err(|error| log::debug!("zones: gevrek's own description of a drag is not understood: {error}"))
+        .inspect_err(|error| {
+            log::debug!("zones: gevrek's own description of a drag is not understood: {error}")
+        })
         .ok()?;
     if read.get("process")?.as_u64()? != u64::from(process) {
         return None;
@@ -122,7 +129,8 @@ pub fn paths_of_hdrop(bytes: &[u8]) -> Option<Vec<String>> {
 /// in, each of the others an item relative to it. Nothing for bytes that
 /// are no such thing.
 pub fn id_list_offsets(bytes: &[u8]) -> Option<(usize, Vec<usize>)> {
-    let number = |at: usize| Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?) as usize);
+    let number =
+        |at: usize| Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?) as usize);
     let count = number(0)?;
     // (Not more than could be there: a count read from garbage.)
     if count > bytes.len() / 4 {
@@ -257,12 +265,16 @@ pub fn data_object(asked: &[ItemId]) -> Result<IDataObject, BackendError> {
         .unzip();
     if lists.is_empty() {
         return Err(match asked.first() {
-            Some(item) => BackendError::NotFound { what: item.as_str().to_string() },
+            Some(item) => BackendError::NotFound {
+                what: item.as_str().to_string(),
+            },
             None => BackendError::Unsupported,
         });
     }
     let raw: Vec<*const ITEMIDLIST> = lists.iter().map(Pidl::as_ptr).collect();
-    let refused = |error: windows::core::Error| BackendError::Refused { what: error.message() };
+    let refused = |error: windows::core::Error| BackendError::Refused {
+        what: error.message(),
+    };
     // SAFETY: the lists live until the object is made, which copies them.
     let object: IDataObject = unsafe {
         SHCreateShellItemArrayFromIDLists(&raw)
@@ -271,7 +283,11 @@ pub fn data_object(asked: &[ItemId]) -> Result<IDataObject, BackendError> {
     };
     // (An object that would not take it still carries everything other
     // programs need; only zones would see paths instead of items.)
-    if let Err(error) = put(&object, kind(ITEMS), &encode_items(std::process::id(), &items)) {
+    if let Err(error) = put(
+        &object,
+        kind(ITEMS),
+        &encode_items(std::process::id(), &items),
+    ) {
         log::warn!("zones: what is dragged does not carry its items: {error}");
     }
     Ok(object)
@@ -304,7 +320,12 @@ pub fn payload_of(object: &IDataObject, allowed: DragActions) -> DropPayload {
             String::from_utf16_lossy(&units)
         })
         .filter(|text| !text.is_empty());
-    DropPayload { items, paths, text, allowed }
+    DropPayload {
+        items,
+        paths,
+        text,
+        allowed,
+    }
 }
 
 /// The kinds an object has that the zones read, by what they are: for
@@ -337,21 +358,55 @@ mod tests {
         for (actions, effects) in [
             (DragActions::ALL, 7),
             (DragActions::default(), 0),
-            (DragActions { copy: true, ..Default::default() }, 1),
-            (DragActions { moving: true, ..Default::default() }, 2),
-            (DragActions { link: true, ..Default::default() }, 4),
-            (DragActions { copy: true, moving: true, link: false }, 3),
+            (
+                DragActions {
+                    copy: true,
+                    ..Default::default()
+                },
+                1,
+            ),
+            (
+                DragActions {
+                    moving: true,
+                    ..Default::default()
+                },
+                2,
+            ),
+            (
+                DragActions {
+                    link: true,
+                    ..Default::default()
+                },
+                4,
+            ),
+            (
+                DragActions {
+                    copy: true,
+                    moving: true,
+                    link: false,
+                },
+                3,
+            ),
         ] {
             assert_eq!(effects_of(actions), effects);
             assert_eq!(actions_of(effects), actions);
         }
         // "The target scrolls" is no action.
-        assert_eq!(actions_of(0x8000_0001), DragActions { copy: true, ..Default::default() });
+        assert_eq!(
+            actions_of(0x8000_0001),
+            DragActions {
+                copy: true,
+                ..Default::default()
+            }
+        );
     }
 
     #[test]
     fn the_items_of_a_drag_are_read_back_by_the_program_that_began_it() {
-        let items = [ItemId::new("C:\\Users\\ada\\Desktop\\a \"b\".txt"), ItemId::new("::{645FF040-5081-101B-9F08-00AA002F954E}")];
+        let items = [
+            ItemId::new("C:\\Users\\ada\\Desktop\\a \"b\".txt"),
+            ItemId::new("::{645FF040-5081-101B-9F08-00AA002F954E}"),
+        ];
         let mut bytes = encode_items(42, &items);
         assert_eq!(decode_items(&bytes, 42).as_deref(), Some(&items[..]));
         // Memory that is longer than what was written into it.
@@ -385,8 +440,14 @@ mod tests {
     fn a_list_of_dropped_files_is_read_wide_and_narrow() {
         let names = ["C:\\Users\\ada\\Desktop\\a.txt", "D:\\Bilder\\Größe.png"];
         assert_eq!(paths_of_hdrop(&hdrop(&names, true)).expect("read"), names);
-        assert_eq!(paths_of_hdrop(&hdrop(&names[..1], false)).expect("read"), names[..1]);
-        assert_eq!(paths_of_hdrop(&hdrop(&[], true)).expect("read"), Vec::<String>::new());
+        assert_eq!(
+            paths_of_hdrop(&hdrop(&names[..1], false)).expect("read"),
+            names[..1]
+        );
+        assert_eq!(
+            paths_of_hdrop(&hdrop(&[], true)).expect("read"),
+            Vec::<String>::new()
+        );
         // Cut short, or a head that points past the end.
         assert_eq!(paths_of_hdrop(&[1, 2, 3]), None);
         let mut far = hdrop(&names, true);
@@ -434,7 +495,10 @@ mod tests {
             .to_string_lossy()
             .trim_start_matches("\\\\?\\")
             .to_string();
-        let files = [format!("{folder}\\a.txt"), format!("{folder}\\inner\\b c.txt")];
+        let files = [
+            format!("{folder}\\a.txt"),
+            format!("{folder}\\inner\\b c.txt"),
+        ];
         for file in &files {
             std::fs::write(file, b"x").expect("written");
         }
@@ -442,7 +506,12 @@ mod tests {
         let items: Vec<ItemId> = files.iter().map(|file| ItemId::new(file.clone())).collect();
         let object = data_object(&items).expect("an object");
         let kinds = kinds_read(&object);
-        assert!(kinds.contains(&"paths") && kinds.contains(&"the shell's names") && kinds.contains(&"gevrek's items"), "{kinds:?}");
+        assert!(
+            kinds.contains(&"paths")
+                && kinds.contains(&"the shell's names")
+                && kinds.contains(&"gevrek's items"),
+            "{kinds:?}"
+        );
         let payload = payload_of(&object, DragActions::ALL);
         assert_eq!(payload.items, items);
         assert_eq!(payload.paths, files);
@@ -454,7 +523,10 @@ mod tests {
 
         // What is not there cannot be dragged; one of two that is, can.
         let gone = ItemId::new(format!("{folder}\\gone.txt"));
-        assert!(matches!(data_object(std::slice::from_ref(&gone)), Err(BackendError::NotFound { .. })));
+        assert!(matches!(
+            data_object(std::slice::from_ref(&gone)),
+            Err(BackendError::NotFound { .. })
+        ));
         assert_eq!(data_object(&[]).err(), Some(BackendError::Unsupported));
         let one = data_object(&[gone, items[0].clone()]).expect("an object");
         assert_eq!(payload_of(&one, DragActions::default()).paths, files[..1]);

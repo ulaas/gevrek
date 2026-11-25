@@ -48,7 +48,10 @@ pub struct How {
 
 impl Default for How {
     fn default() -> Self {
-        Self { patience: PATIENCE, reach: Box::new(|path| path.is_dir()) }
+        Self {
+            patience: PATIENCE,
+            reach: Box::new(|path| path.is_dir()),
+        }
     }
 }
 
@@ -107,9 +110,15 @@ pub enum Outcome {
     There { watcher: Watcher, items: Vec<Item> },
     /// It is not there (or cannot be read), with the watch on a folder
     /// above it where one could be had.
-    Away { why: String, sentinel: Option<(Watcher, PathBuf)> },
+    Away {
+        why: String,
+        sentinel: Option<(Watcher, PathBuf)>,
+    },
     /// A folder nobody watches, read once.
-    Once { location: Location, listed: Result<Vec<Item>, BackendError> },
+    Once {
+        location: Location,
+        listed: Result<Vec<Item>, BackendError>,
+    },
 }
 
 /// What a thread found, for the backend.
@@ -137,9 +146,14 @@ fn read(folder: &Path, system: &System, how: &How, wake: &Wake) -> Outcome {
             // The telling begins before the reading, so that nothing
             // that happens between the two is missed.
             let begun = watcher(wake).and_then(|mut watcher| watcher.add(folder).map(|()| watcher));
-            match begun.map_err(|error| error.to_string()).and_then(|watcher| {
-                system.list(folder).map(|items| (watcher, items)).map_err(|error| error.to_string())
-            }) {
+            match begun
+                .map_err(|error| error.to_string())
+                .and_then(|watcher| {
+                    system
+                        .list(folder)
+                        .map(|items| (watcher, items))
+                        .map_err(|error| error.to_string())
+                }) {
                 Ok((watcher, items)) => return Outcome::There { watcher, items },
                 Err(error) => why = format!("{}: {error}", folder.display()),
             }
@@ -152,9 +166,14 @@ fn read(folder: &Path, system: &System, how: &How, wake: &Wake) -> Outcome {
                 break None;
             };
             if (how.reach)(above) {
-                let watching = watcher(wake).and_then(|mut watcher| watcher.add(above).map(|()| watcher));
+                let watching =
+                    watcher(wake).and_then(|mut watcher| watcher.add(above).map(|()| watcher));
                 if let Err(error) = &watching {
-                    log::debug!("zones: {} is not listened to for {} to come back: {error}", above.display(), folder.display());
+                    log::debug!(
+                        "zones: {} is not listened to for {} to come back: {error}",
+                        above.display(),
+                        folder.display()
+                    );
                 }
                 break watching.ok().map(|watcher| (watcher, next.to_path_buf()));
             }
@@ -185,41 +204,70 @@ pub fn go(
     answers: mpsc::Sender<Answer>,
     wake: Wake,
 ) -> std::io::Result<()> {
-    std::thread::Builder::new().name("gevrek-zones-portal".to_string()).spawn(move || {
-        let (found, finding) = mpsc::channel();
-        let (reading, reader_how, reader_wake) = (folder.clone(), Arc::clone(&how), Arc::clone(&wake));
-        // The going itself is on a second thread, so that this one can
-        // say "it does not answer" while that one still waits.
-        let reader = std::thread::Builder::new().name("gevrek-zones-portal-read".to_string()).spawn(move || {
-            let _ = found.send(read(&reading, &system, &reader_how, &reader_wake));
-        });
-        let lost = || Outcome::Away { why: format!("{}: no answer", folder.display()), sentinel: None };
-        let outcome = match reader {
-            Err(_) => lost(),
-            Ok(_) => match finding.recv_timeout(how.patience) {
-                Ok(outcome) => outcome,
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    log::debug!("zones: {} does not answer within {} ms; waited for on", folder.display(), how.patience.as_millis());
-                    let _ = answers.send(Answer { watch: Some(watch), outcome: Outcome::Slow });
-                    wake();
-                    finding.recv().unwrap_or_else(|_| lost())
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => lost(),
-            },
-        };
-        let _ = answers.send(Answer { watch: Some(watch), outcome });
-        wake();
-    })?;
+    std::thread::Builder::new()
+        .name("gevrek-zones-portal".to_string())
+        .spawn(move || {
+            let (found, finding) = mpsc::channel();
+            let (reading, reader_how, reader_wake) =
+                (folder.clone(), Arc::clone(&how), Arc::clone(&wake));
+            // The going itself is on a second thread, so that this one can
+            // say "it does not answer" while that one still waits.
+            let reader = std::thread::Builder::new()
+                .name("gevrek-zones-portal-read".to_string())
+                .spawn(move || {
+                    let _ = found.send(read(&reading, &system, &reader_how, &reader_wake));
+                });
+            let lost = || Outcome::Away {
+                why: format!("{}: no answer", folder.display()),
+                sentinel: None,
+            };
+            let outcome = match reader {
+                Err(_) => lost(),
+                Ok(_) => match finding.recv_timeout(how.patience) {
+                    Ok(outcome) => outcome,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        log::debug!(
+                            "zones: {} does not answer within {} ms; waited for on",
+                            folder.display(),
+                            how.patience.as_millis()
+                        );
+                        let _ = answers.send(Answer {
+                            watch: Some(watch),
+                            outcome: Outcome::Slow,
+                        });
+                        wake();
+                        finding.recv().unwrap_or_else(|_| lost())
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => lost(),
+                },
+            };
+            let _ = answers.send(Answer {
+                watch: Some(watch),
+                outcome,
+            });
+            wake();
+        })?;
     Ok(())
 }
 
 /// Read a folder nobody watches once, on a thread of its own.
-pub fn once(location: Location, folder: PathBuf, system: Arc<System>, answers: mpsc::Sender<Answer>, wake: Wake) -> bool {
+pub fn once(
+    location: Location,
+    folder: PathBuf,
+    system: Arc<System>,
+    answers: mpsc::Sender<Answer>,
+    wake: Wake,
+) -> bool {
     std::thread::Builder::new()
         .name("gevrek-zones-list".to_string())
         .spawn(move || {
-            let listed = system.list(&folder).map_err(|error| super::refusal(error, &folder.to_string_lossy()));
-            let _ = answers.send(Answer { watch: None, outcome: Outcome::Once { location, listed } });
+            let listed = system
+                .list(&folder)
+                .map_err(|error| super::refusal(error, &folder.to_string_lossy()));
+            let _ = answers.send(Answer {
+                watch: None,
+                outcome: Outcome::Once { location, listed },
+            });
             wake();
         })
         .is_ok()

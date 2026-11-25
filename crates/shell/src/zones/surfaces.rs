@@ -23,11 +23,13 @@ use super::draw::{self, Look};
 use super::menu::{self, menu_size, Chain};
 use super::{Ask, DeskAction, Spot, Zones};
 use egui::{pos2, vec2, Pos2, Rect};
-use gevrek_shellkit::dnd::{DragAction, DragEvent, DragOutcome, DragPayload, DragStart, DropAnswer};
+use gevrek_shellkit::dnd::{
+    DragAction, DragEvent, DragOutcome, DragPayload, DragStart, DropAnswer,
+};
 use gevrek_shellkit::host::{Control, SurfaceId};
-use gevrek_zones::backend::{DragActions, DropPayload};
 use gevrek_shellkit::{Edge, Flow, Keyboard, Level, Place};
 use gevrek_ui::theme::Palette;
+use gevrek_zones::backend::{DragActions, DropPayload};
 use gevrek_zones::config::{Sort, View, ZoneKind};
 use gevrek_zones::core::Command;
 use gevrek_zones::rules::Scope;
@@ -103,13 +105,24 @@ impl Surfaces {
     /// opened from it).
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn menu(&self) -> Option<SurfaceId> {
-        self.menu.as_ref().and_then(|open| open.borrow().surfaces.first().map(|(_, surface)| *surface))
+        self.menu
+            .as_ref()
+            .and_then(|open| open.borrow().surfaces.first().map(|(_, surface)| *surface))
     }
 
     /// The surfaces of all menus that are open, the first menu's first.
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn menus(&self) -> Vec<SurfaceId> {
-        self.menu.as_ref().map(|open| open.borrow().surfaces.iter().map(|(_, surface)| *surface).collect()).unwrap_or_default()
+        self.menu
+            .as_ref()
+            .map(|open| {
+                open.borrow()
+                    .surfaces
+                    .iter()
+                    .map(|(_, surface)| *surface)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -126,7 +139,9 @@ pub enum Side {
 /// names: for each display and side one strip, as deep as the deepest
 /// region kept there (strips of one side lie over each other, they do
 /// not add up).
-pub fn rooms_for(regions: &[gevrek_zones::reserve::ReservedRegion]) -> BTreeMap<(DisplayId, Side), u32> {
+pub fn rooms_for(
+    regions: &[gevrek_zones::reserve::ReservedRegion],
+) -> BTreeMap<(DisplayId, Side), u32> {
     use gevrek_zones::geometry::Edge as At;
     let mut rooms: BTreeMap<(DisplayId, Side), u32> = BTreeMap::new();
     for region in regions.iter().filter(|region| region.thickness > 0) {
@@ -165,7 +180,8 @@ fn open_room(control: &mut Control, side: Side, depth: u32, output: &str) -> Opt
             Side::Left => Edge::Left,
             Side::Right => Edge::Right,
         };
-        let place = Place::reserved_strip("gevrek-zones-room", edge, depth, Some(output.to_string()));
+        let place =
+            Place::reserved_strip("gevrek-zones-room", edge, depth, Some(output.to_string()));
         let surface = control.open(place, |_, _| Flow::Continue);
         control.reach(surface, Vec::new());
         Some(surface)
@@ -252,7 +268,11 @@ fn open(
     #[cfg(windows)]
     {
         let (x, y, width, height) = spot.pixels;
-        control.open_at(place(spot), gevrek_shellkit::win::place::Area::new(x, y, width, height), draw)
+        control.open_at(
+            place(spot),
+            gevrek_shellkit::win::place::Area::new(x, y, width, height),
+            draw,
+        )
     }
     #[cfg(not(windows))]
     {
@@ -262,7 +282,12 @@ fn open(
 
 /// Make the open surfaces those the zones want: one for each display
 /// there is while zones are switched on, none while they are off.
-pub fn sync(zones: &Shared, surfaces: &Rc<RefCell<Surfaces>>, control: &mut Control, themed: &Themed) {
+pub fn sync(
+    zones: &Shared,
+    surfaces: &Rc<RefCell<Surfaces>>,
+    control: &mut Control,
+    themed: &Themed,
+) {
     let (wanted, away, looked_at, unpictured, rooms) = {
         let mut zones = zones.borrow_mut();
         let shown = zones.core().enabled();
@@ -271,7 +296,11 @@ pub fn sync(zones: &Shared, surfaces: &Rc<RefCell<Surfaces>>, control: &mut Cont
             zones.put_away(),
             shown && zones.core().peeking(),
             shown && zones.kept_from_pictures(),
-            if shown { rooms_for(&zones.core().reserved_regions()) } else { BTreeMap::new() },
+            if shown {
+                rooms_for(&zones.core().reserved_regions())
+            } else {
+                BTreeMap::new()
+            },
         )
     };
     // Everything was just hidden, or switched off: a menu that is still
@@ -286,7 +315,10 @@ pub fn sync(zones: &Shared, surfaces: &Rc<RefCell<Surfaces>>, control: &mut Cont
         .displays
         .iter()
         .filter(|(display, (surface, spot))| {
-            !control.is_open(*surface) || !wanted.iter().any(|(wanted, at)| wanted == *display && at == spot)
+            !control.is_open(*surface)
+                || !wanted
+                    .iter()
+                    .any(|(wanted, at)| wanted == *display && at == spot)
         })
         .map(|(display, _)| display.clone())
         .collect();
@@ -297,14 +329,23 @@ pub fn sync(zones: &Shared, surfaces: &Rc<RefCell<Surfaces>>, control: &mut Cont
                 log::debug!("the zones' surface of {display} is closed: it is not wanted there any more, or is elsewhere");
                 control.close(surface);
             } else {
-                log::debug!("the zones' surface of {display} was closed by the system (its display went)");
+                log::debug!(
+                    "the zones' surface of {display} was closed by the system (its display went)"
+                );
             }
         }
     }
     // Something private is shown, or no longer: every surface that is
     // open is left out of pictures of the screen, or let into them again.
     if open_now.unpictured != unpictured {
-        log::debug!("the zones' surfaces are {} pictures of the screen", if unpictured { "left out of" } else { "let into" });
+        log::debug!(
+            "the zones' surfaces are {} pictures of the screen",
+            if unpictured {
+                "left out of"
+            } else {
+                "let into"
+            }
+        );
         open_now.unpictured = unpictured;
         for (surface, _) in open_now.displays.values() {
             control.exclude_from_capture(*surface, unpictured);
@@ -317,7 +358,9 @@ pub fn sync(zones: &Shared, surfaces: &Rc<RefCell<Surfaces>>, control: &mut Cont
         .rooms
         .iter()
         .filter(|(at, (surface, _))| {
-            !control.is_open(*surface) || !rooms.contains_key(at) || !wanted.iter().any(|(display, _)| display == &at.0)
+            !control.is_open(*surface)
+                || !rooms.contains_key(at)
+                || !wanted.iter().any(|(display, _)| display == &at.0)
         })
         .map(|(at, _)| at.clone())
         .collect();
@@ -334,7 +377,11 @@ pub fn sync(zones: &Shared, surfaces: &Rc<RefCell<Surfaces>>, control: &mut Cont
         };
         match open_now.rooms.get_mut(&at) {
             Some((surface, kept)) if *kept != depth => {
-                let (wide, high) = if matches!(at.1, Side::Left | Side::Right) { (depth, 0) } else { (0, depth) };
+                let (wide, high) = if matches!(at.1, Side::Left | Side::Right) {
+                    (depth, 0)
+                } else {
+                    (0, depth)
+                };
                 control.resize(*surface, wide, high);
                 *kept = depth;
             }
@@ -349,7 +396,10 @@ pub fn sync(zones: &Shared, surfaces: &Rc<RefCell<Surfaces>>, control: &mut Cont
     // Looked at, or no longer: every surface that is open goes above the
     // windows and takes the keyboard, or goes back below and lets it go.
     if open_now.above != looked_at {
-        log::debug!("the zones' surfaces go {} the windows", if looked_at { "above" } else { "back below" });
+        log::debug!(
+            "the zones' surfaces go {} the windows",
+            if looked_at { "above" } else { "back below" }
+        );
         open_now.above = looked_at;
         let (level, keyboard) = stands(looked_at);
         for (surface, _) in open_now.displays.values() {
@@ -391,13 +441,21 @@ pub fn sync(zones: &Shared, surfaces: &Rc<RefCell<Surfaces>>, control: &mut Cont
             // surface is worked on (its menu, its progress) belongs to it.
             #[cfg(windows)]
             {
-                let own = all.borrow().displays.get(&here).map(|(surface, _)| *surface);
+                let own = all
+                    .borrow()
+                    .displays
+                    .get(&here)
+                    .map(|(surface, _)| *surface);
                 if let Some(window) = own.and_then(|own| control.native_window(own)) {
                     shared.borrow_mut().desk.set_owner(window);
                 }
             }
             let soft_shown = control.blur_available();
-            let own = all.borrow().displays.get(&here).map(|(surface, _)| *surface);
+            let own = all
+                .borrow()
+                .displays
+                .get(&here)
+                .map(|(surface, _)| *surface);
             let (asks, others, soft, said) = {
                 let mut zones = shared.borrow_mut();
                 // When the system saw each press that this frame hears
@@ -405,10 +463,19 @@ pub fn sync(zones: &Shared, surfaces: &Rc<RefCell<Surfaces>>, control: &mut Cont
                 if let Some(own) = own {
                     zones.pressed_at(control.presses(own));
                 }
-                let look = Look { palette: &palette, settings: &settings, blur: soft_shown };
+                let look = Look {
+                    palette: &palette,
+                    settings: &settings,
+                    blur: soft_shown,
+                };
                 let soft = draw::draw(&mut zones, ui, &here, &look);
                 let said = zones.hint_on(&here);
-                (zones.take_asks(), std::mem::take(&mut zones.redraw), soft, said)
+                (
+                    zones.take_asks(),
+                    std::mem::take(&mut zones.redraw),
+                    soft,
+                    said,
+                )
             };
             if let Some(own) = own {
                 say(&all, &look, &here, own, said, ui, control);
@@ -454,14 +521,25 @@ pub fn sync(zones: &Shared, surfaces: &Rc<RefCell<Surfaces>>, control: &mut Cont
         if unpictured {
             control.exclude_from_capture(surface, true);
         }
-        log::debug!("the zones' surface of {display} is opened on {} as surface {surface:?}", spot.output);
+        log::debug!(
+            "the zones' surface of {display} is opened on {} as surface {surface:?}",
+            spot.output
+        );
         open_now.displays.insert(display, (surface, spot));
     }
 }
 
 /// How large a hint is for its words, in points.
 fn hint_size(ui: &egui::Ui, words: &str) -> egui::Vec2 {
-    let wide = ui.painter().layout_no_wrap(words.to_string(), egui::FontId::proportional(12.0), egui::Color32::WHITE).size().x;
+    let wide = ui
+        .painter()
+        .layout_no_wrap(
+            words.to_string(),
+            egui::FontId::proportional(12.0),
+            egui::Color32::WHITE,
+        )
+        .size()
+        .x;
     vec2((wide + 20.0).ceil(), 26.0)
 }
 
@@ -480,7 +558,9 @@ fn say(
 ) {
     let mut open = surfaces.borrow_mut();
     let same = match (&open.hint, &said) {
-        (Some((surface, on, words)), Some((_, wanted))) => on == display && words == wanted && control.is_open(*surface),
+        (Some((surface, on, words)), Some((_, wanted))) => {
+            on == display && words == wanted && control.is_open(*surface)
+        }
         // (What another display says is that display's to take away.)
         (Some((_, on, _)), None) => on != display,
         (None, None) => true,
@@ -504,8 +584,19 @@ fn say(
         let (palette, _) = look(ui, &mut fonts);
         let all = ui.max_rect();
         ui.painter().rect_filled(all, 6.0, palette.surface);
-        ui.painter().rect_stroke(all, 6.0, egui::Stroke::new(1.0, palette.border), egui::StrokeKind::Inside);
-        ui.painter().text(all.center(), egui::Align2::CENTER_CENTER, &shown, egui::FontId::proportional(12.0), palette.text);
+        ui.painter().rect_stroke(
+            all,
+            6.0,
+            egui::Stroke::new(1.0, palette.border),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().text(
+            all.center(),
+            egui::Align2::CENTER_CENTER,
+            &shown,
+            egui::FontId::proportional(12.0),
+            palette.text,
+        );
         Flow::Continue
     });
     open.hint = Some((surface, display.clone(), words));
@@ -520,17 +611,29 @@ fn pressed_elsewhere(input: &egui::InputState) -> bool {
 
 /// What a surface takes before its drawing has looked at a drag.
 const STANDING: DropAnswer = DropAnswer {
-    accept: gevrek_shellkit::dnd::DragActions { copy: false, moving: true, link: false },
+    accept: gevrek_shellkit::dnd::DragActions {
+        copy: false,
+        moving: true,
+        link: false,
+    },
     prefer: Some(DragAction::Move),
 };
 
 fn to_zones(actions: gevrek_shellkit::dnd::DragActions) -> DragActions {
-    DragActions { copy: actions.copy, moving: actions.moving, link: actions.link }
+    DragActions {
+        copy: actions.copy,
+        moving: actions.moving,
+        link: actions.link,
+    }
 }
 
 /// What the zones would do, as an answer to the system.
 fn answer_of(would: DragActions) -> DropAnswer {
-    let accept = gevrek_shellkit::dnd::DragActions { copy: would.copy, moving: would.moving, link: false };
+    let accept = gevrek_shellkit::dnd::DragActions {
+        copy: would.copy,
+        moving: would.moving,
+        link: false,
+    };
     match (would.moving, would.copy) {
         (true, _) => DropAnswer::preferring(accept, DragAction::Move),
         (false, true) => DropAnswer::accept(accept),
@@ -560,7 +663,10 @@ fn drags(zones: &Shared, display: &DisplayId, own: SurfaceId, scale: f32, contro
         // one (it names what is no file too, and we know our items by it
         // when they are let go on a zone); else as files, by their paths.
         if !zones.desk.begin_drag(&items, control, own, image.clone()) {
-            log::debug!("the drag is handed to the system as {}", gevrek_zones::timed::count(paths.len(), "file", "files"));
+            log::debug!(
+                "the drag is handed to the system as {}",
+                gevrek_zones::timed::count(paths.len(), "file", "files")
+            );
             let mut payload = DragPayload::files(paths);
             // (A link to a file of the desktop is not ours to offer.)
             payload.allowed.link = false;
@@ -571,7 +677,13 @@ fn drags(zones: &Shared, display: &DisplayId, own: SurfaceId, scale: f32, contro
     if events.is_empty() {
         return;
     }
-    let Some(origin) = zones.layout().desks.iter().find(|desk| &desk.display == display).map(|desk| desk.rect.min) else {
+    let Some(origin) = zones
+        .layout()
+        .desks
+        .iter()
+        .find(|desk| &desk.display == display)
+        .map(|desk| desk.rect.min)
+    else {
         return;
     };
     for event in events {
@@ -587,20 +699,34 @@ fn drags(zones: &Shared, display: &DisplayId, own: SurfaceId, scale: f32, contro
                         for native in &payload.native {
                             named.extend(zones.desk.items_named(&native.kind, &native.bytes));
                         }
-                        zones.payload_with(named, &payload.paths, payload.text, to_zones(offered.allowed))
+                        zones.payload_with(
+                            named,
+                            &payload.paths,
+                            payload.text,
+                            to_zones(offered.allowed),
+                        )
                     }
                     None => {
                         let ours = zones.payload_of(&[], None, to_zones(offered.allowed));
                         let dragging = zones.outgoing_items();
                         if dragging.is_empty() {
-                            DropPayload { paths: vec![String::new()], ..ours }
+                            DropPayload {
+                                paths: vec![String::new()],
+                                ..ours
+                            }
                         } else {
-                            DropPayload { items: dragging, ..ours }
+                            DropPayload {
+                                items: dragging,
+                                ..ours
+                            }
                         }
                     }
                 };
                 let would = zones.drag_over(Some(at + origin.to_vec2()), &payload);
-                log::debug!("a drag of {} came over the zones of {display}; there it would be {would:?}", payload.summary());
+                log::debug!(
+                    "a drag of {} came over the zones of {display}; there it would be {would:?}",
+                    payload.summary()
+                );
                 OVER.with(|over| *over.borrow_mut() = Some(payload));
                 control.answer_drag(own, answer_of(would));
             }
@@ -614,13 +740,23 @@ fn drags(zones: &Shared, display: &DisplayId, own: SurfaceId, scale: f32, contro
                 OVER.with(|over| *over.borrow_mut() = None);
                 zones.drag_over(None, &DropPayload::default());
             }
-            DragEvent::Dropped { at, payload, action } => {
+            DragEvent::Dropped {
+                at,
+                payload,
+                action,
+            } => {
                 OVER.with(|over| *over.borrow_mut() = None);
                 // What was agreed is ours to do, a move in full: the
                 // source deletes nothing.
                 let allowed = match action {
-                    DragAction::Move => DragActions { moving: true, ..DragActions::default() },
-                    DragAction::Copy => DragActions { copy: true, ..DragActions::default() },
+                    DragAction::Move => DragActions {
+                        moving: true,
+                        ..DragActions::default()
+                    },
+                    DragAction::Copy => DragActions {
+                        copy: true,
+                        ..DragActions::default()
+                    },
                     DragAction::Link => DragActions::default(),
                 };
                 // The backend reads the system's own description where
@@ -630,7 +766,10 @@ fn drags(zones: &Shared, display: &DisplayId, own: SurfaceId, scale: f32, contro
                     None => zones.payload_of(&payload.paths, payload.text, allowed),
                 };
                 let came = zones.drop_at(at + origin.to_vec2(), &payload);
-                log::debug!("a drop of {} ({action:?}) on the zones of {display}: {came:?}", payload.summary());
+                log::debug!(
+                    "a drop of {} ({action:?}) on the zones of {display}: {came:?}",
+                    payload.summary()
+                );
             }
             DragEvent::Ended { outcome } => {
                 log::debug!("the drag that began on the zones of {display} ended: {outcome:?}");
@@ -757,7 +896,9 @@ impl Running {
 /// compositor's `screen.shared` event: `shared` names the displays that
 /// are (commas between; empty when none is).
 pub fn shared_now(fields: &[(String, String)]) -> bool {
-    fields.iter().any(|(name, value)| name == "shared" && !value.trim().is_empty())
+    fields
+        .iter()
+        .any(|(name, value)| name == "shared" && !value.trim().is_empty())
 }
 
 /// The workspace that is shown on the display that has the keyboard (on
@@ -771,7 +912,10 @@ pub fn shown_workspace(state: &serde_json::Value) -> Option<String> {
         .map(crate::panel::view_of)
         .collect();
     let view = views.iter().find(|view| view.focused).or(views.first())?;
-    view.tabs.iter().find(|tab| tab.shown).map(|tab| tab.name.clone())
+    view.tabs
+        .iter()
+        .find(|tab| tab.shown)
+        .map(|tab| tab.name.clone())
 }
 
 /// Something was asked of the zones over the line to the window manager
@@ -782,7 +926,10 @@ pub fn asked(running: &Option<Running>, link: &gevrek_link::Link, ask: gevrek_li
     use gevrek_zones::ipc::{Answer, Request};
     log::debug!(
         "the zones are asked over the line to the window manager{}",
-        ask.request.as_ref().map_or_else(|| ", and no answer is waited for".to_string(), |request| format!(" (request {request:?})"))
+        ask.request.as_ref().map_or_else(
+            || ", and no answer is waited for".to_string(),
+            |request| format!(" (request {request:?})")
+        )
     );
     let answer = match (running, ask.ask) {
         (Some(running), Request::Command(command)) => {
@@ -792,10 +939,12 @@ pub fn asked(running: &Option<Running>, link: &gevrek_link::Link, ask: gevrek_li
             (zones.wake_later)(std::time::Duration::ZERO);
             Answer::of(&effects)
         }
-        (Some(running), Request::RestoreSystemIcons) => match running.zones.borrow_mut().restore_system_icons() {
-            Ok(()) => Answer::done(),
-            Err(why) => Answer::refused(why),
-        },
+        (Some(running), Request::RestoreSystemIcons) => {
+            match running.zones.borrow_mut().restore_system_icons() {
+                Ok(()) => Answer::done(),
+                Err(why) => Answer::refused(why),
+            }
+        }
         // Switched off, or never on: the system's icons can be put back
         // all the same, where this system has a backend at all.
         (None, Request::RestoreSystemIcons) => match super::desk(|| {}, super::Starter::none()) {
@@ -805,10 +954,18 @@ pub fn asked(running: &Option<Running>, link: &gevrek_link::Link, ask: gevrek_li
             },
             None => Answer::refused("this build cannot show zones yet"),
         },
-        (None, Request::Command(_)) => Answer::refused("zones are switched off (desktop.zones.enabled)"),
+        (None, Request::Command(_)) => {
+            Answer::refused("zones are switched off (desktop.zones.enabled)")
+        }
     };
     if let Some(request) = ask.request {
-        log::debug!("the zones answer request {request:?}: {}", answer.error.as_deref().map_or_else(|| "done".to_string(), |error| format!("not done: {error}")));
+        log::debug!(
+            "the zones answer request {request:?}: {}",
+            answer
+                .error
+                .as_deref()
+                .map_or_else(|| "done".to_string(), |error| format!("not done: {error}"))
+        );
         link.answer_zones(request, answer);
     }
 }
@@ -817,7 +974,11 @@ pub fn asked(running: &Option<Running>, link: &gevrek_link::Link, ask: gevrek_li
 #[derive(Debug, Clone, PartialEq)]
 pub enum Line {
     /// Something to choose, perhaps marked as what is in force.
-    Choice { label: String, marked: bool, does: Does },
+    Choice {
+        label: String,
+        marked: bool,
+        does: Does,
+    },
     /// A line that leads to a menu of its own, which opens beside it.
     Sub { label: String, lines: Vec<Line> },
     /// A little room between two groups of lines.
@@ -831,21 +992,40 @@ pub enum Does {
     /// Ask for a box to type into, or a sheet to look something over on.
     Ask(Ask),
     /// A line the backend gave for some items.
-    Act { items: Vec<gevrek_zones::ItemId>, action: String },
+    Act {
+        items: Vec<gevrek_zones::ItemId>,
+        action: String,
+    },
     /// Make a zone, with what it is configured as besides its kind.
-    Make { title: String, kind: ZoneKind, rect: Option<gevrek_zones::Rect>, changes: Option<serde_json::Value> },
+    Make {
+        title: String,
+        kind: ZoneKind,
+        rect: Option<gevrek_zones::Rect>,
+        changes: Option<serde_json::Value>,
+    },
 }
 
 fn choice(label: &str, does: Does) -> Line {
-    Line::Choice { label: label.to_string(), marked: false, does }
+    Line::Choice {
+        label: label.to_string(),
+        marked: false,
+        does,
+    }
 }
 
 fn marked(label: &str, marked: bool, command: Command) -> Line {
-    Line::Choice { label: label.to_string(), marked, does: Does::Command(command) }
+    Line::Choice {
+        label: label.to_string(),
+        marked,
+        does: Does::Command(command),
+    }
 }
 
 fn sub(label: &str, lines: Vec<Line>) -> Line {
-    Line::Sub { label: label.to_string(), lines }
+    Line::Sub {
+        label: label.to_string(),
+        lines,
+    }
 }
 
 /// Every line that can be chosen, of a menu and of the menus its lines
@@ -857,7 +1037,11 @@ pub fn every_line(lines: &[Line]) -> Vec<(String, &Line)> {
         match line {
             Line::Choice { label, .. } => all.push((label.clone(), line)),
             Line::Sub { label, lines } => {
-                all.extend(every_line(lines).into_iter().map(|(way, line)| (format!("{label} \u{203a} {way}"), line)));
+                all.extend(
+                    every_line(lines)
+                        .into_iter()
+                        .map(|(way, line)| (format!("{label} \u{203a} {way}"), line)),
+                );
             }
             Line::Gap => {}
         }
@@ -877,51 +1061,118 @@ pub fn desk_menu(zones: &Zones, display: &DisplayId, at: Pos2, palette: &Palette
     let mut new_zone = vec![
         choice(
             "Empty, here",
-            Does::Command(Command::CreateZone { title: "New zone".to_string(), kind: ZoneKind::Manual, rect: Some(here) }),
+            Does::Command(Command::CreateZone {
+                title: "New zone".to_string(),
+                kind: ZoneKind::Manual,
+                rect: Some(here),
+            }),
         ),
         choice("Of a folder\u{2026}", Does::Ask(Ask::NewPortal { at })),
         sub("That fills itself", smart_menu(at)),
         Line::Gap,
-        choice("Make zones by type\u{2026}", Does::Ask(Ask::AutoZones { display: display.clone() })),
+        choice(
+            "Make zones by type\u{2026}",
+            Does::Ask(Ask::AutoZones {
+                display: display.clone(),
+            }),
+        ),
     ];
     if zones.core().can_undo_auto() {
-        new_zone.push(choice("Take the automatic zones back", Does::Command(Command::UndoAutoCreate)));
+        new_zone.push(choice(
+            "Take the automatic zones back",
+            Does::Command(Command::UndoAutoCreate),
+        ));
     }
-    let mut lines = vec![sub("New zone", new_zone), Line::Gap, choice("Find an item\u{2026}", Does::Ask(Ask::Filter))];
+    let mut lines = vec![
+        sub("New zone", new_zone),
+        Line::Gap,
+        choice("Find an item\u{2026}", Does::Ask(Ask::Filter)),
+    ];
     if let Some(parent) = zones.desktop_known() {
-        lines.push(choice("New folder on the desktop\u{2026}", Does::Ask(Ask::NewFolderIn { parent })));
+        lines.push(choice(
+            "New folder on the desktop\u{2026}",
+            Does::Ask(Ask::NewFolderIn { parent }),
+        ));
     }
     let mut rules = Vec::new();
     if !zones.core().config().rules.is_empty() || zones.core().config().catch_all.is_some() {
-        rules.push(choice("What the rules would do\u{2026}", Does::Ask(Ask::Rules { scope: Scope::Loose })));
-        rules.push(choice("Sort the desktop by the rules", Does::Command(Command::ApplyRules { scope: Scope::Loose })));
+        rules.push(choice(
+            "What the rules would do\u{2026}",
+            Does::Ask(Ask::Rules {
+                scope: Scope::Loose,
+            }),
+        ));
+        rules.push(choice(
+            "Sort the desktop by the rules",
+            Does::Command(Command::ApplyRules {
+                scope: Scope::Loose,
+            }),
+        ));
     }
     if zones.core().state().undo.is_some() {
-        rules.push(choice("Take the sorting back", Does::Command(Command::UndoRules)));
+        rules.push(choice(
+            "Take the sorting back",
+            Does::Command(Command::UndoRules),
+        ));
     }
     if !rules.is_empty() {
         lines.push(sub("Rules", rules));
     }
-    lines.push(choice("Take back the last change to a file", Does::Command(Command::UndoFileOperation)));
+    lines.push(choice(
+        "Take back the last change to a file",
+        Does::Command(Command::UndoFileOperation),
+    ));
     // What takes long can be called off while it is under way.
     for operation in &zones.core().scene(super::now()).operations {
-        lines.push(choice("Call off what is being copied or moved", Does::Command(Command::CancelOperation { request: operation.request })));
+        lines.push(choice(
+            "Call off what is being copied or moved",
+            Does::Command(Command::CancelOperation {
+                request: operation.request,
+            }),
+        ));
     }
     lines.push(Line::Gap);
-    lines.push(choice("Hide the zones", Does::Command(Command::QuickHide { hidden: Some(true) })));
+    lines.push(choice(
+        "Hide the zones",
+        Does::Command(Command::QuickHide { hidden: Some(true) }),
+    ));
     let grey = zones.core().grey_icons();
-    lines.push(marked("Every icon grey", grey, Command::GreyIcons { on: Some(!grey) }));
+    lines.push(marked(
+        "Every icon grey",
+        grey,
+        Command::GreyIcons { on: Some(!grey) },
+    ));
     // Everything covered by hand (for when the screen is shown to
     // others and the system does not say so), or shown again.
     let covered = zones.core().scene(super::now()).masked;
-    lines.push(marked("Everything covered from view", covered, Command::Mask { masked: Some(!covered) }));
+    lines.push(marked(
+        "Everything covered from view",
+        covered,
+        Command::Mask {
+            masked: Some(!covered),
+        },
+    ));
     lines.push(Line::Gap);
     let held = zones.core().config().lock;
     lines.push(sub(
         "Held",
         vec![
-            marked("Every zone held where it is", held.geometry, Command::LockAll { geometry: Some(!held.geometry), members: None }),
-            marked("Nothing in or out of any zone", held.members, Command::LockAll { geometry: None, members: Some(!held.members) }),
+            marked(
+                "Every zone held where it is",
+                held.geometry,
+                Command::LockAll {
+                    geometry: Some(!held.geometry),
+                    members: None,
+                },
+            ),
+            marked(
+                "Nothing in or out of any zone",
+                held.members,
+                Command::LockAll {
+                    geometry: None,
+                    members: Some(!held.members),
+                },
+            ),
         ],
     ));
     lines.push(sub("Look of all zones", look_menu(zones, None, palette)));
@@ -933,19 +1184,35 @@ pub fn desk_menu(zones: &Zones, display: &DisplayId, at: Pos2, palette: &Palette
 /// that were kept (each leads to what can be done with it), and an
 /// arrangement written to a file or taken from one.
 pub fn layouts_menu(zones: &Zones) -> Vec<Line> {
-    let mut lines = vec![choice("Keep this arrangement as\u{2026}", Does::Ask(Ask::SaveLayout))];
+    let mut lines = vec![choice(
+        "Keep this arrangement as\u{2026}",
+        Does::Ask(Ask::SaveLayout),
+    )];
     let kept = &zones.core().state().snapshots;
     if !kept.is_empty() {
         lines.push(Line::Gap);
     }
     // The ones the person kept first, then the ones the zones kept
     // themselves before something replaced the arrangement.
-    for snapshot in kept.iter().filter(|snapshot| !snapshot.automatic).chain(kept.iter().filter(|snapshot| snapshot.automatic)) {
-        lines.push(sub(&format!("\u{201c}{}\u{201d}", snapshot.name), layout_menu(&snapshot.name)));
+    for snapshot in kept
+        .iter()
+        .filter(|snapshot| !snapshot.automatic)
+        .chain(kept.iter().filter(|snapshot| snapshot.automatic))
+    {
+        lines.push(sub(
+            &format!("\u{201c}{}\u{201d}", snapshot.name),
+            layout_menu(&snapshot.name),
+        ));
     }
     lines.push(Line::Gap);
-    lines.push(choice("Write this arrangement to a file\u{2026}", Does::Ask(Ask::ExportLayout { name: None })));
-    lines.push(choice("Take an arrangement from a file\u{2026}", Does::Ask(Ask::ImportLayout)));
+    lines.push(choice(
+        "Write this arrangement to a file\u{2026}",
+        Does::Ask(Ask::ExportLayout { name: None }),
+    ));
+    lines.push(choice(
+        "Take an arrangement from a file\u{2026}",
+        Does::Ask(Ask::ImportLayout),
+    ));
     lines
 }
 
@@ -953,11 +1220,23 @@ pub fn layouts_menu(zones: &Zones) -> Vec<Line> {
 pub fn layout_menu(name: &str) -> Vec<Line> {
     let name = || name.to_string();
     vec![
-        choice("Arrange the zones like this", Does::Command(Command::RestoreSnapshot { name: name() })),
-        choice("Rename\u{2026}", Does::Ask(Ask::RenameLayout { name: name() })),
-        choice("Write it to a file\u{2026}", Does::Ask(Ask::ExportLayout { name: Some(name()) })),
+        choice(
+            "Arrange the zones like this",
+            Does::Command(Command::RestoreSnapshot { name: name() }),
+        ),
+        choice(
+            "Rename\u{2026}",
+            Does::Ask(Ask::RenameLayout { name: name() }),
+        ),
+        choice(
+            "Write it to a file\u{2026}",
+            Does::Ask(Ask::ExportLayout { name: Some(name()) }),
+        ),
         Line::Gap,
-        choice("Forget it", Does::Command(Command::DeleteSnapshot { name: name() })),
+        choice(
+            "Forget it",
+            Does::Command(Command::DeleteSnapshot { name: name() }),
+        ),
     ]
 }
 
@@ -968,11 +1247,27 @@ pub fn layout_menu(name: &str) -> Vec<Line> {
 pub fn smart_menu(at: Pos2) -> Vec<Line> {
     use gevrek_zones::config::{DateField, Matcher};
     use serde_json::json;
-    let here = |width: i32, height: i32| Some(gevrek_zones::Rect::new(at.x.round() as i32, at.y.round() as i32, width, height));
-    let make = |label: &str, title: &str, query: Vec<Matcher>, rect: Option<gevrek_zones::Rect>, changes: serde_json::Value| {
+    let here = |width: i32, height: i32| {
+        Some(gevrek_zones::Rect::new(
+            at.x.round() as i32,
+            at.y.round() as i32,
+            width,
+            height,
+        ))
+    };
+    let make = |label: &str,
+                title: &str,
+                query: Vec<Matcher>,
+                rect: Option<gevrek_zones::Rect>,
+                changes: serde_json::Value| {
         choice(
             label,
-            Does::Make { title: title.to_string(), kind: ZoneKind::Smart { query }, rect, changes: Some(changes) },
+            Does::Make {
+                title: title.to_string(),
+                kind: ZoneKind::Smart { query },
+                rect,
+                changes: Some(changes),
+            },
         )
     };
     let today = Matcher::Date {
@@ -983,10 +1278,18 @@ pub fn smart_menu(at: Pos2) -> Vec<Line> {
         older_than_days: None,
     };
     let pictures = Matcher::Extension {
-        any_of: ["png", "jpg", "jpeg", "gif", "webp", "bmp"].map(str::to_string).to_vec(),
+        any_of: ["png", "jpg", "jpeg", "gif", "webp", "bmp"]
+            .map(str::to_string)
+            .to_vec(),
     };
     vec![
-        make("The files used last", "Recent", Vec::new(), here(320, 240), json!({"source": {"from": "recent"}, "limit": 12, "view": "list"})),
+        make(
+            "The files used last",
+            "Recent",
+            Vec::new(),
+            here(320, 240),
+            json!({"source": {"from": "recent"}, "limit": 12, "view": "list"}),
+        ),
         make(
             "What was downloaded today",
             "Downloaded today",
@@ -994,16 +1297,39 @@ pub fn smart_menu(at: Pos2) -> Vec<Line> {
             here(320, 240),
             json!({"source": {"from": "downloads"}, "sort": "date", "sort_descending": true, "view": "list"}),
         ),
-        make("The programs that run", "Running", Vec::new(), here(360, 130), json!({"source": {"from": "running_apps"}})),
-        make("The pinned programs", "Pinned", Vec::new(), here(360, 130), json!({"source": {"from": "pinned"}})),
-        make("The pictures on the desktop", "Pictures", vec![pictures], here(320, 240), json!({"icon_size": 64})),
+        make(
+            "The programs that run",
+            "Running",
+            Vec::new(),
+            here(360, 130),
+            json!({"source": {"from": "running_apps"}}),
+        ),
+        make(
+            "The pinned programs",
+            "Pinned",
+            Vec::new(),
+            here(360, 130),
+            json!({"source": {"from": "pinned"}}),
+        ),
+        make(
+            "The pictures on the desktop",
+            "Pictures",
+            vec![pictures],
+            here(320, 240),
+            json!({"icon_size": 64}),
+        ),
     ]
 }
 
 /// The menu of the desktop while everything is hidden: the way back, and
 /// nothing else (a zone made now, or a sorting, would not be seen).
 pub fn hidden_menu() -> Vec<Line> {
-    vec![choice("Show the zones", Does::Command(Command::QuickHide { hidden: Some(false) }))]
+    vec![choice(
+        "Show the zones",
+        Does::Command(Command::QuickHide {
+            hidden: Some(false),
+        }),
+    )]
 }
 
 /// The menu of a zone: its name, how it shows and orders what it holds,
@@ -1017,7 +1343,14 @@ pub fn zone_menu(zones: &Zones, zone: &ZoneId, palette: &Palette) -> Vec<Line> {
     let id = || zone.clone();
     let mut lines = vec![
         choice("Rename\u{2026}", Does::Ask(Ask::Rename { zone: id() })),
-        marked("Rolled up", definition.rolled_up, Command::RollUp { zone: id(), rolled_up: None }),
+        marked(
+            "Rolled up",
+            definition.rolled_up,
+            Command::RollUp {
+                zone: id(),
+                rolled_up: None,
+            },
+        ),
         sub("Shown and ordered", view_menu(zones, zone)),
         sub("Look", look_menu(zones, Some(zone), palette)),
         Line::Gap,
@@ -1028,22 +1361,36 @@ pub fn zone_menu(zones: &Zones, zone: &ZoneId, palette: &Palette) -> Vec<Line> {
             marked(
                 "Held where it is",
                 definition.lock.geometry,
-                Command::Lock { zone: id(), geometry: Some(!definition.lock.geometry), members: None },
+                Command::Lock {
+                    zone: id(),
+                    geometry: Some(!definition.lock.geometry),
+                    members: None,
+                },
             ),
             marked(
                 "Nothing in or out",
                 definition.lock.members,
-                Command::Lock { zone: id(), geometry: None, members: Some(!definition.lock.members) },
+                Command::Lock {
+                    zone: id(),
+                    geometry: None,
+                    members: Some(!definition.lock.members),
+                },
             ),
         ],
     ));
     lines.push(marked(
         "Stays when the rest is hidden",
         definition.always_visible,
-        Command::AlwaysVisible { zone: id(), on: Some(!definition.always_visible) },
+        Command::AlwaysVisible {
+            zone: id(),
+            on: Some(!definition.always_visible),
+        },
     ));
     if definition.tab_group.is_some() {
-        lines.push(choice("Out of its tabs", Does::Command(Command::Untab { zone: id() })));
+        lines.push(choice(
+            "Out of its tabs",
+            Does::Command(Command::Untab { zone: id() }),
+        ));
     }
     lines.push(Line::Gap);
     // Covered until the person asks to see it; and, where it is covered
@@ -1051,18 +1398,36 @@ pub fn zone_menu(zones: &Zones, zone: &ZoneId, palette: &Palette) -> Vec<Line> {
     lines.push(marked(
         "Private",
         definition.private,
-        Command::ModifyZone { zone: id(), changes: serde_json::json!({ "private": !definition.private }) },
+        Command::ModifyZone {
+            zone: id(),
+            changes: serde_json::json!({ "private": !definition.private }),
+        },
     ));
     let masked = zones.core().is_masked(zone);
     if masked {
-        lines.push(choice("Show what it holds", Does::Command(Command::Reveal { zone: Some(id()), revealed: Some(true) })));
+        lines.push(choice(
+            "Show what it holds",
+            Does::Command(Command::Reveal {
+                zone: Some(id()),
+                revealed: Some(true),
+            }),
+        ));
     } else if definition.private || zones.core().config().privacy.everything {
-        lines.push(choice("Cover it again", Does::Command(Command::Reveal { zone: Some(id()), revealed: Some(false) })));
+        lines.push(choice(
+            "Cover it again",
+            Does::Command(Command::Reveal {
+                zone: Some(id()),
+                revealed: Some(false),
+            }),
+        ));
     }
     lines.push(marked(
         "Windows keep off its place",
         definition.reserves_space,
-        Command::ModifyZone { zone: id(), changes: serde_json::json!({ "reserves_space": !definition.reserves_space }) },
+        Command::ModifyZone {
+            zone: id(),
+            changes: serde_json::json!({ "reserves_space": !definition.reserves_space }),
+        },
     ));
     // What a zone that shows a folder, or looks through something, has
     // besides: a folder made in it, and asking again what is there.
@@ -1070,13 +1435,22 @@ pub fn zone_menu(zones: &Zones, zone: &ZoneId, palette: &Palette) -> Vec<Line> {
         lines.push(Line::Gap);
     }
     if matches!(definition.kind, ZoneKind::Portal { .. }) {
-        lines.push(choice("New folder in it\u{2026}", Does::Ask(Ask::NewFolder { zone: id() })));
+        lines.push(choice(
+            "New folder in it\u{2026}",
+            Does::Ask(Ask::NewFolder { zone: id() }),
+        ));
     }
     if !matches!(definition.kind, ZoneKind::Manual) {
-        lines.push(choice("Look again what is there", Does::Command(Command::RefreshZone { zone: id() })));
+        lines.push(choice(
+            "Look again what is there",
+            Does::Command(Command::RefreshZone { zone: id() }),
+        ));
     }
     lines.push(Line::Gap);
-    lines.push(choice("Take this zone away", Does::Command(Command::DeleteZone { zone: id() })));
+    lines.push(choice(
+        "Take this zone away",
+        Does::Command(Command::DeleteZone { zone: id() }),
+    ));
     lines
 }
 
@@ -1087,9 +1461,27 @@ pub fn view_menu(zones: &Zones, zone: &ZoneId) -> Vec<Line> {
         return Vec::new();
     };
     let id = || zone.clone();
-    let view = |view: View| Command::SetView { zone: id(), view: Some(view), sort: None, descending: None, icon_size: None };
-    let sort = |sort: Sort| Command::SetView { zone: id(), view: None, sort: Some(sort), descending: None, icon_size: None };
-    let size = |size: u32| Command::SetView { zone: id(), view: None, sort: None, descending: None, icon_size: Some(size) };
+    let view = |view: View| Command::SetView {
+        zone: id(),
+        view: Some(view),
+        sort: None,
+        descending: None,
+        icon_size: None,
+    };
+    let sort = |sort: Sort| Command::SetView {
+        zone: id(),
+        view: None,
+        sort: Some(sort),
+        descending: None,
+        icon_size: None,
+    };
+    let size = |size: u32| Command::SetView {
+        zone: id(),
+        view: None,
+        sort: None,
+        descending: None,
+        icon_size: Some(size),
+    };
     let mut lines = vec![
         marked("As a grid", definition.view == View::Grid, view(View::Grid)),
         marked("As a list", definition.view == View::List, view(View::List)),
@@ -1107,10 +1499,20 @@ pub fn view_menu(zones: &Zones, zone: &ZoneId) -> Vec<Line> {
     lines.push(marked(
         "The other way round",
         definition.sort_descending,
-        Command::SetView { zone: id(), view: None, sort: None, descending: Some(!definition.sort_descending), icon_size: None },
+        Command::SetView {
+            zone: id(),
+            view: None,
+            sort: None,
+            descending: Some(!definition.sort_descending),
+            icon_size: None,
+        },
     ));
     lines.push(Line::Gap);
-    for (label, side) in [("Small icons", 32), ("Medium icons", 48), ("Large icons", 72)] {
+    for (label, side) in [
+        ("Small icons", 32),
+        ("Medium icons", 48),
+        ("Large icons", 72),
+    ] {
         lines.push(marked(label, definition.icon_size == side, size(side)));
     }
     lines
@@ -1135,24 +1537,50 @@ pub fn look_menu(zones: &Zones, zone: Option<&ZoneId>, palette: &Palette) -> Vec
         None => &config.look,
     };
     let change = |look: Value| match zone {
-        Some(zone) => Command::ModifyZone { zone: zone.clone(), changes: json!({ "look": look }) },
-        None => Command::ModifySettings { changes: json!({ "look": look }) },
+        Some(zone) => Command::ModifyZone {
+            zone: zone.clone(),
+            changes: json!({ "look": look }),
+        },
+        None => Command::ModifySettings {
+            changes: json!({ "look": look }),
+        },
     };
-    let usual = if zone.is_some() { "as the others" } else { "as the theme" };
+    let usual = if zone.is_some() {
+        "as the others"
+    } else {
+        "as the theme"
+    };
     let mut title = Vec::new();
-    for (label, bar) in [("Title bar", TitleBar::Full), ("Title alone", TitleBar::Plain), ("No title", TitleBar::Hidden)] {
-        let now = look.title_bar == Some(bar) || (look.title_bar.is_none() && zone.is_none() && bar == TitleBar::Full);
+    for (label, bar) in [
+        ("Title bar", TitleBar::Full),
+        ("Title alone", TitleBar::Plain),
+        ("No title", TitleBar::Hidden),
+    ] {
+        let now = look.title_bar == Some(bar)
+            || (look.title_bar.is_none() && zone.is_none() && bar == TitleBar::Full);
         title.push(marked(label, now, change(json!({ "title_bar": bar }))));
     }
     let mut ground = Vec::new();
     let soft = look.blur.unwrap_or(false);
-    ground.push(marked("The desktop soft behind it", soft, change(json!({ "blur": !soft }))));
+    ground.push(marked(
+        "The desktop soft behind it",
+        soft,
+        change(json!({ "blur": !soft })),
+    ));
     ground.push(Line::Gap);
     for (label, opacity) in [("Light ground", Some(45)), ("Solid ground", Some(95))] {
-        ground.push(marked(label, look.opacity == opacity, change(json!({ "opacity": opacity }))));
+        ground.push(marked(
+            label,
+            look.opacity == opacity,
+            change(json!({ "opacity": opacity })),
+        ));
     }
     for (label, radius) in [("Square corners", Some(0)), ("Round corners", Some(18))] {
-        ground.push(marked(label, look.corner_radius == radius, change(json!({ "corner_radius": radius }))));
+        ground.push(marked(
+            label,
+            look.corner_radius == radius,
+            change(json!({ "corner_radius": radius })),
+        ));
     }
     ground.push(Line::Gap);
     // The theme's own hues, each laid thinly over its ground colour.
@@ -1164,13 +1592,25 @@ pub fn look_menu(zones: &Zones, zone: Option<&ZoneId>, palette: &Palette) -> Vec
         ("Amber ground", palette.warn),
     ] {
         let colour = gevrek_ui::color::format(gevrek_ui::theme::mix(palette.surface, hue, 0.3));
-        ground.push(marked(label, look.background.as_deref() == Some(colour.as_str()), change(json!({ "background": colour }))));
+        ground.push(marked(
+            label,
+            look.background.as_deref() == Some(colour.as_str()),
+            change(json!({ "background": colour })),
+        ));
     }
     let mut icons = Vec::new();
     let labels = look.labels.unwrap_or(true);
-    icons.push(marked("Names under the icons", labels, change(json!({ "labels": !labels }))));
+    icons.push(marked(
+        "Names under the icons",
+        labels,
+        change(json!({ "labels": !labels })),
+    ));
     icons.push(Line::Gap);
-    icons.push(marked("Grey icons", look.icon_saturation == Some(0) && look.icon_tint.is_none(), change(json!({ "icon_saturation": 0, "icon_tint": null }))));
+    icons.push(marked(
+        "Grey icons",
+        look.icon_saturation == Some(0) && look.icon_tint.is_none(),
+        change(json!({ "icon_saturation": 0, "icon_tint": null })),
+    ));
     let [red, green, blue, _] = palette.accent.to_srgba_unmultiplied();
     let tint = format!("#{red:02x}{green:02x}{blue:02x}66");
     icons.push(marked(
@@ -1201,13 +1641,28 @@ pub fn look_menu(zones: &Zones, zone: Option<&ZoneId>, palette: &Palette) -> Vec
 /// The lines the backend gave for some items, as a menu. The line that
 /// leads to every program the items can be opened with has those
 /// programs beside it, where there are any.
-fn item_menu(items: &[gevrek_zones::ItemId], lines: &[DeskAction], programs: &[DeskAction]) -> Vec<Line> {
-    let act = |line: &DeskAction| choice(&line.label, Does::Act { items: items.to_vec(), action: line.id.clone() });
+fn item_menu(
+    items: &[gevrek_zones::ItemId],
+    lines: &[DeskAction],
+    programs: &[DeskAction],
+) -> Vec<Line> {
+    let act = |line: &DeskAction| {
+        choice(
+            &line.label,
+            Does::Act {
+                items: items.to_vec(),
+                action: line.id.clone(),
+            },
+        )
+    };
     lines
         .iter()
         .map(|line| {
             if line.id == super::CHOOSE && !programs.is_empty() {
-                sub(line.label.trim_end_matches('\u{2026}'), programs.iter().map(act).collect())
+                sub(
+                    line.label.trim_end_matches('\u{2026}'),
+                    programs.iter().map(act).collect(),
+                )
             } else {
                 act(line)
             }
@@ -1221,13 +1676,23 @@ fn item_menu(items: &[gevrek_zones::ItemId], lines: &[DeskAction], programs: &[D
 ///
 /// A screen reader is told a menu and its items (marked or not, leading
 /// to a menu or not), and pressing an item for the person is a press.
-pub fn menu(ui: &mut egui::Ui, palette: &Palette, shown: &menu::Level) -> (Option<usize>, Option<usize>) {
+pub fn menu(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    shown: &menu::Level,
+) -> (Option<usize>, Option<usize>) {
     use egui::accesskit::{Action, HasPopup, Role, Toggled};
     let all = ui.max_rect();
     ui.painter().rect_filled(all, 0.0, palette.surface);
     // (Menus lie over each other by a little: each has its own rim.)
-    ui.painter().rect_stroke(all, 0.0, egui::Stroke::new(1.0, palette.border), egui::StrokeKind::Inside);
-    ui.ctx().accesskit_node_builder(ui.unique_id(), |node| node.set_role(Role::Menu));
+    ui.painter().rect_stroke(
+        all,
+        0.0,
+        egui::Stroke::new(1.0, palette.border),
+        egui::StrokeKind::Inside,
+    );
+    ui.ctx()
+        .accesskit_node_builder(ui.unique_id(), |node| node.set_role(Role::Menu));
     let rows = menu::rows(&shown.lines);
     // First where the pointer is, then the drawing: the line it is on is
     // the one that is marked, also before the keys' line has caught up.
@@ -1240,9 +1705,17 @@ pub fn menu(ui: &mut egui::Ui, palette: &Palette, shown: &menu::Level) -> (Optio
             Line::Gap => continue,
         };
         let row = row.translate(all.min.to_vec2());
-        let response = ui.interact(row, ui.unique_id().with(("menu-line", index)), egui::Sense::click());
+        let response = ui.interact(
+            row,
+            ui.unique_id().with(("menu-line", index)),
+            egui::Sense::click(),
+        );
         ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_role(if is_marked { Role::MenuItemCheckBox } else { Role::MenuItem });
+            node.set_role(if is_marked {
+                Role::MenuItemCheckBox
+            } else {
+                Role::MenuItem
+            });
             node.set_label(label.trim_end_matches('\u{2026}').to_string());
             if is_marked {
                 node.set_toggled(Toggled::True);
@@ -1267,7 +1740,11 @@ pub fn menu(ui: &mut egui::Ui, palette: &Palette, shown: &menu::Level) -> (Optio
             Line::Choice { label, marked, .. } => (label, *marked, false),
             Line::Sub { label, .. } => (label, false, true),
             Line::Gap => {
-                ui.painter().hline((row.left() + 6.0)..=(row.right() - 6.0), row.center().y, egui::Stroke::new(1.0, palette.border.gamma_multiply(0.6)));
+                ui.painter().hline(
+                    (row.left() + 6.0)..=(row.right() - 6.0),
+                    row.center().y,
+                    egui::Stroke::new(1.0, palette.border.gamma_multiply(0.6)),
+                );
                 continue;
             }
         };
@@ -1275,25 +1752,49 @@ pub fn menu(ui: &mut egui::Ui, palette: &Palette, shown: &menu::Level) -> (Optio
             ui.painter().rect_filled(row, 6.0, palette.control_hover());
         } else if shown.open == Some(index) {
             // The line the menu beside this one opened from.
-            ui.painter().rect_filled(row, 6.0, palette.control_hover().gamma_multiply(0.6));
+            ui.painter()
+                .rect_filled(row, 6.0, palette.control_hover().gamma_multiply(0.6));
         }
         if is_marked {
             // The same short mark a zone's title has.
-            let mark = Rect::from_center_size(pos2(row.left() + 9.0, row.center().y), vec2(3.0, 12.0));
+            let mark =
+                Rect::from_center_size(pos2(row.left() + 9.0, row.center().y), vec2(3.0, 12.0));
             ui.painter().rect_filled(mark, 1.5, palette.accent);
         }
         // (A name longer than its line is cut, with an ellipsis.)
         let room = row.width() - 20.0 - if leads_on { 22.0 } else { 8.0 };
-        let mut job = egui::text::LayoutJob::simple_singleline(label.clone(), egui::FontId::proportional(13.0), palette.text);
-        job.wrap = egui::text::TextWrapping { max_width: room, max_rows: 1, break_anywhere: true, ..Default::default() };
+        let mut job = egui::text::LayoutJob::simple_singleline(
+            label.clone(),
+            egui::FontId::proportional(13.0),
+            palette.text,
+        );
+        job.wrap = egui::text::TextWrapping {
+            max_width: room,
+            max_rows: 1,
+            break_anywhere: true,
+            ..Default::default()
+        };
         let galley = ui.painter().layout_job(job);
-        ui.painter().galley(pos2(row.left() + 20.0, row.center().y - galley.size().y / 2.0), galley, palette.text);
+        ui.painter().galley(
+            pos2(row.left() + 20.0, row.center().y - galley.size().y / 2.0),
+            galley,
+            palette.text,
+        );
         if leads_on {
             // An arrow at its end: there is a menu beside this line.
             let tip = pos2(row.right() - 11.0, row.center().y);
-            let stroke = egui::Stroke::new(1.3, if at == Some(index) || shown.open == Some(index) { palette.text } else { palette.muted });
-            ui.painter().line_segment([tip + vec2(-3.0, -4.0), tip + vec2(1.0, 0.0)], stroke);
-            ui.painter().line_segment([tip + vec2(1.0, 0.0), tip + vec2(-3.0, 4.0)], stroke);
+            let stroke = egui::Stroke::new(
+                1.3,
+                if at == Some(index) || shown.open == Some(index) {
+                    palette.text
+                } else {
+                    palette.muted
+                },
+            );
+            ui.painter()
+                .line_segment([tip + vec2(-3.0, -4.0), tip + vec2(1.0, 0.0)], stroke);
+            ui.painter()
+                .line_segment([tip + vec2(1.0, 0.0), tip + vec2(-3.0, 4.0)], stroke);
         }
     }
     (pointed, pressed)
@@ -1308,7 +1809,12 @@ fn carry_out(zones: &Shared, does: Does) {
         }
         Does::Ask(ask) => zones.ask(ask),
         Does::Act { items, action } => zones.act(&items, &action),
-        Does::Make { title, kind, rect, changes } => {
+        Does::Make {
+            title,
+            kind,
+            rect,
+            changes,
+        } => {
             zones.make_zone(&title, kind, rect, changes);
         }
     }
@@ -1335,7 +1841,11 @@ fn close_menus(open: &Rc<RefCell<OpenMenus>>, control: &mut Control) {
 /// longer open, nor is any that opened from it.
 fn fit(open: &Rc<RefCell<OpenMenus>>, zones: &Shared, themed: &Themed, control: &mut Control) {
     let mut now = open.borrow_mut();
-    if let Some(gone) = now.surfaces.iter().position(|(_, surface)| !control.is_open(*surface)) {
+    if let Some(gone) = now
+        .surfaces
+        .iter()
+        .position(|(_, surface)| !control.is_open(*surface))
+    {
         now.chain.close_from(gone);
     }
     // The surfaces that still show the menu that is open at their depth
@@ -1356,7 +1866,10 @@ fn fit(open: &Rc<RefCell<OpenMenus>>, zones: &Shared, themed: &Themed, control: 
     while now.surfaces.len() < now.chain.levels.len() {
         let depth = now.surfaces.len();
         // (The first menu is opened where it was asked for: `answer`.)
-        let (Some(parent), Some(from)) = (depth.checked_sub(1).map(|before| now.surfaces[before].1), depth.checked_sub(1)) else {
+        let (Some(parent), Some(from)) = (
+            depth.checked_sub(1).map(|before| now.surfaces[before].1),
+            depth.checked_sub(1),
+        ) else {
             now.chain.close_from(0);
             break;
         };
@@ -1367,10 +1880,20 @@ fn fit(open: &Rc<RefCell<OpenMenus>>, zones: &Shared, themed: &Themed, control: 
         let anchor = menu::rows(&now.chain.levels[from].lines)[line];
         let level = &now.chain.levels[depth];
         let serial = level.serial;
-        let surface = control.submenu(parent, anchor, menu_size(&level.lines), menu_surface(open, zones, themed, serial));
+        let surface = control.submenu(
+            parent,
+            anchor,
+            menu_size(&level.lines),
+            menu_surface(open, zones, themed, serial),
+        );
         now.surfaces.push((serial, surface));
     }
-    let stands: Vec<(u64, Option<usize>, Option<usize>)> = now.chain.levels.iter().map(|level| (level.serial, level.at, level.open)).collect();
+    let stands: Vec<(u64, Option<usize>, Option<usize>)> = now
+        .chain
+        .levels
+        .iter()
+        .map(|level| (level.serial, level.at, level.open))
+        .collect();
     if stands != now.drawn {
         for (_, surface) in &now.surfaces {
             control.redraw(*surface);
@@ -1412,7 +1935,8 @@ fn menu_surface(
                 }
                 now.chain.rested(seconds);
                 if let Some(wait) = now.chain.rests_in(seconds) {
-                    ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(wait.max(0.01)));
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_secs_f64(wait.max(0.01)));
                 }
             }
             chosen
@@ -1434,12 +1958,22 @@ fn menu_surface(
 
 /// The keys a display's surface heard while a menu is open are the
 /// menu's. Says whether a menu is still open afterwards.
-fn menu_keys(zones: &Shared, open: &Rc<RefCell<OpenMenus>>, themed: &Themed, keys: Vec<menu::Key>, control: &mut Control) -> bool {
+fn menu_keys(
+    zones: &Shared,
+    open: &Rc<RefCell<OpenMenus>>,
+    themed: &Themed,
+    keys: Vec<menu::Key>,
+    control: &mut Control,
+) -> bool {
     let mut chosen = None;
     {
         let mut now = open.borrow_mut();
         // (The host may have closed some since: Escape, where it hears it.)
-        if let Some(gone) = now.surfaces.iter().position(|(_, surface)| !control.is_open(*surface)) {
+        if let Some(gone) = now
+            .surfaces
+            .iter()
+            .position(|(_, surface)| !control.is_open(*surface))
+        {
             now.chain.close_from(gone);
         }
         for key in keys {
@@ -1470,7 +2004,12 @@ fn answer(
 ) {
     let origin = {
         let mut zones = zones.borrow_mut();
-        zones.layout().desks.iter().find(|desk| &desk.display == display).map(|desk| desk.rect.min)
+        zones
+            .layout()
+            .desks
+            .iter()
+            .find(|desk| &desk.display == display)
+            .map(|desk| desk.rect.min)
     };
     let Some(origin) = origin else {
         return;
@@ -1488,7 +2027,14 @@ fn answer(
             return;
         }
         Ask::NewFolder { zone } => {
-            typing(zones, surfaces, themed, Typed::FolderName(zone), display, control);
+            typing(
+                zones,
+                surfaces,
+                themed,
+                Typed::FolderName(zone),
+                display,
+                control,
+            );
             return;
         }
         Ask::NewPortal { at } => {
@@ -1496,11 +2042,26 @@ fn answer(
             return;
         }
         Ask::NewFolderIn { parent } => {
-            typing(zones, surfaces, themed, Typed::FolderIn(parent), display, control);
+            typing(
+                zones,
+                surfaces,
+                themed,
+                Typed::FolderIn(parent),
+                display,
+                control,
+            );
             return;
         }
         Ask::Sheet { heading, lines } => {
-            properties(surfaces, themed, heading, lines, display, &zones.borrow_mut().spots(), control);
+            properties(
+                surfaces,
+                themed,
+                heading,
+                lines,
+                display,
+                &zones.borrow_mut().spots(),
+                control,
+            );
             return;
         }
         Ask::SaveLayout => {
@@ -1508,18 +2069,36 @@ fn answer(
             return;
         }
         Ask::RenameLayout { name } => {
-            typing(zones, surfaces, themed, Typed::LayoutRename(name), display, control);
+            typing(
+                zones,
+                surfaces,
+                themed,
+                Typed::LayoutRename(name),
+                display,
+                control,
+            );
             return;
         }
         Ask::ExportLayout { name } => {
-            typing(zones, surfaces, themed, Typed::ExportPath(name), display, control);
+            typing(
+                zones,
+                surfaces,
+                themed,
+                Typed::ExportPath(name),
+                display,
+                control,
+            );
             return;
         }
         Ask::ImportLayout => {
             typing(zones, surfaces, themed, Typed::ImportPath, display, control);
             return;
         }
-        Ask::ItemMenu { ref items, at, ref lines } => {
+        Ask::ItemMenu {
+            ref items,
+            at,
+            ref lines,
+        } => {
             // Every program they can be opened with stands beside the
             // line that leads to them (asked of the system only where
             // there is such a line).
@@ -1531,11 +2110,25 @@ fn answer(
             (item_menu(items, lines, &programs), at)
         }
         Ask::Rename { zone } => {
-            typing(zones, surfaces, themed, Typed::ZoneName(zone), display, control);
+            typing(
+                zones,
+                surfaces,
+                themed,
+                Typed::ZoneName(zone),
+                display,
+                control,
+            );
             return;
         }
         Ask::RenameItem { item } => {
-            typing(zones, surfaces, themed, Typed::ItemName(item), display, control);
+            typing(
+                zones,
+                surfaces,
+                themed,
+                Typed::ItemName(item),
+                display,
+                control,
+            );
             return;
         }
         Ask::Filter => {
@@ -1555,9 +2148,18 @@ fn answer(
     }
     let anchor = Rect::from_min_size(at - origin.to_vec2(), vec2(1.0, 1.0));
     let size = menu_size(&lines);
-    let open = Rc::new(RefCell::new(OpenMenus { chain: Chain::of(lines, by_keys), surfaces: Vec::new(), drawn: Vec::new() }));
+    let open = Rc::new(RefCell::new(OpenMenus {
+        chain: Chain::of(lines, by_keys),
+        surfaces: Vec::new(),
+        drawn: Vec::new(),
+    }));
     let serial = open.borrow().chain.levels[0].serial;
-    let opened = control.popup(parent, anchor, size, menu_surface(&open, zones, themed, serial));
+    let opened = control.popup(
+        parent,
+        anchor,
+        size,
+        menu_surface(&open, zones, themed, serial),
+    );
     open.borrow_mut().surfaces.push((serial, opened));
     surfaces.borrow_mut().menu = Some(open);
 }
@@ -1598,7 +2200,12 @@ fn auto_zones(
             control.close(open);
         }
     }
-    let spot = zones.borrow_mut().spots().into_iter().find(|(known, _)| known == display).map(|(_, spot)| spot);
+    let spot = zones
+        .borrow_mut()
+        .spots()
+        .into_iter()
+        .find(|(known, _)| known == display)
+        .map(|(_, spot)| spot);
     let place = Place {
         name: "gevrek-zone-auto".to_string(),
         edge: Edge::Centre,
@@ -1815,7 +2422,13 @@ pub fn export_path(desktop: Option<&str>, name: Option<&str>) -> String {
     let called: String = name
         .unwrap_or("now")
         .chars()
-        .map(|letter| if letter.is_alphanumeric() || letter == '-' { letter.to_ascii_lowercase() } else { '-' })
+        .map(|letter| {
+            if letter.is_alphanumeric() || letter == '-' {
+                letter.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect();
     let file = format!("gevrek-zones-{}.json", called.trim_matches('-'));
     match desktop {
@@ -1830,8 +2443,16 @@ pub fn export_path(desktop: Option<&str>, name: Option<&str>) -> String {
 
 /// The name a zone gets that shows a folder: the folder's own.
 pub fn portal_title(directory: &str) -> String {
-    let name = directory.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or_default();
-    if name.is_empty() { directory.to_string() } else { name.to_string() }
+    let name = directory
+        .trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default();
+    if name.is_empty() {
+        directory.to_string()
+    } else {
+        name.to_string()
+    }
 }
 
 /// Open the box a zone's or a file's name is typed into, or the one for
@@ -1861,23 +2482,56 @@ fn typing(
         };
         match &what {
             Typed::ZoneName(zone) => {
-                let title = zones.core().config().zone(zone).map(|zone| zone.title.clone()).unwrap_or_default();
+                let title = zones
+                    .core()
+                    .config()
+                    .zone(zone)
+                    .map(|zone| zone.title.clone())
+                    .unwrap_or_default();
                 let head = zones.layout().zone(zone).map(|shown| shown.head);
-                (title.clone(), format!("Rename the zone \u{201c}{title}\u{201d}"), head)
+                (
+                    title.clone(),
+                    format!("Rename the zone \u{201c}{title}\u{201d}"),
+                    head,
+                )
             }
             Typed::ItemName(item) => {
-                let name = zones.core().item(item).map(|item| item.name.clone()).unwrap_or_default();
+                let name = zones
+                    .core()
+                    .item(item)
+                    .map(|item| item.name.clone())
+                    .unwrap_or_default();
                 let at = zones.layout().item(item).map(|shown| shown.rect);
                 (name.clone(), format!("Rename \u{201c}{name}\u{201d}"), at)
             }
-            Typed::Find => (zones.filter.clone(), "Find an item by its name".to_string(), None),
+            Typed::Find => (
+                zones.filter.clone(),
+                "Find an item by its name".to_string(),
+                None,
+            ),
             Typed::FolderName(zone) => {
                 let head = zones.layout().zone(zone).map(|shown| shown.head);
-                ("New folder".to_string(), "The name of the new folder".to_string(), head)
+                (
+                    "New folder".to_string(),
+                    "The name of the new folder".to_string(),
+                    head,
+                )
             }
-            Typed::FolderIn(_) => ("New folder".to_string(), "The name of the new folder".to_string(), None),
-            Typed::LayoutName => (String::new(), "Keep this arrangement under the name".to_string(), None),
-            Typed::LayoutRename(name) => (name.clone(), format!("Rename the arrangement \u{201c}{name}\u{201d}"), None),
+            Typed::FolderIn(_) => (
+                "New folder".to_string(),
+                "The name of the new folder".to_string(),
+                None,
+            ),
+            Typed::LayoutName => (
+                String::new(),
+                "Keep this arrangement under the name".to_string(),
+                None,
+            ),
+            Typed::LayoutRename(name) => (
+                name.clone(),
+                format!("Rename the arrangement \u{201c}{name}\u{201d}"),
+                None,
+            ),
             Typed::ExportPath(name) => (
                 export_path(zones.desktop_known().as_deref(), name.as_deref()),
                 "Write the arrangement to the file".to_string(),
@@ -1890,7 +2544,12 @@ fn typing(
             ),
         }
     };
-    let spot = zones.borrow_mut().spots().into_iter().find(|(known, _)| known == display).map(|(_, spot)| spot);
+    let spot = zones
+        .borrow_mut()
+        .spots()
+        .into_iter()
+        .find(|(known, _)| known == display)
+        .map(|(_, spot)| spot);
     let place = Place {
         // (Not a name that begins as the displays' surfaces' does: those
         // are the desktop to the window manager, and this is not.)
@@ -1912,7 +2571,8 @@ fn typing(
     let draw = move |ui: &mut egui::Ui, _: &mut Control| {
         let (palette, _) = look(ui, &mut fonts);
         let context = ui.ctx().clone();
-        let mut close = context.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        let mut close =
+            context.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
         let before = text.clone();
         let entered = type_box(ui, &palette, &heading, &mut text);
         let mut zones = shared.borrow_mut();
@@ -1920,7 +2580,10 @@ fn typing(
             Typed::ZoneName(zone) => {
                 if entered {
                     if !text.trim().is_empty() {
-                        zones.command(Command::RenameZone { zone: zone.clone(), title: text.trim().to_string() });
+                        zones.command(Command::RenameZone {
+                            zone: zone.clone(),
+                            title: text.trim().to_string(),
+                        });
                     }
                     close = true;
                 }
@@ -1928,7 +2591,10 @@ fn typing(
             Typed::ItemName(item) => {
                 if entered {
                     if !text.trim().is_empty() {
-                        zones.command(Command::RenameItem { item: item.clone(), name: text.trim().to_string() });
+                        zones.command(Command::RenameItem {
+                            item: item.clone(),
+                            name: text.trim().to_string(),
+                        });
                     }
                     close = true;
                 }
@@ -1936,7 +2602,10 @@ fn typing(
             Typed::FolderName(zone) => {
                 if entered {
                     if !text.trim().is_empty() {
-                        zones.command(Command::NewFolder { zone: zone.clone(), name: text.trim().to_string() });
+                        zones.command(Command::NewFolder {
+                            zone: zone.clone(),
+                            name: text.trim().to_string(),
+                        });
                     }
                     close = true;
                 }
@@ -1944,7 +2613,9 @@ fn typing(
             Typed::LayoutName => {
                 if entered {
                     if !text.trim().is_empty() {
-                        zones.command(Command::SaveSnapshot { name: text.trim().to_string() });
+                        zones.command(Command::SaveSnapshot {
+                            name: text.trim().to_string(),
+                        });
                     }
                     close = true;
                 }
@@ -1952,7 +2623,10 @@ fn typing(
             Typed::LayoutRename(name) => {
                 if entered {
                     if !text.trim().is_empty() && text.trim() != name {
-                        zones.command(Command::RenameSnapshot { name: name.clone(), to: text.trim().to_string() });
+                        zones.command(Command::RenameSnapshot {
+                            name: name.clone(),
+                            to: text.trim().to_string(),
+                        });
                     }
                     close = true;
                 }
@@ -1961,8 +2635,14 @@ fn typing(
                 if entered {
                     // What came of it is said: a file is not seen to be written.
                     match zones.export_to(name.clone(), text.trim()) {
-                        Ok(()) => zones.say("The arrangement was written", vec![("File".to_string(), text.trim().to_string())]),
-                        Err(why) => zones.say("The arrangement was not written", vec![("Why".to_string(), why)]),
+                        Ok(()) => zones.say(
+                            "The arrangement was written",
+                            vec![("File".to_string(), text.trim().to_string())],
+                        ),
+                        Err(why) => zones.say(
+                            "The arrangement was not written",
+                            vec![("Why".to_string(), why)],
+                        ),
                     }
                     close = true;
                 }
@@ -1974,10 +2654,17 @@ fn typing(
                             "The arrangement was taken in",
                             vec![
                                 ("Kept as".to_string(), name),
-                                ("Before".to_string(), "The arrangement there was is kept too, under Arrangements".to_string()),
+                                (
+                                    "Before".to_string(),
+                                    "The arrangement there was is kept too, under Arrangements"
+                                        .to_string(),
+                                ),
                             ],
                         ),
-                        Err(why) => zones.say("The arrangement was not taken in", vec![("Why".to_string(), why)]),
+                        Err(why) => zones.say(
+                            "The arrangement was not taken in",
+                            vec![("Why".to_string(), why)],
+                        ),
                     }
                     close = true;
                 }
@@ -2023,7 +2710,12 @@ fn typing(
             let origin = shared_origin(zones, display);
             let scale = {
                 let mut zones = zones.borrow_mut();
-                let wide = zones.layout().desks.iter().find(|desk| &desk.display == display).map_or(1.0, |desk| desk.rect.width());
+                let wide = zones
+                    .layout()
+                    .desks
+                    .iter()
+                    .find(|desk| &desk.display == display)
+                    .map_or(1.0, |desk| desk.rect.width());
                 spot.pixels.2 as f32 / wide.max(1.0)
             };
             let at = (head.min - origin.to_vec2()) * scale;
@@ -2073,7 +2765,10 @@ fn properties(
         reserve: false,
         keyboard: Keyboard::OnDemand,
         margin: 0,
-        output: spots.iter().find(|(known, _)| known == display).map(|(_, spot)| spot.output.clone()),
+        output: spots
+            .iter()
+            .find(|(known, _)| known == display)
+            .map(|(_, spot)| spot.output.clone()),
     };
     let all = Rc::clone(surfaces);
     let look = Rc::clone(themed);
@@ -2091,25 +2786,45 @@ fn properties(
 }
 
 /// Draw what there is to say of some items; whether it was closed.
-pub fn properties_sheet(ui: &mut egui::Ui, palette: &Palette, heading: &str, lines: &[(String, String)]) -> bool {
+pub fn properties_sheet(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    heading: &str,
+    lines: &[(String, String)],
+) -> bool {
     let mut close = false;
-    egui::Frame::new().fill(palette.surface).corner_radius(12).inner_margin(18).show(ui, |ui| {
-        ui.set_min_size(ui.available_size());
-        ui.label(egui::RichText::new(heading).size(16.0).color(palette.text));
-        ui.add_space(8.0);
-        egui::ScrollArea::vertical().max_height((ui.available_height() - 40.0).max(40.0)).auto_shrink([false, false]).show(ui, |ui| {
-            egui::Grid::new("zone-item-properties").num_columns(2).spacing([14.0, 6.0]).show(ui, |ui| {
-                for (name, value) in lines {
-                    ui.label(egui::RichText::new(name).size(12.5).color(palette.muted));
-                    ui.add(egui::Label::new(egui::RichText::new(value).size(12.5).color(palette.text)).wrap());
-                    ui.end_row();
-                }
+    egui::Frame::new()
+        .fill(palette.surface)
+        .corner_radius(12)
+        .inner_margin(18)
+        .show(ui, |ui| {
+            ui.set_min_size(ui.available_size());
+            ui.label(egui::RichText::new(heading).size(16.0).color(palette.text));
+            ui.add_space(8.0);
+            egui::ScrollArea::vertical()
+                .max_height((ui.available_height() - 40.0).max(40.0))
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    egui::Grid::new("zone-item-properties")
+                        .num_columns(2)
+                        .spacing([14.0, 6.0])
+                        .show(ui, |ui| {
+                            for (name, value) in lines {
+                                ui.label(egui::RichText::new(name).size(12.5).color(palette.muted));
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(value).size(12.5).color(palette.text),
+                                    )
+                                    .wrap(),
+                                );
+                                ui.end_row();
+                            }
+                        });
+                });
+            ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                close = ui.button("Close").clicked();
             });
         });
-        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-            close = ui.button("Close").clicked();
-        });
-    });
     close
 }
 
@@ -2134,7 +2849,12 @@ fn choose_folder(
             control.close(open);
         }
     }
-    let spot = zones.borrow_mut().spots().into_iter().find(|(known, _)| known == display).map(|(_, spot)| spot);
+    let spot = zones
+        .borrow_mut()
+        .spots()
+        .into_iter()
+        .find(|(known, _)| known == display)
+        .map(|(_, spot)| spot);
     let place = Place {
         name: "gevrek-zone-folder".to_string(),
         edge: Edge::Centre,
@@ -2149,8 +2869,13 @@ fn choose_folder(
     };
     let begin = zones.borrow().desktop_known().unwrap_or_default();
     let home = gevrek_ui::browser::home();
-    let mut browser =
-        gevrek_ui::browser::Browser::new(gevrek_ui::widgets::PathKind::Folder, &begin, home.as_deref(), "", &[]);
+    let mut browser = gevrek_ui::browser::Browser::new(
+        gevrek_ui::widgets::PathKind::Folder,
+        &begin,
+        home.as_deref(),
+        "",
+        &[],
+    );
     let shared = Rc::clone(zones);
     let all = Rc::clone(surfaces);
     let look = Rc::clone(themed);
@@ -2163,7 +2888,12 @@ fn choose_folder(
         if let gevrek_ui::browser::Done::Chosen(folder) = done {
             let mut zones = shared.borrow_mut();
             let (directory, rect) = portal_at(&folder.to_string_lossy(), at);
-            zones.make_zone(&portal_title(&directory), ZoneKind::Portal { directory }, Some(rect), None);
+            zones.make_zone(
+                &portal_title(&directory),
+                ZoneKind::Portal { directory },
+                Some(rect),
+                None,
+            );
             (zones.wake_later)(std::time::Duration::ZERO);
         }
         all.borrow_mut().sheet = None;
@@ -2175,7 +2905,10 @@ fn choose_folder(
 /// The folder a new zone shows, as it is kept, and where the zone is
 /// made: at the point the menu was asked for.
 pub fn portal_at(folder: &str, at: Pos2) -> (String, gevrek_zones::Rect) {
-    (folder.to_string(), gevrek_zones::Rect::new(at.x.round() as i32, at.y.round() as i32, 360, 260))
+    (
+        folder.to_string(),
+        gevrek_zones::Rect::new(at.x.round() as i32, at.y.round() as i32, 360, 260),
+    )
 }
 
 /// How large the sheet of the rules is, in points.
@@ -2211,7 +2944,12 @@ fn rules(
             control.close(open);
         }
     }
-    let spot = zones.borrow_mut().spots().into_iter().find(|(known, _)| known == display).map(|(_, spot)| spot);
+    let spot = zones
+        .borrow_mut()
+        .spots()
+        .into_iter()
+        .find(|(known, _)| known == display)
+        .map(|(_, spot)| spot);
     let place = Place {
         name: "gevrek-zone-rules".to_string(),
         edge: Edge::Centre,
@@ -2243,7 +2981,9 @@ fn rules(
                 done = None;
             }
             Some(RulesChoice::Apply) => {
-                zones.command(Command::ApplyRules { scope: preview.scope });
+                zones.command(Command::ApplyRules {
+                    scope: preview.scope,
+                });
                 preview = zones.rules_preview(preview.scope);
                 done = Some("Sorted. It can be taken back.");
             }
@@ -2277,8 +3017,13 @@ pub fn rules_sheet(
     use gevrek_zones::rules::{Decided, Destination, Reason};
     let mut choice = None;
     let moved = preview.lines.iter().filter(|line| line.held.is_none());
-    let (into_zones, files): (Vec<_>, Vec<_>) = moved.partition(|line| matches!(line.destination, Destination::Zone { .. }));
-    let held = preview.lines.iter().filter(|line| line.held.is_some()).count();
+    let (into_zones, files): (Vec<_>, Vec<_>) =
+        moved.partition(|line| matches!(line.destination, Destination::Zone { .. }));
+    let held = preview
+        .lines
+        .iter()
+        .filter(|line| line.held.is_some())
+        .count();
     egui::Frame::new().fill(palette.surface).corner_radius(12).inner_margin(18).show(ui, |ui| {
         ui.set_min_size(ui.available_size());
         ui.label(egui::RichText::new("What the rules would do").size(16.0).color(palette.text));
@@ -2398,15 +3143,19 @@ fn shared_origin(zones: &Shared, display: &DisplayId) -> Pos2 {
 /// A heading and one line to type into. Says whether Enter was pressed.
 fn type_box(ui: &mut egui::Ui, palette: &Palette, heading: &str, text: &mut String) -> bool {
     let mut entered = false;
-    egui::Frame::new().fill(palette.surface).corner_radius(12).inner_margin(16).show(ui, |ui| {
-        ui.label(egui::RichText::new(heading).size(14.0).color(palette.text));
-        ui.add_space(8.0);
-        let field = ui.add(egui::TextEdit::singleline(text).desired_width(f32::INFINITY));
-        if !field.has_focus() && !field.lost_focus() {
-            field.request_focus();
-        }
-        entered = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-    });
+    egui::Frame::new()
+        .fill(palette.surface)
+        .corner_radius(12)
+        .inner_margin(16)
+        .show(ui, |ui| {
+            ui.label(egui::RichText::new(heading).size(14.0).color(palette.text));
+            ui.add_space(8.0);
+            let field = ui.add(egui::TextEdit::singleline(text).desired_width(f32::INFINITY));
+            if !field.has_focus() && !field.lost_focus() {
+                field.request_focus();
+            }
+            entered = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        });
     entered
 }
 
@@ -2423,10 +3172,18 @@ mod tests {
         // (In the menu itself and in the one of what is held, beside it.)
         let marked: Vec<String> = every_line(&lines)
             .into_iter()
-            .filter(|(way, line)| matches!(line, Line::Choice { marked: true, .. }) && !way.starts_with("Shown") && !way.starts_with("Look"))
+            .filter(|(way, line)| {
+                matches!(line, Line::Choice { marked: true, .. })
+                    && !way.starts_with("Shown")
+                    && !way.starts_with("Look")
+            })
             .map(|(way, _)| way)
             .collect();
-        assert_eq!(marked, Vec::<String>::new(), "nothing of it is held, and it is not rolled up");
+        assert_eq!(
+            marked,
+            Vec::<String>::new(),
+            "nothing of it is held, and it is not rolled up"
+        );
         // What has several values to pick from is a menu beside its line.
         let leads_on: Vec<&str> = lines
             .iter()
@@ -2436,7 +3193,13 @@ mod tests {
             })
             .collect();
         assert_eq!(leads_on, ["Shown and ordered", "Look", "Held"]);
-        let Some(Line::Sub { lines: shown_beside, .. }) = lines.iter().find(|line| matches!(line, Line::Sub { label, .. } if label == "Shown and ordered")) else {
+        let Some(Line::Sub {
+            lines: shown_beside,
+            ..
+        }) = lines
+            .iter()
+            .find(|line| matches!(line, Line::Sub { label, .. } if label == "Shown and ordered"))
+        else {
             panic!("the line leads to a menu");
         };
         assert_eq!(shown_beside, &view_menu(&zones, &downloads));
@@ -2444,37 +3207,57 @@ mod tests {
         let shown: Vec<String> = view_menu(&zones, &downloads)
             .into_iter()
             .filter_map(|line| match line {
-                Line::Choice { label, marked: true, does: Does::Command(Command::SetView { .. }) } => Some(label),
+                Line::Choice {
+                    label,
+                    marked: true,
+                    does: Does::Command(Command::SetView { .. }),
+                } => Some(label),
                 _ => None,
             })
             .collect();
         assert_eq!(shown, ["As a list", "By name", "Medium icons"]);
         assert!(every_line(&lines).iter().all(|(_, line)| match line {
-            Line::Choice { does, .. } => matches!(does, Does::Command(_) | Does::Ask(Ask::Rename { .. } | Ask::NewFolder { .. })),
+            Line::Choice { does, .. } => matches!(
+                does,
+                Does::Command(_) | Does::Ask(Ask::Rename { .. } | Ask::NewFolder { .. })
+            ),
             Line::Sub { .. } | Line::Gap => true,
         }));
         // It shows a folder: a folder can be made in it, and it can be
         // asked again what is there; a zone filled by hand has neither.
         let labels = |zone: &ZoneId| -> Vec<String> {
-            every_line(&zone_menu(&zones, zone, &palette())).into_iter().map(|(way, _)| way).collect()
+            every_line(&zone_menu(&zones, zone, &palette()))
+                .into_iter()
+                .map(|(way, _)| way)
+                .collect()
         };
         let papers = zones.core().config().zones[0].id.clone();
         assert!(labels(&downloads).contains(&"New folder in it\u{2026}".to_string()));
-        assert!(!labels(&papers).iter().any(|label| label.starts_with("New folder") || label.starts_with("Look again")));
+        assert!(!labels(&papers)
+            .iter()
+            .any(|label| label.starts_with("New folder") || label.starts_with("Look again")));
         // A zone that is a tab can be taken out of its tabs; one that is not, not.
         let has = |zone: &ZoneId, label: &str| {
-            zone_menu(&zones, zone, &palette()).iter().any(|line| matches!(line, Line::Choice { label: has, .. } if has == label))
+            zone_menu(&zones, zone, &palette())
+                .iter()
+                .any(|line| matches!(line, Line::Choice { label: has, .. } if has == label))
         };
         let work = zones.core().config().zones[5].id.clone();
         assert!(has(&work, "Out of its tabs") && !has(&downloads, "Out of its tabs"));
         assert_eq!(zone_menu(&zones, &ZoneId::new("no-such"), &palette()), []);
         let size = menu_size(&lines);
-        assert!(size.x == menu::MENU_WIDTH && size.y > 200.0 && size.y < 440.0, "{size:?}");
+        assert!(
+            size.x == menu::MENU_WIDTH && size.y > 200.0 && size.y < 440.0,
+            "{size:?}"
+        );
     }
 
     #[test]
     fn the_keyboard_comes_with_a_press_and_is_never_asked_for() {
-        let spot = Spot { output: "DP-1".to_string(), pixels: (0, 0, 1920, 1080) };
+        let spot = Spot {
+            output: "DP-1".to_string(),
+            pixels: (0, 0, 1920, 1080),
+        };
         let asked = place(&spot);
         // Not `Exclusive` (which takes the keyboard when the surface is
         // shown) and below the windows: shown, it takes nothing from them.
@@ -2482,7 +3265,12 @@ mod tests {
         assert_eq!((asked.level, asked.edge), (Level::Below, Edge::Fill));
         // Nothing that draws the zones or reads the pointer on them asks
         // for the keyboard: no part of it names a call that would.
-        let asks_for_focus = ["request_focus", "Keyboard::Exclusive", "memory_mut", "focus("];
+        let asks_for_focus = [
+            "request_focus",
+            "Keyboard::Exclusive",
+            "memory_mut",
+            "focus(",
+        ];
         for (file, text) in [
             ("draw.rs", include_str!("draw.rs")),
             ("view.rs", include_str!("view.rs")),
@@ -2500,7 +3288,10 @@ mod tests {
         // nothing: no surface's keyboard and no window's place is named.
         let told = include_str!("access.rs");
         assert_eq!(told.matches("request_focus(").count(), 1);
-        let after_the_condition = told.split("if let (true, Some(id)) = (has_keyboard, with_keyboard)").nth(1).expect("the condition is there");
+        let after_the_condition = told
+            .split("if let (true, Some(id)) = (has_keyboard, with_keyboard)")
+            .nth(1)
+            .expect("the condition is there");
         assert!(after_the_condition.contains("request_focus(id)"));
         for call in ["Keyboard::", "ViewportCommand", "set_keyboard", "set_level"] {
             assert!(!told.contains(call), "access.rs has {call}");
@@ -2509,7 +3300,12 @@ mod tests {
         let here = include_str!("surfaces.rs");
         let before_the_tests = here.split("#[cfg(test)]").next().unwrap();
         assert_eq!(before_the_tests.matches(".request_focus()").count(), 1);
-        assert_eq!(before_the_tests.matches("keyboard: Keyboard::Exclusive").count(), 1);
+        assert_eq!(
+            before_the_tests
+                .matches("keyboard: Keyboard::Exclusive")
+                .count(),
+            1
+        );
         let typed_into = before_the_tests.split("fn type_box").nth(1).unwrap();
         assert!(typed_into.contains(".request_focus()"));
         // The one exception is a command, not the drawing: while the
@@ -2525,7 +3321,13 @@ mod tests {
         // else (not the pointer, not a frame).
         assert_eq!(before_the_tests.matches("Keyboard::Exclusive").count(), 2);
         assert_eq!(before_the_tests.matches("set_keyboard(").count(), 2);
-        let sync_alone = before_the_tests.split("pub fn sync").nth(1).unwrap().split("\nfn pressed_elsewhere").next().unwrap();
+        let sync_alone = before_the_tests
+            .split("pub fn sync")
+            .nth(1)
+            .unwrap()
+            .split("\nfn pressed_elsewhere")
+            .next()
+            .unwrap();
         assert_eq!(sync_alone.matches("set_keyboard(").count(), 2);
         assert_eq!(sync_alone.matches("stands(").count(), 2);
         assert!(sync_alone.contains("zones.core().peeking()"));
@@ -2542,12 +3344,19 @@ mod tests {
         assert!(surfaces.borrow().above);
         // What is typed then is looked for everywhere...
         zones.borrow_mut().typed("bud");
-        let found = zones.borrow().search.clone().expect("something is looked for");
+        let found = zones
+            .borrow()
+            .search
+            .clone()
+            .expect("something is looked for");
         assert_eq!(found.typed, "bud");
         assert_eq!(found.hits[0].name, "Budget.xlsx");
         // ...and Escape first empties what was typed, then ends the look.
         zones.borrow_mut().key(crate::zones::gesture::Key::Escape);
-        assert!(zones.borrow().core().peeking() && zones.borrow().search.as_ref().unwrap().typed.is_empty());
+        assert!(
+            zones.borrow().core().peeking()
+                && zones.borrow().search.as_ref().unwrap().typed.is_empty()
+        );
         zones.borrow_mut().key(crate::zones::gesture::Key::Escape);
         assert!(!zones.borrow().core().peeking() && zones.borrow().search.is_none());
         sync(&zones, &surfaces, &mut control, &look);
@@ -2591,7 +3400,11 @@ mod tests {
         let b = DisplayId::new("b");
         assert_eq!(
             rooms,
-            BTreeMap::from([((a.clone(), Side::Top), 120), ((a, Side::Left), 300), ((b, Side::Bottom), 64)])
+            BTreeMap::from([
+                ((a.clone(), Side::Top), 120),
+                ((a, Side::Left), 300),
+                ((b, Side::Bottom), 64)
+            ])
         );
         assert!(rooms_for(&[]).is_empty());
     }
@@ -2603,7 +3416,10 @@ mod tests {
         assert!(surfaces.borrow().rooms.is_empty() && !surfaces.borrow().unpictured);
         // A zone at the display's top asks windows to keep off it.
         let papers = zones.borrow().core().config().zones[0].id.clone();
-        let asked = Command::ModifyZone { zone: papers.clone(), changes: serde_json::json!({ "reserves_space": true }) };
+        let asked = Command::ModifyZone {
+            zone: papers.clone(),
+            changes: serde_json::json!({ "reserves_space": true }),
+        };
         assert!(gevrek_zones::ipc::Answer::of(&zones.borrow_mut().command(asked)).ok);
         let wanted = rooms_for(&zones.borrow().core().reserved_regions());
         assert_eq!(wanted.len(), 1, "{wanted:?}");
@@ -2611,8 +3427,12 @@ mod tests {
         // A strip is opened for it where a surface can keep room (a
         // layer surface); on Windows the room goes to the window manager
         // with the snapshot, and no surface is opened.
-        let kept: Vec<((DisplayId, Side), u32)> =
-            surfaces.borrow().rooms.iter().map(|(at, (_, depth))| (at.clone(), *depth)).collect();
+        let kept: Vec<((DisplayId, Side), u32)> = surfaces
+            .borrow()
+            .rooms
+            .iter()
+            .map(|(at, (_, depth))| (at.clone(), *depth))
+            .collect();
         if cfg!(windows) {
             assert!(kept.is_empty());
             let snapshot = gevrek_zones::ipc::ZonesSnapshot::of(zones.borrow().core(), 0);
@@ -2622,22 +3442,36 @@ mod tests {
             let strip = surfaces.borrow().rooms.values().next().unwrap().0;
             assert!(control.is_open(strip));
             // No longer asked for: the strip goes.
-            let asked = Command::ModifyZone { zone: papers.clone(), changes: serde_json::json!({ "reserves_space": false }) };
+            let asked = Command::ModifyZone {
+                zone: papers.clone(),
+                changes: serde_json::json!({ "reserves_space": false }),
+            };
             zones.borrow_mut().command(asked);
             sync(&zones, &surfaces, &mut control, &look);
             assert!(surfaces.borrow().rooms.is_empty() && !control.is_open(strip));
         }
         // A private zone: the surfaces are left out of pictures of the
         // screen for as long as there is one, also while it is shown.
-        let private = Command::ModifyZone { zone: papers.clone(), changes: serde_json::json!({ "private": true }) };
+        let private = Command::ModifyZone {
+            zone: papers.clone(),
+            changes: serde_json::json!({ "private": true }),
+        };
         zones.borrow_mut().command(private);
         sync(&zones, &surfaces, &mut control, &look);
         assert!(surfaces.borrow().unpictured);
-        zones.borrow_mut().command(Command::Reveal { zone: Some(papers.clone()), revealed: Some(true) });
+        zones.borrow_mut().command(Command::Reveal {
+            zone: Some(papers.clone()),
+            revealed: Some(true),
+        });
         sync(&zones, &surfaces, &mut control, &look);
-        assert!(surfaces.borrow().unpictured, "seen by the person, and still in no picture");
+        assert!(
+            surfaces.borrow().unpictured,
+            "seen by the person, and still in no picture"
+        );
         // The configuration says nothing is to be done about sharing: let in again.
-        zones.borrow_mut().command(Command::ModifySettings { changes: serde_json::json!({"privacy": {"when_shared": "nothing"}}) });
+        zones.borrow_mut().command(Command::ModifySettings {
+            changes: serde_json::json!({"privacy": {"when_shared": "nothing"}}),
+        });
         sync(&zones, &surfaces, &mut control, &look);
         assert!(!surfaces.borrow().unpictured);
     }
@@ -2646,34 +3480,85 @@ mod tests {
     fn a_shared_screen_covers_what_is_private_until_the_person_asks_again() {
         let (zones, ..) = beside_a_display("shared");
         let papers = zones.borrow().core().config().zones[0].id.clone();
-        let private = Command::ModifyZone { zone: papers.clone(), changes: serde_json::json!({ "private": true }) };
+        let private = Command::ModifyZone {
+            zone: papers.clone(),
+            changes: serde_json::json!({ "private": true }),
+        };
         zones.borrow_mut().command(private);
         let covered = |zones: &Shared| zones.borrow_mut().layout().zone(&papers).unwrap().masked;
-        let items = |zones: &Shared| zones.borrow_mut().layout().zone(&papers).unwrap().items.len();
+        let items = |zones: &Shared| {
+            zones
+                .borrow_mut()
+                .layout()
+                .zone(&papers)
+                .unwrap()
+                .items
+                .len()
+        };
         // Covered until the person asks: nothing of what it holds is
         // there to be drawn, only how many there are.
         assert!(covered(&zones) && items(&zones) == 0);
-        assert_eq!(zones.borrow_mut().layout().zone(&papers).unwrap().item_count, 8);
+        assert_eq!(
+            zones
+                .borrow_mut()
+                .layout()
+                .zone(&papers)
+                .unwrap()
+                .item_count,
+            8
+        );
         // A click on the cover asks to see it.
         use crate::zones::gesture::Pointer;
         let at = pos2(400.0, 200.0);
-        zones.borrow_mut().pointer(&Pointer { at: Some(at), pressed: true, down: true, ..Pointer::default() });
-        zones.borrow_mut().pointer(&Pointer { at: Some(at), released: true, ..Pointer::default() });
+        zones.borrow_mut().pointer(&Pointer {
+            at: Some(at),
+            pressed: true,
+            down: true,
+            ..Pointer::default()
+        });
+        zones.borrow_mut().pointer(&Pointer {
+            at: Some(at),
+            released: true,
+            ..Pointer::default()
+        });
         assert!(!covered(&zones) && items(&zones) == 8);
         // The compositor says a display is shown to others: covered again.
-        let said = |shared: &str| vec![("state".to_string(), "started".to_string()), ("shared".to_string(), shared.to_string())];
-        assert!(shared_now(&said("DP-1")) && shared_now(&said("DP-1,HDMI-A-1")) && !shared_now(&said("")) && !shared_now(&[]));
-        let running = Running { zones: Rc::clone(&zones), surfaces: Rc::default(), themed: Rc::new(|_: &egui::Ui, _: &mut bool| unreachable!()) };
+        let said = |shared: &str| {
+            vec![
+                ("state".to_string(), "started".to_string()),
+                ("shared".to_string(), shared.to_string()),
+            ]
+        };
+        assert!(
+            shared_now(&said("DP-1"))
+                && shared_now(&said("DP-1,HDMI-A-1"))
+                && !shared_now(&said(""))
+                && !shared_now(&[])
+        );
+        let running = Running {
+            zones: Rc::clone(&zones),
+            surfaces: Rc::default(),
+            themed: Rc::new(|_: &egui::Ui, _: &mut bool| unreachable!()),
+        };
         running.screen_shared(&said("DP-1"));
         assert!(covered(&zones) && items(&zones) == 0);
         // No longer shared: it stays covered until the person asks.
         running.screen_shared(&said(""));
         assert!(covered(&zones));
         // Everything covered by hand, and shown again.
-        zones.borrow_mut().command(Command::Mask { masked: Some(true) });
+        zones
+            .borrow_mut()
+            .command(Command::Mask { masked: Some(true) });
         assert!(zones.borrow_mut().layout().desks[0].masked);
-        assert!(zones.borrow_mut().layout().zones.iter().all(|zone| zone.masked));
-        zones.borrow_mut().command(Command::Mask { masked: Some(false) });
+        assert!(zones
+            .borrow_mut()
+            .layout()
+            .zones
+            .iter()
+            .all(|zone| zone.masked));
+        zones.borrow_mut().command(Command::Mask {
+            masked: Some(false),
+        });
         assert!(!zones.borrow_mut().layout().desks[0].masked);
     }
 
@@ -2685,12 +3570,22 @@ mod tests {
             // (Its title, its ground and its icons are menus beside their lines.)
             let lines = look_menu(zones, zone, &palette());
             let all = every_line(&lines);
-            let line = all.iter().map(|(_, line)| *line).find(|line| matches!(line, Line::Choice { label: has, .. } if has == label));
-            let Some(Line::Choice { does: Does::Command(command), .. }) = line else {
+            let line = all
+                .iter()
+                .map(|(_, line)| *line)
+                .find(|line| matches!(line, Line::Choice { label: has, .. } if has == label));
+            let Some(Line::Choice {
+                does: Does::Command(command),
+                ..
+            }) = line
+            else {
                 panic!("no line {label:?}");
             };
             let effects = zones.command(command.clone());
-            assert!(gevrek_zones::ipc::Answer::of(&effects).ok, "{label}: {effects:?}");
+            assert!(
+                gevrek_zones::ipc::Answer::of(&effects).ok,
+                "{label}: {effects:?}"
+            );
         };
         let is_marked = |zones: &Zones, zone: Option<&ZoneId>, label: &str| {
             every_line(&look_menu(zones, zone, &palette()))
@@ -2699,46 +3594,100 @@ mod tests {
         };
         // Nothing of its own at first: it looks as all zones do.
         assert!(!is_marked(&zones, Some(&papers), "Title alone"));
-        assert!(is_marked(&zones, None, "Title bar") && is_marked(&zones, Some(&papers), "Names under the icons"));
-        for label in ["Title alone", "Names under the icons", "The desktop soft behind it", "Solid ground", "Round corners", "Blue ground", "Grey icons"] {
+        assert!(
+            is_marked(&zones, None, "Title bar")
+                && is_marked(&zones, Some(&papers), "Names under the icons")
+        );
+        for label in [
+            "Title alone",
+            "Names under the icons",
+            "The desktop soft behind it",
+            "Solid ground",
+            "Round corners",
+            "Blue ground",
+            "Grey icons",
+        ] {
             choose(&mut zones, Some(&papers), label);
         }
         let look = zones.core().config().zone(&papers).unwrap().look.clone();
         assert_eq!(look.title_bar, Some(gevrek_zones::config::TitleBar::Plain));
-        assert_eq!((look.labels, look.blur, look.opacity, look.corner_radius), (Some(false), Some(true), Some(95), Some(18)));
+        assert_eq!(
+            (look.labels, look.blur, look.opacity, look.corner_radius),
+            (Some(false), Some(true), Some(95), Some(18))
+        );
         assert_eq!(look.icon_saturation, Some(0));
-        assert!(look.background.as_deref().is_some_and(|colour| colour.len() == 7 && colour.starts_with('#')));
-        assert!(is_marked(&zones, Some(&papers), "Title alone") && is_marked(&zones, Some(&papers), "Blue ground"));
+        assert!(look
+            .background
+            .as_deref()
+            .is_some_and(|colour| colour.len() == 7 && colour.starts_with('#')));
+        assert!(
+            is_marked(&zones, Some(&papers), "Title alone")
+                && is_marked(&zones, Some(&papers), "Blue ground")
+        );
         // The configuration that comes of it is one that may be written.
         assert_eq!(zones.core().config().problems(), []);
         // Back to how the others look: nothing of its own is left.
         choose(&mut zones, Some(&papers), "Everything as the others");
-        assert_eq!(zones.core().config().zone(&papers).unwrap().look, gevrek_zones::config::ZoneLook::default());
+        assert_eq!(
+            zones.core().config().zone(&papers).unwrap().look,
+            gevrek_zones::config::ZoneLook::default()
+        );
         // For all zones at once.
         choose(&mut zones, None, "No title");
-        assert_eq!(zones.core().config().look.title_bar, Some(gevrek_zones::config::TitleBar::Hidden));
-        assert_eq!(zones.layout().zones[0].title_bar, gevrek_zones::config::TitleBar::Hidden);
-        assert_eq!(look_menu(&zones, Some(&ZoneId::new("no-such")), &palette()), []);
+        assert_eq!(
+            zones.core().config().look.title_bar,
+            Some(gevrek_zones::config::TitleBar::Hidden)
+        );
+        assert_eq!(
+            zones.layout().zones[0].title_bar,
+            gevrek_zones::config::TitleBar::Hidden
+        );
+        assert_eq!(
+            look_menu(&zones, Some(&ZoneId::new("no-such")), &palette()),
+            []
+        );
     }
 
     /// The colours a menu of the look is made with.
     fn palette() -> Palette {
-        gevrek_ui::Settings::default().resolve(egui::Theme::Dark, egui::Color32::from_rgb(64, 224, 208))
+        gevrek_ui::Settings::default()
+            .resolve(egui::Theme::Dark, egui::Color32::from_rgb(64, 224, 208))
     }
 
     /// What `answer` and `sync` need, without a display: the zones of a
     /// working day, no surface yet, a look that is never asked for (no
     /// frame is drawn), and a host that only writes down what is asked
     /// of it. With the surface of the one display, as if it were open.
-    fn beside_a_display(name: &str) -> (Shared, Rc<RefCell<Surfaces>>, Themed, Control, DisplayId, SurfaceId) {
+    fn beside_a_display(
+        name: &str,
+    ) -> (
+        Shared,
+        Rc<RefCell<Surfaces>>,
+        Themed,
+        Control,
+        DisplayId,
+        SurfaceId,
+    ) {
         let zones: Shared = Rc::new(RefCell::new(a_working_desktop(name)));
-        let look: Themed = Rc::new(|_: &egui::Ui, _: &mut bool| -> (Palette, gevrek_ui::Settings) {
-            unreachable!("no frame is drawn")
-        });
+        let look: Themed = Rc::new(
+            |_: &egui::Ui, _: &mut bool| -> (Palette, gevrek_ui::Settings) {
+                unreachable!("no frame is drawn")
+            },
+        );
         let mut control = Control::default();
-        let spot = Spot { output: "picture-1".to_string(), pixels: (0, 0, 1280, 800) };
+        let spot = Spot {
+            output: "picture-1".to_string(),
+            pixels: (0, 0, 1280, 800),
+        };
         let parent = control.open(place(&spot), |_, _| Flow::Continue);
-        (zones, Rc::default(), look, control, DisplayId::new("picture-1"), parent)
+        (
+            zones,
+            Rc::default(),
+            look,
+            control,
+            DisplayId::new("picture-1"),
+            parent,
+        )
     }
 
     #[test]
@@ -2746,17 +3695,50 @@ mod tests {
         let (zones, surfaces, look, mut control, display, parent) = beside_a_display("one-menu");
         let papers = zones.borrow().core().config().zones[0].id.clone();
         let menu_now = |surfaces: &Rc<RefCell<Surfaces>>| surfaces.borrow().menu();
-        let bare = Ask::DeskMenu { display: display.clone(), at: pos2(1100.0, 700.0) };
+        let bare = Ask::DeskMenu {
+            display: display.clone(),
+            at: pos2(1100.0, 700.0),
+        };
         // The other button on the bare desktop, and again without choosing:
         // the first menu goes as the second comes.
-        answer(&zones, &surfaces, &look, &palette(), bare.clone(), &display, parent, &mut control);
+        answer(
+            &zones,
+            &surfaces,
+            &look,
+            &palette(),
+            bare.clone(),
+            &display,
+            parent,
+            &mut control,
+        );
         let first = menu_now(&surfaces).expect("a menu was opened");
         assert!(control.is_open(first));
-        answer(&zones, &surfaces, &look, &palette(), bare.clone(), &display, parent, &mut control);
+        answer(
+            &zones,
+            &surfaces,
+            &look,
+            &palette(),
+            bare.clone(),
+            &display,
+            parent,
+            &mut control,
+        );
         let second = menu_now(&surfaces).expect("a menu was opened");
         assert!(first != second && !control.is_open(first) && control.is_open(second));
         // A zone's menu is the same one menu.
-        answer(&zones, &surfaces, &look, &palette(), Ask::ZoneMenu { zone: papers.clone(), at: pos2(300.0, 150.0) }, &display, parent, &mut control);
+        answer(
+            &zones,
+            &surfaces,
+            &look,
+            &palette(),
+            Ask::ZoneMenu {
+                zone: papers.clone(),
+                at: pos2(300.0, 150.0),
+            },
+            &display,
+            parent,
+            &mut control,
+        );
         let third = menu_now(&surfaces).expect("a menu was opened");
         assert!(!control.is_open(second) && control.is_open(third));
         // A press on a display's surface puts it away; the next finds none.
@@ -2767,10 +3749,28 @@ mod tests {
         assert!(control.is_open(parent));
         // A menu that closed itself (a line was chosen) is not closed again,
         // and is no obstacle to the next.
-        answer(&zones, &surfaces, &look, &palette(), bare.clone(), &display, parent, &mut control);
+        answer(
+            &zones,
+            &surfaces,
+            &look,
+            &palette(),
+            bare.clone(),
+            &display,
+            parent,
+            &mut control,
+        );
         let chosen = menu_now(&surfaces).unwrap();
         control.close(chosen);
-        answer(&zones, &surfaces, &look, &palette(), bare, &display, parent, &mut control);
+        answer(
+            &zones,
+            &surfaces,
+            &look,
+            &palette(),
+            bare,
+            &display,
+            parent,
+            &mut control,
+        );
         assert!(control.is_open(menu_now(&surfaces).unwrap()));
     }
 
@@ -2778,19 +3778,51 @@ mod tests {
     fn a_press_beside_the_box_that_is_typed_into_puts_it_away_too() {
         let (zones, surfaces, look, mut control, display, parent) = beside_a_display("one-box");
         let papers = zones.borrow().core().config().zones[0].id.clone();
-        answer(&zones, &surfaces, &look, &palette(), Ask::Rename { zone: papers.clone() }, &display, parent, &mut control);
+        answer(
+            &zones,
+            &surfaces,
+            &look,
+            &palette(),
+            Ask::Rename {
+                zone: papers.clone(),
+            },
+            &display,
+            parent,
+            &mut control,
+        );
         let typed_into = surfaces.borrow().typing.expect("a box was opened");
         assert!(control.is_open(typed_into));
         assert_eq!(zones.borrow().renaming, Some(papers));
         // With a menu open beside it: one press, and both are gone.
-        answer(&zones, &surfaces, &look, &palette(), Ask::DeskMenu { display: display.clone(), at: pos2(1100.0, 700.0) }, &display, parent, &mut control);
+        answer(
+            &zones,
+            &surfaces,
+            &look,
+            &palette(),
+            Ask::DeskMenu {
+                display: display.clone(),
+                at: pos2(1100.0, 700.0),
+            },
+            &display,
+            parent,
+            &mut control,
+        );
         let menu = surfaces.borrow().menu().unwrap();
         dismiss(&zones, &surfaces, &mut control);
         assert!(!control.is_open(typed_into) && !control.is_open(menu));
         assert!(surfaces.borrow().typing.is_none() && zones.borrow().renaming.is_none());
         // What was looked for stays looked for when its box is put away so.
         zones.borrow_mut().filter = "report".to_string();
-        answer(&zones, &surfaces, &look, &palette(), Ask::Filter, &display, parent, &mut control);
+        answer(
+            &zones,
+            &surfaces,
+            &look,
+            &palette(),
+            Ask::Filter,
+            &display,
+            parent,
+            &mut control,
+        );
         dismiss(&zones, &surfaces, &mut control);
         assert_eq!(zones.borrow().filter, "report");
     }
@@ -2798,24 +3830,49 @@ mod tests {
     #[test]
     fn hiding_everything_puts_the_open_menu_away() {
         let (zones, surfaces, look, mut control, display, parent) = beside_a_display("hidden-menu");
-        let bare = Ask::DeskMenu { display: display.clone(), at: pos2(1100.0, 700.0) };
+        let bare = Ask::DeskMenu {
+            display: display.clone(),
+            at: pos2(1100.0, 700.0),
+        };
         sync(&zones, &surfaces, &mut control, &look);
-        answer(&zones, &surfaces, &look, &palette(), bare.clone(), &display, parent, &mut control);
+        answer(
+            &zones,
+            &surfaces,
+            &look,
+            &palette(),
+            bare.clone(),
+            &display,
+            parent,
+            &mut control,
+        );
         let menu = surfaces.borrow().menu().unwrap();
         // Nothing changed: the menu stays.
         sync(&zones, &surfaces, &mut control, &look);
         assert!(control.is_open(menu));
         // Hidden from elsewhere (a key, another program) while it is open.
-        zones.borrow_mut().command(Command::QuickHide { hidden: Some(true) });
+        zones
+            .borrow_mut()
+            .command(Command::QuickHide { hidden: Some(true) });
         sync(&zones, &surfaces, &mut control, &look);
         assert!(!control.is_open(menu) && surfaces.borrow().menu().is_none());
         // The menu asked for while hidden stays (it is the way back), and
         // showing everything again closes nothing.
-        answer(&zones, &surfaces, &look, &palette(), bare.clone(), &display, parent, &mut control);
+        answer(
+            &zones,
+            &surfaces,
+            &look,
+            &palette(),
+            bare.clone(),
+            &display,
+            parent,
+            &mut control,
+        );
         let back = surfaces.borrow().menu().unwrap();
         sync(&zones, &surfaces, &mut control, &look);
         assert!(control.is_open(back));
-        zones.borrow_mut().command(Command::QuickHide { hidden: Some(false) });
+        zones.borrow_mut().command(Command::QuickHide {
+            hidden: Some(false),
+        });
         sync(&zones, &surfaces, &mut control, &look);
         assert!(control.is_open(back));
         // Switched off in the configuration: away as well.
@@ -2851,15 +3908,27 @@ mod tests {
             output.textures_delta.clear();
             heard
         };
-        assert!(heard(vec![button(at, egui::PointerButton::Primary, true)], false));
-        assert!(heard(vec![button(at, egui::PointerButton::Secondary, true)], false));
+        assert!(heard(
+            vec![button(at, egui::PointerButton::Primary, true)],
+            false
+        ));
+        assert!(heard(
+            vec![button(at, egui::PointerButton::Secondary, true)],
+            false
+        ));
         // (Down and up within one frame is a press all the same.)
         assert!(heard(
-            vec![button(at, egui::PointerButton::Primary, true), button(at, egui::PointerButton::Primary, false)],
+            vec![
+                button(at, egui::PointerButton::Primary, true),
+                button(at, egui::PointerButton::Primary, false)
+            ],
             false
         ));
         assert!(!heard(vec![egui::Event::PointerMoved(at)], true));
-        assert!(!heard(vec![button(at, egui::PointerButton::Primary, false)], true));
+        assert!(!heard(
+            vec![button(at, egui::PointerButton::Primary, false)],
+            true
+        ));
         assert!(heard(vec![key(true)], true));
         // The key of a window that has the keyboard is not ours.
         assert!(!heard(vec![key(true)], false));
@@ -2880,7 +3949,10 @@ mod tests {
         };
         let display = DisplayId::new("picture-1");
         // On the bare desktop, and where a zone lies that is hidden.
-        for (name, at) in [("menu-bare", pos2(1100.0, 700.0)), ("menu-zone", pos2(300.0, 150.0))] {
+        for (name, at) in [
+            ("menu-bare", pos2(1100.0, 700.0)),
+            ("menu-zone", pos2(300.0, 150.0)),
+        ] {
             let mut zones = a_working_desktop(name);
             let context = egui::Context::default();
             gevrek_ui::theme::install_fonts(&context, false);
@@ -2890,7 +3962,11 @@ mod tests {
                 &mut zones,
                 &context,
                 10.0,
-                vec![vec![egui::Event::PointerMoved(at)], vec![button(at, other, true)], vec![button(at, other, false)]],
+                vec![
+                    vec![egui::Event::PointerMoved(at)],
+                    vec![button(at, other, true)],
+                    vec![button(at, other, false)],
+                ],
             );
             let asks = zones.take_asks();
             let [Ask::DeskMenu { at: asked_at, .. }] = asks.as_slice() else {
@@ -2898,18 +3974,26 @@ mod tests {
             };
             let lines = desk_menu(&zones, &display, *asked_at, &palette());
             assert_eq!(labels(&lines), ["Show the zones"], "{name}");
-            let Line::Choice { does: Does::Command(command), .. } = &lines[0] else {
+            let Line::Choice {
+                does: Does::Command(command),
+                ..
+            } = &lines[0]
+            else {
                 panic!("the line is a command");
             };
             zones.command(command.clone());
             assert!(!zones.hidden() && !zones.layout().zones.is_empty());
-            assert!(labels(&desk_menu(&zones, &display, *asked_at, &palette())).contains(&"Hide the zones".to_string()));
+            assert!(labels(&desk_menu(&zones, &display, *asked_at, &palette()))
+                .contains(&"Hide the zones".to_string()));
         }
     }
 
     #[test]
     fn the_workspace_the_zones_go_by_is_the_one_shown_where_the_keyboard_is() {
-        assert_eq!(shown_workspace(&serde_json::json!({ "monitors": [] })), None);
+        assert_eq!(
+            shown_workspace(&serde_json::json!({ "monitors": [] })),
+            None
+        );
         assert_eq!(shown_workspace(&serde_json::json!({})), None);
     }
 
@@ -2931,7 +4015,10 @@ mod tests {
         };
         // Every line that does something, with the way to it.
         let labels = |zones: &Zones| -> Vec<String> {
-            every_line(&desk_menu(zones, &display, pos2(600.0, 400.0), &palette())).into_iter().map(|(way, _)| way).collect()
+            every_line(&desk_menu(zones, &display, pos2(600.0, 400.0), &palette()))
+                .into_iter()
+                .map(|(way, _)| way)
+                .collect()
         };
         assert_eq!(
             own(&zones),
@@ -2950,7 +4037,10 @@ mod tests {
         );
         // Every way to a new zone is beside the one line, and the zones
         // that fill themselves beside theirs.
-        let new: Vec<String> = labels(&zones).into_iter().filter(|way| way.starts_with("New zone \u{203a}")).collect();
+        let new: Vec<String> = labels(&zones)
+            .into_iter()
+            .filter(|way| way.starts_with("New zone \u{203a}"))
+            .collect();
         assert_eq!(
             new,
             [
@@ -2965,27 +4055,62 @@ mod tests {
             ]
         );
         assert!(labels(&zones).contains(&"Held \u{203a} Every zone held where it is".to_string()));
-        assert!(labels(&zones).contains(&"Look of all zones \u{203a} Ground \u{203a} Solid ground".to_string()));
-        assert!(labels(&zones).contains(&"Arrangements \u{203a} Keep this arrangement as\u{2026}".to_string()));
-        assert!(!own(&zones).contains(&"Rules >".to_string()), "there are no rules");
+        assert!(labels(&zones)
+            .contains(&"Look of all zones \u{203a} Ground \u{203a} Solid ground".to_string()));
+        assert!(labels(&zones)
+            .contains(&"Arrangements \u{203a} Keep this arrangement as\u{2026}".to_string()));
+        assert!(
+            !own(&zones).contains(&"Rules >".to_string()),
+            "there are no rules"
+        );
         // Zones made by type can be taken back from the same place, once
         // some were made (and no longer when they were).
-        assert!(!labels(&zones).iter().any(|way| way.ends_with("Take the automatic zones back")));
-        zones.command(Command::AutoCreate { scope: Scope::Loose, min_items: Some(1), display: None, add_rules: Some(false), dry_run: false });
-        assert!(labels(&zones).contains(&"New zone \u{203a} Take the automatic zones back".to_string()));
+        assert!(!labels(&zones)
+            .iter()
+            .any(|way| way.ends_with("Take the automatic zones back")));
+        zones.command(Command::AutoCreate {
+            scope: Scope::Loose,
+            min_items: Some(1),
+            display: None,
+            add_rules: Some(false),
+            dry_run: false,
+        });
+        assert!(
+            labels(&zones).contains(&"New zone \u{203a} Take the automatic zones back".to_string())
+        );
         zones.command(Command::UndoAutoCreate);
-        assert!(!labels(&zones).iter().any(|way| way.ends_with("Take the automatic zones back")));
+        assert!(!labels(&zones)
+            .iter()
+            .any(|way| way.ends_with("Take the automatic zones back")));
         let mut config = zones.core().config().clone();
-        config.catch_all = Some(gevrek_zones::config::RuleAction::AssignToZone { zone: config.zones[0].id.clone() });
+        config.catch_all = Some(gevrek_zones::config::RuleAction::AssignToZone {
+            zone: config.zones[0].id.clone(),
+        });
         zones.configure(&config);
-        assert!(labels(&zones).contains(&"Rules \u{203a} Sort the desktop by the rules".to_string()));
-        assert!(labels(&zones).contains(&"Rules \u{203a} What the rules would do\u{2026}".to_string()));
-        zones.command(Command::ApplyRules { scope: Scope::Loose });
+        assert!(
+            labels(&zones).contains(&"Rules \u{203a} Sort the desktop by the rules".to_string())
+        );
+        assert!(
+            labels(&zones).contains(&"Rules \u{203a} What the rules would do\u{2026}".to_string())
+        );
+        zones.command(Command::ApplyRules {
+            scope: Scope::Loose,
+        });
         assert!(labels(&zones).contains(&"Rules \u{203a} Take the sorting back".to_string()));
         // The new zone is made where the menu was opened.
         let menu = desk_menu(&zones, &display, pos2(600.4, 400.6), &palette());
         let all = every_line(&menu);
-        let Some((_, Line::Choice { does: Does::Command(Command::CreateZone { rect: Some(rect), .. }), .. })) = all.first() else {
+        let Some((
+            _,
+            Line::Choice {
+                does:
+                    Does::Command(Command::CreateZone {
+                        rect: Some(rect), ..
+                    }),
+                ..
+            },
+        )) = all.first()
+        else {
             panic!("the first line makes a zone");
         };
         assert_eq!((rect.x, rect.y), (600, 401));
@@ -3007,8 +4132,21 @@ mod tests {
 
     #[test]
     fn a_menu_opens_beside_the_line_that_leads_to_it_and_the_one_it_came_from_stays() {
-        let (zones, surfaces, look, mut control, display, parent) = beside_a_display("menus-beside");
-        answer(&zones, &surfaces, &look, &palette(), Ask::DeskMenu { display: display.clone(), at: pos2(600.0, 400.0) }, &display, parent, &mut control);
+        let (zones, surfaces, look, mut control, display, parent) =
+            beside_a_display("menus-beside");
+        answer(
+            &zones,
+            &surfaces,
+            &look,
+            &palette(),
+            Ask::DeskMenu {
+                display: display.clone(),
+                at: pos2(600.0, 400.0),
+            },
+            &display,
+            parent,
+            &mut control,
+        );
         let open = surfaces.borrow().menu.clone().expect("a menu was opened");
         let menus = |surfaces: &Rc<RefCell<Surfaces>>| surfaces.borrow().menus();
         assert_eq!(menus(&surfaces).len(), 1);
@@ -3031,7 +4169,13 @@ mod tests {
         fit(&open, &zones, &look, &mut control);
         assert_eq!(menus(&surfaces), three);
         // The left arrow goes one menu back; the others stay.
-        assert!(menu_keys(&zones, &open, &look, vec![menu::Key::Back], &mut control));
+        assert!(menu_keys(
+            &zones,
+            &open,
+            &look,
+            vec![menu::Key::Back],
+            &mut control
+        ));
         assert_eq!(menus(&surfaces), three[..2]);
         assert!(!control.is_open(three[2]) && control.is_open(three[1]));
         // Another line of the first menu that leads elsewhere: one way
@@ -3041,7 +4185,12 @@ mod tests {
         fit(&open, &zones, &look, &mut control);
         let other = menus(&surfaces);
         assert_eq!(other.len(), 2);
-        assert!(other[0] == first && other[1] != three[1] && !control.is_open(three[1]) && control.is_open(other[1]));
+        assert!(
+            other[0] == first
+                && other[1] != three[1]
+                && !control.is_open(three[1])
+                && control.is_open(other[1])
+        );
         // A menu the host closed itself (Escape, where the host hears
         // it) is no longer open here either, nor what opened from it.
         control.close(other[1]);
@@ -3050,36 +4199,82 @@ mod tests {
         assert_eq!(open.borrow().chain.levels.len(), 1);
         assert_eq!(open.borrow().chain.levels[0].open, None);
         // Escape in the first menu closes it: no menu is open.
-        assert!(!menu_keys(&zones, &open, &look, vec![menu::Key::Escape], &mut control));
+        assert!(!menu_keys(
+            &zones,
+            &open,
+            &look,
+            vec![menu::Key::Escape],
+            &mut control
+        ));
         assert!(!control.is_open(first) && menus(&surfaces).is_empty());
     }
 
     #[test]
     fn a_line_that_does_something_closes_every_menu_and_the_keys_choose_as_the_pointer_does() {
-        let (zones, surfaces, look, mut control, display, parent) = beside_a_display("menus-chosen");
+        let (zones, surfaces, look, mut control, display, parent) =
+            beside_a_display("menus-chosen");
         let papers = zones.borrow().core().config().zones[0].id.clone();
         // Asked for by the key for menus: the keys are on its first line.
-        zones.borrow_mut().command(Command::FocusZone { zone: Some(papers.clone()) });
+        zones.borrow_mut().command(Command::FocusZone {
+            zone: Some(papers.clone()),
+        });
         zones.borrow_mut().key(crate::zones::gesture::Key::Menu);
         let asks = zones.borrow_mut().take_asks();
         let [Ask::ZoneMenu { zone, .. }] = asks.as_slice() else {
             panic!("the key asked for {asks:?}");
         };
         assert_eq!(zone, &papers);
-        answer(&zones, &surfaces, &look, &palette(), asks[0].clone(), &display, parent, &mut control);
+        answer(
+            &zones,
+            &surfaces,
+            &look,
+            &palette(),
+            asks[0].clone(),
+            &display,
+            parent,
+            &mut control,
+        );
         let open = surfaces.borrow().menu.clone().unwrap();
         assert_eq!(open.borrow().chain.levels[0].at, Some(0));
         // Down to "Shown and ordered", into it, down to "As a list", Enter.
         use menu::Key::{Choose, Down, Into};
-        assert!(menu_keys(&zones, &open, &look, vec![Down, Down, Into], &mut control));
+        assert!(menu_keys(
+            &zones,
+            &open,
+            &look,
+            vec![Down, Down, Into],
+            &mut control
+        ));
         let all = surfaces.borrow().menus();
         assert_eq!(all.len(), 2);
-        assert_eq!(open.borrow().chain.levels[1].at, Some(0), "the keys are on its first line");
-        assert!(!menu_keys(&zones, &open, &look, vec![Down, Choose], &mut control), "no menu is left open");
+        assert_eq!(
+            open.borrow().chain.levels[1].at,
+            Some(0),
+            "the keys are on its first line"
+        );
+        assert!(
+            !menu_keys(&zones, &open, &look, vec![Down, Choose], &mut control),
+            "no menu is left open"
+        );
         assert!(all.iter().all(|menu| !control.is_open(*menu)));
-        assert_eq!(zones.borrow().core().config().zone(&papers).unwrap().view, View::List);
+        assert_eq!(
+            zones.borrow().core().config().zone(&papers).unwrap().view,
+            View::List
+        );
         // A menu asked for by the pointer has the keys on no line yet.
-        answer(&zones, &surfaces, &look, &palette(), Ask::ZoneMenu { zone: papers.clone(), at: pos2(300.0, 150.0) }, &display, parent, &mut control);
+        answer(
+            &zones,
+            &surfaces,
+            &look,
+            &palette(),
+            Ask::ZoneMenu {
+                zone: papers.clone(),
+                at: pos2(300.0, 150.0),
+            },
+            &display,
+            parent,
+            &mut control,
+        );
         let open = surfaces.borrow().menu.clone().unwrap();
         assert_eq!(open.borrow().chain.levels[0].at, None);
         // A press beside the menus puts all of them away.
@@ -3089,30 +4284,77 @@ mod tests {
         let all = surfaces.borrow().menus();
         assert_eq!(all.len(), 2);
         dismiss(&zones, &surfaces, &mut control);
-        assert!(all.iter().all(|menu| !control.is_open(*menu)) && surfaces.borrow().menu().is_none());
+        assert!(
+            all.iter().all(|menu| !control.is_open(*menu)) && surfaces.borrow().menu().is_none()
+        );
         // The button of a title asks for the one menu of how a zone is
         // shown and ordered, by itself.
-        answer(&zones, &surfaces, &look, &palette(), Ask::ViewMenu { zone: papers.clone(), at: pos2(300.0, 150.0) }, &display, parent, &mut control);
+        answer(
+            &zones,
+            &surfaces,
+            &look,
+            &palette(),
+            Ask::ViewMenu {
+                zone: papers.clone(),
+                at: pos2(300.0, 150.0),
+            },
+            &display,
+            parent,
+            &mut control,
+        );
         let open = surfaces.borrow().menu.clone().unwrap();
-        assert_eq!(open.borrow().chain.levels[0].lines, view_menu(&zones.borrow(), &papers));
+        assert_eq!(
+            open.borrow().chain.levels[0].lines,
+            view_menu(&zones.borrow(), &papers)
+        );
     }
 
     #[test]
     fn the_programs_some_items_open_with_stand_beside_the_line_that_leads_to_them() {
-        let action = |id: &str, label: &str| DeskAction { id: id.to_string(), label: label.to_string() };
+        let action = |id: &str, label: &str| DeskAction {
+            id: id.to_string(),
+            label: label.to_string(),
+        };
         let items = vec![gevrek_zones::ItemId::new("/desk/a.txt")];
-        let lines = [action("open", "Open"), action(crate::zones::CHOOSE, "Open with\u{2026}"), action(crate::zones::RENAME, "Rename\u{2026}")];
-        let programs = [action("with:editor", "Editor"), action("with:viewer", "Viewer")];
+        let lines = [
+            action("open", "Open"),
+            action(crate::zones::CHOOSE, "Open with\u{2026}"),
+            action(crate::zones::RENAME, "Rename\u{2026}"),
+        ];
+        let programs = [
+            action("with:editor", "Editor"),
+            action("with:viewer", "Viewer"),
+        ];
         let menu = item_menu(&items, &lines, &programs);
         let ways: Vec<String> = every_line(&menu).into_iter().map(|(way, _)| way).collect();
-        assert_eq!(ways, ["Open", "Open with \u{203a} Editor", "Open with \u{203a} Viewer", "Rename\u{2026}"]);
+        assert_eq!(
+            ways,
+            [
+                "Open",
+                "Open with \u{203a} Editor",
+                "Open with \u{203a} Viewer",
+                "Rename\u{2026}"
+            ]
+        );
         let Line::Sub { lines: beside, .. } = &menu[1] else {
             panic!("the line leads to a menu");
         };
-        assert_eq!(beside[1], Line::Choice { label: "Viewer".to_string(), marked: false, does: Does::Act { items: items.clone(), action: "with:viewer".to_string() } });
+        assert_eq!(
+            beside[1],
+            Line::Choice {
+                label: "Viewer".to_string(),
+                marked: false,
+                does: Does::Act {
+                    items: items.clone(),
+                    action: "with:viewer".to_string()
+                }
+            }
+        );
         // Where the system names none, the line stays one that asks.
         let menu = item_menu(&items, &lines, &[]);
-        assert!(matches!(&menu[1], Line::Choice { does: Does::Act { action, .. }, .. } if action == crate::zones::CHOOSE));
+        assert!(
+            matches!(&menu[1], Line::Choice { does: Does::Act { action, .. }, .. } if action == crate::zones::CHOOSE)
+        );
     }
 
     #[test]
@@ -3122,14 +4364,42 @@ mod tests {
         let display = DisplayId::new("picture-1");
         let before = zones.core().config().zones.len();
         let preview = zones.auto_preview(Scope::Loose, &display);
-        let titles: Vec<&str> = preview.plan.zones.iter().map(|zone| zone.title.as_str()).collect();
-        assert_eq!(titles, ["Folders", "Programs", "Documents", "Pictures", "Video", "Audio", "Archives", "Code"]);
+        let titles: Vec<&str> = preview
+            .plan
+            .zones
+            .iter()
+            .map(|zone| zone.title.as_str())
+            .collect();
+        assert_eq!(
+            titles,
+            [
+                "Folders",
+                "Programs",
+                "Documents",
+                "Pictures",
+                "Video",
+                "Audio",
+                "Archives",
+                "Code"
+            ]
+        );
         assert!(!preview.can_undo);
         // Every item of the plan has its name, and the picture knows the
         // display and the zone that stands on it.
-        assert!(preview.plan.zones.iter().flat_map(|zone| &zone.items).all(|item| preview.names.contains_key(item)));
-        assert_eq!(preview.display, Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0)));
-        assert_eq!(preview.there, [Rect::from_min_size(pos2(900.0, 520.0), vec2(340.0, 220.0))]);
+        assert!(preview
+            .plan
+            .zones
+            .iter()
+            .flat_map(|zone| &zone.items)
+            .all(|item| preview.names.contains_key(item)));
+        assert_eq!(
+            preview.display,
+            Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0))
+        );
+        assert_eq!(
+            preview.there,
+            [Rect::from_min_size(pos2(900.0, 520.0), vec2(340.0, 220.0))]
+        );
         // Nothing was changed by looking.
         assert_eq!(zones.core().config().zones.len(), before);
         // No new zone lies over the one that is there, nor over another.
@@ -3137,18 +4407,38 @@ mod tests {
             .plan
             .zones
             .iter()
-            .map(|zone| Rect::from_min_size(pos2(zone.rect.x as f32, zone.rect.y as f32), vec2(zone.rect.width as f32, zone.rect.height as f32)))
+            .map(|zone| {
+                Rect::from_min_size(
+                    pos2(zone.rect.x as f32, zone.rect.y as f32),
+                    vec2(zone.rect.width as f32, zone.rect.height as f32),
+                )
+            })
             .collect();
         for (number, rect) in planned.iter().enumerate() {
             assert!(!rect.intersects(preview.there[0]), "{rect:?}");
-            assert!(planned[number + 1..].iter().all(|other| !rect.intersects(*other)), "{rect:?}");
+            assert!(
+                planned[number + 1..]
+                    .iter()
+                    .all(|other| !rect.intersects(*other)),
+                "{rect:?}"
+            );
             assert!(preview.display.contains_rect(*rect));
         }
         // Made, as the sheet's button does it.
-        zones.command(Command::AutoCreate { scope: Scope::Loose, min_items: None, display: Some(display.clone()), add_rules: Some(true), dry_run: false });
+        zones.command(Command::AutoCreate {
+            scope: Scope::Loose,
+            min_items: None,
+            display: Some(display.clone()),
+            add_rules: Some(true),
+            dry_run: false,
+        });
         assert_eq!(zones.core().config().zones.len(), before + 8);
         let after = zones.auto_preview(Scope::Loose, &display);
-        assert!(after.plan.zones.is_empty() && after.can_undo, "{:?}", after.plan);
+        assert!(
+            after.plan.zones.is_empty() && after.can_undo,
+            "{:?}",
+            after.plan
+        );
         assert_eq!(zones.layout().zones.len(), before + 8);
         // And taken back.
         zones.command(Command::UndoAutoCreate);
@@ -3164,7 +4454,10 @@ mod tests {
         shown: &menu::Level,
         time: f64,
         events: Vec<egui::Event>,
-    ) -> ((Option<usize>, Option<usize>), Option<egui::accesskit::TreeUpdate>) {
+    ) -> (
+        (Option<usize>, Option<usize>),
+        Option<egui::accesskit::TreeUpdate>,
+    ) {
         let size = menu_size(&shown.lines);
         let input = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
@@ -3190,23 +4483,53 @@ mod tests {
         gevrek_ui::theme::install_fonts(&context, false);
         let rows = menu::rows(&chain.levels[0].lines);
         let main = egui::PointerButton::Primary;
-        let click = |at: Pos2, pressed: bool| egui::Event::PointerButton { pos: at, button: main, pressed, modifiers: egui::Modifiers::NONE };
+        let click = |at: Pos2, pressed: bool| egui::Event::PointerButton {
+            pos: at,
+            button: main,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
         // The pointer over the third line ("Shown and ordered").
         let third = rows[2].center();
-        menu_frame(&context, &chain.levels[0], 1.0, vec![egui::Event::PointerMoved(third)]);
+        menu_frame(
+            &context,
+            &chain.levels[0],
+            1.0,
+            vec![egui::Event::PointerMoved(third)],
+        );
         let (came, _) = menu_frame(&context, &chain.levels[0], 1.1, Vec::new());
         assert_eq!(came, (Some(2), None));
         // Over a gap: on no line.
-        let gap = chain.levels[0].lines.iter().position(|line| *line == Line::Gap).unwrap();
-        menu_frame(&context, &chain.levels[0], 1.2, vec![egui::Event::PointerMoved(rows[gap].center())]);
-        assert_eq!(menu_frame(&context, &chain.levels[0], 1.3, Vec::new()).0, (None, None));
+        let gap = chain.levels[0]
+            .lines
+            .iter()
+            .position(|line| *line == Line::Gap)
+            .unwrap();
+        menu_frame(
+            &context,
+            &chain.levels[0],
+            1.2,
+            vec![egui::Event::PointerMoved(rows[gap].center())],
+        );
+        assert_eq!(
+            menu_frame(&context, &chain.levels[0], 1.3, Vec::new()).0,
+            (None, None)
+        );
         // Pressed and let go on the first line ("Rename...").
         let first = rows[0].center();
-        menu_frame(&context, &chain.levels[0], 1.4, vec![egui::Event::PointerMoved(first)]);
+        menu_frame(
+            &context,
+            &chain.levels[0],
+            1.4,
+            vec![egui::Event::PointerMoved(first)],
+        );
         menu_frame(&context, &chain.levels[0], 1.5, vec![click(first, true)]);
         let (came, _) = menu_frame(&context, &chain.levels[0], 1.6, vec![click(first, false)]);
         assert_eq!(came, (Some(0), Some(0)));
-        assert!(matches!(chain.pressed(0, 0), Some(Does::Ask(Ask::Rename { .. }))));
+        assert!(matches!(
+            chain.pressed(0, 0),
+            Some(Does::Ask(Ask::Rename { .. }))
+        ));
         // What a screen reader is told: a menu of items, the marked ones
         // as marked, and the ones that lead on as having a menu.
         chain.pressed(0, 2);
@@ -3214,12 +4537,25 @@ mod tests {
         menu_frame(&context, &chain.levels[0], 2.0, Vec::new());
         let (_, told) = menu_frame(&context, &chain.levels[0], 2.1, Vec::new());
         let update = told.expect("a tree for the screen reader");
-        assert!(update.nodes.iter().any(|(_, node)| node.role() == Role::Menu));
-        let named = |name: &str| update.nodes.iter().find(|(_, node)| node.label() == Some(name)).unwrap_or_else(|| panic!("no node is called {name}"));
+        assert!(update
+            .nodes
+            .iter()
+            .any(|(_, node)| node.role() == Role::Menu));
+        let named = |name: &str| {
+            update
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some(name))
+                .unwrap_or_else(|| panic!("no node is called {name}"))
+        };
         assert_eq!(named("Rename").1.role(), Role::MenuItem);
         let (_, shown_and_ordered) = named("Shown and ordered");
         assert_eq!(shown_and_ordered.has_popup(), Some(HasPopup::Menu));
-        assert_eq!(shown_and_ordered.is_expanded(), Some(true), "its menu is open beside it");
+        assert_eq!(
+            shown_and_ordered.is_expanded(),
+            Some(true),
+            "its menu is open beside it"
+        );
         assert_eq!(named("Look").1.is_expanded(), Some(false));
         // A marked line of the menu beside it.
         let (_, as_a_grid) = {
@@ -3228,10 +4564,19 @@ mod tests {
                 menu_frame(&context, &chain.levels[1], 2.3, Vec::new())
             };
             let update = told.unwrap();
-            let node = update.nodes.iter().find(|(_, node)| node.label() == Some("As a grid")).unwrap().1.clone();
+            let node = update
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("As a grid"))
+                .unwrap()
+                .1
+                .clone();
             ((), node)
         };
-        assert_eq!((as_a_grid.role(), as_a_grid.toggled()), (Role::MenuItemCheckBox, Some(Toggled::True)));
+        assert_eq!(
+            (as_a_grid.role(), as_a_grid.toggled()),
+            (Role::MenuItemCheckBox, Some(Toggled::True))
+        );
         // Pressed for the person by the screen reader: a press.
         let (rename_id, _) = named("Rename");
         let request = egui::accesskit::ActionRequest {
@@ -3240,17 +4585,34 @@ mod tests {
             target_node: *rename_id,
             data: None,
         };
-        let (came, _) = menu_frame(&context, &chain.levels[0], 2.4, vec![egui::Event::AccessKitActionRequest(request)]);
+        let (came, _) = menu_frame(
+            &context,
+            &chain.levels[0],
+            2.4,
+            vec![egui::Event::AccessKitActionRequest(request)],
+        );
         assert_eq!(came.1, Some(0));
     }
 
     #[test]
     fn the_keys_of_a_menu_are_taken_out_of_what_a_surface_heard() {
         let context = egui::Context::default();
-        let key = |key: egui::Key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+        let key = |key: egui::Key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
         let input = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0))),
-            events: vec![key(egui::Key::ArrowDown), key(egui::Key::ArrowDown), key(egui::Key::ArrowRight), key(egui::Key::Escape), key(egui::Key::Delete)],
+            events: vec![
+                key(egui::Key::ArrowDown),
+                key(egui::Key::ArrowDown),
+                key(egui::Key::ArrowRight),
+                key(egui::Key::Escape),
+                key(egui::Key::Delete),
+            ],
             focused: true,
             ..Default::default()
         };
@@ -3258,13 +4620,23 @@ mod tests {
         let mut left = (false, false, false);
         let mut output = context.run_ui(input, |ui| {
             heard = ui.input_mut(menu::keys);
-            left = ui.input(|input| (input.key_pressed(egui::Key::ArrowDown), input.key_pressed(egui::Key::Escape), input.key_pressed(egui::Key::Delete)));
+            left = ui.input(|input| {
+                (
+                    input.key_pressed(egui::Key::ArrowDown),
+                    input.key_pressed(egui::Key::Escape),
+                    input.key_pressed(egui::Key::Delete),
+                )
+            });
             // (So a press of Escape that was a menu's puts nothing else away.)
             assert!(!ui.input(pressed_elsewhere));
         });
         output.textures_delta.clear();
         use menu::Key::{Down, Escape, Into};
         assert_eq!(heard, [Down, Down, Into, Escape]);
-        assert_eq!(left, (false, false, true), "the menu's keys are gone, the others are there");
+        assert_eq!(
+            left,
+            (false, false, true),
+            "the menu's keys are gone, the others are there"
+        );
     }
 }

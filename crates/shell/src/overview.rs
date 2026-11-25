@@ -61,7 +61,10 @@ pub fn displays(wm: &Value) -> Vec<Display> {
         .into_iter()
         .flatten()
         .filter_map(|monitor| {
-            let (left, top) = (number(&monitor["position"]["x"]), number(&monitor["position"]["y"]));
+            let (left, top) = (
+                number(&monitor["position"]["x"]),
+                number(&monitor["position"]["y"]),
+            );
             let (width, height) = (
                 number(&monitor["size"]["width"]),
                 number(&monitor["size"]["height"]),
@@ -167,7 +170,8 @@ impl Remembered {
     /// A picture was taken.
     pub fn keep(&mut self, window: u64, picture: Picture) {
         self.stamp += 1;
-        self.pictures.insert(window, (Arc::new(picture), self.stamp));
+        self.pictures
+            .insert(window, (Arc::new(picture), self.stamp));
     }
 
     pub fn of(&self, window: u64) -> Option<&(Arc<Picture>, u64)> {
@@ -285,7 +289,10 @@ impl Overview {
                 high += 22.0;
             }
         }
-        (wide.max(420.0) as u32, high.min(room.1 * 0.9).max(240.0) as u32)
+        (
+            wide.max(420.0) as u32,
+            high.min(room.1 * 0.9).max(240.0) as u32,
+        )
     }
 
     /// Draw it. What was asked for in this frame.
@@ -355,17 +362,14 @@ impl Overview {
         self.chosen = chosen;
         let go_to = |place: (usize, usize)| {
             displays.get(place.0).and_then(|display| {
-                display
-                    .spaces
-                    .get(place.1)
-                    .map(|space| {
-                        Go::Space(
-                            display.name.clone(),
-                            display.focused,
-                            space.index,
-                            space.name.clone(),
-                        )
-                    })
+                display.spaces.get(place.1).map(|space| {
+                    Go::Space(
+                        display.name.clone(),
+                        display.focused,
+                        space.index,
+                        space.name.clone(),
+                    )
+                })
             })
         };
         if enter {
@@ -502,7 +506,12 @@ impl Overview {
                                     } else {
                                         egui::Stroke::new(1.0, palette.border)
                                     };
-                                    painter.rect_stroke(screen, 8.0, edge, egui::StrokeKind::Inside);
+                                    painter.rect_stroke(
+                                        screen,
+                                        8.0,
+                                        edge,
+                                        egui::StrokeKind::Inside,
+                                    );
                                     if keys {
                                         painter.rect_stroke(
                                             screen.expand(3.0),
@@ -520,7 +529,11 @@ impl Overview {
                                         ui,
                                         &name,
                                         egui::FontId::proportional(13.0),
-                                        if space.shown { palette.text } else { palette.muted },
+                                        if space.shown {
+                                            palette.text
+                                        } else {
+                                            palette.muted
+                                        },
                                         wide - 60.0,
                                     );
                                     painter.galley(
@@ -647,7 +660,10 @@ mod tests {
             .iter()
             .map(|space| (space.name.as_str(), space.shown, space.panes.len()))
             .collect();
-        assert_eq!(names, [("one", false, 1), ("two", true, 3), ("three", false, 0)]);
+        assert_eq!(
+            names,
+            [("one", false, 1), ("two", true, 3), ("three", false, 0)]
+        );
         // What is shown of one is its title, or its name where it has none.
         assert_eq!(first.spaces[0].title, "one");
         let titled = super::displays(&serde_json::json!({"monitors": [{
@@ -655,7 +671,10 @@ mod tests {
             "workspaces": [{"id": 1, "name": "web", "title": "Browsing", "detailed_windows": []}],
         }]}));
         assert_eq!(
-            (titled[0].spaces[0].name.as_str(), titled[0].spaces[0].title.as_str()),
+            (
+                titled[0].spaces[0].name.as_str(),
+                titled[0].spaces[0].title.as_str()
+            ),
             ("web", "Browsing")
         );
         // A window's place is a part of its display.
@@ -687,7 +706,10 @@ mod tests {
         assert!(there.contains("Monitor B"), "{there}");
         // One with a name: by its name, on its display.
         let named = Go::Space("Monitor A".to_string(), true, 2, "three".to_string()).command();
-        assert!(named.contains("Monitor A") && named.contains("three"), "{named}");
+        assert!(
+            named.contains("Monitor A") && named.contains("three"),
+            "{named}"
+        );
         assert!(!named.contains("switch_workspace_selector"), "{named}");
         assert!(Go::Window(22).command().contains("focus_window"));
     }
@@ -710,7 +732,10 @@ mod tests {
         let first = remembered.of(5).map(|(_, stamp)| *stamp);
         remembered.keep(5, picture(30));
         assert_ne!(remembered.of(5).map(|(_, stamp)| *stamp), first);
-        assert_eq!(remembered.of(5).map(|(picture, _)| picture.rgba[0]), Some(30));
+        assert_eq!(
+            remembered.of(5).map(|(picture, _)| picture.rgba[0]),
+            Some(30)
+        );
         // A window that is gone is forgotten.
         remembered.only(&[6]);
         assert!(remembered.of(5).is_none() && remembered.of(6).is_some());
@@ -803,15 +828,28 @@ mod tests {
         };
         assert_eq!(frame(&mut overview, &[]), Asked::default());
         // Right, and Enter: the workspace after the one shown.
-        assert_eq!(frame(&mut overview, &[egui::Key::ArrowRight]), Asked::default());
+        assert_eq!(
+            frame(&mut overview, &[egui::Key::ArrowRight]),
+            Asked::default()
+        );
         assert_eq!(
             frame(&mut overview, &[egui::Key::Enter]).go,
-            Some(Go::Space("Monitor A".to_string(), true, 2, "three".to_string()))
+            Some(Go::Space(
+                "Monitor A".to_string(),
+                true,
+                2,
+                "three".to_string()
+            ))
         );
         // A digit: that workspace of the display with the keyboard.
         assert_eq!(
             frame(&mut overview, &[egui::Key::Num1]).go,
-            Some(Go::Space("Monitor A".to_string(), true, 0, "one".to_string()))
+            Some(Go::Space(
+                "Monitor A".to_string(),
+                true,
+                0,
+                "one".to_string()
+            ))
         );
         assert!(frame(&mut overview, &[egui::Key::Escape]).close);
     }

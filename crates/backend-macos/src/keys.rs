@@ -333,7 +333,9 @@ impl Shared {
                     let repeat: Vec<i32> = self
                         .bindings
                         .iter()
-                        .filter(|(_, hotkey)| hits(hotkey) && hotkey.trigger == BindingTrigger::Repeat)
+                        .filter(|(_, hotkey)| {
+                            hits(hotkey) && hotkey.trigger == BindingTrigger::Repeat
+                        })
                         .map(|(id, _)| *id)
                         .collect();
                     if !repeat.is_empty() {
@@ -374,7 +376,14 @@ impl Shared {
     }
 
     /// Tell the runtime of bindings a key or button hit.
-    fn hit(&mut self, ids: Vec<i32>, device: BindingDevice, key: &str, held: Held, trigger: BindingTrigger) {
+    fn hit(
+        &mut self,
+        ids: Vec<i32>,
+        device: BindingDevice,
+        key: &str,
+        held: Held,
+        trigger: BindingTrigger,
+    ) {
         if ids.is_empty() {
             return;
         }
@@ -387,13 +396,19 @@ impl Shared {
             last_repeat: None,
             long_fired: Vec::new(),
         };
-        self.hits.push(hotkey_event(ids, &down, trigger, Duration::ZERO));
+        self.hits
+            .push(hotkey_event(ids, &down, trigger, Duration::ZERO));
     }
 }
 
 /// A binding's event, its modifiers as the binding has them (Alt is
 /// Control, Option and Command held together).
-fn hotkey_event(ids: Vec<i32>, down: &Down, trigger: BindingTrigger, held_for: Duration) -> HotkeyEvent {
+fn hotkey_event(
+    ids: Vec<i32>,
+    down: &Down,
+    trigger: BindingTrigger,
+    held_for: Duration,
+) -> HotkeyEvent {
     let held = down.held;
     let alt = held.command && held.control && held.option;
     HotkeyEvent {
@@ -460,9 +475,7 @@ impl KeyTap {
         .fold(0u64, |mask, kind| mask | (1u64 << kind));
         // SAFETY: a session tap at the head, that may change events, with a
         // callback and a pointer to the boxed state it is kept with.
-        let port = unsafe {
-            ffi::CGEventTapCreate(1, 0, 0, mask, tap_callback, user_info)
-        };
+        let port = unsafe { ffi::CGEventTapCreate(1, 0, 0, mask, tap_callback, user_info) };
         if port.is_null() {
             anyhow::bail!(
                 "the keyboard cannot be watched: allow gevrek in System Settings, \
@@ -610,7 +623,13 @@ fn key_event(shared: &mut Shared, event: ffi::CFTypeRef, up: bool, held: Held) -
 
 /// A mouse button: a drag of a window, or its bindings. Returns whether it
 /// is kept from the programs.
-fn button_event(shared: &mut Shared, event: ffi::CFTypeRef, number: u32, up: bool, held: Held) -> bool {
+fn button_event(
+    shared: &mut Shared,
+    event: ffi::CFTypeRef,
+    number: u32,
+    up: bool,
+    held: Held,
+) -> bool {
     if up {
         shared.release(BUTTON + number);
         if shared.dragging == Some(number) {
@@ -641,7 +660,11 @@ fn button_event(shared: &mut Shared, event: ffi::CFTypeRef, number: u32, up: boo
     if shared.paused {
         return was_swallowed;
     }
-    let trigger = if up { BindingTrigger::Release } else { BindingTrigger::Press };
+    let trigger = if up {
+        BindingTrigger::Release
+    } else {
+        BindingTrigger::Press
+    };
     let (ids, consume) = matching_on(&shared.bindings, BindingDevice::Mouse, name, held, trigger);
     shared.hit(ids, BindingDevice::Mouse, name, held, trigger);
     if !up {
@@ -668,8 +691,13 @@ fn wheel_event(shared: &mut Shared, event: ffi::CFTypeRef, held: Held) -> bool {
         return false;
     }
     let name = if delta > 0 { "WHEEL_UP" } else { "WHEEL_DOWN" };
-    let (ids, consume) =
-        matching_on(&shared.bindings, BindingDevice::Mouse, name, held, BindingTrigger::Press);
+    let (ids, consume) = matching_on(
+        &shared.bindings,
+        BindingDevice::Mouse,
+        name,
+        held,
+        BindingTrigger::Press,
+    );
     shared.hit(ids, BindingDevice::Mouse, name, held, BindingTrigger::Press);
     consume
 }
@@ -749,13 +777,19 @@ mod tests {
             command: true,
             ..option_control
         };
-        assert_eq!(matching(&bindings, "H", OPTION, BindingTrigger::Press), (vec![1], true));
+        assert_eq!(
+            matching(&bindings, "H", OPTION, BindingTrigger::Press),
+            (vec![1], true)
+        );
         // Win with Control is not Alt.
         assert_eq!(
             matching(&bindings, "H", option_control, BindingTrigger::Press),
             (vec![3], true)
         );
-        assert_eq!(matching(&bindings, "H", all_three, BindingTrigger::Press), (vec![2], true));
+        assert_eq!(
+            matching(&bindings, "H", all_three, BindingTrigger::Press),
+            (vec![2], true)
+        );
         assert_eq!(
             matching(&bindings, "H", Held::default(), BindingTrigger::Press),
             (vec![], false)
@@ -778,7 +812,10 @@ mod tests {
             ..OPTION
         };
         for key in ["C", "V", "Q"] {
-            assert_eq!(matching(&bindings, key, command, BindingTrigger::Press), (vec![], false));
+            assert_eq!(
+                matching(&bindings, key, command, BindingTrigger::Press),
+                (vec![], false)
+            );
             assert_eq!(
                 matching(&bindings, key, option_command, BindingTrigger::Press),
                 (vec![], false)
@@ -792,8 +829,14 @@ mod tests {
         release.trigger = BindingTrigger::Release;
         let bindings = vec![(5, release)];
         // The press hits nothing, and is kept: its release is the binding's.
-        assert_eq!(matching(&bindings, "Q", OPTION, BindingTrigger::Press), (vec![], true));
-        assert_eq!(matching(&bindings, "Q", OPTION, BindingTrigger::Release), (vec![5], true));
+        assert_eq!(
+            matching(&bindings, "Q", OPTION, BindingTrigger::Press),
+            (vec![], true)
+        );
+        assert_eq!(
+            matching(&bindings, "Q", OPTION, BindingTrigger::Release),
+            (vec![5], true)
+        );
     }
 
     /// Alt is held as Option with Control, which is also Win with Control:
@@ -830,7 +873,10 @@ mod tests {
                 }
             }
         }
-        assert!(clashes.is_empty(), "on the same keys on a Mac: {clashes:#?}");
+        assert!(
+            clashes.is_empty(),
+            "on the same keys on a Mac: {clashes:#?}"
+        );
     }
 
     fn mouse(key: &str, trigger: BindingTrigger, long_press_ms: u32) -> Hotkey {
@@ -849,15 +895,30 @@ mod tests {
             (2, hotkey("LEFT", true, false, false, false)),
         ];
         assert_eq!(
-            matching_on(&bindings, BindingDevice::Mouse, "WHEEL_UP", OPTION, BindingTrigger::Press),
+            matching_on(
+                &bindings,
+                BindingDevice::Mouse,
+                "WHEEL_UP",
+                OPTION,
+                BindingTrigger::Press
+            ),
             (vec![1], true)
         );
         // `LEFT` is an arrow key on the keyboard and a button of the mouse.
         assert_eq!(
-            matching_on(&bindings, BindingDevice::Mouse, "LEFT", OPTION, BindingTrigger::Press),
+            matching_on(
+                &bindings,
+                BindingDevice::Mouse,
+                "LEFT",
+                OPTION,
+                BindingTrigger::Press
+            ),
             (vec![], false)
         );
-        assert_eq!(matching(&bindings, "LEFT", OPTION, BindingTrigger::Press), (vec![2], false));
+        assert_eq!(
+            matching(&bindings, "LEFT", OPTION, BindingTrigger::Press),
+            (vec![2], false)
+        );
         assert_eq!(mouse_button_name(0), Some("LEFT"));
         assert_eq!(mouse_button_name(2), Some("MIDDLE"));
         assert_eq!(mouse_button_name(9), None);
@@ -919,6 +980,9 @@ mod tests {
     #[test]
     fn a_binding_written_with_another_name_of_the_key_hits() {
         let bindings = vec![(1, hotkey("Return", true, false, false, false))];
-        assert_eq!(matching(&bindings, "ENTER", OPTION, BindingTrigger::Press), (vec![1], false));
+        assert_eq!(
+            matching(&bindings, "ENTER", OPTION, BindingTrigger::Press),
+            (vec![1], false)
+        );
     }
 }

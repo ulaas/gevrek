@@ -28,10 +28,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     // and rename each other's half.)
     static WRITINGS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let writing = WRITINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let temporary = folder.join(format!(
-        ".{name}.gevrek-{}-{writing}",
-        std::process::id()
-    ));
+    let temporary = folder.join(format!(".{name}.gevrek-{}-{writing}", std::process::id()));
     let written = (|| {
         let mut file = std::fs::File::create(&temporary)?;
         file.write_all(bytes)?;
@@ -105,7 +102,10 @@ fn backup_in(folder: &Path, origin: &Path, content: &str) -> std::io::Result<Bac
         match std::fs::remove_file(&old.path) {
             Ok(()) => log::debug!("the old backup {} was removed", old.path.display()),
             Err(error) => {
-                log::debug!("the old backup {} was not removed: {error}", old.path.display())
+                log::debug!(
+                    "the old backup {} was not removed: {error}",
+                    old.path.display()
+                )
             }
         }
     }

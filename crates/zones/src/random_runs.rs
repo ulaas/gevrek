@@ -150,12 +150,26 @@ pub(crate) fn many(rounds: u64, run: fn(u64) -> Result<(), String>) {
         wrong.is_empty(),
         "{} of the runs went wrong; the first:\n{}",
         wrong.len(),
-        wrong.iter().take(3).cloned().collect::<Vec<_>>().join("\n\n")
+        wrong
+            .iter()
+            .take(3)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n\n")
     );
 }
 
 const EXTENSIONS: [&str; 7] = ["png", "jpg", "doc", "txt", "pdf", "lnk", ""];
-const WORDS: [&str; 8] = ["report", "photo", "notes", "Screenshot", "budget", "setup", "old", "x"];
+const WORDS: [&str; 8] = [
+    "report",
+    "photo",
+    "notes",
+    "Screenshot",
+    "budget",
+    "setup",
+    "old",
+    "x",
+];
 
 /// An item as chance makes it: some facts known, some not.
 fn item(chance: &mut Chance, number: usize, now: u64) -> Item {
@@ -164,14 +178,16 @@ fn item(chance: &mut Chance, number: usize, now: u64) -> Item {
     let name = format!("{} {number}{dot}{extension}", chance.pick(&WORDS));
     let mut item = Item::file(&format!("/desk/{name}"));
     let time = |chance: &mut Chance| {
-        chance
-            .one_in_a_hundred(80)
-            .then(|| now.saturating_sub(chance.below(400) as u64 * DAY + chance.below(DAY as usize) as u64))
+        chance.one_in_a_hundred(80).then(|| {
+            now.saturating_sub(chance.below(400) as u64 * DAY + chance.below(DAY as usize) as u64)
+        })
     };
     item.facts.created = time(chance);
     item.facts.modified = time(chance);
     item.facts.accessed = time(chance);
-    item.facts.size = chance.one_in_a_hundred(85).then(|| chance.below(5_000_000) as u64);
+    item.facts.size = chance
+        .one_in_a_hundred(85)
+        .then(|| chance.below(5_000_000) as u64);
     item.facts.mime = match extension {
         "png" | "jpg" if chance.one_in_a_hundred(90) => Some(format!("image/{extension}")),
         "txt" => Some("text/plain".to_string()),
@@ -197,9 +213,15 @@ fn item(chance: &mut Chance, number: usize, now: u64) -> Item {
 fn matcher(chance: &mut Chance, now: u64) -> Matcher {
     match chance.below(9) {
         0 | 1 => Matcher::Extension {
-            any_of: (0..chance.between(1, 3)).map(|_| chance.pick(&EXTENSIONS).to_string()).collect(),
+            any_of: (0..chance.between(1, 3))
+                .map(|_| chance.pick(&EXTENSIONS).to_string())
+                .collect(),
         },
-        2 => Matcher::Mime { pattern: chance.pick(&["image/*", "text/*", "*/png", "*"]).to_string() },
+        2 => Matcher::Mime {
+            pattern: chance
+                .pick(&["image/*", "text/*", "*/png", "*"])
+                .to_string(),
+        },
         3 => Matcher::Name {
             pattern: match chance.below(3) {
                 0 => format!("{}*", chance.pick(&WORDS)),
@@ -208,29 +230,56 @@ fn matcher(chance: &mut Chance, now: u64) -> Matcher {
             },
         },
         4 => Matcher::Kind {
-            any_of: vec![*chance.pick(&[ItemKind::File, ItemKind::Folder, ItemKind::Shortcut, ItemKind::Virtual])],
+            any_of: vec![*chance.pick(&[
+                ItemKind::File,
+                ItemKind::Folder,
+                ItemKind::Shortcut,
+                ItemKind::Virtual,
+            ])],
         },
         5 => Matcher::Date {
             field: *chance.pick(&[DateField::Created, DateField::Modified, DateField::Accessed]),
-            after: chance.one_in_a_hundred(30).then(|| now.saturating_sub(chance.below(300) as u64 * DAY)),
-            before: chance.one_in_a_hundred(30).then(|| now.saturating_sub(chance.below(300) as u64 * DAY)),
-            newer_than_days: chance.one_in_a_hundred(40).then(|| chance.below(300) as u32),
-            older_than_days: chance.one_in_a_hundred(40).then(|| chance.below(300) as u32),
+            after: chance
+                .one_in_a_hundred(30)
+                .then(|| now.saturating_sub(chance.below(300) as u64 * DAY)),
+            before: chance
+                .one_in_a_hundred(30)
+                .then(|| now.saturating_sub(chance.below(300) as u64 * DAY)),
+            newer_than_days: chance
+                .one_in_a_hundred(40)
+                .then(|| chance.below(300) as u32),
+            older_than_days: chance
+                .one_in_a_hundred(40)
+                .then(|| chance.below(300) as u32),
         },
         6 => Matcher::Size {
-            at_least: chance.one_in_a_hundred(60).then(|| chance.below(3_000_000) as u64),
-            at_most: chance.one_in_a_hundred(60).then(|| chance.below(5_000_000) as u64),
+            at_least: chance
+                .one_in_a_hundred(60)
+                .then(|| chance.below(3_000_000) as u64),
+            at_most: chance
+                .one_in_a_hundred(60)
+                .then(|| chance.below(5_000_000) as u64),
         },
-        7 => Matcher::ShortcutTarget { pattern: format!("*{}*", chance.pick(&WORDS)) },
-        _ => Matcher::Untouched { days: chance.below(400) as u32 },
+        7 => Matcher::ShortcutTarget {
+            pattern: format!("*{}*", chance.pick(&WORDS)),
+        },
+        _ => Matcher::Untouched {
+            days: chance.below(400) as u32,
+        },
     }
 }
 
 fn action(chance: &mut Chance, zones: &[&str]) -> RuleAction {
     if chance.one_in_a_hundred(25) {
-        RuleAction::MoveToFolder { folder: chance.pick(&["/archive", "/desk", "/old/papers"]).to_string() }
+        RuleAction::MoveToFolder {
+            folder: chance
+                .pick(&["/archive", "/desk", "/old/papers"])
+                .to_string(),
+        }
     } else {
-        RuleAction::AssignToZone { zone: ZoneId::new(*chance.pick(zones)) }
+        RuleAction::AssignToZone {
+            zone: ZoneId::new(*chance.pick(zones)),
+        }
     }
 }
 
@@ -253,11 +302,16 @@ fn rules_run(seed: u64) -> Result<(), String> {
     // Five zones filled by hand, one that fills itself, one that is not there.
     let names = ["z0", "z1", "z2", "z3", "z4", "portal", "nowhere"];
     let mut config = ZonesConfig {
-        zones: names[..5].iter().map(|name| ZoneDefinition::manual(name, name)).collect(),
+        zones: names[..5]
+            .iter()
+            .map(|name| ZoneDefinition::manual(name, name))
+            .collect(),
         ..ZonesConfig::default()
     };
     config.zones.push(ZoneDefinition {
-        kind: ZoneKind::Portal { directory: "/downloads".to_string() },
+        kind: ZoneKind::Portal {
+            directory: "/downloads".to_string(),
+        },
         ..ZoneDefinition::manual("portal", "portal")
     });
     let mut items: Vec<Item> = Vec::new();
@@ -303,9 +357,15 @@ fn rules_run(seed: u64) -> Result<(), String> {
         }
         if round == 0 || chance.one_in_a_hundred(25) {
             config.rules = rule_list(&mut chance, &names, now);
-            config.catch_all = chance.one_in_a_hundred(30).then(|| action(&mut chance, &names));
+            config.catch_all = chance
+                .one_in_a_hundred(30)
+                .then(|| action(&mut chance, &names));
         }
-        let scope = if chance.one_in_a_hundred(50) { Scope::Loose } else { Scope::All };
+        let scope = if chance.one_in_a_hundred(50) {
+            Scope::Loose
+        } else {
+            Scope::All
+        };
         let wrong = |what: String| Err(format!("round {round}, {scope:?}: {what}"));
         let before = placements.clone();
 
@@ -326,17 +386,25 @@ fn rules_run(seed: u64) -> Result<(), String> {
             let first = config.rules.iter().position(|rule| {
                 rule.enabled
                     && !rule.matchers.is_empty()
-                    && rule.matchers.iter().all(|matcher| rules::holds(matcher, item, now))
+                    && rule
+                        .matchers
+                        .iter()
+                        .all(|matcher| rules::holds(matcher, item, now))
             });
             let expected = match first {
                 Some(index) => (Decided::Rule(index), Some(&config.rules[index].action)),
                 None => (Decided::CatchAll, config.catch_all.as_ref()),
             };
             if (step.decided, Some(&step.action)) != expected {
-                return wrong(format!("{} was decided by {:?}, not by {:?}", step.item, step.decided, expected.0));
+                return wrong(format!(
+                    "{} was decided by {:?}, not by {:?}",
+                    step.item, step.decided, expected.0
+                ));
             }
             if scope == Scope::Loose
-                && placements.zone_of(&step.item).is_some_and(|zone| config.zone(zone).is_some())
+                && placements
+                    .zone_of(&step.item)
+                    .is_some_and(|zone| config.zone(zone).is_some())
             {
                 return wrong(format!("{} is in a zone and was planned for", step.item));
             }
@@ -353,7 +421,12 @@ fn rules_run(seed: u64) -> Result<(), String> {
         }
 
         // Applying does what the dry run said, and nothing else.
-        let path_of = |id: &ItemId| items.iter().find(|item| &item.id == id).and_then(|item| item.path.clone());
+        let path_of = |id: &ItemId| {
+            items
+                .iter()
+                .find(|item| &item.id == id)
+                .and_then(|item| item.path.clone())
+        };
         let applied = rules::apply(&plan, &path_of, &mut placements, now);
         if let Some(broken) = placements.broken() {
             return wrong(format!("after applying: {broken}"));
@@ -365,18 +438,25 @@ fn rules_run(seed: u64) -> Result<(), String> {
                     if placements.zone_of(&step.item) != Some(zone) {
                         return wrong(format!("{} is not in {zone} after applying", step.item));
                     }
-                    if config.zone(zone).is_none_or(|zone| zone.lock.members || zone.kind != ZoneKind::Manual) {
+                    if config
+                        .zone(zone)
+                        .is_none_or(|zone| zone.lock.members || zone.kind != ZoneKind::Manual)
+                    {
                         return wrong(format!("{zone} took an item and may not"));
                     }
                 }
                 RuleAction::MoveToFolder { folder } => {
                     moves += 1;
                     let from = path_of(&step.item).unwrap_or_default();
-                    let operation = FileOperation::Move { from, to_folder: folder.clone() };
+                    let operation = FileOperation::Move {
+                        from,
+                        to_folder: folder.clone(),
+                    };
                     if !applied.operations.contains(&operation) {
                         return wrong(format!("{operation:?} was planned and not asked for"));
                     }
-                    if placements.whereabouts(&step.item) != (Whereabouts::Loose { position: None }) {
+                    if placements.whereabouts(&step.item) != (Whereabouts::Loose { position: None })
+                    {
                         return wrong(format!("{} is moved away and still shown", step.item));
                     }
                 }
@@ -390,22 +470,41 @@ fn rules_run(seed: u64) -> Result<(), String> {
             let is = placements.whereabouts(&item.id);
             let same = match (&was, &is) {
                 // (Its place in the order may be another: items before it left.)
-                (Whereabouts::Zone { zone: a, cell: cell_a, .. }, Whereabouts::Zone { zone: b, cell: cell_b, .. }) => {
-                    a == b && cell_a == cell_b
-                }
+                (
+                    Whereabouts::Zone {
+                        zone: a,
+                        cell: cell_a,
+                        ..
+                    },
+                    Whereabouts::Zone {
+                        zone: b,
+                        cell: cell_b,
+                        ..
+                    },
+                ) => a == b && cell_a == cell_b,
                 _ => was == is,
             };
             if !same {
-                return wrong(format!("{} was not planned for and went from {was:?} to {is:?}", item.id));
+                return wrong(format!(
+                    "{} was not planned for and went from {was:?} to {is:?}",
+                    item.id
+                ));
             }
         }
         // The files that are moved away are gone from the desktop; for
         // what is left there is nothing more to do.
         let moved: BTreeSet<&ItemId> = applied.undo.moved.iter().map(|moved| &moved.item).collect();
-        let left: Vec<Item> = items.iter().filter(|item| !moved.contains(&item.id)).cloned().collect();
+        let left: Vec<Item> = items
+            .iter()
+            .filter(|item| !moved.contains(&item.id))
+            .cloned()
+            .collect();
         let again = rules::plan(&config, &left, &placements, scope, now);
         if !again.steps.is_empty() {
-            return wrong(format!("after applying there is more to do: {:?}", again.steps));
+            return wrong(format!(
+                "after applying there is more to do: {:?}",
+                again.steps
+            ));
         }
 
         // Taking back gives exactly what was.
@@ -419,10 +518,16 @@ fn rules_run(seed: u64) -> Result<(), String> {
         let kept = placements.clone();
         let back = rules::undo(&record, &mut placements);
         if placements != before {
-            return wrong(format!("taking back gave {placements:?}, and before was {before:?}"));
+            return wrong(format!(
+                "taking back gave {placements:?}, and before was {before:?}"
+            ));
         }
-        let expected: Vec<FileOperation> =
-            applied.operations.iter().rev().filter_map(FileOperation::reversed).collect();
+        let expected: Vec<FileOperation> = applied
+            .operations
+            .iter()
+            .rev()
+            .filter_map(FileOperation::reversed)
+            .collect();
         if back != expected {
             return wrong(format!("the files come back by {back:?}, not {expected:?}"));
         }
@@ -441,21 +546,39 @@ fn rules_run(seed: u64) -> Result<(), String> {
 fn long_runs_of_rules_plan_apply_and_take_back_alike() {
     many(48, rules_run);
     if asked().1.is_none() {
-        let seen = [&RULES.planned, &RULES.held, &RULES.files_moved, &RULES.taken_back].map(counted);
-        assert!(seen.iter().all(|times| *times > 500), "the runs saw too little: {seen:?}");
+        let seen = [
+            &RULES.planned,
+            &RULES.held,
+            &RULES.files_moved,
+            &RULES.taken_back,
+        ]
+        .map(counted);
+        assert!(
+            seen.iter().all(|times| *times > 500),
+            "the runs saw too little: {seen:?}"
+        );
     }
 }
 
 /// The displays there are to plug in, by what they call themselves.
 const DISPLAYS: [&str; 4] = ["edid:DEL-A1", "edid:SAM-B2", "edid:LEN-C3", "edid:BNQ-D4"];
-const SIZES: [(i32, i32); 7] =
-    [(1920, 1080), (2560, 1440), (1280, 720), (3840, 2160), (1024, 768), (800, 600), (1080, 1920)];
+const SIZES: [(i32, i32); 7] = [
+    (1920, 1080),
+    (2560, 1440),
+    (1280, 720),
+    (3840, 2160),
+    (1024, 768),
+    (800, 600),
+    (1080, 1920),
+];
 const SCALES: [f64; 4] = [1.0, 1.25, 1.5, 2.0];
 
 /// Put the displays side by side in the order they are in, as a system
 /// would after one of them changed.
 fn side_by_side(displays: &mut [Display]) {
-    let mut x = displays.first().map_or(0, |display| display.rect.x.clamp(-4000, 0));
+    let mut x = displays
+        .first()
+        .map_or(0, |display| display.rect.x.clamp(-4000, 0));
     for display in displays {
         display.rect.x = x;
         x += display.rect.width;
@@ -466,7 +589,12 @@ fn a_display(chance: &mut Chance, id: &str) -> Display {
     let (width, height) = *chance.pick(&SIZES);
     Display {
         id: DisplayId::new(id),
-        rect: Rect::new(chance.between(-3000, 0), chance.between(-600, 600), width, height),
+        rect: Rect::new(
+            chance.between(-3000, 0),
+            chance.between(-600, 600),
+            width,
+            height,
+        ),
         scale: *chance.pick(&SCALES),
         primary: false,
     }
@@ -496,12 +624,19 @@ struct World {
 
 impl World {
     fn key(&self, core: &ZonesCore) -> ProfileKey {
-        let workspace = if core.config().profile_per_workspace { self.workspace.as_deref() } else { None };
+        let workspace = if core.config().profile_per_workspace {
+            self.workspace.as_deref()
+        } else {
+            None
+        };
         ProfileKey::of(&self.displays, workspace)
     }
 
     fn displays_event(&self) -> BackendEvent {
-        BackendEvent::Displays { displays: self.displays.clone(), reserved: self.reserved.clone() }
+        BackendEvent::Displays {
+            displays: self.displays.clone(),
+            reserved: self.reserved.clone(),
+        }
     }
 
     fn a_zone(&self, chance: &mut Chance) -> ZoneId {
@@ -541,11 +676,20 @@ impl World {
                     .unwrap_or(&zone.id)
                     .clone();
                 let geometry = core.profile()?.geometry.get(&leader)?;
-                let display = self.displays.iter().find(|display| display.id == geometry.display)?;
+                let display = self
+                    .displays
+                    .iter()
+                    .find(|display| display.id == geometry.display)?;
                 let rect = core.zone_rect(&zone.id)?;
                 Some((
                     zone.id.clone(),
-                    (leader, display.id.clone(), rect.x - display.rect.x, rect.y - display.rect.y, rect.width),
+                    (
+                        leader,
+                        display.id.clone(),
+                        rect.x - display.rect.x,
+                        rect.y - display.rect.y,
+                        rect.width,
+                    ),
                 ))
             })
             .collect()
@@ -564,7 +708,12 @@ enum Kind {
 }
 
 /// One step of chance. Says what it was.
-fn step(chance: &mut Chance, core: &mut ZonesCore, world: &mut World, now: u64) -> (Kind, String, Vec<Effect>) {
+fn step(
+    chance: &mut Chance,
+    core: &mut ZonesCore,
+    world: &mut World,
+    now: u64,
+) -> (Kind, String, Vec<Effect>) {
     let outside = |world: &mut World, core: &mut ZonesCore, what: String| {
         side_by_side(&mut world.displays);
         world.earlier.push(world.displays.clone());
@@ -578,11 +727,20 @@ fn step(chance: &mut Chance, core: &mut ZonesCore, world: &mut World, now: u64) 
         0 | 1 => {
             let absent: Vec<&str> = DISPLAYS
                 .iter()
-                .filter(|id| !world.displays.iter().any(|display| display.id.as_str() == **id))
+                .filter(|id| {
+                    !world
+                        .displays
+                        .iter()
+                        .any(|display| display.id.as_str() == **id)
+                })
                 .copied()
                 .collect();
             let Some(id) = absent.first().map(|_| *chance.pick(&absent)) else {
-                return (Kind::Outside, "no display left to add".to_string(), Vec::new());
+                return (
+                    Kind::Outside,
+                    "no display left to add".to_string(),
+                    Vec::new(),
+                );
             };
             let at = chance.below(world.displays.len() + 1);
             world.displays.insert(at, a_display(chance, id));
@@ -594,7 +752,10 @@ fn step(chance: &mut Chance, core: &mut ZonesCore, world: &mut World, now: u64) 
                 // nothing may change.
                 let before = core.state().clone();
                 let effects = core.event(
-                    BackendEvent::Displays { displays: Vec::new(), reserved: Vec::new() },
+                    BackendEvent::Displays {
+                        displays: Vec::new(),
+                        reserved: Vec::new(),
+                    },
                     now,
                 );
                 assert_eq!(core.state(), &before, "no display, and the state changed");
@@ -616,20 +777,41 @@ fn step(chance: &mut Chance, core: &mut ZonesCore, world: &mut World, now: u64) 
             let (width, height) = *chance.pick(&SIZES);
             world.displays[at].rect.width = width;
             world.displays[at].rect.height = height;
-            outside(world, core, format!("{} is {width} by {height}", world.displays[at].id))
+            outside(
+                world,
+                core,
+                format!("{} is {width} by {height}", world.displays[at].id),
+            )
         }
         6 => {
             let at = chance.below(world.displays.len());
             world.displays[at].scale = *chance.pick(&SCALES);
-            outside(world, core, format!("{} is scaled {}", world.displays[at].id, world.displays[at].scale))
+            outside(
+                world,
+                core,
+                format!(
+                    "{} is scaled {}",
+                    world.displays[at].id, world.displays[at].scale
+                ),
+            )
         }
         7..=9 => {
             // A set that was there before is there again.
-            let Some(earlier) = (!world.earlier.is_empty()).then(|| chance.pick(&world.earlier).clone()) else {
-                return (Kind::Outside, "nothing earlier to return to".to_string(), Vec::new());
+            let Some(earlier) =
+                (!world.earlier.is_empty()).then(|| chance.pick(&world.earlier).clone())
+            else {
+                return (
+                    Kind::Outside,
+                    "nothing earlier to return to".to_string(),
+                    Vec::new(),
+                );
             };
             world.displays = earlier;
-            outside(world, core, "an earlier set of displays returns".to_string())
+            outside(
+                world,
+                core,
+                "an earlier set of displays returns".to_string(),
+            )
         }
         10 => {
             let mut reserved = Vec::new();
@@ -644,7 +826,11 @@ fn step(chance: &mut Chance, core: &mut ZonesCore, world: &mut World, now: u64) 
             }
             world.reserved = reserved;
             let effects = core.event(world.displays_event(), now);
-            (Kind::Outside, "the room panels keep changes".to_string(), effects)
+            (
+                Kind::Outside,
+                "the room panels keep changes".to_string(),
+                effects,
+            )
         }
         11 => {
             let primary = chance.below(world.displays.len() + 1);
@@ -652,24 +838,48 @@ fn step(chance: &mut Chance, core: &mut ZonesCore, world: &mut World, now: u64) 
                 display.primary = at == primary;
             }
             let effects = core.event(world.displays_event(), now);
-            (Kind::Outside, "another display is the primary one".to_string(), effects)
+            (
+                Kind::Outside,
+                "another display is the primary one".to_string(),
+                effects,
+            )
         }
         12 | 13 => {
             world.workspace = Some(chance.between(1, 3).to_string());
-            let effects = core.event(BackendEvent::Workspace { name: world.workspace.clone() }, now);
-            (Kind::Outside, format!("workspace {:?}", world.workspace), effects)
+            let effects = core.event(
+                BackendEvent::Workspace {
+                    name: world.workspace.clone(),
+                },
+                now,
+            );
+            (
+                Kind::Outside,
+                format!("workspace {:?}", world.workspace),
+                effects,
+            )
         }
         14 | 15 => {
             world.items_made += 1;
             let item = item(chance, world.items_made, now);
             world.items.push(item.clone());
-            let effects = core.event(BackendEvent::ItemAdded { location: Location::Desktop, item }, now);
+            let effects = core.event(
+                BackendEvent::ItemAdded {
+                    location: Location::Desktop,
+                    item,
+                },
+                now,
+            );
             (Kind::Command, "an item comes".to_string(), effects)
         }
         16 if !world.items.is_empty() => {
             let gone = world.items.remove(chance.below(world.items.len()));
-            let effects =
-                core.event(BackendEvent::ItemRemoved { location: Location::Desktop, item: gone.id }, now);
+            let effects = core.event(
+                BackendEvent::ItemRemoved {
+                    location: Location::Desktop,
+                    item: gone.id,
+                },
+                now,
+            );
             (Kind::Command, "an item goes".to_string(), effects)
         }
         17 if !world.items.is_empty() => {
@@ -679,8 +889,16 @@ fn step(chance: &mut Chance, core: &mut ZonesCore, world: &mut World, now: u64) 
             let mut renamed = Item::file(&format!("/desk/renamed {}.txt", world.items_made));
             renamed.facts.modified = world.items[at].facts.modified;
             world.items[at] = renamed.clone();
-            let event = BackendEvent::ItemRenamed { location: Location::Desktop, from, item: renamed };
-            (Kind::Command, "an item is renamed".to_string(), core.event(event, now))
+            let event = BackendEvent::ItemRenamed {
+                location: Location::Desktop,
+                from,
+                item: renamed,
+            };
+            (
+                Kind::Command,
+                "an item is renamed".to_string(),
+                core.event(event, now),
+            )
         }
         other => {
             let zone = world.a_zone(chance);
@@ -688,8 +906,12 @@ fn step(chance: &mut Chance, core: &mut ZonesCore, world: &mut World, now: u64) 
                 18..=20 => Command::CreateZone {
                     title: format!("Zone {}", chance.below(100)),
                     kind: match chance.below(8) {
-                        0 => ZoneKind::Portal { directory: format!("/folder-{}", chance.below(3)) },
-                        1 => ZoneKind::Smart { query: vec![matcher(chance, now)] },
+                        0 => ZoneKind::Portal {
+                            directory: format!("/folder-{}", chance.below(3)),
+                        },
+                        1 => ZoneKind::Smart {
+                            query: vec![matcher(chance, now)],
+                        },
                         _ => ZoneKind::Manual,
                     },
                     rect: chance.one_in_a_hundred(70).then(|| {
@@ -733,20 +955,34 @@ fn step(chance: &mut Chance, core: &mut ZonesCore, world: &mut World, now: u64) 
                         row: chance.below(6) as u32,
                     }),
                 },
-                30 => Command::RemoveItem { item: world.an_item(chance) },
+                30 => Command::RemoveItem {
+                    item: world.an_item(chance),
+                },
                 31 => Command::PlaceLooseItem {
                     item: world.an_item(chance),
                     display: DisplayId::new(*chance.pick(&DISPLAYS)),
                     x: chance.between(-100, 4000),
                     y: chance.between(-100, 2500),
                 },
-                32 => Command::RollUp { zone, rolled_up: chance.one_in_a_hundred(50).then(|| chance.one_in_a_hundred(50)) },
+                32 => Command::RollUp {
+                    zone,
+                    rolled_up: chance
+                        .one_in_a_hundred(50)
+                        .then(|| chance.one_in_a_hundred(50)),
+                },
                 33 => Command::Lock {
                     zone,
-                    geometry: chance.one_in_a_hundred(50).then(|| chance.one_in_a_hundred(30)),
-                    members: chance.one_in_a_hundred(50).then(|| chance.one_in_a_hundred(30)),
+                    geometry: chance
+                        .one_in_a_hundred(50)
+                        .then(|| chance.one_in_a_hundred(30)),
+                    members: chance
+                        .one_in_a_hundred(50)
+                        .then(|| chance.one_in_a_hundred(30)),
                 },
-                34 => Command::Tab { zone, with: world.a_zone(chance) },
+                34 => Command::Tab {
+                    zone,
+                    with: world.a_zone(chance),
+                },
                 35 => {
                     if chance.one_in_a_hundred(50) {
                         Command::Untab { zone }
@@ -755,32 +991,58 @@ fn step(chance: &mut Chance, core: &mut ZonesCore, world: &mut World, now: u64) 
                     }
                 }
                 36 => match chance.below(4) {
-                    0 => Command::ShowZone { zone, shown: chance.one_in_a_hundred(50) },
+                    0 => Command::ShowZone {
+                        zone,
+                        shown: chance.one_in_a_hundred(50),
+                    },
                     1 => Command::QuickHide { hidden: None },
-                    2 => Command::Peek { on: chance.one_in_a_hundred(50) },
+                    2 => Command::Peek {
+                        on: chance.one_in_a_hundred(50),
+                    },
                     _ => Command::SetView {
                         zone,
                         view: Some(*chance.pick(&[View::Grid, View::List])),
-                        sort: Some(*chance.pick(&[Sort::Manual, Sort::Name, Sort::Type, Sort::Date, Sort::Size])),
+                        sort: Some(*chance.pick(&[
+                            Sort::Manual,
+                            Sort::Name,
+                            Sort::Type,
+                            Sort::Date,
+                            Sort::Size,
+                        ])),
                         descending: Some(chance.one_in_a_hundred(50)),
                         icon_size: Some(chance.below(400) as u32),
                     },
                 },
                 37 => {
                     if chance.one_in_a_hundred(60) {
-                        Command::ApplyRules { scope: *chance.pick(&[Scope::Loose, Scope::All]) }
+                        Command::ApplyRules {
+                            scope: *chance.pick(&[Scope::Loose, Scope::All]),
+                        }
                     } else {
                         Command::UndoRules
                     }
                 }
-                38 => Command::SaveSnapshot { name: format!("s{}", chance.below(3)) },
-                _ => Command::RestoreSnapshot { name: format!("s{}", chance.below(3)) },
+                38 => Command::SaveSnapshot {
+                    name: format!("s{}", chance.below(3)),
+                },
+                _ => Command::RestoreSnapshot {
+                    name: format!("s{}", chance.below(3)),
+                },
             };
             let what = format!("{command:?}");
             let effects = core.command(command.clone(), now);
-            let refused = effects.iter().any(|effect| matches!(effect, Effect::Notify(ZonesEvent::Refused { .. })));
+            let refused = effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::Notify(ZonesEvent::Refused { .. })));
             let mut kind = Kind::Command;
-            count(if refused { &LAYOUT.commands_refused } else { &LAYOUT.commands_done }, 1);
+            count(
+                if refused {
+                    &LAYOUT.commands_refused
+                } else {
+                    &LAYOUT.commands_done
+                },
+                1,
+            );
             if !refused {
                 match &command {
                     Command::DeleteZone { zone } => {
@@ -808,7 +1070,10 @@ fn step(chance: &mut Chance, core: &mut ZonesCore, world: &mut World, now: u64) 
 }
 
 /// The places of the zones that are still there, in every arrangement.
-fn places(profiles: &[Profile], config: &ZonesConfig) -> BTreeMap<ProfileKey, BTreeMap<ZoneId, ZoneGeometry>> {
+fn places(
+    profiles: &[Profile],
+    config: &ZonesConfig,
+) -> BTreeMap<ProfileKey, BTreeMap<ZoneId, ZoneGeometry>> {
     profiles
         .iter()
         .map(|profile| {
@@ -825,7 +1090,8 @@ fn places(profiles: &[Profile], config: &ZonesConfig) -> BTreeMap<ProfileKey, BT
 
 /// One run of the layout.
 fn layout_run(seed: u64) -> Result<(), String> {
-    let folder = std::env::temp_dir().join(format!("gevrek-zones-run-{}-{seed:x}", std::process::id()));
+    let folder =
+        std::env::temp_dir().join(format!("gevrek-zones-run-{}-{seed:x}", std::process::id()));
     let _ = std::fs::remove_dir_all(&folder);
     let outcome = layout_steps(seed, &Store::new(&folder).keeping(3));
     let _ = std::fs::remove_dir_all(&folder);
@@ -841,24 +1107,37 @@ fn layout_steps(seed: u64, store: &Store) -> Result<(), String> {
         rules: vec![
             Rule {
                 name: "pictures".to_string(),
-                matchers: vec![Matcher::Extension { any_of: vec!["png".to_string(), "jpg".to_string()] }],
-                action: RuleAction::AssignToZone { zone: ZoneId::new("zone-1") },
+                matchers: vec![Matcher::Extension {
+                    any_of: vec!["png".to_string(), "jpg".to_string()],
+                }],
+                action: RuleAction::AssignToZone {
+                    zone: ZoneId::new("zone-1"),
+                },
                 ..Rule::default()
             },
             Rule {
                 name: "papers".to_string(),
-                matchers: vec![Matcher::Extension { any_of: vec!["doc".to_string(), "pdf".to_string()] }],
-                action: RuleAction::AssignToZone { zone: ZoneId::new("zone-2") },
+                matchers: vec![Matcher::Extension {
+                    any_of: vec!["doc".to_string(), "pdf".to_string()],
+                }],
+                action: RuleAction::AssignToZone {
+                    zone: ZoneId::new("zone-2"),
+                },
                 ..Rule::default()
             },
         ],
         catch_all: chance
             .one_in_a_hundred(30)
-            .then(|| RuleAction::AssignToZone { zone: ZoneId::new("zone-3") }),
+            .then(|| RuleAction::AssignToZone {
+                zone: ZoneId::new("zone-3"),
+            }),
         ..ZonesConfig::default()
     };
     let mut world = World {
-        displays: vec![Display { primary: true, ..a_display(&mut chance, DISPLAYS[0]) }],
+        displays: vec![Display {
+            primary: true,
+            ..a_display(&mut chance, DISPLAYS[0])
+        }],
         reserved: Vec::new(),
         workspace: None,
         items: Vec::new(),
@@ -875,7 +1154,13 @@ fn layout_steps(seed: u64, store: &Store) -> Result<(), String> {
     }
     let mut core = ZonesCore::new(config, ZonesState::default());
     core.event(world.displays_event(), now);
-    core.event(BackendEvent::Listed { location: Location::Desktop, items: world.items.clone() }, now);
+    core.event(
+        BackendEvent::Listed {
+            location: Location::Desktop,
+            items: world.items.clone(),
+        },
+        now,
+    );
 
     for number in 0..260 {
         let before = places(&core.state().profiles, core.config());
@@ -894,9 +1179,17 @@ fn layout_steps(seed: u64, store: &Store) -> Result<(), String> {
             return wrong(broken);
         }
         // No zone is lost, and none is there that should not be.
-        let there: BTreeSet<ZoneId> = core.config().zones.iter().map(|zone| zone.id.clone()).collect();
+        let there: BTreeSet<ZoneId> = core
+            .config()
+            .zones
+            .iter()
+            .map(|zone| zone.id.clone())
+            .collect();
         if there != world.zones {
-            return wrong(format!("the zones are {there:?} and should be {:?}", world.zones));
+            return wrong(format!(
+                "the zones are {there:?} and should be {:?}",
+                world.zones
+            ));
         }
         let key = world.key(&core);
         if core.profile().map(|profile| &profile.key) != Some(&key) {
@@ -911,7 +1204,9 @@ fn layout_steps(seed: u64, store: &Store) -> Result<(), String> {
                 .iter()
                 .any(|display| snap::within(rect, work_area(display, &world.reserved)));
             if !on_one {
-                return wrong(format!("{zone} at {rect:?} is not wholly on a display's free room"));
+                return wrong(format!(
+                    "{zone} at {rect:?} is not wholly on a display's free room"
+                ));
             }
         }
         // What is not in use is not touched. A step from outside may make
@@ -953,13 +1248,18 @@ fn layout_steps(seed: u64, store: &Store) -> Result<(), String> {
                     if let Some(is) = look.get(zone).filter(|is| is.0 == was.0) {
                         count(&LAYOUT.returns_looked_at, 1);
                         if is != was {
-                            return wrong(format!("{zone} was seen at {was:?} on these displays and is at {is:?}"));
+                            return wrong(format!(
+                                "{zone} was seen at {was:?} on these displays and is at {is:?}"
+                            ));
                         }
                     }
                 }
             }
         }
-        count(&LAYOUT.tabs_seen, look.iter().filter(|(zone, seen)| **zone != seen.0).count());
+        count(
+            &LAYOUT.tabs_seen,
+            look.iter().filter(|(zone, seen)| **zone != seen.0).count(),
+        );
         world.seen.insert(key, (world.reserved.clone(), look));
 
         // The state comes back from its text as it is, and (now and
@@ -967,16 +1267,25 @@ fn layout_steps(seed: u64, store: &Store) -> Result<(), String> {
         let text = store::encode(core.state());
         let read = match store::decode(&text) {
             Ok((state, None)) => state,
-            other => return wrong(format!("the state does not come back from its text: {other:?}")),
+            other => {
+                return wrong(format!(
+                    "the state does not come back from its text: {other:?}"
+                ))
+            }
         };
         if &read != core.state() {
             return wrong("the state is another after its text".to_string());
         }
         if number % 32 == 0 {
-            store.save(core.state()).map_err(|error| error.to_string())?;
+            store
+                .save(core.state())
+                .map_err(|error| error.to_string())?;
             let loaded = store.load().map_err(|error| error.to_string())?;
             if loaded.report != LoadReport::Read || &loaded.state != core.state() {
-                return wrong(format!("the state does not come back from its file: {:?}", loaded.report));
+                return wrong(format!(
+                    "the state does not come back from its file: {:?}",
+                    loaded.report
+                ));
             }
             count(&LAYOUT.read_from_disk, 1);
         }
@@ -989,11 +1298,27 @@ fn layout_steps(seed: u64, store: &Store) -> Result<(), String> {
         }
         // And a program started anew with what was written shows the same.
         let mut again = ZonesCore::new(config, read);
-        again.event(BackendEvent::Workspace { name: world.workspace.clone() }, now);
+        again.event(
+            BackendEvent::Workspace {
+                name: world.workspace.clone(),
+            },
+            now,
+        );
         again.event(world.displays_event(), now);
-        again.event(BackendEvent::Listed { location: Location::Desktop, items: world.items.clone() }, now);
+        again.event(
+            BackendEvent::Listed {
+                location: Location::Desktop,
+                items: world.items.clone(),
+            },
+            now,
+        );
         let scene = core.scene(now);
-        again.command(Command::QuickHide { hidden: Some(scene.quick_hidden) }, now);
+        again.command(
+            Command::QuickHide {
+                hidden: Some(scene.quick_hidden),
+            },
+            now,
+        );
         again.command(Command::Peek { on: scene.peeking }, now);
         if again.scene(now) != scene {
             return wrong("started anew, the zones are shown otherwise".to_string());
@@ -1015,6 +1340,9 @@ fn long_runs_of_display_changes_leave_every_zone_where_it_belongs() {
             &LAYOUT.tabs_seen,
         ]
         .map(counted);
-        assert!(seen.iter().all(|times| *times > 150), "the runs saw too little: {seen:?}");
+        assert!(
+            seen.iter().all(|times| *times > 150),
+            "the runs saw too little: {seen:?}"
+        );
     }
 }

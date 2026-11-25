@@ -104,15 +104,24 @@ mod tests {
     fn a_window_that_opens_under_a_held_button_waits_for_its_release() {
         let mut held = Held::default();
         let passed = held.pass(
-            vec![WindowEvent::Focused(A), WindowEvent::Created(A), WindowEvent::Moved(A, 5, 5)],
+            vec![
+                WindowEvent::Focused(A),
+                WindowEvent::Created(A),
+                WindowEvent::Moved(A, 5, 5),
+            ],
             true,
             |_| true,
             |_| true,
         );
-        assert_eq!(passed, vec![WindowEvent::Focused(A), WindowEvent::Moved(A, 5, 5)]);
+        assert_eq!(
+            passed,
+            vec![WindowEvent::Focused(A), WindowEvent::Moved(A, 5, 5)]
+        );
         assert!(held.any());
         // Told again while it waits: still one opening.
-        assert!(held.pass(vec![WindowEvent::Created(A)], true, |_| true, |_| true).is_empty());
+        assert!(held
+            .pass(vec![WindowEvent::Created(A)], true, |_| true, |_| true)
+            .is_empty());
 
         // The button is up and the window was carried: opened, then dropped.
         let told = held.pass(vec![WindowEvent::Focused(B)], false, |_| true, |_| true);

@@ -118,7 +118,9 @@ pub fn parse(text: &str) -> Known {
             _ => {}
         }
     }
-    known.layouts.sort_by_key(|(_, called)| called.to_lowercase());
+    known
+        .layouts
+        .sort_by_key(|(_, called)| called.to_lowercase());
     known
 }
 

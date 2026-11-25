@@ -66,14 +66,30 @@ pub struct IconSize {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum FileOperation {
-    Copy { from: String, to_folder: String },
-    Move { from: String, to_folder: String },
-    Rename { path: String, new_name: String },
-    NewFolder { parent: String, name: String },
+    Copy {
+        from: String,
+        to_folder: String,
+    },
+    Move {
+        from: String,
+        to_folder: String,
+    },
+    Rename {
+        path: String,
+        new_name: String,
+    },
+    NewFolder {
+        parent: String,
+        name: String,
+    },
     /// Into the system's trash, never deleted outright.
-    Trash { path: String },
+    Trash {
+        path: String,
+    },
     /// Out of the trash, back to where it was.
-    Restore { path: String },
+    Restore {
+        path: String,
+    },
 }
 
 impl FileOperation {
@@ -107,12 +123,22 @@ impl FileOperation {
 impl std::fmt::Display for FileOperation {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FileOperation::Copy { from, to_folder } => write!(formatter, "copying {from} into {to_folder}"),
-            FileOperation::Move { from, to_folder } => write!(formatter, "moving {from} into {to_folder}"),
-            FileOperation::Rename { path, new_name } => write!(formatter, "renaming {path} to {new_name}"),
-            FileOperation::NewFolder { parent, name } => write!(formatter, "making the folder {name} in {parent}"),
+            FileOperation::Copy { from, to_folder } => {
+                write!(formatter, "copying {from} into {to_folder}")
+            }
+            FileOperation::Move { from, to_folder } => {
+                write!(formatter, "moving {from} into {to_folder}")
+            }
+            FileOperation::Rename { path, new_name } => {
+                write!(formatter, "renaming {path} to {new_name}")
+            }
+            FileOperation::NewFolder { parent, name } => {
+                write!(formatter, "making the folder {name} in {parent}")
+            }
             FileOperation::Trash { path } => write!(formatter, "putting {path} in the trash"),
-            FileOperation::Restore { path } => write!(formatter, "bringing {path} back from the trash"),
+            FileOperation::Restore { path } => {
+                write!(formatter, "bringing {path} back from the trash")
+            }
         }
     }
 }
@@ -164,7 +190,11 @@ pub struct DragActions {
 }
 
 impl DragActions {
-    pub const ALL: DragActions = DragActions { copy: true, moving: true, link: true };
+    pub const ALL: DragActions = DragActions {
+        copy: true,
+        moving: true,
+        link: true,
+    };
 }
 
 /// Why the backend could not do something.
@@ -203,19 +233,40 @@ impl std::error::Error for BackendError {}
 pub enum BackendEvent {
     /// Everything at a location, as it is now (at the start, and whenever
     /// the backend cannot say what changed).
-    Listed { location: Location, items: Vec<Item> },
-    ItemAdded { location: Location, item: Item },
-    ItemRemoved { location: Location, item: ItemId },
+    Listed {
+        location: Location,
+        items: Vec<Item>,
+    },
+    ItemAdded {
+        location: Location,
+        item: Item,
+    },
+    ItemRemoved {
+        location: Location,
+        item: ItemId,
+    },
     /// An item has another name, and with it perhaps another id.
-    ItemRenamed { location: Location, from: ItemId, item: Item },
+    ItemRenamed {
+        location: Location,
+        from: ItemId,
+        item: Item,
+    },
     /// The facts of an item changed (it was written to).
-    ItemChanged { location: Location, item: Item },
+    ItemChanged {
+        location: Location,
+        item: Item,
+    },
     /// The displays are others, or other than they were, or the room kept
     /// on them is.
-    Displays { displays: Vec<Display>, reserved: Vec<ReservedArea> },
+    Displays {
+        displays: Vec<Display>,
+        reserved: Vec<ReservedArea>,
+    },
     /// Another workspace is shown. (This one comes from the window
     /// manager, by way of whoever hosts the core.)
-    Workspace { name: Option<String> },
+    Workspace {
+        name: Option<String>,
+    },
     /// A file operation the core asked for is done, or failed.
     OperationDone {
         request: u64,
@@ -235,25 +286,42 @@ pub enum BackendEvent {
     /// A location could not be listed: the folder is not there, a share
     /// does not answer, the system said no. Its zone stays and says so;
     /// a later `Listed` for the same location makes it good again.
-    ListingFailed { location: Location, error: BackendError },
+    ListingFailed {
+        location: Location,
+        error: BackendError,
+    },
     /// Everything a smart zone's source has, as it is now, in the
     /// source's own order (the files used last: the newest first). Told
     /// whole each time it changes. The programs that run are known to
     /// whoever hosts the core rather than to the backend, and may be told
     /// by them with this same event.
-    SourceListed { source: SmartSource, items: Vec<Item> },
+    SourceListed {
+        source: SmartSource,
+        items: Vec<Item>,
+    },
     /// A source could not be asked.
-    SourceFailed { source: SmartSource, error: BackendError },
+    SourceFailed {
+        source: SmartSource,
+        error: BackendError,
+    },
     /// The screen is shown to others or recorded, or no longer is. From
     /// whoever knows: the compositor, where gevrek is one.
-    ScreenShared { shared: bool },
+    ScreenShared {
+        shared: bool,
+    },
     /// A file operation was begun and ends later (`begin_operation`
     /// said so). Told by whoever carries the request to the backend; its
     /// end is the `OperationDone` of the same request.
-    OperationBegun { request: u64 },
+    OperationBegun {
+        request: u64,
+    },
     /// How far an operation that ends later has come, in whatever the
     /// backend counts (bytes, files); a `total` of 0 is "not known".
-    OperationProgress { request: u64, done: u64, total: u64 },
+    OperationProgress {
+        request: u64,
+        done: u64,
+        total: u64,
+    },
 }
 
 /// What the core wants of the backend.
@@ -261,21 +329,38 @@ pub enum BackendEvent {
 #[serde(tag = "ask", rename_all = "snake_case")]
 pub enum BackendRequest {
     /// List a folder and tell of every change in it from now on.
-    Watch { directory: String },
-    Unwatch { directory: String },
+    Watch {
+        directory: String,
+    },
+    Unwatch {
+        directory: String,
+    },
     /// Carry out a file operation and answer with `OperationDone`.
-    Perform { request: u64, operation: FileOperation },
+    Perform {
+        request: u64,
+        operation: FileOperation,
+    },
     /// List a watched folder again (it was not there, and may be now).
-    Relist { directory: String },
+    Relist {
+        directory: String,
+    },
     /// Say what a source has, and tell again whenever that changes.
-    WatchSource { source: SmartSource },
-    UnwatchSource { source: SmartSource },
+    WatchSource {
+        source: SmartSource,
+    },
+    UnwatchSource {
+        source: SmartSource,
+    },
     /// Say again what a watched source has.
-    ListSource { source: SmartSource },
+    ListSource {
+        source: SmartSource,
+    },
     /// Call off a file operation that has not ended. The backend answers
     /// with `OperationDone` all the same: with `Cancelled`, or with its
     /// result if it had ended already.
-    Cancel { request: u64 },
+    Cancel {
+        request: u64,
+    },
 }
 
 /// The system, as far as zones need it.
@@ -409,24 +494,50 @@ mod tests {
         let folder = "/home/ada/Desktop";
         for (operation, back) in [
             (
-                FileOperation::Move { from: format!("{folder}/a.txt"), to_folder: "/archive".to_string() },
-                FileOperation::Move { from: "/archive/a.txt".to_string(), to_folder: folder.to_string() },
+                FileOperation::Move {
+                    from: format!("{folder}/a.txt"),
+                    to_folder: "/archive".to_string(),
+                },
+                FileOperation::Move {
+                    from: "/archive/a.txt".to_string(),
+                    to_folder: folder.to_string(),
+                },
             ),
             (
-                FileOperation::Copy { from: format!("{folder}/a.txt"), to_folder: "/archive".to_string() },
-                FileOperation::Trash { path: "/archive/a.txt".to_string() },
+                FileOperation::Copy {
+                    from: format!("{folder}/a.txt"),
+                    to_folder: "/archive".to_string(),
+                },
+                FileOperation::Trash {
+                    path: "/archive/a.txt".to_string(),
+                },
             ),
             (
-                FileOperation::Rename { path: format!("{folder}/a.txt"), new_name: "b.txt".to_string() },
-                FileOperation::Rename { path: format!("{folder}/b.txt"), new_name: "a.txt".to_string() },
+                FileOperation::Rename {
+                    path: format!("{folder}/a.txt"),
+                    new_name: "b.txt".to_string(),
+                },
+                FileOperation::Rename {
+                    path: format!("{folder}/b.txt"),
+                    new_name: "a.txt".to_string(),
+                },
             ),
             (
-                FileOperation::NewFolder { parent: folder.to_string(), name: "New".to_string() },
-                FileOperation::Trash { path: format!("{folder}/New") },
+                FileOperation::NewFolder {
+                    parent: folder.to_string(),
+                    name: "New".to_string(),
+                },
+                FileOperation::Trash {
+                    path: format!("{folder}/New"),
+                },
             ),
             (
-                FileOperation::Trash { path: format!("{folder}/a.txt") },
-                FileOperation::Restore { path: format!("{folder}/a.txt") },
+                FileOperation::Trash {
+                    path: format!("{folder}/a.txt"),
+                },
+                FileOperation::Restore {
+                    path: format!("{folder}/a.txt"),
+                },
             ),
         ] {
             assert_eq!(operation.reversed(), Some(back), "{operation:?}");
@@ -442,7 +553,9 @@ mod tests {
     #[test]
     fn events_and_requests_travel_as_json() {
         let event = BackendEvent::ItemRemoved {
-            location: Location::Directory { path: "/downloads".to_string() },
+            location: Location::Directory {
+                path: "/downloads".to_string(),
+            },
             item: ItemId::new("/downloads/a.txt"),
         };
         let text = serde_json::to_string(&event).unwrap();
@@ -453,18 +566,29 @@ mod tests {
         assert_eq!(serde_json::from_str::<BackendEvent>(&text).unwrap(), event);
         let request = BackendRequest::Perform {
             request: 3,
-            operation: FileOperation::Trash { path: "/a".to_string() },
+            operation: FileOperation::Trash {
+                path: "/a".to_string(),
+            },
         };
         let text = serde_json::to_string(&request).unwrap();
-        assert_eq!(serde_json::from_str::<BackendRequest>(&text).unwrap(), request);
-        let source = BackendRequest::WatchSource { source: SmartSource::Recent };
+        assert_eq!(
+            serde_json::from_str::<BackendRequest>(&text).unwrap(),
+            request
+        );
+        let source = BackendRequest::WatchSource {
+            source: SmartSource::Recent,
+        };
         assert_eq!(
             serde_json::to_string(&source).unwrap(),
             r#"{"ask":"watch_source","source":{"from":"recent"}}"#
         );
         let failed = BackendEvent::ListingFailed {
-            location: Location::Directory { path: "//share/films".to_string() },
-            error: BackendError::NotFound { what: "//share/films".to_string() },
+            location: Location::Directory {
+                path: "//share/films".to_string(),
+            },
+            error: BackendError::NotFound {
+                what: "//share/films".to_string(),
+            },
         };
         let text = serde_json::to_string(&failed).unwrap();
         assert_eq!(serde_json::from_str::<BackendEvent>(&text).unwrap(), failed);

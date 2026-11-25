@@ -132,7 +132,11 @@ pub fn picture(path: &str, size: u32, thumbnail: bool) -> Option<Picture> {
         if thumbnail {
             let item: IShellItemImageFactory =
                 SHCreateItemFromParsingName(&HSTRING::from(path), None).ok()?;
-            return crate::icons::shell::picture_from(&item, size, SIIGBF_THUMBNAILONLY | SIIGBF_INCACHEONLY);
+            return crate::icons::shell::picture_from(
+                &item,
+                size,
+                SIIGBF_THUMBNAILONLY | SIIGBF_INCACHEONLY,
+            );
         }
         let told: IFileSystemBindData = MadeUp(WIN32_FIND_DATAW {
             dwFileAttributes: NORMAL,
@@ -142,7 +146,9 @@ pub fn picture(path: &str, size: u32, thumbnail: bool) -> Option<Picture> {
         let context: IBindCtx = CreateBindCtx(0).ok()?;
         // (The name the shell looks its made-up file data up by.)
         let key = HSTRING::from("File System Bind Data");
-        context.RegisterObjectParam(PCWSTR(key.as_ptr()), &told).ok()?;
+        context
+            .RegisterObjectParam(PCWSTR(key.as_ptr()), &told)
+            .ok()?;
         let item: IShellItemImageFactory =
             SHCreateItemFromParsingName(&HSTRING::from(stand_in(path)), &context).ok()?;
         crate::icons::shell::picture_from(&item, size, SIIGBF_ICONONLY)
@@ -162,7 +168,10 @@ mod tests {
             (ARCHIVE, None),
             (ARCHIVE | REPARSE, None),
             // As OneDrive marks a file that is only in the cloud.
-            (ARCHIVE | SPARSE | REPARSE | UNPINNED | RECALL_ON_DATA_ACCESS, Some(CloudState::OnlineOnly)),
+            (
+                ARCHIVE | SPARSE | REPARSE | UNPINNED | RECALL_ON_DATA_ACCESS,
+                Some(CloudState::OnlineOnly),
+            ),
             (ARCHIVE | OFFLINE, Some(CloudState::OnlineOnly)),
             (RECALL_ON_OPEN, Some(CloudState::OnlineOnly)),
             (ARCHIVE | REPARSE | PINNED, Some(CloudState::AlwaysKept)),
@@ -179,8 +188,14 @@ mod tests {
 
     #[test]
     fn a_stand_in_has_the_ending_and_is_no_file() {
-        assert_eq!(stand_in("C:\\Users\\ada\\OneDrive\\Setup.EXE"), "C:\\gevrek-no-such-folder\\file.exe");
-        assert_eq!(stand_in("\\\\server\\share\\notes"), "C:\\gevrek-no-such-folder\\file");
+        assert_eq!(
+            stand_in("C:\\Users\\ada\\OneDrive\\Setup.EXE"),
+            "C:\\gevrek-no-such-folder\\file.exe"
+        );
+        assert_eq!(
+            stand_in("\\\\server\\share\\notes"),
+            "C:\\gevrek-no-such-folder\\file"
+        );
         assert!(!std::path::Path::new(&stand_in("a.txt")).exists());
     }
 
@@ -188,7 +203,8 @@ mod tests {
     /// nothing is read, so nothing can be fetched.
     #[test]
     fn the_icon_of_a_kind_is_drawn_without_a_file() {
-        let folder = std::env::temp_dir().join(format!("gevrek-zones-cloud-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("gevrek-zones-cloud-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(&folder).expect("a folder");
         // The file is there, and is not what is asked: the picture must

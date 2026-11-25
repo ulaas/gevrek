@@ -249,7 +249,11 @@ pub fn moment_said(moment: SystemTime) -> String {
     let day_of_year = of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_part = (5 * day_of_year + 2) / 153;
     let day = day_of_year - (153 * month_part + 2) / 5 + 1;
-    let month = if month_part < 10 { month_part + 3 } else { month_part - 9 };
+    let month = if month_part < 10 {
+        month_part + 3
+    } else {
+        month_part - 9
+    };
     let year = year_of_era + era * 400 + i64::from(month <= 2);
     format!(
         "{year:04}-{month:02}-{day:02} {:02}:{:02}",
@@ -353,7 +357,13 @@ impl Browser {
     /// A browser for a file or a folder that begins where `typed` leads.
     /// `kinds`: the ends of the names of the files that are asked for,
     /// with the word for them.
-    pub fn new(kind: PathKind, typed: &str, home: Option<&Path>, kinds_name: &str, kinds: &[&str]) -> Self {
+    pub fn new(
+        kind: PathKind,
+        typed: &str,
+        home: Option<&Path>,
+        kinds_name: &str,
+        kinds: &[&str],
+    ) -> Self {
         let whole = widgets::whole_path(typed, home);
         let mut browser = Self {
             preview: None,
@@ -455,15 +465,18 @@ impl Browser {
     /// The picture of the chosen file, where that is a picture: read
     /// away from the drawing the first time it is chosen, and made small.
     fn look_at_the_chosen(&mut self, context: &egui::Context) {
-        let wanted = self
-            .chosen
-            .clone()
-            .filter(|path| path.is_file() && is_of(&path.to_string_lossy(), &PICTURES.map(str::to_string)));
+        let wanted = self.chosen.clone().filter(|path| {
+            path.is_file() && is_of(&path.to_string_lossy(), &PICTURES.map(str::to_string))
+        });
         let Some(wanted) = wanted else {
             self.preview = None;
             return;
         };
-        if self.preview.as_ref().is_none_or(|(path, _)| *path != wanted) {
+        if self
+            .preview
+            .as_ref()
+            .is_none_or(|(path, _)| *path != wanted)
+        {
             let (tell, told) = std::sync::mpsc::channel();
             let (path, wake) = (wanted.clone(), context.clone());
             let started = std::thread::Builder::new()
@@ -520,10 +533,18 @@ impl Browser {
         self.look_at_the_chosen(context);
         let mut done = None;
         let mut go: Option<(PathBuf, bool)> = None;
-        let shown = shown(&self.items, self.order, self.hidden, self.kinds_now(), &self.find);
+        let shown = shown(
+            &self.items,
+            self.order,
+            self.hidden,
+            self.kinds_now(),
+            &self.find,
+        );
         // The keys, where no field is typed in.
         let typing = context.memory(|memory| memory.focused().is_some());
-        let key = |key: egui::Key| context.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key));
+        let key = |key: egui::Key| {
+            context.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key))
+        };
         if key(egui::Key::Escape) {
             if self.typed_path.is_some() || self.new_folder.is_some() {
                 self.typed_path = None;
@@ -564,7 +585,9 @@ impl Browser {
                 }
             }
         }
-        let alt = |key: egui::Key| context.input_mut(|input| input.consume_key(egui::Modifiers::ALT, key));
+        let alt = |key: egui::Key| {
+            context.input_mut(|input| input.consume_key(egui::Modifiers::ALT, key))
+        };
         if alt(egui::Key::ArrowLeft) {
             self.go_back();
         }
@@ -635,7 +658,9 @@ impl Browser {
                         go = Some((up.to_path_buf(), true));
                     }
                 }
-                if widgets::icon_button(ui, icons::ARROW_CLOCKWISE, "Read the folder again").clicked() {
+                if widgets::icon_button(ui, icons::ARROW_CLOCKWISE, "Read the folder again")
+                    .clicked()
+                {
                     self.read();
                 }
                 ui.add_space(6.0);
@@ -646,7 +671,11 @@ impl Browser {
                     }
                     if widgets::icon_button(
                         ui,
-                        if self.hidden { icons::EYE } else { icons::EYE_SLASH },
+                        if self.hidden {
+                            icons::EYE
+                        } else {
+                            icons::EYE_SLASH
+                        },
                         if self.hidden {
                             "Hidden entries are shown: a press hides them"
                         } else {
@@ -685,7 +714,8 @@ impl Browser {
                                     } else if wanted.is_file() && self.kind != PathKind::Folder {
                                         done = Some(Done::Chosen(wanted));
                                     } else {
-                                        self.refused = Some(format!("{} is not there", wanted.display()));
+                                        self.refused =
+                                            Some(format!("{} is not there", wanted.display()));
                                     }
                                 }
                             }
@@ -710,7 +740,10 @@ impl Browser {
                                                 RichText::new(name).color(palette.muted)
                                             };
                                             if ui
-                                                .add(egui::Button::new(words).frame_when_inactive(false))
+                                                .add(
+                                                    egui::Button::new(words)
+                                                        .frame_when_inactive(false),
+                                                )
                                                 .clicked()
                                                 && index != last
                                             {
@@ -751,7 +784,11 @@ impl Browser {
                                     egui::Align2::LEFT_CENTER,
                                     place.sign,
                                     egui::FontId::proportional(15.0),
-                                    if here { palette.accent_fg() } else { palette.muted },
+                                    if here {
+                                        palette.accent_fg()
+                                    } else {
+                                        palette.muted
+                                    },
                                 );
                                 ui.painter().text(
                                     rect.left_center() + egui::vec2(32.0, 0.0),
@@ -760,7 +797,10 @@ impl Browser {
                                     egui::FontId::proportional(13.5),
                                     palette.text,
                                 );
-                                if response.on_hover_text(place.path.display().to_string()).clicked() {
+                                if response
+                                    .on_hover_text(place.path.display().to_string())
+                                    .clicked()
+                                {
                                     go = Some((place.path.clone(), true));
                                 }
                             }
@@ -792,7 +832,11 @@ impl Browser {
                             let words = if mine {
                                 format!(
                                     "{name}  {}",
-                                    if self.order.1 { icons::CARET_UP } else { icons::CARET_DOWN }
+                                    if self.order.1 {
+                                        icons::CARET_UP
+                                    } else {
+                                        icons::CARET_DOWN
+                                    }
                                 )
                             } else {
                                 name.to_string()
@@ -802,10 +846,18 @@ impl Browser {
                                 egui::Align2::LEFT_CENTER,
                                 words,
                                 egui::FontId::proportional(12.0),
-                                if mine || response.hovered() { palette.text } else { palette.faint },
+                                if mine || response.hovered() {
+                                    palette.text
+                                } else {
+                                    palette.faint
+                                },
                             );
                             if response.clicked() {
-                                self.order = if mine { (by, !self.order.1) } else { (by, true) };
+                                self.order = if mine {
+                                    (by, !self.order.1)
+                                } else {
+                                    (by, true)
+                                };
                             }
                         }
                     });
@@ -829,7 +881,9 @@ impl Browser {
                         let top = at as f32 * (row + ui.spacing().item_spacing.y);
                         let view = room - 30.0;
                         let now = ui
-                            .data(|data| data.get_temp::<f32>(egui::Id::unique("gevrek browser offset")))
+                            .data(|data| {
+                                data.get_temp::<f32>(egui::Id::unique("gevrek browser offset"))
+                            })
                             .unwrap_or(0.0);
                         if top < now {
                             area = area.vertical_scroll_offset(top);
@@ -856,14 +910,22 @@ impl Browser {
                             } else {
                                 icons::FILE
                             };
-                            let colour = if faint || item.hidden { palette.faint } else { palette.text };
+                            let colour = if faint || item.hidden {
+                                palette.faint
+                            } else {
+                                palette.text
+                            };
                             let painter = ui.painter().with_clip_rect(rect);
                             painter.text(
                                 rect.left_center() + egui::vec2(8.0, 0.0),
                                 egui::Align2::LEFT_CENTER,
                                 sign,
                                 egui::FontId::proportional(15.0),
-                                if item.is_folder { palette.accent_fg() } else { palette.muted },
+                                if item.is_folder {
+                                    palette.accent_fg()
+                                } else {
+                                    palette.muted
+                                },
                             );
                             let name_room = egui::Rect::from_min_max(
                                 rect.min + egui::vec2(32.0, 0.0),
@@ -902,7 +964,10 @@ impl Browser {
                         }
                     });
                     ui.data_mut(|data| {
-                        data.insert_temp(egui::Id::unique("gevrek browser offset"), out.state.clamped_offset().y);
+                        data.insert_temp(
+                            egui::Id::unique("gevrek browser offset"),
+                            out.state.clamped_offset().y,
+                        );
                     });
                     if shown.is_empty() && self.refused.is_none() {
                         ui.label(
@@ -928,22 +993,25 @@ impl Browser {
                     ui.separator();
                     ui.vertical(|ui| {
                         ui.set_width(220.0);
-                        let (frame, _) = ui.allocate_exact_size(
-                            egui::vec2(220.0, 220.0),
-                            egui::Sense::hover(),
-                        );
+                        let (frame, _) =
+                            ui.allocate_exact_size(egui::vec2(220.0, 220.0), egui::Sense::hover());
                         ui.painter().rect_filled(frame, 8.0, palette.control);
                         let mut about = String::new();
                         match preview {
                             Preview::Ready(texture, size) => {
                                 // (Whole, in the middle of its frame.)
                                 let own = texture.size_vec2();
-                                let scale = (frame.width() / own.x).min(frame.height() / own.y).min(1.0);
-                                let place = egui::Rect::from_center_size(frame.center(), own * scale);
+                                let scale =
+                                    (frame.width() / own.x).min(frame.height() / own.y).min(1.0);
+                                let place =
+                                    egui::Rect::from_center_size(frame.center(), own * scale);
                                 ui.painter().image(
                                     texture.id(),
                                     place,
-                                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                    egui::Rect::from_min_max(
+                                        egui::pos2(0.0, 0.0),
+                                        egui::pos2(1.0, 1.0),
+                                    ),
                                     egui::Color32::WHITE,
                                 );
                                 about = format!("{} × {} px", size[0], size[1]);
@@ -987,7 +1055,8 @@ impl Browser {
                             };
                         }
                         ui.add(
-                            egui::Label::new(RichText::new(about).size(11.5).color(palette.faint)).wrap(),
+                            egui::Label::new(RichText::new(about).size(11.5).color(palette.faint))
+                                .wrap(),
                         );
                     });
                 }
@@ -998,7 +1067,10 @@ impl Browser {
                 let mut make = false;
                 let mut leave = false;
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("{}  New folder", icons::FOLDER_PLUS)).color(palette.muted));
+                    ui.label(
+                        RichText::new(format!("{}  New folder", icons::FOLDER_PLUS))
+                            .color(palette.muted),
+                    );
                     let field = ui.add(
                         egui::TextEdit::singleline(typed)
                             .hint_text("its name")
@@ -1007,7 +1079,8 @@ impl Browser {
                     if !field.has_focus() && !field.lost_focus() {
                         field.request_focus();
                     }
-                    make = (field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)))
+                    make = (field.lost_focus()
+                        && ui.input(|input| input.key_pressed(egui::Key::Enter)))
                         || widgets::secondary_button(ui, "Make it").clicked();
                     leave = widgets::text_button(ui, "", "Leave it").clicked();
                 });
@@ -1015,7 +1088,9 @@ impl Browser {
                     let folder = self.folder.join(typed.trim());
                     match std::fs::create_dir(&folder) {
                         Ok(()) => go = Some((folder, true)),
-                        Err(error) => self.refused = Some(format!("The folder was not made: {error}")),
+                        Err(error) => {
+                            self.refused = Some(format!("The folder was not made: {error}"))
+                        }
                     }
                 } else if leave {
                     self.new_folder = None;
@@ -1048,13 +1123,9 @@ impl Browser {
                         });
                 }
                 ui.label(
-                    RichText::new(format!(
-                        "{} of {}",
-                        shown.len(),
-                        self.items.len()
-                    ))
-                    .size(12.0)
-                    .color(palette.faint),
+                    RichText::new(format!("{} of {}", shown.len(), self.items.len()))
+                        .size(12.0)
+                        .color(palette.faint),
                 );
             });
             ui.horizontal(|ui| {
@@ -1081,7 +1152,12 @@ impl Browser {
                                     .as_ref()
                                     .map(|path| path.display().to_string())
                                     .unwrap_or_default();
-                                ui.label(RichText::new(said).monospace().size(12.5).color(palette.muted));
+                                ui.label(
+                                    RichText::new(said)
+                                        .monospace()
+                                        .size(12.5)
+                                        .color(palette.muted),
+                                );
                             }
                             PathKind::File | PathKind::Program => {
                                 ui.label(RichText::new("Name").color(palette.muted));
@@ -1098,7 +1174,8 @@ impl Browser {
                                 if field.lost_focus()
                                     && ui.input(|input| input.key_pressed(egui::Key::Enter))
                                 {
-                                    let typed = widgets::whole_path(self.name.trim(), home().as_deref());
+                                    let typed =
+                                        widgets::whole_path(self.name.trim(), home().as_deref());
                                     let wanted = if typed.is_absolute() {
                                         typed
                                     } else {
@@ -1173,7 +1250,12 @@ mod tests {
         ));
         std::fs::create_dir_all(folder.join("Pictures")).unwrap();
         std::fs::create_dir_all(folder.join(".cache")).unwrap();
-        for (file, bytes) in [("b.png", 30), ("A.jpg", 2_000), ("notes.txt", 5), (".hidden.png", 1)] {
+        for (file, bytes) in [
+            ("b.png", 30),
+            ("A.jpg", 2_000),
+            ("notes.txt", 5),
+            (".hidden.png", 1),
+        ] {
             std::fs::write(folder.join(file), vec![0u8; bytes]).unwrap();
         }
         folder
@@ -1210,7 +1292,10 @@ mod tests {
             ["Pictures", "A.jpg", "b.png"]
         );
         // A few letters find an entry.
-        assert_eq!(names(shown(&items, (Order::Name, true), false, &[], "NOT")), ["notes.txt"]);
+        assert_eq!(
+            names(shown(&items, (Order::Name, true), false, &[], "NOT")),
+            ["notes.txt"]
+        );
         // A folder that is not there says why.
         assert!(listing(&folder.join("no such")).is_err());
         let _ = std::fs::remove_dir_all(folder);
@@ -1261,7 +1346,10 @@ mod tests {
         assert_eq!(browser.folder(), folder);
         assert_eq!(browser.answer(), Some(folder.join("b.png")));
         // One that is not there: the nearest folder above that is.
-        assert_eq!(start_for(&typed("Pictures/no/such/file.png"), None), folder.join("Pictures"));
+        assert_eq!(
+            start_for(&typed("Pictures/no/such/file.png"), None),
+            folder.join("Pictures")
+        );
         // A folder is asked for: the folder shown is the answer until one
         // in it is chosen.
         let mut browser = Browser::new(PathKind::Folder, &typed(""), None, "", &[]);

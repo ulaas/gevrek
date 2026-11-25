@@ -117,7 +117,10 @@ impl History {
         match options.open(path) {
             Ok(mut file) => {
                 if let Err(error) = file.write_all(text.as_bytes()) {
-                    log::debug!("the clipboard's texts are not kept: {}: {error}", path.display());
+                    log::debug!(
+                        "the clipboard's texts are not kept: {}: {error}",
+                        path.display()
+                    );
                 }
             }
             Err(error) => log::debug!("the clipboard's texts are not kept: {error}"),
@@ -679,14 +682,19 @@ mod tests {
 
         // More than are kept, one of them longer than a text may be,
         // some of them the same, some of them nothing.
-        let mut many: Vec<String> = (0..REMEMBERED * 3).map(|index| format!("text {index}")).collect();
+        let mut many: Vec<String> = (0..REMEMBERED * 3)
+            .map(|index| format!("text {index}"))
+            .collect();
         many.push("x".repeat(LONGEST + 1));
         many.push("text 0".to_string());
         many.push("  \n".to_string());
         std::fs::write(&path, serde_json::to_string(&many).unwrap()).unwrap();
         let read = History::read(&path);
         assert_eq!(read.texts().len(), REMEMBERED);
-        assert!(read.texts().iter().all(|text| text.len() <= LONGEST && !text.trim().is_empty()));
+        assert!(read
+            .texts()
+            .iter()
+            .all(|text| text.len() <= LONGEST && !text.trim().is_empty()));
         assert_eq!(read.newest(), Some("text 0"));
         let mut once = read.texts().to_vec();
         once.sort();

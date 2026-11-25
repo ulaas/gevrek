@@ -128,7 +128,11 @@ impl Asked {
             Asked::ShareEnd(_) => "to end a sharing of the screen".to_string(),
             Asked::Picture(ask) => format!(
                 "for a picture of the screen{}",
-                if ask.interactive { ", chosen by the person" } else { "" }
+                if ask.interactive {
+                    ", chosen by the person"
+                } else {
+                    ""
+                }
             ),
             Asked::Colour(_) => "for a colour from the screen".to_string(),
             Asked::Control(ask) => format!("to let {} control the desktop", ask.app),
@@ -323,7 +327,10 @@ impl ShortcutSession {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(&self.name);
         if let Err(error) = server.remove::<Self, _>(self.name.as_str()).await {
-            log::debug!("a portal session {} was not taken off the bus: {error}", self.name);
+            log::debug!(
+                "a portal session {} was not taken off the bus: {error}",
+                self.name
+            );
         }
     }
 
@@ -1328,7 +1335,10 @@ impl CastSession {
             .remove(&self.name);
         (self.tell)(Asked::ShareEnd(self.name.clone()));
         if let Err(error) = server.remove::<Self, _>(self.name.as_str()).await {
-            log::debug!("a portal session {} was not taken off the bus: {error}", self.name);
+            log::debug!(
+                "a portal session {} was not taken off the bus: {error}",
+                self.name
+            );
         }
     }
 
@@ -1449,7 +1459,10 @@ impl Held {
             (self.tell)(Asked::Awake(self.name.clone(), false));
         }
         if let Err(error) = server.remove::<Self, _>(self.name.as_str()).await {
-            log::debug!("a portal session {} was not taken off the bus: {error}", self.name);
+            log::debug!(
+                "a portal session {} was not taken off the bus: {error}",
+                self.name
+            );
         }
     }
 }

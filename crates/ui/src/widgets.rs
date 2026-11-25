@@ -250,7 +250,11 @@ pub fn keycaps_width(ui: &Ui, combo: &str) -> f32 {
         .filter(|k| !k.is_empty())
         .map(|key| {
             painter
-                .layout_no_wrap(key.to_owned(), egui::FontId::monospace(12.0), Color32::WHITE)
+                .layout_no_wrap(
+                    key.to_owned(),
+                    egui::FontId::monospace(12.0),
+                    Color32::WHITE,
+                )
                 .size()
                 .x
                 + 12.0
@@ -325,7 +329,10 @@ pub fn shortcut_row(ui: &mut Ui, keys: &str, action: &str, mode: Option<&str>) {
         (rect.top() + PAD + CAP + GAP, rect.top() + PAD + CAP / 2.0)
     } else {
         let top = rect.top() + (height - words.size().y) / 2.0;
-        (top, (top + first_line / 2.0).max(rect.top() + PAD + CAP / 2.0))
+        (
+            top,
+            (top + first_line / 2.0).max(rect.top() + PAD + CAP / 2.0),
+        )
     };
     keycaps(ui, egui::pos2(rect.left() + 6.0, keys_y), keys, p.text);
     ui.painter()
@@ -356,9 +363,17 @@ fn words_place(row: f32, keys: f32) -> WordsPlace {
     let x = (6.0 + keys + 10.0).max(COLUMN.min(row / 2.0));
     let beside = row - x - 6.0;
     if beside >= LEAST {
-        WordsPlace { x, width: beside, under: false }
+        WordsPlace {
+            x,
+            width: beside,
+            under: false,
+        }
     } else {
-        WordsPlace { x: 6.0, width: (row - 12.0).max(1.0), under: true }
+        WordsPlace {
+            x: 6.0,
+            width: (row - 12.0).max(1.0),
+            under: true,
+        }
     }
 }
 
@@ -623,7 +638,12 @@ pub fn text_field(ui: &mut Ui, text: &mut String, width: f32) -> egui::Response 
 
 /// A field to search by: a magnifier and what is looked for in its
 /// place until something is typed.
-pub fn search_field(ui: &mut Ui, text: &mut String, looked_for: &str, width: f32) -> egui::Response {
+pub fn search_field(
+    ui: &mut Ui,
+    text: &mut String,
+    looked_for: &str,
+    width: f32,
+) -> egui::Response {
     ui.add(
         egui::TextEdit::singleline(text)
             .hint_text(format!("{}  {looked_for}", icons::MAGNIFYING_GLASS))
@@ -633,7 +653,11 @@ pub fn search_field(ui: &mut Ui, text: &mut String, looked_for: &str, width: f32
 
 /// A number by itself, where no range is known that a slider could be
 /// drawn for: dragged or typed, in a box as wide as a slider's own.
-pub fn number_box<N: egui::emath::Numeric>(ui: &mut Ui, value: &mut N, speed: f64) -> egui::Response {
+pub fn number_box<N: egui::emath::Numeric>(
+    ui: &mut Ui,
+    value: &mut N,
+    speed: f64,
+) -> egui::Response {
     let height = ui.spacing().interact_size.y;
     ui.add_sized([62.0, height], egui::DragValue::new(value).speed(speed))
 }
@@ -850,12 +874,7 @@ pub fn busy(ui: &mut Ui) -> egui::Response {
 /// A line that says something about the page it stands on (it is being
 /// tried, something is wrong, something was done): tinted in the colour
 /// of what it says, with a sign.
-pub fn banner<R>(
-    ui: &mut Ui,
-    colour: Color32,
-    icon: &str,
-    add: impl FnOnce(&mut Ui) -> R,
-) -> R {
+pub fn banner<R>(ui: &mut Ui, colour: Color32, icon: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
     let p = theme::pal(ui.ctx());
     egui::Frame::new()
         .fill(p.tint(colour, 0.14))
@@ -1221,14 +1240,23 @@ mod tests {
     #[test]
     fn a_path_is_made_whole_and_looked_for() {
         let home = std::env::temp_dir();
-        assert_eq!(whole_path("~/pictures/a.png", Some(&home)), home.join("pictures/a.png"));
+        assert_eq!(
+            whole_path("~/pictures/a.png", Some(&home)),
+            home.join("pictures/a.png")
+        );
         assert_eq!(whole_path("~", Some(&home)), home);
-        assert_eq!(whole_path(" /abs/a.png ", Some(&home)), std::path::PathBuf::from("/abs/a.png"));
+        assert_eq!(
+            whole_path(" /abs/a.png ", Some(&home)),
+            std::path::PathBuf::from("/abs/a.png")
+        );
         assert_eq!(whole_path("~/a", None), std::path::PathBuf::from("~/a"));
         // The folder of temporary files is there, and is a folder.
         let there = home.to_string_lossy().to_string();
         assert_eq!(path_found(&there, PathKind::Folder, None), PathFound::There);
-        assert_eq!(path_found(&there, PathKind::File, None), PathFound::OtherKind);
+        assert_eq!(
+            path_found(&there, PathKind::File, None),
+            PathFound::OtherKind
+        );
         assert_eq!(path_found("  ", PathKind::File, None), PathFound::Empty);
         assert_eq!(
             path_found("no/such/thing/anywhere.png", PathKind::File, None),

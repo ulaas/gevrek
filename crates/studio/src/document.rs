@@ -235,11 +235,17 @@ impl Document {
         self.was_typed = Some(self.typed.is_ok());
         if was_typed != self.was_typed {
             match &self.typed {
-                Ok(_) => log::debug!("the document is a configuration ({} issues)", self.issues.len()),
+                Ok(_) => log::debug!(
+                    "the document is a configuration ({} issues)",
+                    self.issues.len()
+                ),
                 Err(error) => log::debug!("the document is no configuration: {error}"),
             }
         } else if self.typed.is_ok() && issues_before != self.issues.len() {
-            log::debug!("the configuration's check finds {} issues", self.issues.len());
+            log::debug!(
+                "the configuration's check finds {} issues",
+                self.issues.len()
+            );
         }
     }
 

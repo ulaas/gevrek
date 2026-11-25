@@ -315,8 +315,13 @@ pub struct Offered {
 #[derive(Debug, Clone, PartialEq)]
 pub enum DragEvent {
     /// Something dragged came over the surface.
-    Entered { at: egui::Pos2, offered: Offered },
-    Moved { at: egui::Pos2 },
+    Entered {
+        at: egui::Pos2,
+        offered: Offered,
+    },
+    Moved {
+        at: egui::Pos2,
+    },
     /// It went away, or the drag was given up.
     Left,
     /// It was let go here. `action` is what the source was told would be
@@ -328,7 +333,9 @@ pub enum DragEvent {
         action: DragAction,
     },
     /// A drag this surface began is over.
-    Ended { outcome: DragOutcome },
+    Ended {
+        outcome: DragOutcome,
+    },
 }
 
 /// How a drag out of a surface ended.
@@ -435,7 +442,12 @@ pub fn premultiplied_bgra(rgba: &[u8]) -> Vec<u8> {
         let alpha = u32::from(pixel[3]);
         // (Rounded, so that a solid pixel keeps its colour exactly.)
         let scaled = |colour: u8| ((u32::from(colour) * alpha + 127) / 255) as u8;
-        out.extend_from_slice(&[scaled(pixel[2]), scaled(pixel[1]), scaled(pixel[0]), pixel[3]]);
+        out.extend_from_slice(&[
+            scaled(pixel[2]),
+            scaled(pixel[1]),
+            scaled(pixel[0]),
+            pixel[3],
+        ]);
     }
     out
 }
@@ -612,7 +624,10 @@ pub mod uri {
     /// way, empty ones and remarks (`#`) left out, and nothing after a
     /// zero byte (some programs send the end of their text along).
     pub fn parse_list(bytes: &[u8]) -> Vec<String> {
-        let end = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
+        let end = bytes
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(bytes.len());
         String::from_utf8_lossy(&bytes[..end])
             .lines()
             .map(str::trim)
@@ -721,7 +736,10 @@ pub mod mime {
                 }
             }
         } else {
-            let end = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
+            let end = bytes
+                .iter()
+                .position(|byte| *byte == 0)
+                .unwrap_or(bytes.len());
             let text = String::from_utf8_lossy(&bytes[..end]).into_owned();
             if !text.is_empty() {
                 payload.text = Some(text);
@@ -745,7 +763,10 @@ pub mod hdrop {
         out.extend_from_slice(&(HEAD as u32).to_le_bytes());
         out.extend_from_slice(&[0; 12]);
         out.extend_from_slice(&1u32.to_le_bytes());
-        for path in paths.iter().filter(|path| !path.is_empty() && !path.contains('\0')) {
+        for path in paths
+            .iter()
+            .filter(|path| !path.is_empty() && !path.contains('\0'))
+        {
             for unit in path.encode_utf16().chain(std::iter::once(0)) {
                 out.extend_from_slice(&unit.to_le_bytes());
             }
@@ -848,22 +869,41 @@ mod tests {
                 Some(DragAction::Copy),
             ),
             (
-                DragActions { copy: false, moving: true, link: true },
+                DragActions {
+                    copy: false,
+                    moving: true,
+                    link: true,
+                },
                 none,
                 all,
                 Some(DragAction::Move),
             ),
-            (DragActions::only(DragAction::Link), none, all, Some(DragAction::Link)),
+            (
+                DragActions::only(DragAction::Link),
+                none,
+                all,
+                Some(DragAction::Link),
+            ),
             // Keys.
             (DragActions::ALL, ctrl, all, Some(DragAction::Copy)),
             (DragActions::ALL, shift, all, Some(DragAction::Move)),
             (DragActions::ALL, both, all, Some(DragAction::Link)),
-            (DragActions::ALL, held(false, false, true), all, Some(DragAction::Link)),
+            (
+                DragActions::ALL,
+                held(false, false, true),
+                all,
+                Some(DragAction::Link),
+            ),
             // A key that asks for what cannot be done gets nothing, not
             // something else.
             (DragActions::COPY, shift, all, None),
             (DragActions::COPY_OR_MOVE, both, all, None),
-            (DragActions::ALL, shift, DropAnswer::accept(DragActions::COPY), None),
+            (
+                DragActions::ALL,
+                shift,
+                DropAnswer::accept(DragActions::COPY),
+                None,
+            ),
             (
                 DragActions::ALL,
                 ctrl,
@@ -882,14 +922,23 @@ mod tests {
             (DragActions::NONE, none, all, None),
         ];
         for (offered, keys, answer, wanted) in table {
-            assert_eq!(negotiate(offered, keys, answer), wanted, "{offered:?} {keys:?} {answer:?}");
+            assert_eq!(
+                negotiate(offered, keys, answer),
+                wanted,
+                "{offered:?} {keys:?} {answer:?}"
+            );
         }
         // Whatever is asked: never an action one side did not allow.
         for offered in OFFERS {
             for accept in OFFERS {
                 for bits in 0..8u8 {
                     let keys = held(bits & 1 != 0, bits & 2 != 0, bits & 4 != 0);
-                    for prefer in [None, Some(DragAction::Copy), Some(DragAction::Move), Some(DragAction::Link)] {
+                    for prefer in [
+                        None,
+                        Some(DragAction::Copy),
+                        Some(DragAction::Move),
+                        Some(DragAction::Link),
+                    ] {
                         let answer = DropAnswer { accept, prefer };
                         if let Some(action) = negotiate(offered, keys, answer) {
                             assert!(offered.allows(action) && accept.allows(action));
@@ -909,7 +958,10 @@ mod tests {
         assert_eq!(DragActions::COPY_OR_MOVE.effects(), 3);
         assert_eq!(DragActions::from_effects(7), DragActions::ALL);
         // (Scrolling is in Windows' count and is no action.)
-        assert_eq!(DragActions::from_effects(0x8000_0002), DragActions::only(DragAction::Move));
+        assert_eq!(
+            DragActions::from_effects(0x8000_0002),
+            DragActions::only(DragAction::Move)
+        );
         for actions in OFFERS {
             assert_eq!(DragActions::from_effects(actions.effects()), actions);
         }
@@ -948,14 +1000,35 @@ mod tests {
         assert_eq!(outcome(true, 4, None, None), taken(DragAction::Link, false));
         // A move the target left half done: the originals are the source's.
         assert_eq!(outcome(true, 2, None, None), taken(DragAction::Move, true));
-        assert_eq!(outcome(true, 2, Some(2), Some(2)), taken(DragAction::Move, true));
-        assert_eq!(outcome(true, 0, Some(2), None), taken(DragAction::Move, true));
+        assert_eq!(
+            outcome(true, 2, Some(2), Some(2)),
+            taken(DragAction::Move, true)
+        );
+        assert_eq!(
+            outcome(true, 0, Some(2), None),
+            taken(DragAction::Move, true)
+        );
         // A move the target did itself.
-        assert_eq!(outcome(true, 2, Some(0), Some(2)), taken(DragAction::Move, false));
-        assert_eq!(outcome(true, 0, Some(0), Some(2)), taken(DragAction::Move, false));
-        assert_eq!(outcome(true, 0, None, Some(2)), taken(DragAction::Move, false));
-        assert_eq!(outcome(true, 0, Some(1), None), taken(DragAction::Copy, false));
-        assert_eq!(outcome(true, 0, None, Some(1)), taken(DragAction::Copy, false));
+        assert_eq!(
+            outcome(true, 2, Some(0), Some(2)),
+            taken(DragAction::Move, false)
+        );
+        assert_eq!(
+            outcome(true, 0, Some(0), Some(2)),
+            taken(DragAction::Move, false)
+        );
+        assert_eq!(
+            outcome(true, 0, None, Some(2)),
+            taken(DragAction::Move, false)
+        );
+        assert_eq!(
+            outcome(true, 0, Some(1), None),
+            taken(DragAction::Copy, false)
+        );
+        assert_eq!(
+            outcome(true, 0, None, Some(1)),
+            taken(DragAction::Copy, false)
+        );
     }
 
     #[test]
@@ -982,7 +1055,10 @@ mod tests {
         assert!(image.is_sound());
         assert_eq!(image.logical_size(), (64, 32));
         assert_eq!(image.logical_hotspot(), (8, 4));
-        let short = DragImage { rgba: vec![0; 5], ..image };
+        let short = DragImage {
+            rgba: vec![0; 5],
+            ..image
+        };
         assert!(!short.is_sound());
     }
 
@@ -999,25 +1075,46 @@ mod tests {
     fn a_path_and_its_address_are_each_others() {
         let cases = [
             ("/home/ada/a.txt", "file:///home/ada/a.txt"),
-            ("/home/ada/my file (1).txt", "file:///home/ada/my%20file%20%281%29.txt"),
-            ("/tmp/çay & şeker.txt", "file:///tmp/%C3%A7ay%20%26%20%C5%9Feker.txt"),
+            (
+                "/home/ada/my file (1).txt",
+                "file:///home/ada/my%20file%20%281%29.txt",
+            ),
+            (
+                "/tmp/çay & şeker.txt",
+                "file:///tmp/%C3%A7ay%20%26%20%C5%9Feker.txt",
+            ),
             ("/tmp/100%#?.txt", "file:///tmp/100%25%23%3F.txt"),
             ("/tmp/日本語", "file:///tmp/%E6%97%A5%E6%9C%AC%E8%AA%9E"),
             ("/", "file:///"),
         ];
         for (path, address) in cases {
-            assert_eq!(uri::of_path(path, PathStyle::Unix).as_deref(), Some(address));
-            assert_eq!(uri::to_path(address, PathStyle::Unix, None).as_deref(), Some(path));
+            assert_eq!(
+                uri::of_path(path, PathStyle::Unix).as_deref(),
+                Some(address)
+            );
+            assert_eq!(
+                uri::to_path(address, PathStyle::Unix, None).as_deref(),
+                Some(path)
+            );
         }
         assert_eq!(uri::of_path("a.txt", PathStyle::Unix), None);
         let cases = [
             (r"C:\Users\ada\a.txt", "file:///C:/Users/ada/a.txt"),
-            (r"D:\Çay Bahçesi\ö.txt", "file:///D:/%C3%87ay%20Bah%C3%A7esi/%C3%B6.txt"),
+            (
+                r"D:\Çay Bahçesi\ö.txt",
+                "file:///D:/%C3%87ay%20Bah%C3%A7esi/%C3%B6.txt",
+            ),
             (r"\\server\share\a b.txt", "file://server/share/a%20b.txt"),
         ];
         for (path, address) in cases {
-            assert_eq!(uri::of_path(path, PathStyle::Windows).as_deref(), Some(address));
-            assert_eq!(uri::to_path(address, PathStyle::Windows, None).as_deref(), Some(path));
+            assert_eq!(
+                uri::of_path(path, PathStyle::Windows).as_deref(),
+                Some(address)
+            );
+            assert_eq!(
+                uri::to_path(address, PathStyle::Windows, None).as_deref(),
+                Some(path)
+            );
         }
         // Paths written "as they are" are addressed like any other.
         assert_eq!(
@@ -1037,13 +1134,19 @@ mod tests {
         let unix = |address, host| uri::to_path(address, PathStyle::Unix, host);
         assert_eq!(unix("file://localhost/a/b", None).as_deref(), Some("/a/b"));
         assert_eq!(unix("FILE://LocalHost/a/b", None).as_deref(), Some("/a/b"));
-        assert_eq!(unix("file://lovelace/a/b", Some("Lovelace")).as_deref(), Some("/a/b"));
+        assert_eq!(
+            unix("file://lovelace/a/b", Some("Lovelace")).as_deref(),
+            Some("/a/b")
+        );
         assert_eq!(unix("file://babbage/a/b", Some("lovelace")), None);
         assert_eq!(unix("file://babbage/a/b", None), None);
         // One slash, as some programs write it.
         assert_eq!(unix("file:/a/b%20c", None).as_deref(), Some("/a/b c"));
         // Small and capital digits, and what is after the path.
-        assert_eq!(unix("file:///a/%c3%A7?x=1#top", None).as_deref(), Some("/a/ç"));
+        assert_eq!(
+            unix("file:///a/%c3%A7?x=1#top", None).as_deref(),
+            Some("/a/ç")
+        );
         // No file, no path, or no text.
         assert_eq!(unix("https://example.org/a", None), None);
         assert_eq!(unix("file://host", None), None);
@@ -1055,7 +1158,10 @@ mod tests {
         let windows = |address| uri::to_path(address, PathStyle::Windows, None);
         assert_eq!(windows("file://localhost/C:/a").as_deref(), Some(r"C:\a"));
         assert_eq!(windows("file:///c:/a%20b/").as_deref(), Some(r"c:\a b\"));
-        assert_eq!(windows("file:////server/share/a").as_deref(), Some(r"\\server\share\a"));
+        assert_eq!(
+            windows("file:////server/share/a").as_deref(),
+            Some(r"\\server\share\a")
+        );
         assert_eq!(windows("file:///a/b"), None);
     }
 
@@ -1063,7 +1169,10 @@ mod tests {
     fn a_list_of_addresses_is_read_however_its_lines_end() {
         let sent = uri::list(&["file:///a".to_string(), "file:///b%20c".to_string()]);
         assert_eq!(sent, "file:///a\r\nfile:///b%20c\r\n");
-        assert_eq!(uri::parse_list(sent.as_bytes()), ["file:///a", "file:///b%20c"]);
+        assert_eq!(
+            uri::parse_list(sent.as_bytes()),
+            ["file:///a", "file:///b%20c"]
+        );
         let received = b"# from a file manager\r\nfile:///a\r\n\r\n  file:///b \nhttps://example.org/\r\n\0junk";
         assert_eq!(
             uri::parse_list(received),
@@ -1078,7 +1187,12 @@ mod tests {
         let payload = DragPayload::files(["/home/ada/a b.txt", "/home/ada/ç"]);
         assert_eq!(
             mime::kinds(&payload, PathStyle::Unix),
-            [mime::URI_LIST, mime::GNOME_FILES, mime::TEXT_UTF8, mime::TEXT]
+            [
+                mime::URI_LIST,
+                mime::GNOME_FILES,
+                mime::TEXT_UTF8,
+                mime::TEXT
+            ]
         );
         let bytes = |kind| {
             String::from_utf8(mime::bytes(&payload, kind, PathStyle::Unix).unwrap()).unwrap()
@@ -1094,21 +1208,38 @@ mod tests {
         assert_eq!(bytes(mime::TEXT), "/home/ada/a b.txt\n/home/ada/ç");
         assert_eq!(mime::bytes(&payload, "image/png", PathStyle::Unix), None);
         // Text alone is offered as text alone.
-        let text = DragPayload { text: Some("çay".to_string()), ..Default::default() };
-        assert_eq!(mime::kinds(&text, PathStyle::Unix), [mime::TEXT_UTF8, mime::TEXT]);
-        assert_eq!(mime::bytes(&text, mime::TEXT_UTF8, PathStyle::Unix).unwrap(), "çay".as_bytes());
+        let text = DragPayload {
+            text: Some("çay".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            mime::kinds(&text, PathStyle::Unix),
+            [mime::TEXT_UTF8, mime::TEXT]
+        );
+        assert_eq!(
+            mime::bytes(&text, mime::TEXT_UTF8, PathStyle::Unix).unwrap(),
+            "çay".as_bytes()
+        );
         assert_eq!(mime::bytes(&text, mime::URI_LIST, PathStyle::Unix), None);
         assert!(mime::kinds(&DragPayload::default(), PathStyle::Unix).is_empty());
     }
 
     #[test]
     fn what_a_source_sends_is_read_into_paths_addresses_and_text() {
-        let offered = |kinds: &[&str]| kinds.iter().map(|kind| kind.to_string()).collect::<Vec<_>>();
+        let offered = |kinds: &[&str]| {
+            kinds
+                .iter()
+                .map(|kind| kind.to_string())
+                .collect::<Vec<_>>()
+        };
         assert_eq!(
             mime::pick(&offered(&["text/plain", "text/uri-list", "image/png"])),
             Some(mime::URI_LIST)
         );
-        assert_eq!(mime::pick(&offered(&["STRING", "text/plain"])), Some(mime::TEXT));
+        assert_eq!(
+            mime::pick(&offered(&["STRING", "text/plain"])),
+            Some(mime::TEXT)
+        );
         assert_eq!(mime::pick(&offered(&["image/png"])), None);
         assert!(mime::has_files(&offered(&["text/uri-list"])));
         assert!(!mime::has_files(&offered(&["text/plain"])));
@@ -1125,7 +1256,13 @@ mod tests {
         assert_eq!(payload.uris, ["file://babbage/x", "https://example.org/a"]);
         assert_eq!(payload.text, None);
         let mut payload = DragPayload::default();
-        mime::read(&mut payload, mime::TEXT_UTF8, "şeker\0".as_bytes(), PathStyle::Unix, None);
+        mime::read(
+            &mut payload,
+            mime::TEXT_UTF8,
+            "şeker\0".as_bytes(),
+            PathStyle::Unix,
+            None,
+        );
         assert_eq!(payload.text.as_deref(), Some("şeker"));
         assert!(payload.paths.is_empty());
         // What was sent comes back as it was.
@@ -1143,7 +1280,10 @@ mod tests {
 
     #[test]
     fn windows_list_of_files_is_written_and_read_back() {
-        let paths = vec![r"C:\a.txt".to_string(), r"D:\Çay Bahçesi\日本語 𝄞.txt".to_string()];
+        let paths = vec![
+            r"C:\a.txt".to_string(),
+            r"D:\Çay Bahçesi\日本語 𝄞.txt".to_string(),
+        ];
         let bytes = hdrop::encode(&paths);
         // The head: the paths begin after it, and are in wide letters.
         assert_eq!(&bytes[0..4], &20u32.to_le_bytes());
@@ -1170,7 +1310,10 @@ mod tests {
         assert_eq!(hdrop::decode(&empty), Some(Vec::new()));
         // What would end the list early is left out.
         let odd = vec!["a\0b".to_string(), String::new(), r"C:\c".to_string()];
-        assert_eq!(hdrop::decode(&hdrop::encode(&odd)), Some(vec![r"C:\c".to_string()]));
+        assert_eq!(
+            hdrop::decode(&hdrop::encode(&odd)),
+            Some(vec![r"C:\c".to_string()])
+        );
     }
 
     #[test]

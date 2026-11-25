@@ -77,8 +77,8 @@ pub fn decode(text: &str) -> Result<(ZonesState, Option<u64>), Unreadable> {
     if older.is_some() {
         migrate(&mut document, version);
     }
-    let state: ZonesState = serde_json::from_value(document)
-        .map_err(|error| Unreadable::Corrupt(error.to_string()))?;
+    let state: ZonesState =
+        serde_json::from_value(document).map_err(|error| Unreadable::Corrupt(error.to_string()))?;
     if let Some(broken) = state.placements.broken() {
         return Err(Unreadable::Corrupt(broken));
     }
@@ -125,7 +125,10 @@ pub struct Store {
 
 impl Store {
     pub fn new(folder: impl Into<PathBuf>) -> Self {
-        Self { folder: folder.into(), keep: KEEP }
+        Self {
+            folder: folder.into(),
+            keep: KEEP,
+        }
     }
 
     /// Keep this many backups (one at least).
@@ -153,7 +156,11 @@ impl Store {
             .filter_map(|entry| {
                 let path = entry.path();
                 let name = path.file_name()?.to_str()?.to_string();
-                let number = name.strip_prefix("zones-")?.strip_suffix(".json")?.parse().ok()?;
+                let number = name
+                    .strip_prefix("zones-")?
+                    .strip_suffix(".json")?
+                    .parse()
+                    .ok()?;
                 Some((number, path))
             })
             .collect();
@@ -174,7 +181,10 @@ impl Store {
         write_atomic(&path, text.as_bytes())?;
         for old in existing.iter().skip(self.keep.saturating_sub(1)) {
             if let Err(error) = std::fs::remove_file(old) {
-                log::debug!("the old backup {} of the zones' state could not be removed: {error}", old.display());
+                log::debug!(
+                    "the old backup {} of the zones' state could not be removed: {error}",
+                    old.display()
+                );
             }
         }
         Ok(path)
@@ -196,7 +206,11 @@ impl Store {
             number += 1;
         };
         std::fs::rename(self.file(), &aside)?;
-        log::debug!("the zones' state file {} is put aside as {} ({why:?})", self.file().display(), aside.display());
+        log::debug!(
+            "the zones' state file {} is put aside as {} ({why:?})",
+            self.file().display(),
+            aside.display()
+        );
         Ok(aside)
     }
 
@@ -207,7 +221,10 @@ impl Store {
         let text = encode(state);
         match std::fs::read_to_string(self.file()) {
             Ok(before) if before == text => {
-                log::trace!("the zones' state is as it was in {}; nothing is written", self.file().display());
+                log::trace!(
+                    "the zones' state is as it was in {}; nothing is written",
+                    self.file().display()
+                );
                 return Ok(());
             }
             Ok(before) => match decode(&before) {
@@ -226,7 +243,11 @@ impl Store {
             Err(error) => return Err(error),
         }
         write_atomic(&self.file(), text.as_bytes())?;
-        log::debug!("the zones' state was written to {} ({} bytes)", self.file().display(), text.len());
+        log::debug!(
+            "the zones' state was written to {} ({} bytes)",
+            self.file().display(),
+            text.len()
+        );
         Ok(())
     }
 
@@ -258,15 +279,26 @@ impl Store {
     fn read(&self) -> std::io::Result<Loaded> {
         let why = match std::fs::read_to_string(self.file()) {
             Ok(text) => match decode(&text) {
-                Ok((state, None)) => return Ok(Loaded { state, report: LoadReport::Read }),
+                Ok((state, None)) => {
+                    return Ok(Loaded {
+                        state,
+                        report: LoadReport::Read,
+                    })
+                }
                 Ok((state, Some(from))) => {
-                    return Ok(Loaded { state, report: LoadReport::Migrated { from } })
+                    return Ok(Loaded {
+                        state,
+                        report: LoadReport::Migrated { from },
+                    })
                 }
                 Err(why) => why,
             },
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 if self.backups().is_empty() {
-                    return Ok(Loaded { state: ZonesState::default(), report: LoadReport::Fresh });
+                    return Ok(Loaded {
+                        state: ZonesState::default(),
+                        report: LoadReport::Fresh,
+                    });
                 }
                 Unreadable::Missing
             }
@@ -286,7 +318,11 @@ impl Store {
                 Ok(text) => decode(&text).map_err(|why| format!("{why:?}")),
                 Err(error) => Err(error.to_string()),
             };
-            let state = state.inspect_err(|why| log::debug!("the backup {} cannot be used: {why}", backup.display())).ok();
+            let state = state
+                .inspect_err(|why| {
+                    log::debug!("the backup {} cannot be used: {why}", backup.display())
+                })
+                .ok();
             match state {
                 Some((state, _)) => {
                     found = Some((state, backup));
@@ -301,7 +337,12 @@ impl Store {
         };
         Ok(Loaded {
             state,
-            report: LoadReport::Recovered { why, set_aside, backup, unreadable_backups },
+            report: LoadReport::Recovered {
+                why,
+                set_aside,
+                backup,
+                unreadable_backups,
+            },
         })
     }
 }
@@ -334,9 +375,20 @@ mod tests {
 
     /// A state that differs with every number.
     fn state(number: u64) -> ZonesState {
-        let mut state = ZonesState { zones_made: number, ..ZonesState::default() };
-        state.placements.assign(&ItemId::new(format!("item-{number}")), &ZoneId::new("z"), None, None);
-        state.snapshots.push(Snapshot { name: format!("s{number}"), ..Snapshot::default() });
+        let mut state = ZonesState {
+            zones_made: number,
+            ..ZonesState::default()
+        };
+        state.placements.assign(
+            &ItemId::new(format!("item-{number}")),
+            &ZoneId::new("z"),
+            None,
+            None,
+        );
+        state.snapshots.push(Snapshot {
+            name: format!("s{number}"),
+            ..Snapshot::default()
+        });
         state
     }
 
@@ -355,12 +407,21 @@ mod tests {
         let store = Store::new(&folder);
         assert_eq!(
             store.load().unwrap(),
-            Loaded { state: ZonesState::default(), report: LoadReport::Fresh }
+            Loaded {
+                state: ZonesState::default(),
+                report: LoadReport::Fresh
+            }
         );
         // (Reading made no folder and no file.)
         assert!(!folder.exists());
         store.save(&state(1)).unwrap();
-        assert_eq!(store.load().unwrap(), Loaded { state: state(1), report: LoadReport::Read });
+        assert_eq!(
+            store.load().unwrap(),
+            Loaded {
+                state: state(1),
+                report: LoadReport::Read
+            }
+        );
         assert_eq!(names(&folder), ["zones.json"]);
         // Keys of a newer gevrek's are kept through a round.
         let mut text: Value = serde_json::from_str(&encode(&state(1))).unwrap();
@@ -410,9 +471,18 @@ mod tests {
         assert_eq!(backups.len(), 3);
         let held: Vec<u64> = backups
             .iter()
-            .map(|path| decode(&std::fs::read_to_string(path).unwrap()).unwrap().0.zones_made)
+            .map(|path| {
+                decode(&std::fs::read_to_string(path).unwrap())
+                    .unwrap()
+                    .0
+                    .zones_made
+            })
             .collect();
-        assert_eq!(held, [5, 4, 3], "the newest first, each what the file held before");
+        assert_eq!(
+            held,
+            [5, 4, 3],
+            "the newest first, each what the file held before"
+        );
         assert_eq!(store.load().unwrap().state, state(6));
         assert_eq!(names(&folder), ["backups", "zones.json"]);
         std::fs::remove_dir_all(folder).unwrap();
@@ -433,7 +503,13 @@ mod tests {
 
         let loaded = store.load().unwrap();
         assert_eq!(loaded.state, state(1), "the newest backup that can be read");
-        let LoadReport::Recovered { why, set_aside, backup, unreadable_backups } = loaded.report else {
+        let LoadReport::Recovered {
+            why,
+            set_aside,
+            backup,
+            unreadable_backups,
+        } = loaded.report
+        else {
             panic!("{:?}", loaded.report);
         };
         assert!(matches!(why, Unreadable::Corrupt(_)));
@@ -441,7 +517,10 @@ mod tests {
         assert_eq!(backup, Some(store.backups().remove(1)));
         // The spoilt file is still there, as it was, under another name.
         let aside = set_aside.unwrap();
-        assert_eq!(std::fs::read_to_string(&aside).unwrap(), whole[..whole.len() / 2]);
+        assert_eq!(
+            std::fs::read_to_string(&aside).unwrap(),
+            whole[..whole.len() / 2]
+        );
         assert!(!store.file().exists());
         assert!(newest.exists());
 
@@ -449,7 +528,10 @@ mod tests {
         store.save(&loaded.state).unwrap();
         std::fs::write(store.file(), "[1, 2").unwrap();
         let again = store.load().unwrap();
-        let LoadReport::Recovered { set_aside: second, .. } = again.report else {
+        let LoadReport::Recovered {
+            set_aside: second, ..
+        } = again.report
+        else {
             panic!("{:?}", again.report);
         };
         assert_ne!(second.unwrap(), aside);
@@ -459,8 +541,18 @@ mod tests {
 
     #[test]
     fn what_is_not_a_state_file_is_corrupt() {
-        for text in ["", "null", "[]", "{}", "{\"version\": \"one\"}", "{\"version\": 1, \"profiles\": 7}"] {
-            assert!(matches!(decode(text), Err(Unreadable::Corrupt(_))), "{text}");
+        for text in [
+            "",
+            "null",
+            "[]",
+            "{}",
+            "{\"version\": \"one\"}",
+            "{\"version\": 1, \"profiles\": 7}",
+        ] {
+            assert!(
+                matches!(decode(text), Err(Unreadable::Corrupt(_))),
+                "{text}"
+            );
         }
         // An item in two zones is no layout either.
         let twice = r#"{"version": 1, "placements": {"zones": {"a": {"items": ["x"]}, "b": {"items": ["x"]}}}}"#;
@@ -493,7 +585,10 @@ mod tests {
         std::fs::write(store.file(), newer).unwrap();
         let loaded = store.load().unwrap();
         assert_eq!(loaded.state, ZonesState::default());
-        assert!(matches!(loaded.report, LoadReport::Recovered { backup: None, .. }));
+        assert!(matches!(
+            loaded.report,
+            LoadReport::Recovered { backup: None, .. }
+        ));
         assert_eq!(names(&alone), ["zones.json.newer-1"]);
         // A save by this version writes its own file beside it.
         store.save(&state(3)).unwrap();
@@ -510,7 +605,10 @@ mod tests {
         std::fs::write(store.file(), "{\"version\": 99}").unwrap();
         store.save(&state(2)).unwrap();
         assert_eq!(names(&folder), ["zones.json", "zones.json.newer-1"]);
-        assert!(store.backups().is_empty(), "what cannot be read is no backup");
+        assert!(
+            store.backups().is_empty(),
+            "what cannot be read is no backup"
+        );
         std::fs::remove_dir_all(folder).unwrap();
     }
 
@@ -525,7 +623,12 @@ mod tests {
         assert_eq!(loaded.state, state(1));
         assert!(matches!(
             loaded.report,
-            LoadReport::Recovered { why: Unreadable::Missing, set_aside: None, backup: Some(_), .. }
+            LoadReport::Recovered {
+                why: Unreadable::Missing,
+                set_aside: None,
+                backup: Some(_),
+                ..
+            }
         ));
         std::fs::remove_dir_all(folder).unwrap();
     }
@@ -544,13 +647,22 @@ mod tests {
         ];
         let mut from_one = serde_json::json!({"version": 1, "zone_count": 4});
         migrate_with(&mut from_one, 1, steps, 3);
-        assert_eq!(from_one, serde_json::json!({"version": 3, "zones_made": 4, "choices": 7}));
+        assert_eq!(
+            from_one,
+            serde_json::json!({"version": 3, "zones_made": 4, "choices": 7})
+        );
         let mut from_two = serde_json::json!({"version": 2, "zones_made": 4});
         migrate_with(&mut from_two, 2, steps, 3);
-        assert_eq!(from_two, serde_json::json!({"version": 3, "zones_made": 4, "choices": 7}));
+        assert_eq!(
+            from_two,
+            serde_json::json!({"version": 3, "zones_made": 4, "choices": 7})
+        );
         // And through the door a file comes in by: a version before the
         // first reads with what it has and is said to be brought up.
         let (state, from) = decode(r#"{"version": 0, "zones_made": 9}"#).unwrap();
-        assert_eq!((state.zones_made, state.version, from), (9, STATE_VERSION, Some(0)));
+        assert_eq!(
+            (state.zones_made, state.version, from),
+            (9, STATE_VERSION, Some(0))
+        );
     }
 }

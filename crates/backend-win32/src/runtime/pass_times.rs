@@ -198,7 +198,11 @@ mod tests {
             said[0]
         );
         // The second half minute knows nothing of the first.
-        assert!(said[1].starts_with("30 passes, 2.0 ms each on average, 0 longer"), "{}", said[1]);
+        assert!(
+            said[1].starts_with("30 passes, 2.0 ms each on average, 0 longer"),
+            "{}",
+            said[1]
+        );
         let _ = at;
     }
 

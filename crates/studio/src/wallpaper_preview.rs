@@ -74,7 +74,12 @@ pub fn displays(state: Option<&Value>) -> Vec<Display> {
 /// a place on the display's drawing and the part of the picture (0 to 1
 /// each way) that is shown there. `picture`: the picture's own size;
 /// `scale`: how much smaller the drawing is than the display.
-pub fn pieces(fit: WallpaperFit, picture: egui::Vec2, screen: Rect, scale: f32) -> Vec<(Rect, Rect)> {
+pub fn pieces(
+    fit: WallpaperFit,
+    picture: egui::Vec2,
+    screen: Rect,
+    scale: f32,
+) -> Vec<(Rect, Rect)> {
     let whole = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
     if picture.x < 1.0 || picture.y < 1.0 || screen.width() < 1.0 || screen.height() < 1.0 {
         return Vec::new();
@@ -300,7 +305,10 @@ impl WallpaperPreview {
                 .name("gevrek-studio-system-wallpaper".to_string())
                 .spawn(move || {
                     let program = std::env::current_exe().ok().and_then(|own| {
-                        Some(own.parent()?.join(format!("gevrek{}", std::env::consts::EXE_SUFFIX)))
+                        Some(
+                            own.parent()?
+                                .join(format!("gevrek{}", std::env::consts::EXE_SUFFIX)),
+                        )
                     });
                     let answer = program
                         .and_then(|program| {
@@ -413,7 +421,10 @@ impl WallpaperPreview {
                             wide,
                         );
                         let shown = ui
-                            .add(egui::Label::new(egui::WidgetText::from(path)).sense(egui::Sense::click()))
+                            .add(
+                                egui::Label::new(egui::WidgetText::from(path))
+                                    .sense(egui::Sense::click()),
+                            )
                             .on_hover_text(format!("{whole}\nA press copies the path."));
                         if shown.clicked() {
                             ui.ctx().copy_text(whole.clone());
@@ -427,7 +438,11 @@ impl WallpaperPreview {
                         ui.label(
                             egui::RichText::new(about)
                                 .size(11.5)
-                                .color(if bytes.is_none() { palette.warn } else { palette.faint }),
+                                .color(if bytes.is_none() {
+                                    palette.warn
+                                } else {
+                                    palette.faint
+                                }),
                         );
                     }
                 });
@@ -525,10 +540,17 @@ mod tests {
     #[test]
     fn what_is_known_of_the_picture_in_use_is_said() {
         assert_eq!(
-            about_picture(Some(egui::vec2(3840.0, 2160.0)), Some(2 * 1024 * 1024), WallpaperFit::Fill),
+            about_picture(
+                Some(egui::vec2(3840.0, 2160.0)),
+                Some(2 * 1024 * 1024),
+                WallpaperFit::Fill
+            ),
             "3840 × 2160 px  ·  2.0 MB  ·  fill"
         );
-        assert_eq!(about_picture(None, Some(100), WallpaperFit::Tile), "100 B  ·  tile");
+        assert_eq!(
+            about_picture(None, Some(100), WallpaperFit::Tile),
+            "100 B  ·  tile"
+        );
         // What gevrek's command says the system shows: each picture once.
         let told = serde_json::json!({"system": {"kind": "picture", "displays": [
             {"display": "one", "picture": r"C:\own\a.jpg"},
@@ -580,7 +602,11 @@ mod tests {
         );
         assert_eq!(
             shown_on(&config, "DP-2"),
-            (Some("/pictures/second.jpg".into()), WallpaperFit::Tile, false)
+            (
+                Some("/pictures/second.jpg".into()),
+                WallpaperFit::Tile,
+                false
+            )
         );
         assert_eq!(shown_on(&config, "DP-3").0, None);
         // A slideshow whose folder is not there: said, and nothing shown.

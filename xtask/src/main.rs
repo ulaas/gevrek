@@ -343,7 +343,9 @@ fn brand_icons() -> Vec<(PathBuf, PathBuf)> {
         .join("linux")
         .join("hicolor");
     let mut found = Vec::new();
-    for size in ["16x16", "24x24", "32x32", "48x48", "64x64", "128x128", "256x256", "512x512"] {
+    for size in [
+        "16x16", "24x24", "32x32", "48x48", "64x64", "128x128", "256x256", "512x512",
+    ] {
         let place = Path::new(size).join("apps").join("gevrek.png");
         found.push((from.join(&place), place));
     }
@@ -776,7 +778,10 @@ fn package(arguments: &[String]) -> Result<()> {
     let name = format!("gevrek-{}-{commit}-windows-x64", env!("CARGO_PKG_VERSION"));
     let (folder, zip) = windows_package(&target_dir().join("package"), &name, debug)?;
     println!("== the package is {}", zip.display());
-    println!("   (unpacked: {}; install.ps1 in it installs or updates)", folder.display());
+    println!(
+        "   (unpacked: {}; install.ps1 in it installs or updates)",
+        folder.display()
+    );
     Ok(())
 }
 
@@ -846,7 +851,10 @@ fn find_tool(name: &str, places: &[PathBuf]) -> Option<PathBuf> {
     if on_path {
         return Some(PathBuf::from(name));
     }
-    places.iter().map(|place| place.join(name)).find(|file| file.exists())
+    places
+        .iter()
+        .map(|place| place.join(name))
+        .find(|file| file.exists())
 }
 
 fn has_program(name: &str) -> bool {
@@ -886,7 +894,10 @@ fn dist(arguments: &[String]) -> Result<()> {
         &["tar", "deb", "rpm"]
     };
     if let Some(unknown) = named.iter().find(|kind| !kinds.contains(kind)) {
-        bail!("dist {unknown}: on this system there are {}", kinds.join(", "));
+        bail!(
+            "dist {unknown}: on this system there are {}",
+            kinds.join(", ")
+        );
     }
     let wanted = |kind: &str| named.is_empty() || named.contains(&kind);
     // Left out, with a word, when nobody named it; an error when somebody did.
@@ -1009,7 +1020,8 @@ fn dist(arguments: &[String]) -> Result<()> {
 
 /// How the lock screen checks the password, as every login on the system
 /// does: Fedora and its relatives, and Debian and its.
-const PAM_FEDORA: &str = "#%PAM-1.0\nauth       include      system-auth\naccount    include      system-auth\n";
+const PAM_FEDORA: &str =
+    "#%PAM-1.0\nauth       include      system-auth\naccount    include      system-auth\n";
 const PAM_DEBIAN: &str = "#%PAM-1.0\n@include common-auth\n@include common-account\n";
 
 /// The files of gevrek as a package places them on a Linux system, under
@@ -1027,7 +1039,11 @@ fn linux_tree(built: &Path, tree: &Path, pam: &str) -> Result<()> {
     for program in programs() {
         put(&built.join(program), &format!("usr/bin/{program}"), true)?;
     }
-    put(&resources.join("gevrek-session"), "usr/bin/gevrek-session", true)?;
+    put(
+        &resources.join("gevrek-session"),
+        "usr/bin/gevrek-session",
+        true,
+    )?;
     // The units name the programs by their place.
     for unit in [
         "gevrek.service",
@@ -1069,8 +1085,16 @@ fn linux_tree(built: &Path, tree: &Path, pam: &str) -> Result<()> {
         "usr/share/xdg-desktop-portal/portals/gevrek.portal",
         false,
     )?;
-    put(&root().join("docs").join("LINUX.md"), "usr/share/doc/gevrek/LINUX.md", false)?;
-    put(&root().join("LICENSE"), "usr/share/licenses/gevrek/LICENSE", false)?;
+    put(
+        &root().join("docs").join("LINUX.md"),
+        "usr/share/doc/gevrek/LINUX.md",
+        false,
+    )?;
+    put(
+        &root().join("LICENSE"),
+        "usr/share/licenses/gevrek/LICENSE",
+        false,
+    )?;
     let lock = tree.join("etc/pam.d/gevrek-lock");
     std::fs::create_dir_all(lock.parent().context("a file is in a folder")?)?;
     std::fs::write(&lock, pam)?;

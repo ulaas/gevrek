@@ -62,7 +62,10 @@ pub fn launcher_item(app: &App) -> Item {
         kind: ItemKind::Launcher,
         name: app.name.clone(),
         path: None,
-        facts: ItemFacts { shortcut_target: app.command.first().cloned(), ..ItemFacts::default() },
+        facts: ItemFacts {
+            shortcut_target: app.command.first().cloned(),
+            ..ItemFacts::default()
+        },
     }
 }
 
@@ -107,13 +110,17 @@ impl Kept {
     /// Whether a change of this file is a change of the launchers.
     pub fn concerns(&self, path: &Path) -> bool {
         let name = path.file_name();
-        [&self.counts, &self.recent, &self.pins].into_iter().any(|file| file.file_name() == name)
+        [&self.counts, &self.recent, &self.pins]
+            .into_iter()
+            .any(|file| file.file_name() == name)
     }
 
     /// The pinned programs, in the person's order. Nothing where the
     /// file is not there or cannot be read.
     pub fn pins(&self) -> Vec<String> {
-        text(&self.pins).and_then(|text| understood(&self.pins, serde_json::from_str(&text))).unwrap_or_default()
+        text(&self.pins)
+            .and_then(|text| understood(&self.pins, serde_json::from_str(&text)))
+            .unwrap_or_default()
     }
 
     /// Write the pinned programs down, whole or not at all.
@@ -129,12 +136,16 @@ impl Kept {
 
     /// How often each program was started.
     pub fn counts(&self) -> HashMap<String, u32> {
-        text(&self.counts).and_then(|text| understood(&self.counts, serde_json::from_str(&text))).unwrap_or_default()
+        text(&self.counts)
+            .and_then(|text| understood(&self.counts, serde_json::from_str(&text)))
+            .unwrap_or_default()
     }
 
     /// The programs started last, the newest first.
     pub fn recent(&self) -> Vec<String> {
-        text(&self.recent).and_then(|text| understood(&self.recent, serde_json::from_str(&text))).unwrap_or_default()
+        text(&self.recent)
+            .and_then(|text| understood(&self.recent, serde_json::from_str(&text)))
+            .unwrap_or_default()
     }
 }
 
@@ -154,7 +165,14 @@ fn text(file: &Path) -> Option<String> {
 /// What was read of a file as JSON; nothing (said in the log) where it
 /// is not understood.
 fn understood<T>(file: &Path, parsed: serde_json::Result<T>) -> Option<T> {
-    parsed.inspect_err(|error| log::debug!("zones: {} is not understood, and is taken as empty: {error}", file.display())).ok()
+    parsed
+        .inspect_err(|error| {
+            log::debug!(
+                "zones: {} is not understood, and is taken as empty: {error}",
+                file.display()
+            )
+        })
+        .ok()
 }
 
 /// The name of a program's file without its folders and its ending, as
@@ -181,7 +199,13 @@ pub fn pinned(mut pins: Vec<String>, app: &str, pin: bool) -> Vec<String> {
 /// often the earlier; of two started equally often, the one started
 /// later; then by name). A program that is not installed any more is
 /// left out, and comes back with the program.
-pub fn launchers(apps: &[App], pins: &[String], counts: &HashMap<String, u32>, recent: &[String], most: usize) -> Vec<Item> {
+pub fn launchers(
+    apps: &[App],
+    pins: &[String],
+    counts: &HashMap<String, u32>,
+    recent: &[String],
+    most: usize,
+) -> Vec<Item> {
     let by_id: HashMap<&str, &App> = apps.iter().map(|app| (app.id.as_str(), app)).collect();
     let mut items: Vec<Item> = Vec::new();
     for pin in pins {
@@ -191,7 +215,12 @@ pub fn launchers(apps: &[App], pins: &[String], counts: &HashMap<String, u32>, r
             }
         }
     }
-    let lately = |id: &str| recent.iter().position(|known| known == id).unwrap_or(usize::MAX);
+    let lately = |id: &str| {
+        recent
+            .iter()
+            .position(|known| known == id)
+            .unwrap_or(usize::MAX)
+    };
     let mut started: Vec<&App> = apps
         .iter()
         .filter(|app| counts.get(&app.id).copied().unwrap_or(0) > 0 && !pins.contains(&app.id))
@@ -237,7 +266,12 @@ pub fn running(state: &serde_json::Value, apps: &[App]) -> Vec<Running> {
         .into_iter()
         .flatten()
         .flat_map(|monitor| monitor["workspaces"].as_array().into_iter().flatten())
-        .flat_map(|workspace| workspace["detailed_windows"].as_array().into_iter().flatten());
+        .flat_map(|workspace| {
+            workspace["detailed_windows"]
+                .as_array()
+                .into_iter()
+                .flatten()
+        });
     for window in windows {
         if window["is_border_window"].as_bool().unwrap_or(false) {
             continue;
@@ -273,7 +307,12 @@ pub fn running(state: &serde_json::Value, apps: &[App]) -> Vec<Running> {
         let name = installed
             .map(|app| app.name.clone())
             .or_else(|| file_stem.clone())
-            .or_else(|| [app, class, title].into_iter().find(|text| !text.is_empty()).map(str::to_string))
+            .or_else(|| {
+                [app, class, title]
+                    .into_iter()
+                    .find(|text| !text.is_empty())
+                    .map(str::to_string)
+            })
             .unwrap_or_else(|| format!("Window {id}"));
         let own = said("icon");
         let icon = if !own.is_empty() {
@@ -325,10 +364,18 @@ impl Known {
     /// one. None for an item that is no program.
     pub fn icon_of(&self, id: &str) -> Option<String> {
         if let Some(app) = id.strip_prefix(APP) {
-            return self.apps.iter().find(|known| known.id == app).map(|app| app.icon.clone());
+            return self
+                .apps
+                .iter()
+                .find(|known| known.id == app)
+                .map(|app| app.icon.clone());
         }
         if id.starts_with(RUNNING) {
-            return self.running.iter().find(|known| known.item.id.as_str() == id).map(|known| known.icon.clone());
+            return self
+                .running
+                .iter()
+                .find(|known| known.item.id.as_str() == id)
+                .map(|known| known.icon.clone());
         }
         None
     }
@@ -342,7 +389,12 @@ impl Known {
     /// The window to give the keyboard to when an item of a program
     /// that runs is activated.
     pub fn window_of(&self, item: &ItemId) -> Option<u64> {
-        self.running.iter().find(|known| &known.item.id == item)?.windows.first().copied()
+        self.running
+            .iter()
+            .find(|known| &known.item.id == item)?
+            .windows
+            .first()
+            .copied()
     }
 }
 
@@ -392,7 +444,10 @@ mod tests {
         assert_eq!(item.kind, ItemKind::Launcher);
         assert_eq!(item.name, "Editor");
         assert_eq!(item.path, None);
-        assert_eq!(item.facts.shortcut_target.as_deref(), Some("/usr/bin/org.editor"));
+        assert_eq!(
+            item.facts.shortcut_target.as_deref(),
+            Some("/usr/bin/org.editor")
+        );
         assert_eq!(app_of_id(&item.id), Some("org.editor"));
         assert_eq!(app_of_id(&ItemId::new("/home/ada/a.txt")), None);
         let all = installed_items(&[app("b", "zebra"), app("a", "Apple")]);
@@ -401,11 +456,29 @@ mod tests {
 
     #[test]
     fn pinned_programs_come_first_and_the_most_started_follow() {
-        let apps = [app("mail", "Mail"), app("web", "Web"), app("edit", "Edit"), app("draw", "Draw"), app("calc", "Calc")];
-        let counts: HashMap<String, u32> =
-            [("web", 9), ("edit", 3), ("draw", 3), ("mail", 40), ("gone", 99)].map(|(id, count)| (id.to_string(), count)).into();
+        let apps = [
+            app("mail", "Mail"),
+            app("web", "Web"),
+            app("edit", "Edit"),
+            app("draw", "Draw"),
+            app("calc", "Calc"),
+        ];
+        let counts: HashMap<String, u32> = [
+            ("web", 9),
+            ("edit", 3),
+            ("draw", 3),
+            ("mail", 40),
+            ("gone", 99),
+        ]
+        .map(|(id, count)| (id.to_string(), count))
+        .into();
         let recent = vec!["draw".to_string(), "edit".to_string()];
-        let pins = vec!["calc".to_string(), "gone".to_string(), "mail".to_string(), "calc".to_string()];
+        let pins = vec![
+            "calc".to_string(),
+            "gone".to_string(),
+            "mail".to_string(),
+            "calc".to_string(),
+        ];
         // Pins in their order, once each, without what is not installed;
         // then by how often, the one started later first of two equals;
         // what was never started is not there.
@@ -413,22 +486,36 @@ mod tests {
             ids(&launchers(&apps, &pins, &counts, &recent, 12)),
             ["app:calc", "app:mail", "app:web", "app:draw", "app:edit"]
         );
-        assert_eq!(ids(&launchers(&apps, &pins, &counts, &recent, 1)), ["app:calc", "app:mail", "app:web"]);
-        assert_eq!(ids(&launchers(&apps, &[], &HashMap::new(), &[], 12)), Vec::<&str>::new());
+        assert_eq!(
+            ids(&launchers(&apps, &pins, &counts, &recent, 1)),
+            ["app:calc", "app:mail", "app:web"]
+        );
+        assert_eq!(
+            ids(&launchers(&apps, &[], &HashMap::new(), &[], 12)),
+            Vec::<&str>::new()
+        );
 
         assert_eq!(pinned(vec!["a".to_string()], "b", true), ["a", "b"]);
-        assert_eq!(pinned(vec!["a".to_string(), "b".to_string()], "a", true), ["b", "a"]);
-        assert_eq!(pinned(vec!["a".to_string(), "b".to_string()], "a", false), ["b"]);
+        assert_eq!(
+            pinned(vec!["a".to_string(), "b".to_string()], "a", true),
+            ["b", "a"]
+        );
+        assert_eq!(
+            pinned(vec!["a".to_string(), "b".to_string()], "a", false),
+            ["b"]
+        );
     }
 
     #[test]
     fn pins_are_kept_in_the_zones_own_file_and_the_launchers_counts_are_read() {
-        let root = std::env::temp_dir().join(format!("gevrek-zones-kept-pins-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("gevrek-zones-kept-pins-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let kept = Kept::under(&root);
         assert_eq!(kept.pins(), Vec::<String>::new());
         assert!(kept.counts().is_empty());
-        kept.set_pins(&["web".to_string(), "mail".to_string()]).expect("written");
+        kept.set_pins(&["web".to_string(), "mail".to_string()])
+            .expect("written");
         assert_eq!(kept.pins(), ["web", "mail"]);
         // As the launcher writes its two files.
         std::fs::write(&kept.counts, r#"{"web":3,"mail":1}"#).expect("written");
@@ -465,34 +552,68 @@ mod tests {
             ]}]},
         ]});
         let found = running(&state, &[app("org.mail", "Mail")]);
-        let seen: Vec<(&str, &str, &[u64])> =
-            found.iter().map(|known| (known.item.id.as_str(), known.item.name.as_str(), &known.windows[..])).collect();
+        let seen: Vec<(&str, &str, &[u64])> = found
+            .iter()
+            .map(|known| {
+                (
+                    known.item.id.as_str(),
+                    known.item.name.as_str(),
+                    &known.windows[..],
+                )
+            })
+            .collect();
         assert_eq!(
             seen,
             [
                 // Both windows of one program, the one with the keyboard
                 // first; named by its file.
-                ("running:c:\\windows\\notepad.exe", "notepad", &[11u64, 7][..]),
+                (
+                    "running:c:\\windows\\notepad.exe",
+                    "notepad",
+                    &[11u64, 7][..]
+                ),
                 // Named as the installed program is.
                 ("running:org.mail", "Mail", &[9][..]),
                 ("running:viewer", "viewer", &[12][..]),
                 ("running:window-13", "Window 13", &[13][..]),
             ]
         );
-        assert!(found.iter().all(|known| known.item.kind == ItemKind::Launcher && known.item.path.is_none()));
-        assert_eq!(found[0].item.facts.shortcut_target.as_deref(), Some("C:\\Windows\\notepad.exe"));
+        assert!(found
+            .iter()
+            .all(|known| known.item.kind == ItemKind::Launcher && known.item.path.is_none()));
+        assert_eq!(
+            found[0].item.facts.shortcut_target.as_deref(),
+            Some("C:\\Windows\\notepad.exe")
+        );
         // The window's own picture before the program's.
         assert_eq!(found[2].icon, "/usr/share/icons/viewer.png");
         assert_eq!(found[1].icon, if cfg!(windows) { "" } else { "org.mail" });
         assert!(running(&json!({}), &[]).is_empty());
 
-        let known = Known { apps: vec![app("org.mail", "Mail")], running: found };
-        assert_eq!(known.window_of(&ItemId::new("running:c:\\windows\\notepad.exe")), Some(11));
+        let known = Known {
+            apps: vec![app("org.mail", "Mail")],
+            running: found,
+        };
+        assert_eq!(
+            known.window_of(&ItemId::new("running:c:\\windows\\notepad.exe")),
+            Some(11)
+        );
         assert_eq!(known.window_of(&ItemId::new("running:nothing")), None);
-        assert_eq!(known.icon_of("app:org.mail").as_deref(), Some("icon-of-org.mail"));
-        assert_eq!(known.icon_of("running:viewer").as_deref(), Some("/usr/share/icons/viewer.png"));
+        assert_eq!(
+            known.icon_of("app:org.mail").as_deref(),
+            Some("icon-of-org.mail")
+        );
+        assert_eq!(
+            known.icon_of("running:viewer").as_deref(),
+            Some("/usr/share/icons/viewer.png")
+        );
         assert_eq!(known.icon_of("C:\\a.txt"), None);
-        assert_eq!(known.app(&ItemId::new("app:org.mail")).map(|app| app.name.as_str()), Some("Mail"));
+        assert_eq!(
+            known
+                .app(&ItemId::new("app:org.mail"))
+                .map(|app| app.name.as_str()),
+            Some("Mail")
+        );
         assert_eq!(
             focus_command(11),
             json!({"command": "focus_window", "selector": {"kind": "handle", "value": 11}})

@@ -55,7 +55,10 @@ fn plain(value: &str) -> String {
             _ => name
                 .strip_prefix("#x")
                 .and_then(|hex| u32::from_str_radix(hex, 16).ok())
-                .or_else(|| name.strip_prefix('#').and_then(|number| number.parse().ok()))
+                .or_else(|| {
+                    name.strip_prefix('#')
+                        .and_then(|number| number.parse().ok())
+                })
                 .and_then(char::from_u32),
         };
         match letter {
@@ -76,7 +79,11 @@ fn attributes(tag: &str) -> Vec<(&str, String)> {
     while let Some(equals) = rest.find('=') {
         let name = rest[..equals].split_whitespace().last().unwrap_or_default();
         let after = rest[equals + 1..].trim_start();
-        let Some(quote) = after.chars().next().filter(|quote| *quote == '"' || *quote == '\'') else {
+        let Some(quote) = after
+            .chars()
+            .next()
+            .filter(|quote| *quote == '"' || *quote == '\'')
+        else {
             break;
         };
         let Some(end) = after[1..].find(quote) else {
@@ -111,10 +118,19 @@ pub fn bookmarks(text: &str) -> Vec<Bookmark> {
             break;
         };
         let said = attributes(&rest[..end]);
-        let value = |name: &str| said.iter().find(|(known, _)| *known == name).map(|(_, value)| value.as_str());
-        let visited = ["visited", "modified", "added"].into_iter().find_map(|name| value(name).and_then(seconds));
+        let value = |name: &str| {
+            said.iter()
+                .find(|(known, _)| *known == name)
+                .map(|(_, value)| value.as_str())
+        };
+        let visited = ["visited", "modified", "added"]
+            .into_iter()
+            .find_map(|name| value(name).and_then(seconds));
         if let (Some(href), Some(visited)) = (value("href"), visited) {
-            found.push(Bookmark { href: href.to_string(), visited });
+            found.push(Bookmark {
+                href: href.to_string(),
+                visited,
+            });
         }
         rest = &rest[end..];
     }
@@ -129,7 +145,12 @@ pub fn read(system: &System, most: usize) -> Vec<Item> {
         return Vec::new();
     };
     let mut marks = bookmarks(&text);
-    marks.sort_by(|one, other| other.visited.cmp(&one.visited).then_with(|| one.href.cmp(&other.href)));
+    marks.sort_by(|one, other| {
+        other
+            .visited
+            .cmp(&one.visited)
+            .then_with(|| one.href.cmp(&other.href))
+    });
     let mut items: Vec<Item> = Vec::new();
     for mark in marks {
         if items.len() >= most {
@@ -179,16 +200,31 @@ mod tests {
             marks,
             [
                 // The entity is read; the time is the visit's, to the second.
-                Bookmark { href: "file:///home/ada/Documents/notes%20&%20more.txt".to_string(), visited: 1_795_079_553 },
+                Bookmark {
+                    href: "file:///home/ada/Documents/notes%20&%20more.txt".to_string(),
+                    visited: 1_795_079_553
+                },
                 // Never visited: when it was changed, an hour east of Greenwich.
-                Bookmark { href: "file:///home/ada/a.png".to_string(), visited: 1_793_610_000 },
-                Bookmark { href: "sftp://server/remote.txt".to_string(), visited: 1_795_082_400 },
+                Bookmark {
+                    href: "file:///home/ada/a.png".to_string(),
+                    visited: 1_793_610_000
+                },
+                Bookmark {
+                    href: "sftp://server/remote.txt".to_string(),
+                    visited: 1_795_082_400
+                },
             ]
         );
         assert_eq!(bookmarks(""), []);
-        assert_eq!(bookmarks("<xbel><bookmark href=\"file:///a\" visited=\"not a time\"/>"), []);
+        assert_eq!(
+            bookmarks("<xbel><bookmark href=\"file:///a\" visited=\"not a time\"/>"),
+            []
+        );
         assert_eq!(bookmarks("<bookmark href=\"file:///cut off"), []);
-        assert_eq!(plain("a &lt;b&gt; &#65;&#x42; &unknown; &"), "a <b> AB &unknown; &");
+        assert_eq!(
+            plain("a &lt;b&gt; &#65;&#x42; &unknown; &"),
+            "a <b> AB &unknown; &"
+        );
     }
 
     #[test]
@@ -213,10 +249,17 @@ mod tests {
         std::fs::write(file(&places.data_home), record).expect("written");
         let system = System::at(places);
         let items = read(&system, MOST);
-        let seen: Vec<(&str, Option<u64>)> = items.iter().map(|item| (item.name.as_str(), item.facts.accessed)).collect();
+        let seen: Vec<(&str, Option<u64>)> = items
+            .iter()
+            .map(|item| (item.name.as_str(), item.facts.accessed))
+            .collect();
         assert_eq!(
             seen,
-            [("new file.txt", Some(1_795_046_400)), ("twice.txt", Some(1_794_700_800)), ("old.txt", Some(1_794_268_800))]
+            [
+                ("new file.txt", Some(1_795_046_400)),
+                ("twice.txt", Some(1_794_700_800)),
+                ("old.txt", Some(1_794_268_800))
+            ]
         );
         // The item is the file itself, as a zone of its folder has it.
         assert_eq!(items[0].id, uris::item_id(&docs.join("new file.txt")));

@@ -87,7 +87,9 @@ const WRITTEN_TOGETHER_WITHIN: Duration = Duration::from_millis(100);
 /// The file is to say what is in memory: now, or with the changes that
 /// follow at once.
 fn written(journal: &Journal) {
-    let mut at = WRITTEN_AT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut at = WRITTEN_AT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     if at.is_none_or(|at| at.elapsed() >= WRITTEN_TOGETHER_WITHIN) {
         *at = Some(Instant::now());
         UNWRITTEN.store(false, std::sync::atomic::Ordering::Release);
@@ -101,7 +103,9 @@ fn written(journal: &Journal) {
 /// each pass of the window manager, and before it ends.
 pub fn flush() {
     if UNWRITTEN.swap(false, std::sync::atomic::Ordering::AcqRel) {
-        *WRITTEN_AT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Instant::now());
+        *WRITTEN_AT
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Instant::now());
         lock().persist();
     }
 }
@@ -412,8 +416,14 @@ mod tests {
             }
         }
         let _ = std::fs::remove_dir_all(dir);
-        assert!(ended.is_empty(), "{}", ended.join("
-"));
+        assert!(
+            ended.is_empty(),
+            "{}",
+            ended.join(
+                "
+"
+            )
+        );
     }
 
     #[test]

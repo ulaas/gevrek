@@ -7,8 +7,14 @@ fn main() {
 
 #[cfg(any(windows, target_os = "macos"))]
 fn main() {
-    let seconds: u64 = std::env::args().nth(1).and_then(|text| text.parse().ok()).unwrap_or(5);
-    println!("now: {:?}", gevrek_system::sound::level(gevrek_system::sound::Device::Speaker));
+    let seconds: u64 = std::env::args()
+        .nth(1)
+        .and_then(|text| text.parse().ok())
+        .unwrap_or(5);
+    println!(
+        "now: {:?}",
+        gevrek_system::sound::level(gevrek_system::sound::Device::Speaker)
+    );
     let watched = gevrek_system::sound::watch(|level| println!("changed: {level:?}"));
     println!("watched: {watched}");
     std::thread::sleep(std::time::Duration::from_secs(seconds));

@@ -77,7 +77,10 @@ impl Counted<'_> {
 fn part_name(folder: &Path, name: &str) -> PathBuf {
     static MADE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let count = MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    folder.join(format!(".{name}.gevrek-part-{}-{count}", std::process::id()))
+    folder.join(format!(
+        ".{name}.gevrek-part-{}-{count}",
+        std::process::id()
+    ))
 }
 
 /// Give what was written whole under a part name its real name: `name`
@@ -111,7 +114,11 @@ fn settle(part: &Path, folder: &Path, name: &str) -> std::io::Result<PathBuf> {
 /// of it is left.
 fn arrive(from: &Path, folder: &Path, name: &str, tick: Tick<'_>) -> std::io::Result<PathBuf> {
     let part = part_name(folder, name);
-    let mut counted = Counted { done: 0, total: size_of_tree(from), tick };
+    let mut counted = Counted {
+        done: 0,
+        total: size_of_tree(from),
+        tick,
+    };
     let arrived = copy_tree(from, &part, &mut counted).and_then(|()| settle(&part, folder, name));
     if arrived.is_err() {
         // Half a copy is not left lying.
@@ -159,7 +166,10 @@ fn copy_tree(from: &Path, to: &Path, counted: &mut Counted<'_>) -> std::io::Resu
         // (Made anew and never over something: `to` appearing meanwhile
         // is an error, not a file lost.)
         let mut source = std::fs::File::open(from)?;
-        let mut target = std::fs::OpenOptions::new().write(true).create_new(true).open(to)?;
+        let mut target = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(to)?;
         // (A piece at a time, so that it can say how far it is and be
         // called off between two pieces.)
         let mut piece = vec![0u8; 1 << 20];
@@ -174,12 +184,17 @@ fn copy_tree(from: &Path, to: &Path, counted: &mut Counted<'_>) -> std::io::Resu
         target.set_permissions(data.permissions())?;
         if let Ok(modified) = data.modified() {
             if let Err(error) = target.set_modified(modified) {
-                log::trace!("zones: a copy keeps the time it was made, not the original's: {error}");
+                log::trace!(
+                    "zones: a copy keeps the time it was made, not the original's: {error}"
+                );
             }
         }
         Ok(())
     } else {
-        Err(Error::new(ErrorKind::Unsupported, "neither a file, a folder nor a link"))
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "neither a file, a folder nor a link",
+        ))
     }
 }
 
@@ -193,9 +208,17 @@ pub fn copy(from: &Path, folder: &Path) -> std::io::Result<PathBuf> {
 pub fn copy_told(from: &Path, folder: &Path, tick: Tick<'_>) -> std::io::Result<PathBuf> {
     std::fs::symlink_metadata(from)?;
     folder_there(folder)?;
-    let name = from.file_name().ok_or_else(|| Error::new(ErrorKind::InvalidInput, "no name"))?;
-    if std::fs::canonicalize(folder)?.starts_with(std::fs::canonicalize(from)?) && from.is_dir() && !from.is_symlink() {
-        return Err(Error::new(ErrorKind::InvalidInput, "a folder cannot go into itself"));
+    let name = from
+        .file_name()
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "no name"))?;
+    if std::fs::canonicalize(folder)?.starts_with(std::fs::canonicalize(from)?)
+        && from.is_dir()
+        && !from.is_symlink()
+    {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "a folder cannot go into itself",
+        ));
     }
     arrive(from, folder, &name.to_string_lossy(), tick)
 }
@@ -222,8 +245,13 @@ pub fn move_into(from: &Path, folder: &Path) -> std::io::Result<PathBuf> {
 pub fn move_into_told(from: &Path, folder: &Path, tick: Tick<'_>) -> std::io::Result<PathBuf> {
     std::fs::symlink_metadata(from)?;
     folder_there(folder)?;
-    let name = from.file_name().ok_or_else(|| Error::new(ErrorKind::InvalidInput, "no name"))?;
-    if from.parent().is_some_and(|parent| same_place(parent, folder)) {
+    let name = from
+        .file_name()
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "no name"))?;
+    if from
+        .parent()
+        .is_some_and(|parent| same_place(parent, folder))
+    {
         // It is there already.
         return Ok(from.to_path_buf());
     }
@@ -255,7 +283,9 @@ pub fn rename(path: &Path, new_name: &str) -> std::io::Result<PathBuf> {
         return Err(Error::new(ErrorKind::InvalidInput, "not a name"));
     }
     std::fs::symlink_metadata(path)?;
-    let folder = path.parent().ok_or_else(|| Error::new(ErrorKind::InvalidInput, "no folder"))?;
+    let folder = path
+        .parent()
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "no folder"))?;
     let to = folder.join(new_name);
     if to == path {
         return Ok(to);
@@ -339,18 +369,43 @@ mod tests {
         // A rename, refused onto a name that is taken or is none.
         let renamed = rename(&moved, "final.pdf").expect("renamed");
         assert_eq!(renamed, archive.join("final.pdf"));
-        assert_eq!(rename(&renamed, "report.pdf").expect_err("taken").kind(), ErrorKind::AlreadyExists);
-        assert_eq!(rename(&renamed, "a/b").expect_err("no name").kind(), ErrorKind::InvalidInput);
-        assert_eq!(std::fs::read_to_string(archive.join("report.pdf")).expect("read"), "first");
+        assert_eq!(
+            rename(&renamed, "report.pdf").expect_err("taken").kind(),
+            ErrorKind::AlreadyExists
+        );
+        assert_eq!(
+            rename(&renamed, "a/b").expect_err("no name").kind(),
+            ErrorKind::InvalidInput
+        );
+        assert_eq!(
+            std::fs::read_to_string(archive.join("report.pdf")).expect("read"),
+            "first"
+        );
 
         // New folders.
-        assert_eq!(new_folder(&desk, "New folder").expect("made"), desk.join("New folder"));
-        assert_eq!(new_folder(&desk, "New folder").expect("made"), desk.join("New folder (2)"));
+        assert_eq!(
+            new_folder(&desk, "New folder").expect("made"),
+            desk.join("New folder")
+        );
+        assert_eq!(
+            new_folder(&desk, "New folder").expect("made"),
+            desk.join("New folder (2)")
+        );
         assert!(new_folder(&root.join("nowhere"), "x").is_err());
 
         // What is not there, and a folder that is not there.
-        assert_eq!(copy(&desk.join("none"), &archive).expect_err("absent").kind(), ErrorKind::NotFound);
-        assert_eq!(move_into(&renamed, &root.join("nowhere")).expect_err("absent").kind(), ErrorKind::NotFound);
+        assert_eq!(
+            copy(&desk.join("none"), &archive)
+                .expect_err("absent")
+                .kind(),
+            ErrorKind::NotFound
+        );
+        assert_eq!(
+            move_into(&renamed, &root.join("nowhere"))
+                .expect_err("absent")
+                .kind(),
+            ErrorKind::NotFound
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -363,8 +418,14 @@ mod tests {
         std::fs::write(from.join("Album/inner/a.txt"), "a").expect("written");
         std::os::unix::fs::symlink("inner/a.txt", from.join("Album/link")).expect("a link");
         let copied = copy(&from.join("Album"), &to).expect("copied");
-        assert_eq!(std::fs::read_to_string(copied.join("inner/a.txt")).expect("read"), "a");
-        assert_eq!(std::fs::read_link(copied.join("link")).expect("a link"), Path::new("inner/a.txt"));
+        assert_eq!(
+            std::fs::read_to_string(copied.join("inner/a.txt")).expect("read"),
+            "a"
+        );
+        assert_eq!(
+            std::fs::read_link(copied.join("link")).expect("a link"),
+            Path::new("inner/a.txt")
+        );
         // Not into itself.
         assert!(copy(&from.join("Album"), &from.join("Album/inner")).is_err());
         assert!(!from.join("Album/inner/Album").exists());

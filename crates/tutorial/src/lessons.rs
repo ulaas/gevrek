@@ -170,7 +170,8 @@ const FOCUS_RIGHT: &str = r#"{"command":"focus_direction","direction":"right"}"#
 const FOCUS_DOWN: &str = r#"{"command":"focus_direction","direction":"down"}"#;
 const SWAP_LEFT: &str = r#"{"command":"swap_direction","direction":"left"}"#;
 const SWAP_RIGHT: &str = r#"{"command":"swap_direction","direction":"right"}"#;
-const NEXT_WORKSPACE: &str = r#"{"command":"switch_workspace_selector","selector":{"kind":"next"}}"#;
+const NEXT_WORKSPACE: &str =
+    r#"{"command":"switch_workspace_selector","selector":{"kind":"next"}}"#;
 const PREVIOUS_WORKSPACE: &str =
     r#"{"command":"switch_workspace_selector","selector":{"kind":"previous"}}"#;
 const CARRY_NEXT: &str = r#"{"command":"move_to_workspace_and_follow","selector":{"kind":"next"}}"#;
@@ -574,12 +575,17 @@ mod tests {
         // What the welcome says of the tour's length holds ("about a
         // quarter of an hour").
         let minutes: u32 = the_tour().iter().map(|lesson| lesson.minutes).sum();
-        assert!((10..=17).contains(&minutes), "the tour takes {minutes} minutes");
+        assert!(
+            (10..=17).contains(&minutes),
+            "the tour takes {minutes} minutes"
+        );
         // Nothing promises what is not there: only the tour is written.
         for lesson in all {
             for step in &lesson.steps {
                 assert!(
-                    !format!("{} {}", step.say, step.why).to_lowercase().contains("chapter"),
+                    !format!("{} {}", step.say, step.why)
+                        .to_lowercase()
+                        .contains("chapter"),
                     "{} speaks of chapters, and there are none",
                     lesson.id
                 );
@@ -606,15 +612,23 @@ mod tests {
                 assert!(!step.say.is_empty(), "{at}");
                 // A step that is only read waits for nothing, and one
                 // that waits has something to wait for.
-                assert_eq!(step.goal == Goal::Read, step.act == Act::None && step.demo == Demo::None
-                    && !matches!(step.goal, Goal::Gone(_)), "{at}");
+                assert_eq!(
+                    step.goal == Goal::Read,
+                    step.act == Act::None
+                        && step.demo == Demo::None
+                        && !matches!(step.goal, Goal::Gone(_)),
+                    "{at}"
+                );
                 let Act::Command(command) = step.act else {
                     continue;
                 };
                 // A command the window manager knows.
                 let read: DispatchCommand = serde_json::from_str(command)
                     .unwrap_or_else(|error| panic!("{at}: {command}: {error}"));
-                assert!(!matches!(read, DispatchCommand::Unknown(_)), "{at}: {command}");
+                assert!(
+                    !matches!(read, DispatchCommand::Unknown(_)),
+                    "{at}: {command}"
+                );
                 // With a key in what gevrek starts with, unless the
                 // card's button is how it is done.
                 let keys = crate::keys_for(&config, command);

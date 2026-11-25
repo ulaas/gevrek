@@ -104,7 +104,9 @@ enum Popped {
     Menu,
     /// A menu that opens from a line of another: beside that line.
     Sub,
-    Hint { beside: bool },
+    Hint {
+        beside: bool,
+    },
 }
 
 /// What a drawing, or a message's handler, asks of the shell. It is
@@ -448,9 +450,12 @@ impl<M: 'static> Shell<M> {
         let watched = watch.clone();
         event_loop
             .handle()
-            .insert_source(WaylandSource::new(connection.clone(), queue), move |_, queue, host| {
-                watched.during(crate::stall::Part::Events, || queue.dispatch_pending(host))
-            })
+            .insert_source(
+                WaylandSource::new(connection.clone(), queue),
+                move |_, queue, host| {
+                    watched.during(crate::stall::Part::Events, || queue.dispatch_pending(host))
+                },
+            )
             .map_err(|error| anyhow::anyhow!("the Wayland source: {error}"))?;
         // Messages from other threads wake the loop and wait in a list.
         let (channel, receiver) =
@@ -622,7 +627,8 @@ impl<M: 'static> Shell<M> {
                     }
                 });
             }
-            self.watch.during(Part::CarryOut, || self.host.carry_out(&self.handle));
+            self.watch
+                .during(Part::CarryOut, || self.host.carry_out(&self.handle));
             self.watch.during(Part::Access, || self.host.access_news());
             let now = Instant::now();
             for index in 0..self.host.surfaces.len() {
@@ -632,11 +638,16 @@ impl<M: 'static> Shell<M> {
                     surface.redraw = true;
                 }
                 if surface.redraw && surface.configured && !surface.waiting_for_frame {
-                    let part = Part::Draw { surface: surface.id.0, size: surface.size };
-                    self.watch.during(part, || self.host.draw(index, &self.handle));
+                    let part = Part::Draw {
+                        surface: surface.id.0,
+                        size: surface.size,
+                    };
+                    self.watch
+                        .during(part, || self.host.draw(index, &self.handle));
                 }
             }
-            self.watch.during(Part::CarryOut, || self.host.carry_out(&self.handle));
+            self.watch
+                .during(Part::CarryOut, || self.host.carry_out(&self.handle));
             if self.host.control.quit || (until_empty && self.host.surfaces.is_empty()) {
                 break;
             }
@@ -891,7 +902,10 @@ impl Host {
                         "the surface {} is opened as {id:?} ({:?}, on {})",
                         place.name,
                         place.level,
-                        place.output.as_deref().unwrap_or("the compositor's choice of display")
+                        place
+                            .output
+                            .as_deref()
+                            .unwrap_or("the compositor's choice of display")
                     );
                     self.surfaces.push(surface)
                 }
@@ -961,7 +975,9 @@ impl Host {
                 continue;
             }
             if now == Level::Marks || level == Level::Marks {
-                log::warn!("surface {id:?} stays {now:?}: a surface is marks from the start or never");
+                log::warn!(
+                    "surface {id:?} stays {now:?}: a surface is marks from the start or never"
+                );
                 continue;
             }
             // (The first version of the layer shell has no such request,
@@ -1109,7 +1125,9 @@ impl Host {
         if place.level == Level::Marks {
             // Marks: the pointer goes through them.
             if let Ok(nowhere) = smithay_client_toolkit::compositor::Region::new(&self.compositor) {
-                layer.wl_surface().set_input_region(Some(nowhere.wl_region()));
+                layer
+                    .wl_surface()
+                    .set_input_region(Some(nowhere.wl_region()));
             }
         }
         // The first commit has no picture: the compositor answers with the size.
@@ -1309,7 +1327,12 @@ impl Host {
                 pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
                     .context("the graphics device")?;
             let info = adapter.get_info();
-            log::debug!("drawing with {} ({:?}, {:?})", info.name, info.backend, info.device_type);
+            log::debug!(
+                "drawing with {} ({:?}, {:?})",
+                info.name,
+                info.backend,
+                info.device_type
+            );
             device.on_uncaptured_error(std::sync::Arc::new(|error| {
                 log::warn!("the graphics device: {error}");
             }));
@@ -1460,7 +1483,9 @@ impl Host {
         if wanted != surface.pointer {
             surface.pointer = wanted;
             if self.pointer_on == Some(surface.id) {
-                if let (Some(device), Some(serial), Some(shape)) = (&self.shape_device, self.pointer_entered, shape_of(wanted)) {
+                if let (Some(device), Some(serial), Some(shape)) =
+                    (&self.shape_device, self.pointer_entered, shape_of(wanted))
+                {
                     device.set_shape(serial, shape);
                 }
             }
@@ -1490,9 +1515,15 @@ impl Host {
             }
             other => {
                 if surface.failing {
-                    log::trace!("still no frame to draw into on surface {:?}: {other:?}", surface.id);
+                    log::trace!(
+                        "still no frame to draw into on surface {:?}: {other:?}",
+                        surface.id
+                    );
                 } else {
-                    log::debug!("no frame to draw into on surface {:?}: {other:?}", surface.id);
+                    log::debug!(
+                        "no frame to draw into on surface {:?}: {other:?}",
+                        surface.id
+                    );
                     surface.failing = true;
                 }
                 surface.configure_target(&gpu.device);
@@ -1733,7 +1764,11 @@ impl PopupHandler for Host {
             return;
         };
         let surface = &mut self.surfaces[index];
-        log_configure(surface, configure.width.max(0) as u32, configure.height.max(0) as u32);
+        log_configure(
+            surface,
+            configure.width.max(0) as u32,
+            configure.height.max(0) as u32,
+        );
         if configure.width > 0 && configure.height > 0 {
             surface.size = (configure.width as u32, configure.height as u32);
         }
@@ -1932,7 +1967,9 @@ impl PointerHandler for Host {
                     // surface last wanted it over itself.
                     if let PointerEventKind::Enter { serial } = event.kind {
                         self.pointer_entered = Some(serial);
-                        if let (Some(device), Some(shape)) = (&self.shape_device, shape_of(surface.pointer)) {
+                        if let (Some(device), Some(shape)) =
+                            (&self.shape_device, shape_of(surface.pointer))
+                        {
                             device.set_shape(serial, shape);
                         }
                     }
@@ -1963,7 +2000,11 @@ impl PointerHandler for Host {
                         self.dnd.held.push(button);
                     }
                     if let Some(time_ms) = time_ms {
-                        let press = crate::Press { button, at, time_ms };
+                        let press = crate::Press {
+                            button,
+                            at,
+                            time_ms,
+                        };
                         self.control.pressed.push((surface.id, press));
                         // (A surface that never asks leaves them lying.)
                         let over = self.control.pressed.len().saturating_sub(PRESSES_KEPT);
@@ -2222,9 +2263,9 @@ pub fn key_of(keysym: Keysym) -> Option<egui::Key> {
             let name = other.name()?.trim_start_matches("XK_").to_string();
             // The keys of the top row by theirs (F2 gives a name anew,
             // Shift and F10 asks for a menu).
-            let numbered = name
-                .strip_prefix('F')
-                .is_some_and(|number| !number.is_empty() && number.chars().all(|digit| digit.is_ascii_digit()));
+            let numbered = name.strip_prefix('F').is_some_and(|number| {
+                !number.is_empty() && number.chars().all(|digit| digit.is_ascii_digit())
+            });
             if numbered {
                 return Key::from_name(&name);
             }
@@ -2811,11 +2852,26 @@ mod tests {
         assert_eq!(key_of(Keysym::Shift_L), None);
         // The pointers a surface asks for have the compositor's names.
         assert_eq!(shape_of(egui::CursorIcon::Default), Some(Shape::Default));
-        assert_eq!(shape_of(egui::CursorIcon::PointingHand), Some(Shape::Pointer));
-        assert_eq!(shape_of(egui::CursorIcon::ResizeHorizontal), Some(Shape::EwResize));
-        assert_eq!(shape_of(egui::CursorIcon::ResizeVertical), Some(Shape::NsResize));
-        assert_eq!(shape_of(egui::CursorIcon::ResizeNwSe), Some(Shape::NwseResize));
-        assert_eq!(shape_of(egui::CursorIcon::ResizeNeSw), Some(Shape::NeswResize));
+        assert_eq!(
+            shape_of(egui::CursorIcon::PointingHand),
+            Some(Shape::Pointer)
+        );
+        assert_eq!(
+            shape_of(egui::CursorIcon::ResizeHorizontal),
+            Some(Shape::EwResize)
+        );
+        assert_eq!(
+            shape_of(egui::CursorIcon::ResizeVertical),
+            Some(Shape::NsResize)
+        );
+        assert_eq!(
+            shape_of(egui::CursorIcon::ResizeNwSe),
+            Some(Shape::NwseResize)
+        );
+        assert_eq!(
+            shape_of(egui::CursorIcon::ResizeNeSw),
+            Some(Shape::NeswResize)
+        );
         assert_eq!(shape_of(egui::CursorIcon::Move), Some(Shape::Move));
         assert_eq!(shape_of(egui::CursorIcon::None), None);
         assert_eq!(key_of(Keysym::F2), Some(egui::Key::F2));

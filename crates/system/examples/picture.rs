@@ -7,8 +7,14 @@ fn main() {
 
 #[cfg(any(windows, target_os = "macos"))]
 fn main() {
-    let handle: isize = std::env::args().nth(1).and_then(|text| text.parse().ok()).expect("a window's number");
-    let side: u32 = std::env::args().nth(2).and_then(|text| text.parse().ok()).unwrap_or(256);
+    let handle: isize = std::env::args()
+        .nth(1)
+        .and_then(|text| text.parse().ok())
+        .expect("a window's number");
+    let side: u32 = std::env::args()
+        .nth(2)
+        .and_then(|text| text.parse().ok())
+        .unwrap_or(256);
     let Some(picture) = gevrek_system::pictures::of_window(handle, side) else {
         println!("no picture");
         return;

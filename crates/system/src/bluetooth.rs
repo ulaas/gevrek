@@ -153,7 +153,8 @@ mod mac {
                 return false;
             };
             let key = objc2_foundation::NSString::from_str("NSBluetoothAlwaysUsageDescription");
-            let said: Option<Retained<AnyObject>> = msg_send![&*bundle, objectForInfoDictionaryKey: &*key];
+            let said: Option<Retained<AnyObject>> =
+                msg_send![&*bundle, objectForInfoDictionaryKey: &*key];
             said.is_some()
         }
     }
@@ -162,7 +163,8 @@ mod mac {
         object
             .map(|text| {
                 // SAFETY: an NSString's own description is itself.
-                let text: Retained<objc2_foundation::NSString> = unsafe { Retained::cast_unchecked(text) };
+                let text: Retained<objc2_foundation::NSString> =
+                    unsafe { Retained::cast_unchecked(text) };
                 text.to_string()
             })
             .unwrap_or_default()
@@ -230,7 +232,9 @@ mod mac {
 mod system {
     use super::{Bluetooth, Device};
     use windows::core::HSTRING;
-    use windows::Devices::Bluetooth::{BluetoothConnectionStatus, BluetoothDevice, BluetoothLEDevice};
+    use windows::Devices::Bluetooth::{
+        BluetoothConnectionStatus, BluetoothDevice, BluetoothLEDevice,
+    };
     use windows::Devices::Enumeration::DeviceInformation;
     use windows::Devices::Radios::{Radio, RadioKind, RadioState};
 
@@ -255,7 +259,10 @@ mod system {
             .filter_map(|device| {
                 Some((
                     device.Id().ok()?,
-                    device.Name().map(|name| name.to_string()).unwrap_or_default(),
+                    device
+                        .Name()
+                        .map(|name| name.to_string())
+                        .unwrap_or_default(),
                 ))
             })
             .collect()
@@ -267,10 +274,9 @@ mod system {
         let mut devices: Vec<Device> = Vec::new();
         let mut add = |number: u64, name: String, connected: bool| {
             let address = super::address_of(number);
-            match devices
-                .iter_mut()
-                .find(|known| known.address == address || (!name.trim().is_empty() && known.name == name))
-            {
+            match devices.iter_mut().find(|known| {
+                known.address == address || (!name.trim().is_empty() && known.name == name)
+            }) {
                 // (A device of both kinds is one device, also where it
                 // has an address for each: it is known by its name.)
                 Some(known) => known.connected |= connected,
@@ -502,9 +508,16 @@ mod tests {
                 read().is_some_and(|radio| radio.powered == on)
             })
         };
-        println!("the radio was on: {}, devices: {}", before.powered, before.devices.len());
+        println!(
+            "the radio was on: {}, devices: {}",
+            before.powered,
+            before.devices.len()
+        );
         set_power(!before.powered);
-        println!("the other way within ten seconds: {}", wait_for(!before.powered));
+        println!(
+            "the other way within ten seconds: {}",
+            wait_for(!before.powered)
+        );
         set_power(before.powered);
         println!("as it was within ten seconds: {}", wait_for(before.powered));
     }

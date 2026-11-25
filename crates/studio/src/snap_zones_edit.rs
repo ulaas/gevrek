@@ -368,7 +368,9 @@ impl SnapZonesEdit {
 
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            if gevrek_ui::widgets::secondary_button(ui, format!("{}  Add a zone", icons::PLUS)).clicked() {
+            if gevrek_ui::widgets::secondary_button(ui, format!("{}  Add a zone", icons::PLUS))
+                .clicked()
+            {
                 let zone = another(&zones);
                 document.edit(&zones_at, |zones| {
                     if let Some(zones) = zones.as_array_mut() {
@@ -460,8 +462,9 @@ impl SnapZonesEdit {
             });
         if add_own {
             let copy = document.get(&layout).cloned().unwrap_or(Value::Null);
-            let mut own = serde_json::to_value(gevrek_model::settings::MonitorSnapZoneLayout::default())
-                .unwrap_or_else(|_| json!({}));
+            let mut own =
+                serde_json::to_value(gevrek_model::settings::MonitorSnapZoneLayout::default())
+                    .unwrap_or_else(|_| json!({}));
             if !copy.is_null() {
                 own["layout"] = copy;
             }

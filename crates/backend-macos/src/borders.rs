@@ -292,7 +292,10 @@ fn paint(border: &mut Border) {
             let inset = ring + gap;
             inner.setFrame(CGRect::new(
                 CGPoint::new(inset, inset),
-                CGSize::new((size.0 - 2.0 * inset).max(0.0), (size.1 - 2.0 * inset).max(0.0)),
+                CGSize::new(
+                    (size.0 - 2.0 * inset).max(0.0),
+                    (size.1 - 2.0 * inset).max(0.0),
+                ),
             ));
             inner.setBorderColor(Some(&color));
             inner.setBorderWidth(ring);
@@ -303,7 +306,10 @@ fn paint(border: &mut Border) {
             layer.setBorderWidth(0.0);
             layer.setCornerRadius(0.0);
             let dashes = CAShapeLayer::layer();
-            dashes.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(size.0, size.1)));
+            dashes.setFrame(CGRect::new(
+                CGPoint::new(0.0, 0.0),
+                CGSize::new(size.0, size.1),
+            ));
             // (A stroke lies on both sides of its path: the path runs down
             // the middle of the band.)
             let half = width / 2.0;
@@ -318,7 +324,8 @@ fn paint(border: &mut Border) {
             dashes.setStrokeColor(Some(&color));
             dashes.setLineWidth(width);
             let (dash, gap) = dash_lengths(look.width.max(1));
-            let pattern = NSArray::from_retained_slice(&[NSNumber::new_f64(dash), NSNumber::new_f64(gap)]);
+            let pattern =
+                NSArray::from_retained_slice(&[NSNumber::new_f64(dash), NSNumber::new_f64(gap)]);
             dashes.setLineDashPattern(Some(&pattern));
             layer.addSublayer(&dashes);
             border.extra = Some(Retained::into_super(dashes));

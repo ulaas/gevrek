@@ -16,11 +16,11 @@
 use super::facts::same_path;
 use super::shell::{plain, shell_item, taken};
 use crate::com::Com;
+use crate::zones::operations::Watched;
 use gevrek_zones::backend::{BackendError, FileOperation};
 use gevrek_zones::paths;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use crate::zones::operations::Watched;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use windows::core::{implement, Interface, Result as ComResult, GUID, HRESULT, HSTRING, PCWSTR};
@@ -30,10 +30,9 @@ use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 use windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY;
 use windows::Win32::UI::Shell::{
     BHID_EnumItems, FOLDERID_RecycleBinFolder, FileOperation as ShellFileOperation,
-    IEnumShellItems, IFileOperation, IFileOperationProgressSink,
-    IFileOperationProgressSink_Impl, IShellItem, IShellItem2, SHGetKnownFolderItem,
-    FILEOPERATION_FLAGS, FOFX_EARLYFAILURE, FOFX_RECYCLEONDELETE,
-    FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOCONFIRMMKDIR, FOF_NOERRORUI,
+    IEnumShellItems, IFileOperation, IFileOperationProgressSink, IFileOperationProgressSink_Impl,
+    IShellItem, IShellItem2, SHGetKnownFolderItem, FILEOPERATION_FLAGS, FOFX_EARLYFAILURE,
+    FOFX_RECYCLEONDELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOCONFIRMMKDIR, FOF_NOERRORUI,
     FOF_RENAMEONCOLLISION, FOF_SILENT, FOF_WANTNUKEWARNING, KF_FLAG_DEFAULT,
     SIGDN_DESKTOPABSOLUTEPARSING, SIGDN_NORMALDISPLAY,
 };
@@ -205,15 +204,23 @@ pub fn error_of(result: HRESULT, what: &str) -> BackendError {
     // The system's own numbers, as results: "file not found", "path not
     // found"; "file exists", "already exists".
     match result.0 as u32 {
-        0x8007_0002 | 0x8007_0003 => BackendError::NotFound { what: what.to_string() },
-        0x8007_0050 | 0x8007_00B7 => BackendError::Exists { what: what.to_string() },
+        0x8007_0002 | 0x8007_0003 => BackendError::NotFound {
+            what: what.to_string(),
+        },
+        0x8007_0050 | 0x8007_00B7 => BackendError::Exists {
+            what: what.to_string(),
+        },
         0x8007_04C7 => BackendError::Cancelled,
-        _ => BackendError::Refused { what: format!("{what}: {}", result.message()) },
+        _ => BackendError::Refused {
+            what: format!("{what}: {}", result.message()),
+        },
     }
 }
 
 fn missing(what: &str) -> BackendError {
-    BackendError::NotFound { what: what.to_string() }
+    BackendError::NotFound {
+        what: what.to_string(),
+    }
 }
 
 /// The file operations, and what they need to remember. A copy of this
@@ -251,7 +258,9 @@ impl FileOperations {
             }
             FileOperation::Move { from, to_folder } => {
                 let (from, to_folder) = (existing(from)?, existing_folder(to_folder)?);
-                let back = paths::parent(&from).ok_or(BackendError::Unsupported)?.to_string();
+                let back = paths::parent(&from)
+                    .ok_or(BackendError::Unsupported)?
+                    .to_string();
                 if same_path(&back, &to_folder) {
                     // It is there already; the shell would call that a
                     // collision and give it another name.
@@ -260,25 +269,35 @@ impl FileOperations {
                 let made = self.run(&from, collide(), |shell, listener| unsafe {
                     shell.MoveItem(&item(&from)?, &item(&to_folder)?, PCWSTR::null(), listener)
                 })?;
-                Ok(FileOperation::Move { from: made, to_folder: back })
+                Ok(FileOperation::Move {
+                    from: made,
+                    to_folder: back,
+                })
             }
             FileOperation::Rename { path, new_name } => {
                 let path = existing(path)?;
                 let folder = paths::parent(&path).ok_or(BackendError::Unsupported)?;
                 if new_name.is_empty() || new_name.contains(['\\', '/']) {
-                    return Err(BackendError::Refused { what: format!("{new_name:?} is no name") });
+                    return Err(BackendError::Refused {
+                        what: format!("{new_name:?} is no name"),
+                    });
                 }
                 let old_name = paths::file_name(&path).to_string();
                 let target = paths::join(folder, new_name);
                 // (Only the case of its letters changed: the same file.)
                 if !same_path(&target, &path) && std::path::Path::new(&target).exists() {
-                    return Err(BackendError::Exists { what: new_name.clone() });
+                    return Err(BackendError::Exists {
+                        what: new_name.clone(),
+                    });
                 }
                 let name = HSTRING::from(new_name.as_str());
                 let made = self.run(&path, collide(), |shell, listener| unsafe {
                     shell.RenameItem(&item(&path)?, &name, listener)
                 })?;
-                Ok(FileOperation::Rename { path: made, new_name: old_name })
+                Ok(FileOperation::Rename {
+                    path: made,
+                    new_name: old_name,
+                })
             }
             FileOperation::NewFolder { parent, name } => {
                 let parent = existing_folder(parent)?;
@@ -315,7 +334,9 @@ impl FileOperations {
             }
             FileOperation::Restore { path } => {
                 let path = plain(path);
-                let folder = paths::parent(&path).ok_or(BackendError::Unsupported)?.to_string();
+                let folder = paths::parent(&path)
+                    .ok_or(BackendError::Unsupported)?
+                    .to_string();
                 let remembered = self.recycled().remove(&path.to_lowercase());
                 let lies_at = match remembered {
                     Some(lies_at) if std::path::Path::new(&lies_at).exists() => lies_at,
@@ -336,7 +357,9 @@ impl FileOperations {
     }
 
     fn recycled(&self) -> std::sync::MutexGuard<'_, HashMap<String, String>> {
-        self.recycled.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.recycled
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Give the shell one operation and have it carried out. The answer
@@ -349,10 +372,12 @@ impl FileOperations {
         queue: impl FnOnce(&IFileOperation, &IFileOperationProgressSink) -> ComResult<()>,
     ) -> Result<String, BackendError> {
         let outcome = Rc::new(RefCell::new(Outcome::default()));
-        let listener: IFileOperationProgressSink = Listener(Rc::clone(&outcome), self.watched.clone()).into();
+        let listener: IFileOperationProgressSink =
+            Listener(Rc::clone(&outcome), self.watched.clone()).into();
         // No questions and no messages of the shell's: what goes wrong is
         // answered to who asked. It ends at the first thing that fails.
-        let mut flags = how | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_NOCONFIRMMKDIR | FOFX_EARLYFAILURE;
+        let mut flags =
+            how | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_NOCONFIRMMKDIR | FOFX_EARLYFAILURE;
         if self.quiet {
             flags |= FOF_SILENT;
         }
@@ -360,7 +385,8 @@ impl FileOperations {
         // which the caller has set up for them.
         let done = unsafe {
             (|| {
-                let shell: IFileOperation = CoCreateInstance(&ShellFileOperation, None, CLSCTX_ALL)?;
+                let shell: IFileOperation =
+                    CoCreateInstance(&ShellFileOperation, None, CLSCTX_ALL)?;
                 shell.SetOperationFlags(flags)?;
                 if self.owner != 0 {
                     shell.SetOwnerWindow(HWND(self.owner as *mut _))?;
@@ -376,7 +402,9 @@ impl FileOperations {
         }
         match done {
             Err(error) => Err(error_of(error.code(), what)),
-            Ok(true) => Err(BackendError::Refused { what: format!("{what}: not carried out") }),
+            Ok(true) => Err(BackendError::Refused {
+                what: format!("{what}: not carried out"),
+            }),
             Ok(false) => outcome.made.ok_or(BackendError::Unsupported),
         }
     }
@@ -445,7 +473,10 @@ fn recycle_bin() -> Vec<Recycled> {
             if all.Next(&mut next, Some(&mut fetched)).is_err() || fetched == 0 {
                 break;
             }
-            let Some(lying) = next[0].take().and_then(|lying| lying.cast::<IShellItem2>().ok()) else {
+            let Some(lying) = next[0]
+                .take()
+                .and_then(|lying| lying.cast::<IShellItem2>().ok())
+            else {
                 continue;
             };
             let Ok(from) = lying.GetString(&DELETED_FROM).map(|from| taken(from)) else {
@@ -486,7 +517,10 @@ fn recycle_bin() -> Vec<Recycled> {
             found.push(Recycled {
                 from,
                 name: paths::file_name(&had).to_string(),
-                at: (noted, lying.GetFileTime(&DELETED_AT).map(ticks).unwrap_or(0)),
+                at: (
+                    noted,
+                    lying.GetFileTime(&DELETED_AT).map(ticks).unwrap_or(0),
+                ),
                 lies_at,
             });
         }
@@ -535,7 +569,9 @@ fn in_recycle_bin(path: &str) -> Option<String> {
     let name = paths::file_name(path);
     recycle_bin()
         .into_iter()
-        .filter(|lying| same_path(&lying.from, folder) && lying.name.to_lowercase() == name.to_lowercase())
+        .filter(|lying| {
+            same_path(&lying.from, folder) && lying.name.to_lowercase() == name.to_lowercase()
+        })
         .max_by_key(|lying| lying.at)
         .map(|lying| lying.lies_at)
 }
@@ -552,17 +588,40 @@ mod tests {
     #[test]
     fn the_systems_numbers_become_the_cores_errors() {
         let error = |number: u32| error_of(HRESULT(number as i32), "a.txt");
-        assert_eq!(error(0x8007_0002), BackendError::NotFound { what: "a.txt".to_string() });
-        assert_eq!(error(0x8007_0003), BackendError::NotFound { what: "a.txt".to_string() });
-        assert_eq!(error(0x8007_0050), BackendError::Exists { what: "a.txt".to_string() });
-        assert_eq!(error(0x8007_00B7), BackendError::Exists { what: "a.txt".to_string() });
-        assert!(matches!(error(0x8007_0005), BackendError::Refused { what } if what.starts_with("a.txt: ")));
+        assert_eq!(
+            error(0x8007_0002),
+            BackendError::NotFound {
+                what: "a.txt".to_string()
+            }
+        );
+        assert_eq!(
+            error(0x8007_0003),
+            BackendError::NotFound {
+                what: "a.txt".to_string()
+            }
+        );
+        assert_eq!(
+            error(0x8007_0050),
+            BackendError::Exists {
+                what: "a.txt".to_string()
+            }
+        );
+        assert_eq!(
+            error(0x8007_00B7),
+            BackendError::Exists {
+                what: "a.txt".to_string()
+            }
+        );
+        assert!(
+            matches!(error(0x8007_0005), BackendError::Refused { what } if what.starts_with("a.txt: "))
+        );
     }
 
     /// A folder of this test's own under the system's folder for
     /// temporary files. Nothing outside it is touched.
     fn folder(name: &str) -> String {
-        let folder = std::env::temp_dir().join(format!("gevrek-zones-{name}-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("gevrek-zones-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(&folder).expect("a folder");
         // (As the shell writes it: the long form, not `RUNNER~1`.)
@@ -583,7 +642,10 @@ mod tests {
         fn drop(&mut self) {
             let _com = Com::new();
             let under = format!("{}\\", self.0.to_lowercase());
-            let mut shell = FileOperations { quiet: true, ..Default::default() };
+            let mut shell = FileOperations {
+                quiet: true,
+                ..Default::default()
+            };
             for lying in recycle_bin() {
                 if format!("{}\\", lying.from.to_lowercase()).starts_with(&under) {
                     let _ = shell.perform(&FileOperation::Restore {
@@ -614,48 +676,79 @@ mod tests {
         std::fs::create_dir_all(&archive).expect("made");
         let file = paths::join(&desk, "a.txt");
         std::fs::write(&file, b"what the file holds").expect("written");
-        let mut shell = FileOperations { quiet: true, ..Default::default() };
+        let mut shell = FileOperations {
+            quiet: true,
+            ..Default::default()
+        };
         let before = (names(&desk), names(&archive));
         for (operation, after) in [
             (
-                FileOperation::Copy { from: file.clone(), to_folder: archive.clone() },
+                FileOperation::Copy {
+                    from: file.clone(),
+                    to_folder: archive.clone(),
+                },
                 (vec!["a.txt"], vec!["a.txt"]),
             ),
             (
-                FileOperation::Move { from: file.clone(), to_folder: archive.clone() },
+                FileOperation::Move {
+                    from: file.clone(),
+                    to_folder: archive.clone(),
+                },
                 (vec![], vec!["a.txt"]),
             ),
             (
-                FileOperation::Rename { path: file.clone(), new_name: "b.md".to_string() },
+                FileOperation::Rename {
+                    path: file.clone(),
+                    new_name: "b.md".to_string(),
+                },
                 (vec!["b.md"], vec![]),
             ),
             (
-                FileOperation::NewFolder { parent: desk.clone(), name: "New".to_string() },
+                FileOperation::NewFolder {
+                    parent: desk.clone(),
+                    name: "New".to_string(),
+                },
                 (vec!["New", "a.txt"], vec![]),
             ),
-            (FileOperation::Trash { path: file.clone() }, (vec![], vec![])),
+            (
+                FileOperation::Trash { path: file.clone() },
+                (vec![], vec![]),
+            ),
         ] {
-            let undo = shell.perform(&operation).unwrap_or_else(|error| panic!("{operation:?}: {error}"));
+            let undo = shell
+                .perform(&operation)
+                .unwrap_or_else(|error| panic!("{operation:?}: {error}"));
             let now = (names(&desk), names(&archive));
             assert_eq!(
-                (now.0.iter().map(String::as_str).collect::<Vec<_>>(), now.1.iter().map(String::as_str).collect::<Vec<_>>()),
+                (
+                    now.0.iter().map(String::as_str).collect::<Vec<_>>(),
+                    now.1.iter().map(String::as_str).collect::<Vec<_>>()
+                ),
                 after,
                 "{operation:?}"
             );
             // The way back is what the core would have assumed, here
             // where nothing was in the way.
             assert_eq!(Some(&undo), operation.reversed().as_ref(), "{operation:?}");
-            shell.perform(&undo).unwrap_or_else(|error| panic!("{undo:?}: {error}"));
-            assert_eq!((names(&desk), names(&archive)), before, "{undo:?} did not take {operation:?} back");
+            shell
+                .perform(&undo)
+                .unwrap_or_else(|error| panic!("{undo:?}: {error}"));
+            assert_eq!(
+                (names(&desk), names(&archive)),
+                before,
+                "{undo:?} did not take {operation:?} back"
+            );
             // What lies in the bin is a file there, beside its note.
             assert!(
-                shell.recycled().values().all(|lies_at| note_of(lies_at).is_some_and(|note| note.exists())),
+                shell
+                    .recycled()
+                    .values()
+                    .all(|lies_at| note_of(lies_at).is_some_and(|note| note.exists())),
                 "{:?}",
                 shell.recycled
             );
             assert_eq!(std::fs::read(&file).expect("read"), b"what the file holds");
         }
-
     }
 
     #[test]
@@ -668,16 +761,29 @@ mod tests {
         let (file, other) = (paths::join(&desk, "a.txt"), paths::join(&archive, "a.txt"));
         std::fs::write(&file, b"mine").expect("written");
         std::fs::write(&other, b"the other").expect("written");
-        let mut shell = FileOperations { quiet: true, ..Default::default() };
+        let mut shell = FileOperations {
+            quiet: true,
+            ..Default::default()
+        };
 
-        let operation = FileOperation::Move { from: file.clone(), to_folder: archive.clone() };
+        let operation = FileOperation::Move {
+            from: file.clone(),
+            to_folder: archive.clone(),
+        };
         let undo = shell.perform(&operation).expect("moved");
         assert_eq!(std::fs::read(&other).expect("read"), b"the other");
-        let FileOperation::Move { from: moved, to_folder } = &undo else {
+        let FileOperation::Move {
+            from: moved,
+            to_folder,
+        } = &undo
+        else {
             panic!("a move is taken back by a move: {undo:?}");
         };
         assert!(same_path(to_folder, &desk));
-        assert!(!same_path(moved, &other), "it got a name of its own: {moved}");
+        assert!(
+            !same_path(moved, &other),
+            "it got a name of its own: {moved}"
+        );
         assert_eq!(std::fs::read(moved).expect("read"), b"mine");
         assert_ne!(Some(&undo), operation.reversed().as_ref());
         assert_eq!(names(&archive).len(), 2);
@@ -685,14 +791,26 @@ mod tests {
         // A name that is taken is refused, not given to both.
         let taken = paths::file_name(moved).to_string();
         assert_eq!(
-            shell.perform(&FileOperation::Rename { path: other.clone(), new_name: taken.clone() }),
+            shell.perform(&FileOperation::Rename {
+                path: other.clone(),
+                new_name: taken.clone()
+            }),
             Err(BackendError::Exists { what: taken })
         );
         // Only the letters' case: that is the same file, and allowed.
         let renamed = shell
-            .perform(&FileOperation::Rename { path: other.clone(), new_name: "A.TXT".to_string() })
+            .perform(&FileOperation::Rename {
+                path: other.clone(),
+                new_name: "A.TXT".to_string(),
+            })
             .expect("renamed");
-        assert_eq!(names(&archive).iter().filter(|name| name.as_str() == "A.TXT").count(), 1);
+        assert_eq!(
+            names(&archive)
+                .iter()
+                .filter(|name| name.as_str() == "A.TXT")
+                .count(),
+            1
+        );
         shell.perform(&renamed).expect("renamed back");
 
         // What is not there, and a name that is none.
@@ -700,16 +818,28 @@ mod tests {
         for operation in [
             FileOperation::Trash { path: gone.clone() },
             FileOperation::Restore { path: gone.clone() },
-            FileOperation::Copy { from: gone.clone(), to_folder: archive.clone() },
-            FileOperation::Move { from: other.clone(), to_folder: paths::join(&root, "nowhere") },
+            FileOperation::Copy {
+                from: gone.clone(),
+                to_folder: archive.clone(),
+            },
+            FileOperation::Move {
+                from: other.clone(),
+                to_folder: paths::join(&root, "nowhere"),
+            },
         ] {
             assert!(
-                matches!(shell.perform(&operation), Err(BackendError::NotFound { .. })),
+                matches!(
+                    shell.perform(&operation),
+                    Err(BackendError::NotFound { .. })
+                ),
                 "{operation:?}"
             );
         }
         assert!(matches!(
-            shell.perform(&FileOperation::Rename { path: other.clone(), new_name: "a\\b".to_string() }),
+            shell.perform(&FileOperation::Rename {
+                path: other.clone(),
+                new_name: "a\\b".to_string()
+            }),
             Err(BackendError::Refused { .. })
         ));
     }
@@ -726,7 +856,10 @@ mod tests {
                 .collect()
         };
         let head = |kind: u64| -> Vec<u8> {
-            [kind, 5, 133_000_000_000_000_000].iter().flat_map(|number| number.to_le_bytes()).collect()
+            [kind, 5, 133_000_000_000_000_000]
+                .iter()
+                .flat_map(|number| number.to_le_bytes())
+                .collect()
         };
         // The kind of Windows 10 and later: the length, then the path.
         let mut new = head(2);
@@ -751,19 +884,33 @@ mod tests {
         let _tidy = Tidy(root.clone());
         let file = paths::join(&root, "kept for later.txt");
         std::fs::write(&file, b"first").expect("written");
-        let mut shell = FileOperations { quiet: true, ..Default::default() };
-        shell.perform(&FileOperation::Trash { path: file.clone() }).expect("deleted");
+        let mut shell = FileOperations {
+            quiet: true,
+            ..Default::default()
+        };
+        shell
+            .perform(&FileOperation::Trash { path: file.clone() })
+            .expect("deleted");
         // Another of the same name, deleted later: that is the one a
         // run that remembers nothing puts back.
         std::fs::write(&file, b"second").expect("written");
-        let undo = shell.perform(&FileOperation::Trash { path: file.clone() }).expect("deleted");
+        let undo = shell
+            .perform(&FileOperation::Trash { path: file.clone() })
+            .expect("deleted");
         assert!(names(&root).is_empty());
         // The bin's own note of it says the path it had, whole: that is
         // what it is found by, however Explorer is set to show names.
         let lying = in_recycle_bin(&file).expect("in the bin");
-        let note = std::fs::read(note_of(&lying).expect("a note beside it")).expect("the note is read");
-        assert!(same_path(&path_in_note(&note).expect("a path in the note"), &file));
-        let mut another_run = FileOperations { quiet: true, ..Default::default() };
+        let note =
+            std::fs::read(note_of(&lying).expect("a note beside it")).expect("the note is read");
+        assert!(same_path(
+            &path_in_note(&note).expect("a path in the note"),
+            &file
+        ));
+        let mut another_run = FileOperations {
+            quiet: true,
+            ..Default::default()
+        };
         let again = another_run.perform(&undo).expect("put back");
         assert_eq!(again, FileOperation::Trash { path: file.clone() });
         assert_eq!(std::fs::read(&file).expect("read"), b"second");
@@ -775,6 +922,9 @@ mod tests {
         };
         assert!(!same_path(&beside, &file));
         assert_eq!(std::fs::read(&beside).expect("read"), b"first");
-        assert!(matches!(another_run.perform(&undo), Err(BackendError::NotFound { .. })));
+        assert!(matches!(
+            another_run.perform(&undo),
+            Err(BackendError::NotFound { .. })
+        ));
     }
 }

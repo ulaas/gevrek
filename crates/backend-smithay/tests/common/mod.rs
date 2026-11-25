@@ -130,7 +130,9 @@ impl Harness {
         let window = {
             let client = &mut self.clients[client];
             let handle = client.queue.handle();
-            client.app.open_with_parent(&handle, title, app_id, Some(parent))
+            client
+                .app
+                .open_with_parent(&handle, title, app_id, Some(parent))
         };
         self.pump();
         let id = self

@@ -120,7 +120,14 @@ impl Snapshot {
         // (When an arrangement was last used is no part of where things
         // are: looking at a layout does not make it another.)
         let arranged = |snapshot: &Snapshot| -> Vec<Profile> {
-            snapshot.profiles.iter().map(|profile| Profile { last_used: 0, ..profile.clone() }).collect()
+            snapshot
+                .profiles
+                .iter()
+                .map(|profile| Profile {
+                    last_used: 0,
+                    ..profile.clone()
+                })
+                .collect()
         };
         self.zones == other.zones
             && self.rules == other.rules

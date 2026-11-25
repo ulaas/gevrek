@@ -248,7 +248,11 @@ pub fn day_band(ui: &mut Ui, from: &mut u32, to: &mut u32, look: &DayBand) -> eg
             )
         });
         if left || right {
-            let by = if right { look.step as i64 } else { -(look.step as i64) };
+            let by = if right {
+                look.step as i64
+            } else {
+                -(look.step as i64)
+            };
             *from = (i64::from(*from) + by).rem_euclid(i64::from(DAY)) as u32;
             response.mark_changed();
         }
@@ -264,7 +268,10 @@ pub fn day_band(ui: &mut Ui, from: &mut u32, to: &mut u32, look: &DayBand) -> eg
     for (start, end) in band_parts(*from, *to) {
         let piece = egui::Rect::from_min_max(
             egui::pos2(egui::lerp(track.left()..=track.right(), start), track.top()),
-            egui::pos2(egui::lerp(track.left()..=track.right(), end), track.bottom()),
+            egui::pos2(
+                egui::lerp(track.left()..=track.right(), end),
+                track.bottom(),
+            ),
         );
         painter.rect_filled(piece, 7.0, fill);
     }
@@ -448,11 +455,7 @@ impl egui::Widget for StopSlider<'_> {
                 if let Some(at) = response.interact_pointer_pos() {
                     if response.dragged() || response.clicked() {
                         let part = ((at.x - track.left()) / track.width()).clamp(0.0, 1.0);
-                        let wanted = caught(
-                            self.stops,
-                            low + part * (high - low),
-                            self.range,
-                        );
+                        let wanted = caught(self.stops, low + part * (high - low), self.range);
                         value = rounded(wanted);
                     }
                 }
@@ -499,7 +502,11 @@ impl egui::Widget for StopSlider<'_> {
                                     track.bottom(),
                                 ),
                             );
-                            let round = if piece == 0 || piece == pieces - 1 { 4.0 } else { 0.0 };
+                            let round = if piece == 0 || piece == pieces - 1 {
+                                4.0
+                            } else {
+                                0.0
+                            };
                             painter.rect_filled(part, round, colour);
                         }
                     }
@@ -538,7 +545,11 @@ impl egui::Widget for StopSlider<'_> {
                 );
                 let ring = if enabled { p.accent } else { p.faint };
                 if hot > 0.0 {
-                    painter.circle_filled(centre, knob + 5.0 * hot, ring.gamma_multiply(0.18 * hot));
+                    painter.circle_filled(
+                        centre,
+                        knob + 5.0 * hot,
+                        ring.gamma_multiply(0.18 * hot),
+                    );
                 }
                 painter.circle_filled(
                     centre + egui::vec2(0.0, 1.0),
@@ -579,9 +590,11 @@ impl egui::Widget for StopSlider<'_> {
                     ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
                     for (index, stop) in self.stops.iter().enumerate() {
                         let is = chosen == Some(index);
-                        let text = egui::RichText::new(stop.name)
-                            .size(12.5)
-                            .color(if is { p.text } else { p.muted });
+                        let text = egui::RichText::new(stop.name).size(12.5).color(if is {
+                            p.text
+                        } else {
+                            p.muted
+                        });
                         let mut button = egui::Button::new(text)
                             .corner_radius(12)
                             .min_size(egui::vec2(0.0, 24.0));
@@ -670,16 +683,25 @@ pub fn tile(ui: &mut Ui, size: egui::Vec2, tile: &Tile<'_>) -> TilePressed {
     let p = theme::pal(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let arrow = tile.more.map(|_| {
-        egui::Rect::from_min_max(egui::pos2(rect.right() - 30.0, rect.top()), rect.right_bottom())
+        egui::Rect::from_min_max(
+            egui::pos2(rect.right() - 30.0, rect.top()),
+            rect.right_bottom(),
+        )
     });
     let more = arrow.map(|arrow| ui.interact(arrow, response.id.with("more"), Sense::click()));
     let more_pressed = more.as_ref().is_some_and(egui::Response::clicked);
     let switched = response.clicked() && !more_pressed;
 
-    let lit = ui.ctx().animate_bool_responsive(response.id.with("on"), tile.on);
+    let lit = ui
+        .ctx()
+        .animate_bool_responsive(response.id.with("on"), tile.on);
     let hovered = response.hovered() || more.as_ref().is_some_and(egui::Response::hovered);
     let ground = theme::mix(
-        if hovered { p.control_hover() } else { p.control },
+        if hovered {
+            p.control_hover()
+        } else {
+            p.control
+        },
         p.accent,
         0.24 * lit,
     );
@@ -703,16 +725,24 @@ pub fn tile(ui: &mut Ui, size: egui::Vec2, tile: &Tile<'_>) -> TilePressed {
     );
     let left = rect.left() + 50.0;
     let room = rect.right() - left - if arrow.is_some() { 30.0 } else { 10.0 };
-    let name = one_line(ui, tile.name, egui::FontId::proportional(13.5), p.text, room);
-    let state = one_line(ui, tile.state, egui::FontId::proportional(11.5), p.muted, room);
+    let name = one_line(
+        ui,
+        tile.name,
+        egui::FontId::proportional(13.5),
+        p.text,
+        room,
+    );
+    let state = one_line(
+        ui,
+        tile.state,
+        egui::FontId::proportional(11.5),
+        p.muted,
+        room,
+    );
     let tall = name.size().y + state.size().y + 1.0;
     let top = rect.center().y - tall / 2.0;
     painter.galley(egui::pos2(left, top), name.clone(), p.text);
-    painter.galley(
-        egui::pos2(left, top + name.size().y + 1.0),
-        state,
-        p.muted,
-    );
+    painter.galley(egui::pos2(left, top + name.size().y + 1.0), state, p.muted);
     if let (Some(arrow), Some(open)) = (arrow, tile.more) {
         if tile.busy {
             ui.put(
@@ -789,7 +819,13 @@ pub fn level(
             .on_hover_text(tip);
         if let Some(name) = name {
             let (rect, _) = ui.allocate_exact_size(egui::vec2(92.0, height), Sense::hover());
-            let words = one_line(ui, name, egui::FontId::proportional(13.0), p.muted, rect.width());
+            let words = one_line(
+                ui,
+                name,
+                egui::FontId::proportional(13.0),
+                p.muted,
+                rect.width(),
+            );
             ui.painter().galley(
                 egui::pos2(rect.left(), rect.center().y - words.size().y / 2.0),
                 words,
@@ -801,10 +837,8 @@ pub fn level(
         let (rect, mut slider) =
             ui.allocate_exact_size(egui::vec2(width, height), Sense::click_and_drag());
         let knob = 8.0;
-        let track = egui::Rect::from_center_size(
-            rect.center(),
-            egui::vec2(rect.width() - 2.0 * knob, 4.0),
-        );
+        let track =
+            egui::Rect::from_center_size(rect.center(), egui::vec2(rect.width() - 2.0 * knob, 4.0));
         let (low, high) = (*range.start(), *range.end());
         if let Some(at) = slider.interact_pointer_pos() {
             if slider.dragged() || slider.clicked() {
@@ -825,7 +859,9 @@ pub fn level(
             });
             if left || right {
                 let by = (high - low) / 20.0;
-                *value = (*value + if right { by } else { -by }).clamp(low, high).round();
+                *value = (*value + if right { by } else { -by })
+                    .clamp(low, high)
+                    .round();
                 slider.mark_changed();
             }
         }
@@ -930,7 +966,13 @@ pub fn choice_row(
         );
         right -= 8.0;
     }
-    let words = one_line(ui, name, egui::FontId::proportional(13.0), p.text, right - left);
+    let words = one_line(
+        ui,
+        name,
+        egui::FontId::proportional(13.0),
+        p.text,
+        right - left,
+    );
     ui.painter().galley(
         egui::pos2(left, rect.center().y - words.size().y / 2.0),
         words,
@@ -1009,7 +1051,11 @@ pub fn chosen_line(ui: &mut Ui, of: &str, chosen: &str, open: bool) -> egui::Res
         );
     }
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), format!("{of}: {chosen}"))
+        egui::WidgetInfo::labeled(
+            egui::Role::ComboBox,
+            ui.is_enabled(),
+            format!("{of}: {chosen}"),
+        )
     });
     response
 }
@@ -1065,7 +1111,10 @@ mod tests {
             assert_eq!(back, minutes);
         }
         // A night is one piece; a span that holds noon is two.
-        assert_eq!(band_parts(20 * 60, 7 * 60), [(1.0 / 3.0, 1.0 / 3.0 + 11.0 / 24.0)]);
+        assert_eq!(
+            band_parts(20 * 60, 7 * 60),
+            [(1.0 / 3.0, 1.0 / 3.0 + 11.0 / 24.0)]
+        );
         let over_noon = band_parts(10 * 60, 14 * 60);
         assert_eq!(over_noon.len(), 2);
         assert_eq!(over_noon[0].1, 1.0);

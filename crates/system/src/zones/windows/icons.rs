@@ -16,7 +16,11 @@ use gevrek_zones::backend::IconSize;
 /// The side of a picture in pixels: the logical size at the display's
 /// scale, within what the shell draws.
 pub fn pixels(size: IconSize) -> u32 {
-    let scale = if size.scale.is_finite() && size.scale > 0.0 { size.scale } else { 1.0 };
+    let scale = if size.scale.is_finite() && size.scale > 0.0 {
+        size.scale
+    } else {
+        1.0
+    };
     ((f64::from(size.size) * scale).round() as u32).clamp(8, 512)
 }
 
@@ -39,7 +43,10 @@ pub fn of_shell(
                 if thumbnail {
                     return None;
                 }
-                let icon = programs.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).icon_of(id)?;
+                let icon = programs
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .icon_of(id)?;
                 return crate::zones::programs::picture(&icon, size);
             }
             look(id, size, thumbnail)

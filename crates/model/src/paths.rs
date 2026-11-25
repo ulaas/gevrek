@@ -117,39 +117,44 @@ pub fn config_file() -> PathBuf {
 /// What should outlive a restart and is not configuration: backups of the
 /// configuration, history, the saved session.
 pub fn state_dir() -> PathBuf {
-    overridden("GEVREK_STATE_DIR").or_else(|| under_test("state")).unwrap_or_else(|| {
-        // `dirs::state_dir` is Linux only; elsewhere a folder beside the
-        // local data.
-        match dirs::state_dir() {
-            Some(base) => scoped(base, &instance()),
-            None => {
-                scoped(dirs::data_local_dir().unwrap_or_else(fallback), &instance()).join("state")
+    overridden("GEVREK_STATE_DIR")
+        .or_else(|| under_test("state"))
+        .unwrap_or_else(|| {
+            // `dirs::state_dir` is Linux only; elsewhere a folder beside the
+            // local data.
+            match dirs::state_dir() {
+                Some(base) => scoped(base, &instance()),
+                None => scoped(dirs::data_local_dir().unwrap_or_else(fallback), &instance())
+                    .join("state"),
             }
-        }
-    })
+        })
 }
 
 /// What can be made again: icons, scaled pictures.
 pub fn cache_dir() -> PathBuf {
-    overridden("GEVREK_CACHE_DIR").or_else(|| under_test("cache")).unwrap_or_else(|| {
-        if cfg!(windows) {
-            scoped(dirs::data_local_dir().unwrap_or_else(fallback), &instance()).join("cache")
-        } else {
-            scoped(dirs::cache_dir().unwrap_or_else(fallback), &instance())
-        }
-    })
+    overridden("GEVREK_CACHE_DIR")
+        .or_else(|| under_test("cache"))
+        .unwrap_or_else(|| {
+            if cfg!(windows) {
+                scoped(dirs::data_local_dir().unwrap_or_else(fallback), &instance()).join("cache")
+            } else {
+                scoped(dirs::cache_dir().unwrap_or_else(fallback), &instance())
+            }
+        })
 }
 
 /// What lives only while the session does: sockets, pid files. All
 /// instances share it; their files carry the instance's name.
 pub fn runtime_dir() -> PathBuf {
-    overridden("GEVREK_RUNTIME_DIR").or_else(|| under_test("run")).unwrap_or_else(|| match dirs::runtime_dir() {
-        Some(base) => base.join("gevrek"),
-        None => dirs::data_local_dir()
-            .unwrap_or_else(fallback)
-            .join("gevrek")
-            .join("run"),
-    })
+    overridden("GEVREK_RUNTIME_DIR")
+        .or_else(|| under_test("run"))
+        .unwrap_or_else(|| match dirs::runtime_dir() {
+            Some(base) => base.join("gevrek"),
+            None => dirs::data_local_dir()
+                .unwrap_or_else(fallback)
+                .join("gevrek")
+                .join("run"),
+        })
 }
 
 /// The file a running program of this instance is known by:

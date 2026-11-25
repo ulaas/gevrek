@@ -231,7 +231,10 @@ mod tests {
     fn what_is_said_of_the_machine_is_what_is_so_there() {
         let mut desktop = DesktopConfig::default();
         desktop.snap_zones.behavior.enabled = false;
-        let said: Vec<String> = notices(&desktop).into_iter().map(|notice| notice.id).collect();
+        let said: Vec<String> = notices(&desktop)
+            .into_iter()
+            .map(|notice| notice.id)
+            .collect();
         let expected: Vec<String> = administrator_notice(runs_as_administrator())
             .into_iter()
             .map(|notice| notice.id)

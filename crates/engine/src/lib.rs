@@ -41,10 +41,10 @@ pub mod rule_state;
 pub mod rules;
 pub mod scratchpads;
 pub mod shell_room;
+pub mod snap_zones;
 pub mod workspace;
 pub mod workspace_profile;
 pub mod workspaces;
-pub mod snap_zones;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;

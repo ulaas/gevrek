@@ -367,9 +367,13 @@ async fn run(
         match tokio::time::timeout(CALL, client.query_state()).await {
             Ok(Ok(state)) => tell.tell(Event::Graph(GraphEvent::Paused(state.execution_paused))),
             Ok(Err(error)) => {
-                log::debug!("whether the graph runs is not known: the state was not answered: {error:#}")
+                log::debug!(
+                    "whether the graph runs is not known: the state was not answered: {error:#}"
+                )
             }
-            Err(_) => log::debug!("whether the graph runs is not known: the state was not answered in time"),
+            Err(_) => log::debug!(
+                "whether the graph runs is not known: the state was not answered in time"
+            ),
         }
         let mut stream = match client.subscribe_to_events().await {
             Ok(stream) => stream,
@@ -631,7 +635,13 @@ async fn serve(client: &mut WMClient, request: Request, tell: &Teller) {
             )
             .await;
             let event = zones_answered(command, answer);
-            if let Event::ZonesAnswered { command, success, error, .. } = &event {
+            if let Event::ZonesAnswered {
+                command,
+                success,
+                error,
+                ..
+            } = &event
+            {
                 let name = command_name(command);
                 match (success, error) {
                     (true, _) => log::debug!("the zones did {name}"),
@@ -669,7 +679,10 @@ async fn serve(client: &mut WMClient, request: Request, tell: &Teller) {
             };
             match said(answer) {
                 None => {
-                    log::debug!("the graph is {} now", if pause { "paused" } else { "let run" });
+                    log::debug!(
+                        "the graph is {} now",
+                        if pause { "paused" } else { "let run" }
+                    );
                     tell.tell(Event::Graph(GraphEvent::Paused(pause)))
                 }
                 Some(error) => tell.tell(Event::Dispatched {
@@ -714,7 +727,10 @@ fn command_name(json: &str) -> String {
 /// answered, or did not.
 fn zones_answered<E: std::fmt::Display>(
     command: String,
-    answer: Result<Result<gevrek_protocol::proto::ZonesCommandReply, E>, tokio::time::error::Elapsed>,
+    answer: Result<
+        Result<gevrek_protocol::proto::ZonesCommandReply, E>,
+        tokio::time::error::Elapsed,
+    >,
 ) -> Event {
     let not_asked = |error: String| Event::ZonesAnswered {
         command: command.clone(),
@@ -740,7 +756,10 @@ fn zones_answered<E: std::fmt::Display>(
 /// answered, or did not (said as a state with nothing in it and the
 /// reason, so that whoever asked always hears back).
 fn zones_state<E: std::fmt::Display>(
-    answer: Result<Result<gevrek_protocol::proto::ZonesStateResponse, E>, tokio::time::error::Elapsed>,
+    answer: Result<
+        Result<gevrek_protocol::proto::ZonesStateResponse, E>,
+        tokio::time::error::Elapsed,
+    >,
 ) -> Event {
     let nothing = |message: String| Event::ZonesState {
         running: false,
@@ -775,8 +794,13 @@ mod zones_asking_tests {
             events: vec![r#"{"event":"refused","reason":"no zone is called nowhere"}"#.to_string()],
             delivered: true,
         };
-        let Event::ZonesAnswered { command, success, delivered, error, events } =
-            zones_answered("{}".to_string(), Ok(Failed::Ok(reply)))
+        let Event::ZonesAnswered {
+            command,
+            success,
+            delivered,
+            error,
+            events,
+        } = zones_answered("{}".to_string(), Ok(Failed::Ok(reply)))
         else {
             panic!("not an answer of the zones");
         };
@@ -784,8 +808,15 @@ mod zones_asking_tests {
         assert_eq!(error.as_deref(), Some("no zone is called nowhere"));
         assert_eq!(events.len(), 1);
 
-        let Event::ZonesAnswered { success, delivered, error, .. } =
-            zones_answered("{}".to_string(), Ok(Failed::Err("the line broke".to_string())))
+        let Event::ZonesAnswered {
+            success,
+            delivered,
+            error,
+            ..
+        } = zones_answered(
+            "{}".to_string(),
+            Ok(Failed::Err("the line broke".to_string())),
+        )
         else {
             panic!("not an answer of the zones");
         };
@@ -800,15 +831,23 @@ mod zones_asking_tests {
             json: r#"{"version":1}"#.to_string(),
             ..Default::default()
         };
-        let Event::ZonesState { running, stale, json, message } =
-            zones_state(Ok(Ok::<_, String>(state)))
+        let Event::ZonesState {
+            running,
+            stale,
+            json,
+            message,
+        } = zones_state(Ok(Ok::<_, String>(state)))
         else {
             panic!("not the zones' state");
         };
         assert!(running && !stale && message.is_empty());
         assert_eq!(json, r#"{"version":1}"#);
-        let Event::ZonesState { running, json, message, .. } =
-            zones_state(Ok(Err::<ZonesStateResponse, _>("gone".to_string())))
+        let Event::ZonesState {
+            running,
+            json,
+            message,
+            ..
+        } = zones_state(Ok(Err::<ZonesStateResponse, _>("gone".to_string())))
         else {
             panic!("not the zones' state");
         };

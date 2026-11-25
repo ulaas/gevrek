@@ -102,7 +102,10 @@ impl Journal {
                 std::fs::rename(&partial, path)
             });
         if let Err(error) = written {
-            log::warn!("Could not write the parked windows to {}: {error}", path.display());
+            log::warn!(
+                "Could not write the parked windows to {}: {error}",
+                path.display()
+            );
         }
     }
 }
@@ -141,12 +144,15 @@ mod tests {
 
     #[test]
     fn a_journal_that_is_not_there_or_spoilt_is_empty() {
-        let folder = std::env::temp_dir().join(format!("gevrek-journal-bad-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("gevrek-journal-bad-{}", std::process::id()));
         std::fs::create_dir_all(&folder).unwrap();
         let path = folder.join("spoilt.parked.json");
         std::fs::write(&path, b"{ not json").unwrap();
         assert!(Journal::open(path).take_all().is_empty());
-        assert!(Journal::open(folder.join("absent.json")).take_all().is_empty());
+        assert!(Journal::open(folder.join("absent.json"))
+            .take_all()
+            .is_empty());
         let _ = std::fs::remove_dir_all(folder);
     }
 }

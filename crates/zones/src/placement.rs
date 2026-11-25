@@ -115,10 +115,18 @@ impl Placements {
     /// Put an item into a zone, at `index` in its order (at the end
     /// without one, or with one beyond the end). It leaves wherever it
     /// was.
-    pub fn assign(&mut self, item: &ItemId, zone: &ZoneId, index: Option<usize>, cell: Option<Cell>) {
+    pub fn assign(
+        &mut self,
+        item: &ItemId,
+        zone: &ZoneId,
+        index: Option<usize>,
+        cell: Option<Cell>,
+    ) {
         self.take(item);
         let members = self.zones.entry(zone.clone()).or_default();
-        let index = index.unwrap_or(members.items.len()).min(members.items.len());
+        let index = index
+            .unwrap_or(members.items.len())
+            .min(members.items.len());
         members.items.insert(index, item.clone());
         if let Some(cell) = cell {
             // (One item a cell: who was there is laid out with the rest.)
@@ -138,9 +146,7 @@ impl Placements {
     /// Put an item where it was.
     pub fn put_back(&mut self, item: &ItemId, whereabouts: &Whereabouts) {
         match whereabouts {
-            Whereabouts::Zone { zone, index, cell } => {
-                self.assign(item, zone, Some(*index), *cell)
-            }
+            Whereabouts::Zone { zone, index, cell } => self.assign(item, zone, Some(*index), *cell),
             Whereabouts::Loose { position } => self.loosen(item, position.clone()),
         }
     }
@@ -177,7 +183,11 @@ impl Placements {
                     return Some(format!("{item} is in {zone} and loose"));
                 }
             }
-            if let Some(stray) = members.cells.keys().find(|item| !members.items.contains(item)) {
+            if let Some(stray) = members
+                .cells
+                .keys()
+                .find(|item| !members.items.contains(item))
+            {
                 return Some(format!("{stray} has a cell in {zone} and is not in it"));
             }
         }
@@ -217,10 +227,17 @@ mod tests {
         placements.assign(&item("a"), &zone("two"), None, None);
         assert_eq!(placements.items_of(&zone("one")), [item("b")]);
         assert_eq!(placements.items_of(&zone("two")), [item("a")]);
-        let at = LoosePosition { display: DisplayId::new("d"), x: 4, y: 5 };
+        let at = LoosePosition {
+            display: DisplayId::new("d"),
+            x: 4,
+            y: 5,
+        };
         placements.loosen(&item("a"), Some(at.clone()));
         assert_eq!(placements.zone_of(&item("a")), None);
-        assert_eq!(placements.whereabouts(&item("a")), Whereabouts::Loose { position: Some(at) });
+        assert_eq!(
+            placements.whereabouts(&item("a")),
+            Whereabouts::Loose { position: Some(at) }
+        );
         placements.assign(&item("a"), &zone("one"), Some(0), None);
         assert!(placements.loose.is_empty());
         assert_eq!(placements.items_of(&zone("one")), [item("a"), item("b")]);
@@ -233,7 +250,12 @@ mod tests {
         for name in ["a", "b", "c"] {
             placements.assign(&item(name), &zone("one"), None, None);
         }
-        placements.assign(&item("b"), &zone("one"), Some(1), Some(Cell { column: 2, row: 0 }));
+        placements.assign(
+            &item("b"),
+            &zone("one"),
+            Some(1),
+            Some(Cell { column: 2, row: 0 }),
+        );
         let before = placements.clone();
         let was = placements.whereabouts(&item("b"));
         placements.assign(&item("b"), &zone("two"), None, None);
@@ -249,8 +271,15 @@ mod tests {
             placements.assign(&item(name), &zone("one"), None, None);
         }
         placements.rename(&item("b"), &item("B"));
-        assert_eq!(placements.items_of(&zone("one")), [item("a"), item("B"), item("c")]);
-        let at = LoosePosition { display: DisplayId::new("d"), x: 1, y: 2 };
+        assert_eq!(
+            placements.items_of(&zone("one")),
+            [item("a"), item("B"), item("c")]
+        );
+        let at = LoosePosition {
+            display: DisplayId::new("d"),
+            x: 1,
+            y: 2,
+        };
         placements.loosen(&item("x"), Some(at.clone()));
         placements.rename(&item("x"), &item("y"));
         assert_eq!(placements.loose.get(&item("y")), Some(&at));

@@ -750,10 +750,7 @@ fn night_light(hardware: &mut Hardware, state: &mut State) {
     let minutes = now.hour() as u32 * 60 + now.minute() as u32;
     let wanted = shown
         .filter(|kelvin| *kelvin != NEUTRAL)
-        .or_else(|| {
-            (shown.is_none() && config.on_at(minutes))
-                .then(|| config.kelvin())
-        });
+        .or_else(|| (shown.is_none() && config.on_at(minutes)).then(|| config.kelvin()));
     let displays = hardware.surfaces.len();
     if !hardware.active
         || (hardware.night == Some((wanted, displays)) && hardware.night_fade.is_none())

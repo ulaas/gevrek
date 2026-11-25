@@ -100,7 +100,14 @@ pub fn is_a_popups_class(class: &str) -> bool {
 /// own ends (Unreal Editor's "SplashScreenGuard", a title bar with
 /// nothing below it, shown for as long as the editor runs).
 fn is_a_controls_class(class: &str) -> bool {
-    const WHOLE: [&str; 6] = ["Static", "Button", "Edit", "ListBox", "ScrollBar", "ComboBox"];
+    const WHOLE: [&str; 6] = [
+        "Static",
+        "Button",
+        "Edit",
+        "ListBox",
+        "ScrollBar",
+        "ComboBox",
+    ];
     WHOLE.iter().any(|name| class.eq_ignore_ascii_case(name))
 }
 
@@ -176,9 +183,7 @@ pub fn kind(facts: &Facts) -> Kind {
     if facts.bare() && facts.resizable() {
         return Kind::Passing;
     }
-    if facts.class == DIALOG_CLASS
-        || (!facts.resizable() && facts.style & WS_MINIMIZEBOX == 0)
-    {
+    if facts.class == DIALOG_CLASS || (!facts.resizable() && facts.style & WS_MINIMIZEBOX == 0) {
         // What would be a dialog, made of one of the system's own parts
         // of a window, with not even a box to close it by: nothing to
         // answer, and nothing to work in.
@@ -288,7 +293,9 @@ pub fn owner_on_screen(window: isize) -> Option<isize> {
     let hwnd = HWND(window as *mut _);
     // SAFETY: plain questions; a window that is gone has no owner.
     unsafe {
-        let owner = GetWindow(hwnd, GW_OWNER).ok().filter(|owner| !owner.is_invalid())?;
+        let owner = GetWindow(hwnd, GW_OWNER)
+            .ok()
+            .filter(|owner| !owner.is_invalid())?;
         let seen = if IsWindowVisible(owner).as_bool() {
             let mut rect = RECT::default();
             GetWindowRect(owner, &mut rect).is_ok()
@@ -320,7 +327,8 @@ mod tests {
     const WS_SYSMENU: u32 = 0x0008_0000;
     const WS_MAXIMIZEBOX: u32 = 0x0001_0000;
     /// A program's window as Windows makes it: title bar, frame, both boxes.
-    const OVERLAPPED: u32 = WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+    const OVERLAPPED: u32 =
+        WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
 
     fn floats_with(style: u32, extended: u32, class: &str, owned: bool) -> bool {
         floats(&Facts {
@@ -336,7 +344,12 @@ mod tests {
         assert_eq!(kind_of(OVERLAPPED, 0, "Notepad", false), Kind::Ordinary);
         // One that draws its own title bar and can still be resized.
         assert_eq!(
-            kind_of(WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX, 0, "Chrome_WidgetWin_1", false),
+            kind_of(
+                WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX,
+                0,
+                "Chrome_WidgetWin_1",
+                false
+            ),
             Kind::Ordinary
         );
         // One of a fixed size that can be minimised (an old game, a small tool).
@@ -345,15 +358,24 @@ mod tests {
             Kind::Ordinary
         );
         // Kept above the others by the person: still its program's window.
-        assert_eq!(kind_of(OVERLAPPED, WS_EX_TOPMOST, "Notepad", false), Kind::Ordinary);
+        assert_eq!(
+            kind_of(OVERLAPPED, WS_EX_TOPMOST, "Notepad", false),
+            Kind::Ordinary
+        );
     }
 
     #[test]
     fn a_window_of_its_own_that_is_no_main_window_has_no_border() {
         // The dialogs' own class.
-        assert_eq!(kind_of(WS_CAPTION | WS_SYSMENU, 0, "#32770", false), Kind::Beside);
+        assert_eq!(
+            kind_of(WS_CAPTION | WS_SYSMENU, 0, "#32770", false),
+            Kind::Beside
+        );
         // It can be neither resized nor minimised.
-        assert_eq!(kind_of(WS_CAPTION | WS_SYSMENU, 0, "AboutBox", false), Kind::Beside);
+        assert_eq!(
+            kind_of(WS_CAPTION | WS_SYSMENU, 0, "AboutBox", false),
+            Kind::Beside
+        );
         assert_eq!(kind_of(WS_POPUP, 0, "Splash", false), Kind::Beside);
         // Above everything, with a title bar: a dialog that insists.
         assert_eq!(
@@ -366,25 +388,40 @@ mod tests {
     #[test]
     fn what_belongs_to_another_window_is_not_gevreks() {
         // A dialog a window opened, of the dialogs' class or of any other.
-        assert_eq!(kind_of(WS_POPUP | WS_CAPTION | WS_SYSMENU, 0, "#32770", true), Kind::Owned);
+        assert_eq!(
+            kind_of(WS_POPUP | WS_CAPTION | WS_SYSMENU, 0, "#32770", true),
+            Kind::Owned
+        );
         assert_eq!(kind_of(OVERLAPPED, 0, "Settings", true), Kind::Owned);
         // A menu, a list that drops down, a bubble: with no frame at all,
         // above everything or not.
         assert_eq!(kind_of(WS_POPUP, WS_EX_TOPMOST, "Menu", true), Kind::Owned);
-        assert_eq!(kind_of(WS_POPUP, 0, "Chrome_WidgetWin_1", true), Kind::Owned);
+        assert_eq!(
+            kind_of(WS_POPUP, 0, "Chrome_WidgetWin_1", true),
+            Kind::Owned
+        );
         assert!(!Kind::Owned.is_managed());
         // One that asks for its own place in the taskbar is a window of
         // its own, whatever it belongs to.
-        assert_eq!(kind_of(OVERLAPPED, WS_EX_APPWINDOW, "Document", true), Kind::Ordinary);
+        assert_eq!(
+            kind_of(OVERLAPPED, WS_EX_APPWINDOW, "Document", true),
+            Kind::Ordinary
+        );
     }
 
     #[test]
     fn what_passes_by_is_no_window_to_gevrek() {
         // Above everything, with no title bar and no frame: a notification.
-        assert_eq!(kind_of(WS_POPUP, WS_EX_TOPMOST, "Toast", false), Kind::Passing);
+        assert_eq!(
+            kind_of(WS_POPUP, WS_EX_TOPMOST, "Toast", false),
+            Kind::Passing
+        );
         // A window inside another.
         assert_eq!(kind_of(WS_CHILD, 0, "Button", false), Kind::Passing);
-        assert_eq!(kind_of(WS_CHILD | WS_CAPTION | WS_THICKFRAME, 0, "MDIChild", true), Kind::Passing);
+        assert_eq!(
+            kind_of(WS_CHILD | WS_CAPTION | WS_THICKFRAME, 0, "MDIChild", true),
+            Kind::Passing
+        );
         assert!(!Kind::Passing.is_managed());
         // The menu of a tab of Windows Terminal, as it is on the screen
         // (read off a running one): by its class, and by its styles alone.
@@ -392,20 +429,34 @@ mod tests {
             kind_of(0x8400_0000, 0x0820_0000, "Xaml_WindowedPopupClass", false),
             Kind::Passing
         );
-        assert_eq!(kind_of(0x8400_0000, 0x0820_0000, "SomeToolkitsMenu", false), Kind::Passing);
+        assert_eq!(
+            kind_of(0x8400_0000, 0x0820_0000, "SomeToolkitsMenu", false),
+            Kind::Passing
+        );
         // Windows' own menu, a tooltip, a Qt popup: by their classes,
         // whatever their styles say.
         assert_eq!(kind_of(OVERLAPPED, 0, "#32768", false), Kind::Passing);
-        assert_eq!(kind_of(OVERLAPPED, 0, "tooltips_class32", false), Kind::Passing);
+        assert_eq!(
+            kind_of(OVERLAPPED, 0, "tooltips_class32", false),
+            Kind::Passing
+        );
         assert_eq!(
             kind_of(OVERLAPPED, 0, "Qt5151QWindowPopupSaveBits", false),
             Kind::Passing
         );
         // A palette kept out of the taskbar; one that asks to be in it is
         // a window of its own.
-        assert_eq!(kind_of(OVERLAPPED, WS_EX_TOOLWINDOW, "Palette", false), Kind::Passing);
         assert_eq!(
-            kind_of(OVERLAPPED, WS_EX_TOOLWINDOW | WS_EX_APPWINDOW, "Palette", false),
+            kind_of(OVERLAPPED, WS_EX_TOOLWINDOW, "Palette", false),
+            Kind::Passing
+        );
+        assert_eq!(
+            kind_of(
+                OVERLAPPED,
+                WS_EX_TOOLWINDOW | WS_EX_APPWINDOW,
+                "Palette",
+                false
+            ),
             Kind::Ordinary
         );
         // A browser's menu (of a folder of bookmarks): nothing but a
@@ -416,32 +467,63 @@ mod tests {
             Kind::Passing
         );
         assert_eq!(
-            kind_of(WS_POPUP | WS_THICKFRAME, WS_EX_TOPMOST, "Chrome_WidgetWin_2", false),
+            kind_of(
+                WS_POPUP | WS_THICKFRAME,
+                WS_EX_TOPMOST,
+                "Chrome_WidgetWin_2",
+                false
+            ),
             Kind::Passing
         );
         // The browser's own window, as it is on the screen while it is
         // tiled (read off a running one; gevrek has taken its two boxes),
         // and one of a program made with the same toolkit that draws its
         // own title bar: windows of their own.
-        assert_eq!(kind_of(0x16CC_0000, 0x0020_0100, "Chrome_WidgetWin_1", false), Kind::Ordinary);
-        assert_eq!(kind_of(0x14C7_0000, 0x0020_0100, "Chrome_WidgetWin_1", false), Kind::Ordinary);
         assert_eq!(
-            kind_of(WS_POPUP | WS_THICKFRAME | WS_SYSMENU, 0, "Qt5QWindowIcon", false),
+            kind_of(0x16CC_0000, 0x0020_0100, "Chrome_WidgetWin_1", false),
+            Kind::Ordinary
+        );
+        assert_eq!(
+            kind_of(0x14C7_0000, 0x0020_0100, "Chrome_WidgetWin_1", false),
+            Kind::Ordinary
+        );
+        assert_eq!(
+            kind_of(
+                WS_POPUP | WS_THICKFRAME | WS_SYSMENU,
+                0,
+                "Qt5QWindowIcon",
+                false
+            ),
             Kind::Ordinary
         );
         // Unreal Editor's windows that are none to work in, as they are on
         // the screen (read off a running one): a notification, and the
         // title bar with nothing below it that it keeps from its start.
-        assert_eq!(kind_of(0x9600_0000, 0x0008_0088, "UnrealWindow", false), Kind::Passing);
-        assert_eq!(kind_of(0x14C0_0000, 0x0000_0100, "Static", false), Kind::Passing);
+        assert_eq!(
+            kind_of(0x9600_0000, 0x0008_0088, "UnrealWindow", false),
+            Kind::Passing
+        );
+        assert_eq!(
+            kind_of(0x14C0_0000, 0x0000_0100, "Static", false),
+            Kind::Passing
+        );
         // (A window made of such a part that is a program's window in
         // all else stays one.)
         assert_eq!(kind_of(OVERLAPPED, 0, "STATIC", false), Kind::Ordinary);
-        assert_eq!(kind_of(WS_CAPTION | WS_SYSMENU, 0, "Static", false), Kind::Beside);
+        assert_eq!(
+            kind_of(WS_CAPTION | WS_SYSMENU, 0, "Static", false),
+            Kind::Beside
+        );
         // Its own window is a window of its own.
-        assert_eq!(kind_of(0x96CF_0000, 0x0004_0100, "UnrealWindow", false), Kind::Ordinary);
+        assert_eq!(
+            kind_of(0x96CF_0000, 0x0004_0100, "UnrealWindow", false),
+            Kind::Ordinary
+        );
         // A Qt program's own window is not a popup for being Qt's.
-        assert_eq!(kind_of(OVERLAPPED, 0, "Qt5151QWindowIcon", false), Kind::Ordinary);
+        assert_eq!(
+            kind_of(OVERLAPPED, 0, "Qt5151QWindowIcon", false),
+            Kind::Ordinary
+        );
     }
 
     #[test]
@@ -449,7 +531,12 @@ mod tests {
         // A program's window as Windows makes it is tiled.
         assert!(!floats_with(OVERLAPPED, 0, "Notepad", false));
         // An installer: a title bar, a box to minimise it by, one size.
-        assert!(floats_with(WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, 0, "TWizardForm", false));
+        assert!(floats_with(
+            WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+            0,
+            "TWizardForm",
+            false
+        ));
         // A dialog with no window it belongs to, a splash screen.
         assert!(floats_with(WS_CAPTION | WS_SYSMENU, 0, "#32770", false));
         assert!(floats_with(OVERLAPPED, 0, "#32770", false));
@@ -463,8 +550,18 @@ mod tests {
         ));
         // A program that draws all of its window itself and has no frame
         // of the system's is tiled as before.
-        assert!(!floats_with(WS_POPUP | WS_MINIMIZEBOX | WS_SYSMENU, 0, "Qt5QWindowIcon", false));
-        assert!(!floats_with(WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX, 0, "Chrome_WidgetWin_1", false));
+        assert!(!floats_with(
+            WS_POPUP | WS_MINIMIZEBOX | WS_SYSMENU,
+            0,
+            "Qt5QWindowIcon",
+            false
+        ));
+        assert!(!floats_with(
+            WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX,
+            0,
+            "Chrome_WidgetWin_1",
+            false
+        ));
         // What is not gevrek's is neither.
         assert!(!floats_with(WS_POPUP | WS_CAPTION, 0, "#32770", true));
         assert!(!floats_with(WS_POPUP, WS_EX_TOPMOST, "Toast", false));

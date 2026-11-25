@@ -90,11 +90,19 @@ pub struct Answer {
 
 impl Answer {
     pub fn done() -> Self {
-        Self { ok: true, error: None, events: Vec::new() }
+        Self {
+            ok: true,
+            error: None,
+            events: Vec::new(),
+        }
     }
 
     pub fn refused(reason: impl Into<String>) -> Self {
-        Self { ok: false, error: Some(reason.into()), events: Vec::new() }
+        Self {
+            ok: false,
+            error: Some(reason.into()),
+            events: Vec::new(),
+        }
     }
 
     /// The answer to a command, from the effects it gave: refused with
@@ -106,7 +114,11 @@ impl Answer {
             ZonesEvent::Refused { reason } => Some(reason.clone()),
             _ => None,
         });
-        Self { ok: reason.is_none(), error: reason, events }
+        Self {
+            ok: reason.is_none(),
+            error: reason,
+            events,
+        }
     }
 }
 
@@ -125,7 +137,12 @@ pub fn events_of(effects: &[Effect]) -> Vec<ZonesEvent> {
 pub fn event_name(event: &ZonesEvent) -> String {
     serde_json::to_value(event)
         .ok()
-        .and_then(|value| value.get("event").and_then(|name| name.as_str()).map(str::to_string))
+        .and_then(|value| {
+            value
+                .get("event")
+                .and_then(|name| name.as_str())
+                .map(str::to_string)
+        })
         .unwrap_or_default()
 }
 
@@ -354,9 +371,14 @@ impl ZonesSnapshot {
                 let drawn = scene.zones.iter().find(|zone| zone.zone == definition.id);
                 // Tabs share the place of the first of them.
                 let group = layout::group_of(&groups, &definition.id);
-                let leader = group.and_then(|group| group.members.first()).unwrap_or(&definition.id);
-                let items: Vec<ItemSnapshot> =
-                    core.zone_items(&definition.id, now).into_iter().map(item).collect();
+                let leader = group
+                    .and_then(|group| group.members.first())
+                    .unwrap_or(&definition.id);
+                let items: Vec<ItemSnapshot> = core
+                    .zone_items(&definition.id, now)
+                    .into_iter()
+                    .map(item)
+                    .collect();
                 ZoneSnapshot {
                     id: definition.id.clone(),
                     title: definition.title.clone(),
@@ -382,11 +404,14 @@ impl ZonesSnapshot {
                     masked: core.is_masked(&definition.id),
                     private: definition.private || config.privacy.everything,
                     reserves_space: definition.reserves_space,
-                    focused: core.focus().is_some_and(|focus| focus.zone == definition.id),
+                    focused: core
+                        .focus()
+                        .is_some_and(|focus| focus.zone == definition.id),
                     workspaces: definition.workspaces.clone(),
                     filter: drawn.and_then(|zone| zone.filter.clone()),
                     portal: drawn.and_then(|zone| zone.portal.clone()),
-                    source: matches!(definition.kind, ZoneKind::Smart { .. }).then(|| definition.source.clone()),
+                    source: matches!(definition.kind, ZoneKind::Smart { .. })
+                        .then(|| definition.source.clone()),
                     listing: drawn.and_then(|zone| zone.source.clone()),
                     auto: definition.auto.clone(),
                 }
@@ -429,7 +454,9 @@ impl ZonesSnapshot {
                 .map(|profile| ProfileSummary {
                     key: profile.key.clone(),
                     zones: profile.geometry.len(),
-                    current: core.profile().is_some_and(|current| current.key == profile.key),
+                    current: core
+                        .profile()
+                        .is_some_and(|current| current.key == profile.key),
                 })
                 .collect(),
             reserved: scene.reserved.clone(),
@@ -448,15 +475,19 @@ impl ZonesSnapshot {
     /// Read a snapshot from its JSON. One of a number this reader does
     /// not know is refused: its fields may mean something else.
     pub fn from_json(text: &str) -> Result<Self, String> {
-        let value: serde_json::Value =
-            serde_json::from_str(text).map_err(|error| format!("the zones' state is not JSON: {error}"))?;
-        let version = value.get("version").and_then(|version| version.as_u64()).unwrap_or(0);
+        let value: serde_json::Value = serde_json::from_str(text)
+            .map_err(|error| format!("the zones' state is not JSON: {error}"))?;
+        let version = value
+            .get("version")
+            .and_then(|version| version.as_u64())
+            .unwrap_or(0);
         if version != u64::from(VERSION) {
             return Err(format!(
                 "the zones' state is of version {version}, and this program reads version {VERSION}"
             ));
         }
-        serde_json::from_value(value).map_err(|error| format!("the zones' state is not read: {error}"))
+        serde_json::from_value(value)
+            .map_err(|error| format!("the zones' state is not read: {error}"))
     }
 }
 
@@ -492,7 +523,10 @@ mod tests {
     #[test]
     fn a_request_is_a_core_command_or_one_of_the_other_words() {
         let hide = Request::from_json(r#"{"command":"quick_hide","hidden":true}"#).unwrap();
-        assert_eq!(hide, Request::Command(Command::QuickHide { hidden: Some(true) }));
+        assert_eq!(
+            hide,
+            Request::Command(Command::QuickHide { hidden: Some(true) })
+        );
         assert_eq!(Request::from_value(hide.to_value()).unwrap(), hide);
 
         let restore = Request::from_json(r#"{"command":"restore_system_icons"}"#).unwrap();
@@ -504,7 +538,9 @@ mod tests {
         assert!(unknown.starts_with("not a zones command: "), "{unknown}");
         let missing = Request::from_json(r#"{"command":"rename_zone","zone":"work"}"#).unwrap_err();
         assert!(missing.contains("title"), "{missing}");
-        assert!(Request::from_json("[1]").unwrap_err().contains("\"command\""));
+        assert!(Request::from_json("[1]")
+            .unwrap_err()
+            .contains("\"command\""));
         assert!(Request::from_json("{").unwrap_err().starts_with("not JSON"));
     }
 
@@ -512,14 +548,26 @@ mod tests {
     fn an_answer_says_what_the_core_said() {
         let mut core = core(true);
         let made = core.command(
-            Command::CreateZone { title: "Play".to_string(), kind: ZoneKind::Manual, rect: None },
+            Command::CreateZone {
+                title: "Play".to_string(),
+                kind: ZoneKind::Manual,
+                rect: None,
+            },
             NOW,
         );
         let answer = Answer::of(&made);
         assert!(answer.ok && answer.error.is_none());
-        assert!(answer.events.iter().any(|event| matches!(event, ZonesEvent::ZoneCreated { .. })));
+        assert!(answer
+            .events
+            .iter()
+            .any(|event| matches!(event, ZonesEvent::ZoneCreated { .. })));
 
-        let refused = core.command(Command::DeleteZone { zone: ZoneId::new("nowhere") }, NOW);
+        let refused = core.command(
+            Command::DeleteZone {
+                zone: ZoneId::new("nowhere"),
+            },
+            NOW,
+        );
         let answer = Answer::of(&refused);
         assert!(!answer.ok);
         assert!(answer.error.is_some());
@@ -527,17 +575,28 @@ mod tests {
         // Switched off, the core refuses everything, and says that.
         let mut off = self::core(false);
         let answer = Answer::of(&off.command(Command::QuickHide { hidden: None }, NOW));
-        assert_eq!(answer.error.as_deref(), Some("zones are switched off (desktop.zones.enabled)"));
+        assert_eq!(
+            answer.error.as_deref(),
+            Some("zones are switched off (desktop.zones.enabled)")
+        );
 
         let text = serde_json::to_string(&answer).unwrap();
         assert_eq!(serde_json::from_str::<Answer>(&text).unwrap(), answer);
-        assert_eq!(serde_json::to_string(&Answer::done()).unwrap(), r#"{"ok":true}"#);
+        assert_eq!(
+            serde_json::to_string(&Answer::done()).unwrap(),
+            r#"{"ok":true}"#
+        );
     }
 
     #[test]
     fn events_have_the_names_they_are_told_by() {
         assert_eq!(event_name(&ZonesEvent::LayoutChanged), "layout_changed");
-        assert_eq!(event_name(&ZonesEvent::ZoneCreated { zone: ZoneId::new("a") }), "zone_created");
+        assert_eq!(
+            event_name(&ZonesEvent::ZoneCreated {
+                zone: ZoneId::new("a")
+            }),
+            "zone_created"
+        );
     }
 
     #[test]
@@ -563,21 +622,37 @@ mod tests {
             NOW,
         );
         assert!(Answer::of(&refused).ok);
-        core.command(Command::RollUp { zone: ZoneId::new("work"), rolled_up: Some(true) }, NOW);
         core.command(
-            Command::Lock { zone: ZoneId::new("work"), geometry: Some(true), members: None },
+            Command::RollUp {
+                zone: ZoneId::new("work"),
+                rolled_up: Some(true),
+            },
+            NOW,
+        );
+        core.command(
+            Command::Lock {
+                zone: ZoneId::new("work"),
+                geometry: Some(true),
+                members: None,
+            },
             NOW,
         );
 
         let snapshot = ZonesSnapshot::of(&core, NOW);
         assert_eq!(snapshot.version, VERSION);
         assert!(snapshot.enabled && !snapshot.quick_hidden && !snapshot.peeking);
-        assert_eq!(snapshot.profile.as_ref().unwrap().displays[0].id.as_str(), "DEL-A1B2-77");
+        assert_eq!(
+            snapshot.profile.as_ref().unwrap().displays[0].id.as_str(),
+            "DEL-A1B2-77"
+        );
         assert_eq!(snapshot.displays.len(), 1);
         let zone = snapshot.zone("work").unwrap();
         assert_eq!(zone.title, "Work");
         assert_eq!(zone.display.as_ref().unwrap().as_str(), "DEL-A1B2-77");
-        assert_eq!(zone.geometry.as_ref().unwrap().display.as_str(), "DEL-A1B2-77");
+        assert_eq!(
+            zone.geometry.as_ref().unwrap().display.as_str(),
+            "DEL-A1B2-77"
+        );
         assert!(zone.visible && zone.rolled_up && zone.front);
         assert!(zone.locked.geometry && !zone.locked.members);
         // Rolled up, the rectangle is the title's: lower than the zone is.
@@ -595,7 +670,9 @@ mod tests {
         let text = serde_json::to_string(&snapshot).unwrap();
         assert_eq!(ZonesSnapshot::from_json(&text).unwrap(), snapshot);
         let newer = text.replacen("\"version\":1", "\"version\":2", 1);
-        assert!(ZonesSnapshot::from_json(&newer).unwrap_err().contains("version 2"));
+        assert!(ZonesSnapshot::from_json(&newer)
+            .unwrap_err()
+            .contains("version 2"));
     }
 
     #[test]
@@ -604,6 +681,9 @@ mod tests {
         assert!(!snapshot.enabled);
         let zone = snapshot.zone("work").unwrap();
         assert!(!zone.visible);
-        assert_eq!((zone.rect, zone.display.clone(), zone.geometry.clone()), (None, None, None));
+        assert_eq!(
+            (zone.rect, zone.display.clone(), zone.geometry.clone()),
+            (None, None, None)
+        );
     }
 }

@@ -194,7 +194,11 @@ impl MacDesktop {
     /// The border of a window goes where the window is now (after a move
     /// gevrek did not make: it trails a dragged window a little).
     pub fn follow_border(&mut self, id: WindowHandle) {
-        let Some(rect) = self.get(id).filter(|window| !window.parked).map(|window| window.rect) else {
+        let Some(rect) = self
+            .get(id)
+            .filter(|window| !window.parked)
+            .map(|window| window.rect)
+        else {
             return;
         };
         if let Some(borders) = &mut self.borders {
@@ -439,7 +443,9 @@ impl WindowQueries for MacDesktop {
     }
 
     fn has_title(&self, id: WindowHandle, title: &str) -> Result<bool, String> {
-        Ok(self.get(id).is_some_and(|window| window.title.contains(title)))
+        Ok(self
+            .get(id)
+            .is_some_and(|window| window.title.contains(title)))
     }
 
     fn position(&self, id: WindowHandle) -> Option<(i32, i32)> {
@@ -451,11 +457,15 @@ impl WindowQueries for MacDesktop {
     }
 
     fn title(&self, id: WindowHandle) -> String {
-        self.get(id).map(|window| window.title.clone()).unwrap_or_default()
+        self.get(id)
+            .map(|window| window.title.clone())
+            .unwrap_or_default()
     }
 
     fn class(&self, id: WindowHandle) -> String {
-        self.get(id).map(|window| window.app.app_id()).unwrap_or_default()
+        self.get(id)
+            .map(|window| window.app.app_id())
+            .unwrap_or_default()
     }
 
     fn exe(&self, id: WindowHandle) -> String {
@@ -465,7 +475,9 @@ impl WindowQueries for MacDesktop {
     }
 
     fn path(&self, id: WindowHandle) -> String {
-        self.get(id).map(|window| window.app.path.clone()).unwrap_or_default()
+        self.get(id)
+            .map(|window| window.app.path.clone())
+            .unwrap_or_default()
     }
 
     fn app_id(&self, id: WindowHandle) -> String {
@@ -525,8 +537,9 @@ impl WindowQueries for MacDesktop {
 
     // A dialog stands where its program put it (over its window).
     fn placed_itself(&self, id: WindowHandle) -> bool {
-        self.get(id)
-            .is_some_and(|window| window.subrole == "AXDialog" || window.subrole == "AXSystemDialog")
+        self.get(id).is_some_and(|window| {
+            window.subrole == "AXDialog" || window.subrole == "AXSystemDialog"
+        })
     }
 
     fn is_tracked(&self, id: WindowHandle) -> bool {
@@ -851,7 +864,11 @@ impl Desktop for MacDesktop {
         look: &gevrek_engine::workspace::BorderLook,
         is_focused: bool,
     ) -> anyhow::Result<()> {
-        let Some(at) = self.get(id).filter(|window| !window.parked).map(|window| window.rect) else {
+        let Some(at) = self
+            .get(id)
+            .filter(|window| !window.parked)
+            .map(|window| window.rect)
+        else {
             return Ok(());
         };
         self.decorate_window_at(id, at, look, is_focused)
@@ -934,7 +951,10 @@ impl Desktop for MacDesktop {
         Ok(())
     }
 
-    fn launch(&mut self, launch_profile: &gevrek_model::settings::LaunchProfile) -> anyhow::Result<u32> {
+    fn launch(
+        &mut self,
+        launch_profile: &gevrek_model::settings::LaunchProfile,
+    ) -> anyhow::Result<u32> {
         launch(launch_profile)
     }
 

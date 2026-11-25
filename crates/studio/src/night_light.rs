@@ -94,7 +94,12 @@ pub struct Card {
 impl Card {
     /// Draw the card's inside. What it asks of the window manager (a
     /// command as JSON), if anything.
-    pub fn show(&mut self, ui: &mut Ui, document: &mut Document, connected: bool) -> Option<String> {
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        document: &mut Document,
+        connected: bool,
+    ) -> Option<String> {
         let palette = theme::pal(ui.ctx());
         let at = |name: &str| format!("{PLACE}/{name}");
         let text = |document: &Document, name: &str| {
@@ -346,7 +351,9 @@ mod tests {
         // The set points are in order, within the track, and the model's
         // usual temperature is one of them.
         assert!(STOPS.windows(2).all(|pair| pair[0].value < pair[1].value));
-        assert!(STOPS.iter().all(|stop| stop.value >= WARMEST && stop.value <= NEUTRAL as f32));
+        assert!(STOPS
+            .iter()
+            .all(|stop| stop.value >= WARMEST && stop.value <= NEUTRAL as f32));
         let usual = gevrek_model::night_light::NightLightConfig::default().temperature;
         assert!(STOPS.iter().any(|stop| stop.value == usual as f32));
     }
@@ -372,7 +379,9 @@ mod tests {
         document.set("/desktop/night_light/from", Value::String("evening".into()));
         draw(&mut card, &mut document);
         assert_eq!(
-            document.get("/desktop/night_light/from").and_then(Value::as_str),
+            document
+                .get("/desktop/night_light/from")
+                .and_then(Value::as_str),
             Some("evening")
         );
     }

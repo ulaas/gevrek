@@ -304,7 +304,11 @@ fn press_is_anothers(at: (i32, i32)) -> bool {
 /// windows (or has none any more).
 pub fn set_helper_answers(answers: bool) {
     ROLE.store(
-        if answers { ROLE_WITH_HELPER } else { ROLE_ALONE },
+        if answers {
+            ROLE_WITH_HELPER
+        } else {
+            ROLE_ALONE
+        },
         std::sync::atomic::Ordering::Relaxed,
     );
 }
@@ -1049,9 +1053,9 @@ fn run_input_loop(
             // release was not heard (`is_a_new_press`), then it is let go
             // first and pressed anew.
             if raw.down
-                && pressed.get(&identity).is_some_and(|state| {
-                    is_a_new_press(raw.device, state.last_heard.elapsed())
-                })
+                && pressed
+                    .get(&identity)
+                    .is_some_and(|state| is_a_new_press(raw.device, state.last_heard.elapsed()))
             {
                 pressed.remove(&identity);
             }
@@ -1696,12 +1700,21 @@ mod helper_tests {
     #[test]
     fn a_press_whose_release_was_not_heard_is_a_press_again() {
         // A held key repeats: told again soon, it is a repeat.
-        assert!(!is_a_new_press(BindingDevice::Keyboard, Duration::from_millis(40)));
-        assert!(!is_a_new_press(BindingDevice::Keyboard, Duration::from_millis(600)));
+        assert!(!is_a_new_press(
+            BindingDevice::Keyboard,
+            Duration::from_millis(40)
+        ));
+        assert!(!is_a_new_press(
+            BindingDevice::Keyboard,
+            Duration::from_millis(600)
+        ));
         // Silent for long and then down again: it had been let go.
         assert!(is_a_new_press(BindingDevice::Keyboard, HELD_KEY_SILENCE));
         // A button of the mouse does not repeat at all.
-        assert!(is_a_new_press(BindingDevice::Mouse, Duration::from_millis(1)));
+        assert!(is_a_new_press(
+            BindingDevice::Mouse,
+            Duration::from_millis(1)
+        ));
     }
 
     fn key(name: &str, ctrl: bool, alt: bool, win: bool) -> Hotkey {
@@ -1740,7 +1753,12 @@ mod helper_tests {
         assert!(!may_be_heard_by_helper(&key("Q", true, true, false)));
         // Keys that type nothing.
         assert!(may_be_heard_by_helper(&key("F12", false, false, false)));
-        assert!(may_be_heard_by_helper(&key("VOLUME_UP", false, false, false)));
+        assert!(may_be_heard_by_helper(&key(
+            "VOLUME_UP",
+            false,
+            false,
+            false
+        )));
         assert!(!may_be_heard_by_helper(&key("F", false, false, false)));
         // A button of the mouse says nothing of what is typed.
         let mut button = key("MIDDLE", false, false, false);

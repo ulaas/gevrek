@@ -29,7 +29,10 @@ impl ZonesCore {
         let ZoneKind::Portal { directory } = &definition.kind else {
             return None;
         };
-        self.view.portals.get(&definition.id).filter(|view| view.root() == directory)
+        self.view
+            .portals
+            .get(&definition.id)
+            .filter(|view| view.root() == directory)
     }
 
     /// The folder a portal shows now: the one it walked to, or its own.
@@ -38,7 +41,11 @@ impl ZonesCore {
         let ZoneKind::Portal { directory } = &definition.kind else {
             return None;
         };
-        Some(self.portal_view(definition).map_or(directory.as_str(), |view| view.current()).to_string())
+        Some(
+            self.portal_view(definition)
+                .map_or(directory.as_str(), |view| view.current())
+                .to_string(),
+        )
     }
 
     /// The folder a zone's items come from: a portal's, or the folder a
@@ -76,7 +83,11 @@ impl ZonesCore {
         };
         let fresh = PortalView::new(directory);
         let view = self.portal_view(definition).unwrap_or(&fresh);
-        let listing = self.listings.get(view.current()).cloned().unwrap_or_default();
+        let listing = self
+            .listings
+            .get(view.current())
+            .cloned()
+            .unwrap_or_default();
         Some(view.scene(listing))
     }
 
@@ -88,8 +99,15 @@ impl ZonesCore {
         }
         match &definition.source {
             SmartSource::Desktop => None,
-            SmartSource::Folder { directory } => Some(self.listings.get(directory).cloned().unwrap_or_default()),
-            source => Some(self.source_listings.get(source).cloned().unwrap_or_default()),
+            SmartSource::Folder { directory } => {
+                Some(self.listings.get(directory).cloned().unwrap_or_default())
+            }
+            source => Some(
+                self.source_listings
+                    .get(source)
+                    .cloned()
+                    .unwrap_or_default(),
+            ),
         }
     }
 
@@ -97,7 +115,12 @@ impl ZonesCore {
     /// that all of its query holds for, in the source's order. Asked of
     /// the desktop, an empty query shows nothing (it would be the whole
     /// desktop again); asked of anything else, it shows all there is.
-    pub(super) fn smart_items(&self, definition: &ZoneDefinition, query: &[Matcher], now: u64) -> Vec<&Item> {
+    pub(super) fn smart_items(
+        &self,
+        definition: &ZoneDefinition,
+        query: &[Matcher],
+        now: u64,
+    ) -> Vec<&Item> {
         let fits = |item: &&Item| query.iter().all(|matcher| rules::holds(matcher, item, now));
         match &definition.source {
             SmartSource::Desktop if query.is_empty() => Vec::new(),
@@ -124,7 +147,12 @@ impl ZonesCore {
         self.listings.insert(directory.to_string(), listing.clone());
         self.showing(directory)
             .into_iter()
-            .map(|zone| Effect::Notify(ZonesEvent::ListingChanged { zone, listing: listing.clone() }))
+            .map(|zone| {
+                Effect::Notify(ZonesEvent::ListingChanged {
+                    zone,
+                    listing: listing.clone(),
+                })
+            })
             .collect()
     }
 
@@ -144,9 +172,14 @@ impl ZonesCore {
         let mut effects = Vec::new();
         for zone in self.fed_by(source) {
             if changed {
-                effects.push(Effect::Notify(ZonesEvent::ListingChanged { zone: zone.clone(), listing: listing.clone() }));
+                effects.push(Effect::Notify(ZonesEvent::ListingChanged {
+                    zone: zone.clone(),
+                    listing: listing.clone(),
+                }));
             }
-            effects.push(Effect::Notify(ZonesEvent::ItemsChanged { zone: Some(zone) }));
+            effects.push(Effect::Notify(ZonesEvent::ItemsChanged {
+                zone: Some(zone),
+            }));
         }
         effects
     }
@@ -160,7 +193,11 @@ impl ZonesCore {
         self.source_is(&source, Listing::Ready)
     }
 
-    pub(super) fn source_failed(&mut self, source: SmartSource, error: BackendError) -> Vec<Effect> {
+    pub(super) fn source_failed(
+        &mut self,
+        source: SmartSource,
+        error: BackendError,
+    ) -> Vec<Effect> {
         if !self.watched_sources.contains(&source) {
             return Vec::new();
         }
@@ -172,7 +209,12 @@ impl ZonesCore {
             return self.source_is(&source, Listing::Ready);
         }
         self.sources.remove(&source);
-        self.source_is(&source, Listing::Unavailable { reason: error.to_string() })
+        self.source_is(
+            &source,
+            Listing::Unavailable {
+                reason: error.to_string(),
+            },
+        )
     }
 
     pub(super) fn navigate(&mut self, zone: &ZoneId, way: Way) -> Outcome {
@@ -180,7 +222,10 @@ impl ZonesCore {
         let ZoneKind::Portal { directory: root } = &definition.kind else {
             return Err(format!("{zone} is no portal"));
         };
-        let mut view = self.portal_view(&definition).cloned().unwrap_or_else(|| PortalView::new(root));
+        let mut view = self
+            .portal_view(&definition)
+            .cloned()
+            .unwrap_or_else(|| PortalView::new(root));
         let went = match way {
             Way::Into(item) => {
                 let folder = self
@@ -198,11 +243,17 @@ impl ZonesCore {
                 }
                 view.go(&directory)
             }
-            Way::Up if view.at_root() => return Err(format!("{zone} is in its own folder: there is no way up")),
+            Way::Up if view.at_root() => {
+                return Err(format!("{zone} is in its own folder: there is no way up"))
+            }
             Way::Up => view.up(),
-            Way::Back if !view.can_go_back() => return Err(format!("{zone} has not been anywhere else")),
+            Way::Back if !view.can_go_back() => {
+                return Err(format!("{zone} has not been anywhere else"))
+            }
             Way::Back => view.back(),
-            Way::Forward if !view.can_go_forward() => return Err(format!("{zone} has nowhere to go forward to")),
+            Way::Forward if !view.can_go_forward() => {
+                return Err(format!("{zone} has nowhere to go forward to"))
+            }
             Way::Forward => view.forward(),
         };
         if !went {
@@ -212,12 +263,20 @@ impl ZonesCore {
         self.view.portals.insert(zone.clone(), view);
         // What was typed was typed of the folder that was shown.
         let filtered = self.view.filters.remove(zone).is_some();
-        let mut effects = vec![Effect::Notify(ZonesEvent::Navigated { zone: zone.clone(), directory })];
+        let mut effects = vec![Effect::Notify(ZonesEvent::Navigated {
+            zone: zone.clone(),
+            directory,
+        })];
         if filtered {
-            effects.push(Effect::Notify(ZonesEvent::FilterChanged { zone: zone.clone(), typed: String::new() }));
+            effects.push(Effect::Notify(ZonesEvent::FilterChanged {
+                zone: zone.clone(),
+                typed: String::new(),
+            }));
         }
         effects.extend(self.sync_watches());
-        effects.push(Effect::Notify(ZonesEvent::ItemsChanged { zone: Some(zone.clone()) }));
+        effects.push(Effect::Notify(ZonesEvent::ItemsChanged {
+            zone: Some(zone.clone()),
+        }));
         Ok(effects)
     }
 
@@ -231,7 +290,9 @@ impl ZonesCore {
         match (&definition.kind, &definition.source) {
             (ZoneKind::Smart { .. }, source) if self.watched_sources.contains(source) => {
                 let mut effects = self.source_is(source, Listing::Loading);
-                effects.push(Effect::Ask(BackendRequest::ListSource { source: source.clone() }));
+                effects.push(Effect::Ask(BackendRequest::ListSource {
+                    source: source.clone(),
+                }));
                 Ok(effects)
             }
             // The desktop is told of as it changes: there is nothing to ask.
@@ -241,7 +302,9 @@ impl ZonesCore {
 
     pub(super) fn new_folder(&mut self, zone: &ZoneId, name: &str) -> Outcome {
         let definition = self.known(zone)?.clone();
-        let parent = self.directory_of(&definition).ok_or_else(|| format!("{zone} shows no folder to make one in"))?;
+        let parent = self
+            .directory_of(&definition)
+            .ok_or_else(|| format!("{zone} shows no folder to make one in"))?;
         self.new_folder_in(parent, name)
     }
 
@@ -253,11 +316,19 @@ impl ZonesCore {
         if name.is_empty() || name.contains(['/', '\\']) {
             return Err("that is no name for a folder".to_string());
         }
-        let operation = FileOperation::NewFolder { parent, name: name.to_string() };
+        let operation = FileOperation::NewFolder {
+            parent,
+            name: name.to_string(),
+        };
         Ok(vec![self.ask(Pending::Portal { operation })])
     }
 
-    pub(super) fn move_items_to_folder(&mut self, items: &[ItemId], folder: &str, copy: bool) -> Outcome {
+    pub(super) fn move_items_to_folder(
+        &mut self,
+        items: &[ItemId],
+        folder: &str,
+        copy: bool,
+    ) -> Outcome {
         if folder.trim().is_empty() {
             return Err("name the folder the files go to".to_string());
         }
@@ -265,8 +336,15 @@ impl ZonesCore {
         for id in items {
             // Taking a file away takes it out of its zone, which a lock
             // forbids; a copy leaves it there.
-            let locked = !copy && self.zone_of(id).is_some_and(|zone| self.lock_of(zone).members);
-            let Some(from) = self.item(id).and_then(|item| item.path.clone()).filter(|_| !locked) else {
+            let locked = !copy
+                && self
+                    .zone_of(id)
+                    .is_some_and(|zone| self.lock_of(zone).members);
+            let Some(from) = self
+                .item(id)
+                .and_then(|item| item.path.clone())
+                .filter(|_| !locked)
+            else {
                 continue;
             };
             if !copy && paths::parent(&from).is_some_and(|at| paths::same_folder(at, folder)) {
@@ -277,8 +355,11 @@ impl ZonesCore {
                 continue;
             }
             let to_folder = folder.to_string();
-            let operation =
-                if copy { FileOperation::Copy { from, to_folder } } else { FileOperation::Move { from, to_folder } };
+            let operation = if copy {
+                FileOperation::Copy { from, to_folder }
+            } else {
+                FileOperation::Move { from, to_folder }
+            };
             effects.push(self.ask(Pending::Portal { operation }));
         }
         if effects.is_empty() {
@@ -298,12 +379,19 @@ impl ZonesCore {
                 let pending = self.pending.get(request)?;
                 let operation = pending.operation();
                 let (path, folders): (&str, Vec<&str>) = match operation {
-                    FileOperation::Copy { from, to_folder } | FileOperation::Move { from, to_folder } => {
-                        (from, paths::parent(from).into_iter().chain([to_folder.as_str()]).collect())
-                    }
+                    FileOperation::Copy { from, to_folder }
+                    | FileOperation::Move { from, to_folder } => (
+                        from,
+                        paths::parent(from)
+                            .into_iter()
+                            .chain([to_folder.as_str()])
+                            .collect(),
+                    ),
                     FileOperation::Rename { path, .. }
                     | FileOperation::Trash { path }
-                    | FileOperation::Restore { path } => (path, paths::parent(path).into_iter().collect()),
+                    | FileOperation::Restore { path } => {
+                        (path, paths::parent(path).into_iter().collect())
+                    }
                     FileOperation::NewFolder { parent, .. } => (parent, vec![parent.as_str()]),
                 };
                 let item = self
@@ -312,8 +400,14 @@ impl ZonesCore {
                     .chain(self.directories.values().flat_map(|items| items.values()))
                     .find(|item| item.path.as_deref() == Some(path))
                     .map(|item| item.id.clone());
-                let mut zones: Vec<ZoneId> = folders.iter().flat_map(|folder| self.showing(folder)).collect();
-                if let Pending::Arriving { zone: Some(zone), .. } = pending {
+                let mut zones: Vec<ZoneId> = folders
+                    .iter()
+                    .flat_map(|folder| self.showing(folder))
+                    .collect();
+                if let Pending::Arriving {
+                    zone: Some(zone), ..
+                } = pending
+                {
                     zones.push(zone.clone());
                 }
                 zones.extend(item.as_ref().and_then(|item| self.zone_of(item)).cloned());
@@ -356,7 +450,10 @@ impl ZonesCore {
             self.view.filters.insert(zone.clone(), typed.to_string());
         }
         Ok(vec![
-            Effect::Notify(ZonesEvent::FilterChanged { zone: zone.clone(), typed: typed.to_string() }),
+            Effect::Notify(ZonesEvent::FilterChanged {
+                zone: zone.clone(),
+                typed: typed.to_string(),
+            }),
             Effect::Notify(ZonesEvent::ItemsChanged { zone: Some(zone) }),
         ])
     }

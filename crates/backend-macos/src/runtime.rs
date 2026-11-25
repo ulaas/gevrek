@@ -16,16 +16,14 @@ use crate::apps::{self, App};
 use crate::ax::Element;
 use crate::desktop::{handle_of, MacDesktop};
 use crate::observer::{self, AxEvent, AxEventKind, Observer};
+use gevrek_engine::contract::WindowQueries as _;
 use gevrek_engine::core::WmCore;
 use gevrek_engine::events::WindowEvent;
-use gevrek_engine::executor::{
-    Executor, LogBroadcast, NodeEventBroadcast, RuntimeEventKind,
-};
+use gevrek_engine::executor::{Executor, LogBroadcast, NodeEventBroadcast, RuntimeEventKind};
 use gevrek_engine::focus_manager::FocusManager;
 use gevrek_engine::input::Hotkey;
 use gevrek_engine::outputs::Outputs;
 use gevrek_engine::rules::RuleEngine;
-use gevrek_engine::contract::WindowQueries as _;
 use gevrek_engine::{Desktop, WindowHandle};
 use gevrek_host::wm::bindings::Bindings as _;
 use gevrek_host::wm::commands::Commands as _;
@@ -292,7 +290,9 @@ impl MacRuntime {
             .map(|(id, _)| *id)
             .collect();
         for id in parked {
-            let _ = self.desktop.apply(&gevrek_engine::Effect::SetVisible { id, visible: true });
+            let _ = self
+                .desktop
+                .apply(&gevrek_engine::Effect::SetVisible { id, visible: true });
         }
         log::info!("gevrek stopped cleanly");
     }
@@ -302,7 +302,10 @@ impl MacRuntime {
     fn window_event(&mut self, event: WindowEvent) {
         let (kind, window, fields) = RuntimeEventKind::of_window_event(&event);
         self.host.emit(kind, Some(window), fields);
-        if let Err(error) = self.core.handle_window_event(&mut self.desktop, event.clone()) {
+        if let Err(error) = self
+            .core
+            .handle_window_event(&mut self.desktop, event.clone())
+        {
             log::warn!("{event:?}: {error}");
         }
         self.settle();
@@ -390,7 +393,8 @@ impl MacRuntime {
                             WindowEvent::Created(id)
                         });
                         if !away {
-                            self.overlays_due.push((id, Instant::now() + FULL_SCREEN_ANIMATION));
+                            self.overlays_due
+                                .push((id, Instant::now() + FULL_SCREEN_ANIMATION));
                         }
                         continue;
                     }
@@ -400,7 +404,11 @@ impl MacRuntime {
                     }
                     self.desktop.refresh(id);
                     self.desktop.follow_border(id);
-                    let rect = self.desktop.get(id).map(|window| window.rect).unwrap_or_default();
+                    let rect = self
+                        .desktop
+                        .get(id)
+                        .map(|window| window.rect)
+                        .unwrap_or_default();
                     self.window_event(if event.kind == AxEventKind::Moved {
                         WindowEvent::Moved(id, rect.x, rect.y)
                     } else {
@@ -498,13 +506,15 @@ impl MacRuntime {
         let past = objc2_foundation::NSDate::distantPast();
         // SAFETY: the run loop mode is the system's constant.
         let mode = unsafe { objc2_foundation::NSDefaultRunLoopMode };
-        while let Some(event) =
-            app.nextEventMatchingMask_untilDate_inMode_dequeue(NSEventMask::Any, Some(&past), mode, true)
-        {
+        while let Some(event) = app.nextEventMatchingMask_untilDate_inMode_dequeue(
+            NSEventMask::Any,
+            Some(&past),
+            mode,
+            true,
+        ) {
             if event.r#type() == NSEventType::LeftMouseDown {
                 let at = event.locationInWindow();
-                if let Some((key, index)) =
-                    self.desktop.stackbar_tab_at(event.windowNumber(), at.x)
+                if let Some((key, index)) = self.desktop.stackbar_tab_at(event.windowNumber(), at.x)
                 {
                     if let Err(error) = self.core.executor.focus_stackbar_tab(
                         &mut self.desktop,
@@ -530,7 +540,10 @@ impl MacRuntime {
             keys.paused = self.host.paused();
             keys.managed = self.desktop.shown_window_ids();
             keys.tick(Instant::now());
-            (std::mem::take(&mut keys.hits), std::mem::take(&mut keys.drags))
+            (
+                std::mem::take(&mut keys.hits),
+                std::mem::take(&mut keys.drags),
+            )
         };
         for hit in hits {
             self.bindings_triggered(&hit);
@@ -604,7 +617,10 @@ impl MacRuntime {
         let running: Vec<App> = apps::running()
             .into_iter()
             .filter(|app| app.regular && app.pid != apps::own_pid())
-            .filter(|app| only.as_ref().is_none_or(|only| only.contains(&app.app_id())))
+            .filter(|app| {
+                only.as_ref()
+                    .is_none_or(|only| only.contains(&app.app_id()))
+            })
             .collect();
         let gone: Vec<i32> = self
             .observers
@@ -763,8 +779,11 @@ impl WmHost for MacRuntime {
         let registrations = gevrek_host::wm::bindings::gesture_registrations(&self.config);
         let gestures = &self.config.desktop.gestures;
         let wanted = !registrations.is_empty();
-        self.gestures
-            .configure(registrations, gestures.idle_timeout_ms, gestures.axis_lock_ratio);
+        self.gestures.configure(
+            registrations,
+            gestures.idle_timeout_ms,
+            gestures.axis_lock_ratio,
+        );
         if wanted && self.touchpad.is_none() {
             self.touchpad = crate::touchpad::Touchpad::start();
         } else if !wanted {
@@ -852,10 +871,28 @@ impl Drag {
             return gevrek_engine::Rect::new(start.x + dx, start.y + dy, start.width, start.height);
         }
         let min = crate::keys::MIN_DRAG_SIZE;
-        let width = if self.from_left { start.width - dx } else { start.width + dx }.max(min);
-        let height = if self.from_top { start.height - dy } else { start.height + dy }.max(min);
-        let x = if self.from_left { start.x + start.width - width } else { start.x };
-        let y = if self.from_top { start.y + start.height - height } else { start.y };
+        let width = if self.from_left {
+            start.width - dx
+        } else {
+            start.width + dx
+        }
+        .max(min);
+        let height = if self.from_top {
+            start.height - dy
+        } else {
+            start.height + dy
+        }
+        .max(min);
+        let x = if self.from_left {
+            start.x + start.width - width
+        } else {
+            start.x
+        };
+        let y = if self.from_top {
+            start.y + start.height - height
+        } else {
+            start.y
+        };
         gevrek_engine::Rect::new(x, y, width, height)
     }
 }
@@ -867,7 +904,8 @@ impl Drag {
 /// programs use Option with the mouse themselves (Finder copies what is
 /// dragged with it).
 fn drag_modifier() -> Option<crate::keys::Held> {
-    let named = std::env::var("GEVREK_MACOS_DRAG_MODIFIER").unwrap_or_else(|_| "option".to_string());
+    let named =
+        std::env::var("GEVREK_MACOS_DRAG_MODIFIER").unwrap_or_else(|_| "option".to_string());
     let mut held = crate::keys::Held::default();
     for name in named.split(',') {
         match name.trim().to_ascii_lowercase().as_str() {
@@ -911,7 +949,10 @@ pub fn run(
         anyhow::bail!("the macOS window manager runs on the main thread");
     };
     if let Some(only) = only_these_programs() {
-        log::warn!("GEVREK_MACOS_ONLY: only these programs are managed: {}", only.join(", "));
+        log::warn!(
+            "GEVREK_MACOS_ONLY: only these programs are managed: {}",
+            only.join(", ")
+        );
     }
     let mut runtime = MacRuntime::new(config, mtm, log_broadcast, node_events);
     runtime.attach(links);
@@ -957,6 +998,9 @@ mod tests {
         );
         // Never smaller than the least size.
         let tiny = drag(true, false, false).rect_at((-2000, -2000));
-        assert_eq!((tiny.width, tiny.height), (crate::keys::MIN_DRAG_SIZE, crate::keys::MIN_DRAG_SIZE));
+        assert_eq!(
+            (tiny.width, tiny.height),
+            (crate::keys::MIN_DRAG_SIZE, crate::keys::MIN_DRAG_SIZE)
+        );
     }
 }

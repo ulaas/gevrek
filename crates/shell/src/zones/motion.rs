@@ -74,10 +74,20 @@ impl Motion {
     /// shown); one whose end changed sets out from where it is.
     pub fn toward(&mut self, part: Part, to: f32, lasts: f32, now: f64) -> f32 {
         let still = self.still;
-        let glide = self.glides.entry(part).or_insert(Glide { from: to, to, began: now, lasts: 0.0 });
+        let glide = self.glides.entry(part).or_insert(Glide {
+            from: to,
+            to,
+            began: now,
+            lasts: 0.0,
+        });
         if glide.to != to {
             let from = glide.value(now);
-            *glide = Glide { from, to, began: now, lasts: if still { 0.0 } else { lasts } };
+            *glide = Glide {
+                from,
+                to,
+                began: now,
+                lasts: if still { 0.0 } else { lasts },
+            };
         }
         if still {
             return to;
@@ -100,14 +110,22 @@ impl Motion {
         }
         let along = since / REFUSAL;
         let fading = 1.0 - along;
-        let aside = if self.still { 0.0 } else { (along * std::f32::consts::TAU * 2.5).sin() * 5.0 * fading };
+        let aside = if self.still {
+            0.0
+        } else {
+            (along * std::f32::consts::TAU * 2.5).sin() * 5.0 * fading
+        };
         Some((aside, if self.still { 1.0 } else { fading.sqrt() }))
     }
 
     /// Whether something is on its way at `now`: the next frame is wanted.
     pub fn busy(&self, now: f64) -> bool {
         (!self.still && self.glides.values().any(|glide| glide.moving(now)))
-            || (!self.still && self.refusals.values().any(|at| ((now - at) as f32) < REFUSAL))
+            || (!self.still
+                && self
+                    .refusals
+                    .values()
+                    .any(|at| ((now - at) as f32) < REFUSAL))
     }
 
     /// In how many seconds something that is shown for a while and does
@@ -126,7 +144,8 @@ impl Motion {
 
     /// Forget what is over, and the zones that are no longer there.
     pub fn settle(&mut self, now: f64, there: &dyn Fn(&ZoneId) -> bool) {
-        self.refusals.retain(|zone, at| ((now - *at) as f32) < REFUSAL && there(zone));
+        self.refusals
+            .retain(|zone, at| ((now - *at) as f32) < REFUSAL && there(zone));
         self.glides.retain(|part, _| match part {
             Part::Open(zone) => there(zone),
             Part::Loose | Part::Peek => true,
@@ -166,7 +185,10 @@ mod tests {
 
     #[test]
     fn with_movement_reduced_everything_is_at_its_end_at_once() {
-        let mut motion = Motion { still: true, ..Motion::default() };
+        let mut motion = Motion {
+            still: true,
+            ..Motion::default()
+        };
         let part = Part::Loose;
         assert_eq!(motion.toward(part.clone(), 1.0, FADE, 5.0), 1.0);
         assert_eq!(motion.toward(part.clone(), 0.0, FADE, 5.0), 0.0);
@@ -178,7 +200,10 @@ mod tests {
         assert!(!motion.busy(5.1));
         let left = motion.ends_in(5.1).unwrap();
         assert!((left - (REFUSAL - 0.1)).abs() < 0.001, "{left}");
-        assert_eq!(motion.refusal(&zone("a"), 5.0 + f64::from(REFUSAL) + 0.01), None);
+        assert_eq!(
+            motion.refusal(&zone("a"), 5.0 + f64::from(REFUSAL) + 0.01),
+            None
+        );
         assert_eq!(motion.ends_in(6.0), None);
     }
 
@@ -188,9 +213,16 @@ mod tests {
         assert_eq!(motion.refusal(&zone("a"), 1.0), None);
         motion.refused(&zone("a"), 1.0);
         let (aside, mark) = motion.refusal(&zone("a"), 1.05).unwrap();
-        assert!(aside.abs() > 1.0 && aside.abs() <= 5.0 && mark > 0.8, "{aside} {mark}");
+        assert!(
+            aside.abs() > 1.0 && aside.abs() <= 5.0 && mark > 0.8,
+            "{aside} {mark}"
+        );
         assert!(motion.busy(1.05));
-        assert_eq!(motion.ends_in(1.05), None, "frames follow each other while it shakes");
+        assert_eq!(
+            motion.ends_in(1.05),
+            None,
+            "frames follow each other while it shakes"
+        );
         assert!(!motion.busy(2.0));
         motion.settle(2.0, &|_| true);
         assert!(motion.refusals.is_empty());

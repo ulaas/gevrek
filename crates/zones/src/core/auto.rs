@@ -29,7 +29,10 @@ impl ZonesCore {
             return Ok(Vec::new());
         }
         self.state.grey_icons = on;
-        Ok(vec![Effect::Notify(ZonesEvent::GreyIconsChanged { on }), Effect::SaveState])
+        Ok(vec![
+            Effect::Notify(ZonesEvent::GreyIconsChanged { on }),
+            Effect::SaveState,
+        ])
     }
 
     /// Whether the last making of zones by type can be taken back
@@ -79,43 +82,99 @@ impl ZonesCore {
             add_rules: add_rules.unwrap_or(self.config.auto.add_rules),
         };
         let planned = |taken: &[Rect]| {
-            let room = Room { display: &display.id, area, taken, metrics: &self.metrics };
-            auto::plan(&self.config, self.items.values(), &self.state.placements, asked, &room, &|zone| self.zone_rect(zone))
+            let room = Room {
+                display: &display.id,
+                area,
+                taken,
+                metrics: &self.metrics,
+            };
+            auto::plan(
+                &self.config,
+                self.items.values(),
+                &self.state.placements,
+                asked,
+                &room,
+                &|zone| self.zone_rect(zone),
+            )
         };
         // What stays loose keeps its place on the desktop: a new zone is
         // not made over an icon that goes into none. Which items stay is
         // known once it is known which go, so the zones are placed twice:
         // first to see what goes, then around what is left lying.
         let first = planned(&taken);
-        let goes: BTreeSet<&ItemId> = first.zones.iter().flat_map(|zone| zone.items.iter()).collect();
+        let goes: BTreeSet<&ItemId> = first
+            .zones
+            .iter()
+            .flat_map(|zone| zone.items.iter())
+            .collect();
         taken.extend(self.loose_left_on(display, area, &goes));
         Ok(planned(&taken))
     }
 
     /// Where the loose items of a display would lie once some of them
     /// have gone into zones: each one's cell, on the desktop.
-    fn loose_left_on(&self, display: &crate::geometry::Display, area: Rect, goes: &BTreeSet<&ItemId>) -> Vec<Rect> {
+    fn loose_left_on(
+        &self,
+        display: &crate::geometry::Display,
+        area: Rect,
+        goes: &BTreeSet<&ItemId>,
+    ) -> Vec<Rect> {
         let Some(fallback) = fallback_display(&self.displays).map(|display| &display.id) else {
             return Vec::new();
         };
         let here = |item: &&crate::Item| {
-            let own = self.state.placements.loose.get(&item.id).map(|position| &position.display);
-            own.filter(|wanted| self.displays.iter().any(|display| &display.id == *wanted)).unwrap_or(fallback) == &display.id
+            let own = self
+                .state
+                .placements
+                .loose
+                .get(&item.id)
+                .map(|position| &position.display);
+            own.filter(|wanted| self.displays.iter().any(|display| &display.id == *wanted))
+                .unwrap_or(fallback)
+                == &display.id
         };
-        let stays: Vec<&crate::Item> = self.loose_items().into_iter().filter(|item| !goes.contains(&item.id) && !self.is_withheld(&item.id)).filter(here).collect();
-        let ids: Vec<ItemId> = crate::layout::sorted(stays, crate::config::Sort::Name, false).iter().map(|item| item.id.clone()).collect();
+        let stays: Vec<&crate::Item> = self
+            .loose_items()
+            .into_iter()
+            .filter(|item| !goes.contains(&item.id) && !self.is_withheld(&item.id))
+            .filter(here)
+            .collect();
+        let ids: Vec<ItemId> = crate::layout::sorted(stays, crate::config::Sort::Name, false)
+            .iter()
+            .map(|item| item.id.clone())
+            .collect();
         let own: std::collections::BTreeMap<ItemId, (i32, i32)> = ids
             .iter()
             .filter_map(|id| {
                 let position = self.state.placements.loose.get(id)?;
-                (position.display == display.id)
-                    .then(|| (id.clone(), (position.x - (area.x - display.rect.x), position.y - (area.y - display.rect.y))))
+                (position.display == display.id).then(|| {
+                    (
+                        id.clone(),
+                        (
+                            position.x - (area.x - display.rect.x),
+                            position.y - (area.y - display.rect.y),
+                        ),
+                    )
+                })
             })
             .collect();
-        crate::layout::lay_out_loose(self.config.loose_icon_size, &self.metrics, (area.width, area.height), &ids, &own)
-            .into_iter()
-            .map(|placed| Rect::new(area.x + placed.rect.x, area.y + placed.rect.y, placed.rect.width, placed.rect.height))
-            .collect()
+        crate::layout::lay_out_loose(
+            self.config.loose_icon_size,
+            &self.metrics,
+            (area.width, area.height),
+            &ids,
+            &own,
+        )
+        .into_iter()
+        .map(|placed| {
+            Rect::new(
+                area.x + placed.rect.x,
+                area.y + placed.rect.y,
+                placed.rect.width,
+                placed.rect.height,
+            )
+        })
+        .collect()
     }
 
     /// What making zones by type would do now (`Command::AutoCreate`
@@ -128,8 +187,15 @@ impl ZonesCore {
     /// where none is given). `display`: where new zones are made (the
     /// primary one where none is given). While no display is known, or
     /// the one named is not there, the plan is empty.
-    pub fn auto_plan(&self, scope: Scope, min_items: Option<u32>, display: Option<&DisplayId>, _now: u64) -> AutoPlan {
-        self.auto_planned(scope, min_items, display, None).unwrap_or_default()
+    pub fn auto_plan(
+        &self,
+        scope: Scope,
+        min_items: Option<u32>,
+        display: Option<&DisplayId>,
+        _now: u64,
+    ) -> AutoPlan {
+        self.auto_planned(scope, min_items, display, None)
+            .unwrap_or_default()
     }
 
     pub(super) fn auto_create(
@@ -150,9 +216,16 @@ impl ZonesCore {
         }
         if plan.zones.is_empty() {
             // Nothing to do, and nothing to take back that was not there before.
-            return Ok(vec![Effect::Notify(ZonesEvent::AutoCreated { zones: Vec::new(), items: 0, rules: 0 })]);
+            return Ok(vec![Effect::Notify(ZonesEvent::AutoCreated {
+                zones: Vec::new(),
+                items: 0,
+                rules: 0,
+            })]);
         }
-        let mut record = AutoUndo { made_at: now, ..AutoUndo::default() };
+        let mut record = AutoUndo {
+            made_at: now,
+            ..AutoUndo::default()
+        };
         let mut effects = Vec::new();
         let mut filled: Vec<ZoneId> = Vec::new();
         let mut emptied: BTreeSet<Option<ZoneId>> = BTreeSet::new();
@@ -160,7 +233,11 @@ impl ZonesCore {
             let zone = match &planned.zone {
                 Some(zone) => zone.clone(),
                 None => {
-                    let made = self.create_zone(planned.title.clone(), ZoneKind::Manual, Some(planned.rect))?;
+                    let made = self.create_zone(
+                        planned.title.clone(),
+                        ZoneKind::Manual,
+                        Some(planned.rect),
+                    )?;
                     let zone = made
                         .iter()
                         .find_map(|effect| match effect {
@@ -172,9 +249,20 @@ impl ZonesCore {
                     if let Some(definition) = self.config.zone_mut(&zone) {
                         definition.auto = Some(planned.category.clone());
                     }
-                    record.zones.push(AutoMade { zone: zone.clone(), category: planned.category.clone() });
-                    let category = self.config.auto.categories.iter().find(|category| category.id == planned.category);
-                    if let Some(rule) = category.filter(|_| planned.rule).and_then(|category| auto::rule_for(category, &zone)) {
+                    record.zones.push(AutoMade {
+                        zone: zone.clone(),
+                        category: planned.category.clone(),
+                    });
+                    let category = self
+                        .config
+                        .auto
+                        .categories
+                        .iter()
+                        .find(|category| category.id == planned.category);
+                    if let Some(rule) = category
+                        .filter(|_| planned.rule)
+                        .and_then(|category| auto::rule_for(category, &zone))
+                    {
                         self.config.rules.push(rule.clone());
                         record.rules.push(rule);
                     }
@@ -185,7 +273,11 @@ impl ZonesCore {
                 emptied.insert(self.zone_of(item).cloned());
                 let before = self.state.placements.whereabouts(item);
                 self.state.placements.assign(item, &zone, None, None);
-                record.entries.push(AutoMoved { item: item.clone(), before, zone: zone.clone() });
+                record.entries.push(AutoMoved {
+                    item: item.clone(),
+                    before,
+                    zone: zone.clone(),
+                });
             }
             filled.push(zone);
         }
@@ -193,7 +285,9 @@ impl ZonesCore {
         // One saving for all of it, at the end.
         effects.retain(|effect| !matches!(effect, Effect::SaveConfig | Effect::SaveState));
         for zone in &filled {
-            effects.push(Effect::Notify(ZonesEvent::ItemsChanged { zone: Some(zone.clone()) }));
+            effects.push(Effect::Notify(ZonesEvent::ItemsChanged {
+                zone: Some(zone.clone()),
+            }));
         }
         for zone in emptied {
             effects.push(Effect::Notify(ZonesEvent::ItemsChanged { zone }));
@@ -232,11 +326,17 @@ impl ZonesCore {
         let record = self.state.auto_undo.take().unwrap_or_default();
         // The zones it made that go again: still that type's, and not locked.
         let goes = |core: &Self, made: &AutoMade| {
-            core.config.zone(&made.zone).is_some_and(|zone| zone.auto.as_deref() == Some(made.category.as_str()))
+            core.config
+                .zone(&made.zone)
+                .is_some_and(|zone| zone.auto.as_deref() == Some(made.category.as_str()))
                 && !core.lock_of(&made.zone).members
         };
-        let stays: BTreeSet<&ZoneId> =
-            record.zones.iter().filter(|made| !goes(self, made)).map(|made| &made.zone).collect();
+        let stays: BTreeSet<&ZoneId> = record
+            .zones
+            .iter()
+            .filter(|made| !goes(self, made))
+            .map(|made| &made.zone)
+            .collect();
         let mut touched: BTreeSet<Option<ZoneId>> = BTreeSet::new();
         let mut items = 0;
         // The last first: each entry says where its item was when it was
@@ -250,7 +350,9 @@ impl ZonesCore {
             // nothing back: its item lies loose.
             let before = match &entry.before {
                 Whereabouts::Zone { zone, .. }
-                    if !self.config.zone(zone).is_some_and(|zone| zone.kind == ZoneKind::Manual && !zone.lock.members) =>
+                    if !self.config.zone(zone).is_some_and(|zone| {
+                        zone.kind == ZoneKind::Manual && !zone.lock.members
+                    }) =>
                 {
                     Whereabouts::Loose { position: None }
                 }
@@ -289,11 +391,18 @@ impl ZonesCore {
         }
         effects.retain(|effect| !matches!(effect, Effect::SaveConfig | Effect::SaveState));
         for zone in touched {
-            if zone.as_ref().is_none_or(|zone| self.config.zone(zone).is_some()) {
+            if zone
+                .as_ref()
+                .is_none_or(|zone| self.config.zone(zone).is_some())
+            {
                 effects.push(Effect::Notify(ZonesEvent::ItemsChanged { zone }));
             }
         }
-        effects.push(Effect::Notify(ZonesEvent::AutoUndone { zones, items, rules }));
+        effects.push(Effect::Notify(ZonesEvent::AutoUndone {
+            zones,
+            items,
+            rules,
+        }));
         effects.push(Effect::Notify(ZonesEvent::LayoutChanged));
         if zones > 0 || rules > 0 {
             effects.push(Effect::SaveConfig);

@@ -72,9 +72,10 @@ impl FontsCard {
             ),
         ] {
             let shown = fonts::shown_name(choice, default);
-            let (pick, reset) = widgets::row(ui, label, help, *choice != Choice::Default, false, |ui| {
-                self.picker(ui, label, &shown, default, builtin)
-            });
+            let (pick, reset) =
+                widgets::row(ui, label, help, *choice != Choice::Default, false, |ui| {
+                    self.picker(ui, label, &shown, default, builtin)
+                });
             if reset {
                 *choice = Choice::Default;
             }
@@ -83,7 +84,10 @@ impl FontsCard {
             }
         }
         ui.add_space(6.0);
-        widgets::caption(ui, "Each area in the interface's font, or a font of its own.");
+        widgets::caption(
+            ui,
+            "Each area in the interface's font, or a font of its own.",
+        );
         for area in Area::ALL {
             let choice = chosen.area(area).clone();
             let default = "As the interface";
@@ -111,7 +115,11 @@ impl FontsCard {
             .unwrap_or("")
             .to_owned();
         let default = "The system's";
-        let shown = if family.is_empty() { default } else { family.as_str() };
+        let shown = if family.is_empty() {
+            default
+        } else {
+            family.as_str()
+        };
         let (pick, reset) = widgets::row(
             ui,
             "Stack bar tabs",
@@ -183,7 +191,10 @@ impl FontsCard {
                 let families = fonts::families();
                 if families.is_empty() {
                     let muted = theme::pal(ui.ctx()).muted;
-                    ui.colored_label(muted, format!("{}  No font of the system's was found.", icons::INFO));
+                    ui.colored_label(
+                        muted,
+                        format!("{}  No font of the system's was found.", icons::INFO),
+                    );
                 }
                 for font in families {
                     if !needle.is_empty() && !font.family.to_lowercase().contains(&needle) {

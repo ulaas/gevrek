@@ -775,7 +775,10 @@ mod tests {
         assert_eq!(subsystem_of(b"not a program"), None);
         assert_eq!(subsystem_of(&header(2)[..0x90]), None);
         // One with windows of its own, by its file's name as it is written.
-        assert_eq!(own_program_name("Peek.exe", Some(2)), Some("Peek".to_string()));
+        assert_eq!(
+            own_program_name("Peek.exe", Some(2)),
+            Some("Peek".to_string())
+        );
         // One for a terminal, a copy from before an update, another file.
         assert_eq!(own_program_name("soyuz-tui.exe", Some(3)), None);
         assert_eq!(own_program_name("peek.old.exe", Some(2)), None);
@@ -799,11 +802,18 @@ mod tests {
     fn a_program_the_start_menu_has_is_not_listed_twice() {
         let found = |_: &str| Found::File;
         let menu = gather(
-            &[shortcut("Soyuz.lnk", "Soyuz", "C:\\Programs\\Soyuz\\soyuz.exe", "")],
+            &[shortcut(
+                "Soyuz.lnk",
+                "Soyuz",
+                "C:\\Programs\\Soyuz\\soyuz.exe",
+                "",
+            )],
             &[],
             &found,
         );
-        let own = |name: &str| app_of_program(std::path::Path::new(&format!("C:\\bin\\{name}.exe")), name);
+        let own = |name: &str| {
+            app_of_program(std::path::Path::new(&format!("C:\\bin\\{name}.exe")), name)
+        };
         let all = with_own_programs(menu, vec![own("soyuz"), own("peek"), own("walle")]);
         let names: Vec<&str> = all.iter().map(|app| app.name.as_str()).collect();
         assert_eq!(names, ["peek", "Soyuz", "walle"]);

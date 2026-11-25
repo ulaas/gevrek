@@ -1020,7 +1020,11 @@ impl DesktopConfig {
     /// Give the workspace `name` the title `title` on every display: in
     /// every entry that is written down for it.
     pub fn title_workspace(&mut self, name: &str, title: &str) -> Titled {
-        if !self.workspaces.iter().any(|profile| same_name(&profile.name, name)) {
+        if !self
+            .workspaces
+            .iter()
+            .any(|profile| same_name(&profile.name, name))
+        {
             return Titled::Unknown;
         }
         let typed = title.trim();
@@ -1236,10 +1240,9 @@ impl DesktopConfig {
         (1usize..)
             .map(|number| number.to_string())
             .find(|text| {
-                !self
-                    .workspaces
-                    .iter()
-                    .any(|profile| same_name(&profile.name, text) || same_name(profile.label(), text))
+                !self.workspaces.iter().any(|profile| {
+                    same_name(&profile.name, text) || same_name(profile.label(), text)
+                })
             })
             .unwrap_or_default()
     }
@@ -1283,7 +1286,8 @@ impl DesktopConfig {
     /// there was one.
     pub fn remove_workspace(&mut self, name: &str) -> bool {
         let before = self.workspaces.len();
-        self.workspaces.retain(|profile| !same_name(&profile.name, name));
+        self.workspaces
+            .retain(|profile| !same_name(&profile.name, name));
         self.workspaces.len() != before
     }
 
@@ -1317,11 +1321,18 @@ impl DesktopConfig {
                 .into_iter()
                 .partition(|profile| same_name(&profile.name, name));
         let at = before
-            .and_then(|before| rest.iter().position(|profile| same_name(&profile.name, before)))
+            .and_then(|before| {
+                rest.iter()
+                    .position(|profile| same_name(&profile.name, before))
+            })
             .unwrap_or(rest.len());
         rest.splice(at..at, moved);
         self.workspaces = rest;
-        was != self.workspaces.iter().map(|p| p.name.clone()).collect::<Vec<_>>()
+        was != self
+            .workspaces
+            .iter()
+            .map(|p| p.name.clone())
+            .collect::<Vec<_>>()
     }
 
     /// Give the workspace `old` the name `new` (the name it is known by
@@ -1363,7 +1374,9 @@ impl DesktopConfig {
         let with = |super_held: bool, alt_held: bool| {
             self.bindings
                 .iter()
-                .filter(|binding| binding.enabled && binding.win == super_held && binding.alt == alt_held)
+                .filter(|binding| {
+                    binding.enabled && binding.win == super_held && binding.alt == alt_held
+                })
                 .count()
         };
         if with(false, true) > with(true, false) {
@@ -1470,7 +1483,9 @@ impl DesktopConfig {
             ));
         }
         let floating = &self.appearance.floating;
-        if floating.separate && floating.border_enabled && !(1..=32).contains(&floating.border_width)
+        if floating.separate
+            && floating.border_enabled
+            && !(1..=32).contains(&floating.border_width)
         {
             issues.push(ConfigIssue::error(
                 "desktop.appearance.floating.border_width",
@@ -1663,7 +1678,10 @@ impl DesktopConfig {
             }
             // Room between and around the windows: nothing less than
             // none, and nothing that leaves the windows no room at all.
-            for (name, gap) in [("gaps_in", workspace.gaps_in), ("gaps_out", workspace.gaps_out)] {
+            for (name, gap) in [
+                ("gaps_in", workspace.gaps_in),
+                ("gaps_out", workspace.gaps_out),
+            ] {
                 if !(0..=500).contains(&gap) {
                     issues.push(ConfigIssue::error(
                         format!("{path}.{name}"),
@@ -2035,7 +2053,10 @@ impl DesktopConfig {
                 ));
             }
             if let Some(problem) = selector_pattern_problem(&binding.command) {
-                issues.push(ConfigIssue::error(format!("{path}.command.selector"), problem));
+                issues.push(ConfigIssue::error(
+                    format!("{path}.command.selector"),
+                    problem,
+                ));
             }
             if let DispatchCommand::SetBindingSubmap { name } = &binding.command {
                 let target = name.trim().to_ascii_lowercase();
@@ -2270,7 +2291,10 @@ impl DesktopConfig {
                 _ => {}
             }
             if let Some(problem) = selector_pattern_problem(&gesture.command) {
-                issues.push(ConfigIssue::error(format!("{path}.command.selector"), problem));
+                issues.push(ConfigIssue::error(
+                    format!("{path}.command.selector"),
+                    problem,
+                ));
             }
         }
 
@@ -2371,7 +2395,11 @@ impl DesktopConfig {
         issues
     }
 
-    fn snap_validate_zone_layout(layout: &SnapZoneLayout, path: &str, issues: &mut Vec<ConfigIssue>) {
+    fn snap_validate_zone_layout(
+        layout: &SnapZoneLayout,
+        path: &str,
+        issues: &mut Vec<ConfigIssue>,
+    ) {
         if layout.id.trim().is_empty() {
             issues.push(ConfigIssue::error(
                 format!("{path}.id"),
@@ -5228,10 +5256,16 @@ mod workspace_rename_tests {
                 } if name == wanted)
             })
         };
-        assert!(shows(&desktop, "1"), "the starting keys show workspace 1 by its name");
+        assert!(
+            shows(&desktop, "1"),
+            "the starting keys show workspace 1 by its name"
+        );
 
         assert!(desktop.rename_workspace("1", " web "));
-        assert!(desktop.workspaces.iter().any(|profile| profile.name == "web"));
+        assert!(desktop
+            .workspaces
+            .iter()
+            .any(|profile| profile.name == "web"));
         assert!(!desktop.workspaces.iter().any(|profile| profile.name == "1"));
         // The key that showed it shows it still.
         assert!(shows(&desktop, "web") && !shows(&desktop, "1"));
@@ -5251,7 +5285,11 @@ mod odd_value_tests {
     use super::*;
 
     fn problems(desktop: &DesktopConfig) -> Vec<String> {
-        desktop.validate().into_iter().map(|issue| issue.path).collect()
+        desktop
+            .validate()
+            .into_iter()
+            .map(|issue| issue.path)
+            .collect()
     }
 
     #[test]
@@ -5275,7 +5313,10 @@ mod odd_value_tests {
         assert_eq!(first.chord_key(), second.chord_key());
         desktop.bindings.push(first);
         desktop.bindings.push(second);
-        assert!(!problems(&desktop).is_empty(), "two bindings on one key are told of");
+        assert!(
+            !problems(&desktop).is_empty(),
+            "two bindings on one key are told of"
+        );
         assert_eq!(crate::keys::canonical_key_name(" esc "), "ESCAPE");
         assert_eq!(crate::keys::canonical_key_name("oem_minus"), "MINUS");
         assert_eq!(crate::keys::canonical_key_name("X1"), "X1");
@@ -5294,11 +5335,26 @@ mod odd_value_tests {
             );
         };
         told(&|desktop| desktop.workspaces[0].gaps_in = -4, "gaps_in");
-        told(&|desktop| desktop.workspaces[0].gaps_out = 100_000, "gaps_out");
-        told(&|desktop| desktop.appearance.effects.shadow.radius = u32::MAX, "shadow.radius");
-        told(&|desktop| desktop.appearance.effects.shadow.offset_x = i32::MIN, "shadow.offset_x");
-        told(&|desktop| desktop.appearance.effects.glow.radius = 5000, "glow.radius");
-        told(&|desktop| desktop.animations.session.duration_ms = 600_000, "session.duration_ms");
+        told(
+            &|desktop| desktop.workspaces[0].gaps_out = 100_000,
+            "gaps_out",
+        );
+        told(
+            &|desktop| desktop.appearance.effects.shadow.radius = u32::MAX,
+            "shadow.radius",
+        );
+        told(
+            &|desktop| desktop.appearance.effects.shadow.offset_x = i32::MIN,
+            "shadow.offset_x",
+        );
+        told(
+            &|desktop| desktop.appearance.effects.glow.radius = 5000,
+            "glow.radius",
+        );
+        told(
+            &|desktop| desktop.animations.session.duration_ms = 600_000,
+            "session.duration_ms",
+        );
         // (And none of them overflows where it is used.)
         let mut desktop = good.clone();
         desktop.appearance.effects.shadow.enabled = true;
@@ -5343,13 +5399,23 @@ mod workspace_per_display_tests {
         let before = desktop.workspaces.len();
         let bindings = serde_json::to_value(&desktop.bindings).unwrap();
         let (one, two) = (DisplayRef::named("DP-1"), DisplayRef::named("DP-2"));
-        assert_eq!(desktop.title_workspace_on(&one, "1", "web"), Titled::Changed);
+        assert_eq!(
+            desktop.title_workspace_on(&one, "1", "web"),
+            Titled::Changed
+        );
         // The entry for every display is as it was; this display has one
         // of its own for the same workspace, right after it.
         assert_eq!(desktop.workspaces.len(), before + 1);
-        let shared = desktop.workspaces.iter().position(|p| p.name == "1").unwrap();
+        let shared = desktop
+            .workspaces
+            .iter()
+            .position(|p| p.name == "1")
+            .unwrap();
         let own = &desktop.workspaces[shared + 1];
-        assert_eq!((own.name.as_str(), own.title.as_deref()), ("1", Some("web")));
+        assert_eq!(
+            (own.name.as_str(), own.title.as_deref()),
+            ("1", Some("web"))
+        );
         assert_eq!(own.monitor, MonitorSelector::Name("DP-1".to_string()));
         assert_eq!(desktop.workspaces[shared].title, None);
         // Nothing that names the workspace has changed, and nothing has to.
@@ -5360,25 +5426,49 @@ mod workspace_per_display_tests {
         )));
         assert_eq!(labels(&desktop, "DP-1")[0], "web");
         assert_eq!(labels(&desktop, "DP-2")[0], "1");
-        assert_eq!(labels(&desktop, "DP-1").len(), labels(&desktop, "DP-2").len());
+        assert_eq!(
+            labels(&desktop, "DP-1").len(),
+            labels(&desktop, "DP-2").len()
+        );
         assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
 
         // Titled again there, as often as one likes: the same entry.
-        assert_eq!(desktop.title_workspace_on(&one, "1", "mail"), Titled::Changed);
-        assert_eq!(desktop.title_workspace_on(&one, "1", " mail "), Titled::Same);
+        assert_eq!(
+            desktop.title_workspace_on(&one, "1", "mail"),
+            Titled::Changed
+        );
+        assert_eq!(
+            desktop.title_workspace_on(&one, "1", " mail "),
+            Titled::Same
+        );
         assert_eq!(desktop.workspaces.len(), before + 1);
         assert_eq!(labels(&desktop, "DP-1")[0], "mail");
         // Another display has a title of its own for it.
-        assert_eq!(desktop.title_workspace_on(&two, "1", "chat"), Titled::Changed);
+        assert_eq!(
+            desktop.title_workspace_on(&two, "1", "chat"),
+            Titled::Changed
+        );
         assert_eq!(desktop.workspaces.len(), before + 2);
-        assert_eq!((labels(&desktop, "DP-1")[0].as_str(), labels(&desktop, "DP-2")[0].as_str()), ("mail", "chat"));
+        assert_eq!(
+            (
+                labels(&desktop, "DP-1")[0].as_str(),
+                labels(&desktop, "DP-2")[0].as_str()
+            ),
+            ("mail", "chat")
+        );
         // The same title on two displays is nobody's trouble.
-        assert_eq!(desktop.title_workspace_on(&two, "2", "mail"), Titled::Changed);
+        assert_eq!(
+            desktop.title_workspace_on(&two, "2", "mail"),
+            Titled::Changed
+        );
         // What another workspace of the display is shown by or named,
         // and a workspace nobody has.
         assert_eq!(desktop.title_workspace_on(&one, "2", "mail"), Titled::Taken);
         assert_eq!(desktop.title_workspace_on(&one, "2", "3"), Titled::Taken);
-        assert_eq!(desktop.title_workspace_on(&one, "nothing", "x"), Titled::Unknown);
+        assert_eq!(
+            desktop.title_workspace_on(&one, "nothing", "x"),
+            Titled::Unknown
+        );
         assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
 
         // The title given back: the display's own entry says nothing of
@@ -5410,21 +5500,33 @@ mod workspace_per_display_tests {
     #[test]
     fn a_display_has_its_own_entry_before_the_one_for_every_display() {
         let mut desktop = crate::examples::starting_configuration().desktop;
-        let shared = desktop.workspaces.iter().position(|p| p.name == "2").unwrap();
+        let shared = desktop
+            .workspaces
+            .iter()
+            .position(|p| p.name == "2")
+            .unwrap();
         // DP-1 lays workspace 2 out another way, and does not have 3.
         let mut own = desktop.workspaces[shared].clone();
         own.monitor = MonitorSelector::Name("dp-1".to_string());
         own.layout = crate::layout::LayoutType::Monocle;
         desktop.workspaces.push(own);
-        let mut off = desktop.workspaces.iter().find(|p| p.name == "3").unwrap().clone();
+        let mut off = desktop
+            .workspaces
+            .iter()
+            .find(|p| p.name == "3")
+            .unwrap()
+            .clone();
         off.monitor = MonitorSelector::Name("DP-1".to_string());
         off.enabled = false;
         desktop.workspaces.push(off);
         assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
 
         let one = DisplayRef::named("DP-1");
-        let there: Vec<&str> =
-            desktop.workspaces_on(&one).iter().map(|profile| profile.name.as_str()).collect();
+        let there: Vec<&str> = desktop
+            .workspaces_on(&one)
+            .iter()
+            .map(|profile| profile.name.as_str())
+            .collect();
         // In the order they are written in, the display's own in the
         // place of the one it stands for.
         assert_eq!(&there[..3], ["1", "2", "4"]);
@@ -5453,7 +5555,9 @@ mod workspace_per_display_tests {
         let kept = desktop.workspace_on(&one, "10").unwrap();
         assert_eq!(kept.label(), "music");
         assert!(kept.persistent && !kept.default);
-        assert!(desktop.workspace_on(&DisplayRef::named("DP-2"), "10").is_none());
+        assert!(desktop
+            .workspace_on(&DisplayRef::named("DP-2"), "10")
+            .is_none());
         // It is the display's last, and one it has is not written twice.
         assert_eq!(desktop.workspaces_on(&one).last().unwrap().name, "10");
         assert!(!desktop.keep_workspace_on(&one, "10", "again"));
@@ -5468,10 +5572,16 @@ mod workspace_per_display_tests {
         let before = desktop.workspaces.len();
         let (one, two) = (DisplayRef::named("DP-1"), DisplayRef::named("DP-2"));
         let layout = |desktop: &DesktopConfig, display: &DisplayRef, name: &str| {
-            desktop.workspace_on(display, name).map(|profile| profile.layout)
+            desktop
+                .workspace_on(display, name)
+                .map(|profile| profile.layout)
         };
         let shared = layout(&desktop, &one, "2").unwrap();
-        let other = if shared == LayoutType::Monocle { LayoutType::BSP } else { LayoutType::Monocle };
+        let other = if shared == LayoutType::Monocle {
+            LayoutType::BSP
+        } else {
+            LayoutType::Monocle
+        };
 
         // For one display: an entry of its own, and gone again when it
         // says what every display has.
@@ -5559,7 +5669,10 @@ mod workspace_per_display_tests {
         assert_eq!(&names(&desktop, "DP-2")[..4], ["3", "1", "2", "4"]);
         assert_eq!(desktop.workspace_on(&one, "3").unwrap().label(), "mail");
         assert!(desktop.move_workspace("3", None));
-        assert_eq!(names(&desktop, "DP-1").last().map(String::as_str), Some("3"));
+        assert_eq!(
+            names(&desktop, "DP-1").last().map(String::as_str),
+            Some("3")
+        );
         assert!(!desktop.move_workspace("3", None));
         assert!(!desktop.move_workspace("3", Some("3")));
 
@@ -5570,7 +5683,10 @@ mod workspace_per_display_tests {
         assert!(!desktop.remove_workspace("3"));
         // One that only this display has, not wanted there: gone.
         assert!(desktop.have_workspace_on(&one, &here, false));
-        assert!(!desktop.workspaces.iter().any(|profile| profile.name == here));
+        assert!(!desktop
+            .workspaces
+            .iter()
+            .any(|profile| profile.name == here));
         assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
     }
 
@@ -5586,7 +5702,8 @@ mod workspace_per_display_tests {
         assert!(display.is_meant_by(&MonitorSelector::Index(1)));
         assert!(!display.is_meant_by(&MonitorSelector::Index(0)));
         assert!(display.is_meant_by(&MonitorSelector::Name("Monitor ACM2702".to_string())));
-        let bare = DisplayRef::of_state(&serde_json::json!({"name": "eDP-1", "connector": ""}), None);
+        let bare =
+            DisplayRef::of_state(&serde_json::json!({"name": "eDP-1", "connector": ""}), None);
         assert_eq!(bare.name(), "eDP-1");
     }
 
@@ -5606,8 +5723,13 @@ mod workspace_per_display_tests {
         assert_eq!(desktop.workspaces.len(), 3);
         assert_eq!(labels(&desktop, "DP-1"), ["1", "3"]);
         assert_eq!(labels(&desktop, "DP-2"), ["Saturn", "3"]);
-        let own = desktop.workspace_on(&DisplayRef::named("DP-1"), "saturn").unwrap();
-        assert_eq!((own.name.as_str(), own.title.as_deref()), ("Saturn", Some("1")));
+        let own = desktop
+            .workspace_on(&DisplayRef::named("DP-1"), "saturn")
+            .unwrap();
+        assert_eq!(
+            (own.name.as_str(), own.title.as_deref()),
+            ("Saturn", Some("1"))
+        );
         assert!(desktop.validate().is_empty(), "{:?}", desktop.validate());
         // Written again, nothing of the old way is left.
         let text = serde_json::to_string(&desktop).unwrap();

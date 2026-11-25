@@ -121,7 +121,11 @@ const KINDS: [&str; 4] = ["png", "jpg", "jpeg", "bmp"];
 fn shown_by_the_system(file: &Path) -> bool {
     file.extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| KINDS.iter().any(|kind| extension.eq_ignore_ascii_case(kind)))
+        .is_some_and(|extension| {
+            KINDS
+                .iter()
+                .any(|kind| extension.eq_ignore_ascii_case(kind))
+        })
 }
 
 /// The pictures of a slideshow's folder the system can show, by name.
@@ -146,7 +150,8 @@ fn told(file: &Path) -> String {
 }
 
 fn same_file(a: &str, b: &str) -> bool {
-    a.replace('/', "\\").eq_ignore_ascii_case(&b.replace('/', "\\"))
+    a.replace('/', "\\")
+        .eq_ignore_ascii_case(&b.replace('/', "\\"))
 }
 
 /// What the person had before gevrek changed anything.
@@ -899,7 +904,13 @@ pub mod system {
                 if items.GetCount().ok()? != 1 {
                     return None;
                 }
-                let place = taken(items.GetItemAt(0).ok()?.GetDisplayName(SIGDN_FILESYSPATH).ok()?);
+                let place = taken(
+                    items
+                        .GetItemAt(0)
+                        .ok()?
+                        .GetDisplayName(SIGDN_FILESYSPATH)
+                        .ok()?,
+                );
                 let mut options = DESKTOP_SLIDESHOW_OPTIONS(0);
                 let mut tick = 0u32;
                 self.api.GetSlideshowOptions(&mut options, &mut tick).ok()?;
@@ -978,7 +989,10 @@ mod tests {
             self.kind
         }
         fn displays(&self) -> Vec<String> {
-            self.pictures.iter().map(|(display, _)| display.clone()).collect()
+            self.pictures
+                .iter()
+                .map(|(display, _)| display.clone())
+                .collect()
         }
         fn picture(&self, display: &str) -> Option<String> {
             self.pictures
@@ -1055,7 +1069,12 @@ mod tests {
     fn names(display: &str) -> Vec<String> {
         vec![
             display.to_string(),
-            if display == "one" { "DISPLAY1" } else { "DISPLAY2" }.to_string(),
+            if display == "one" {
+                "DISPLAY1"
+            } else {
+                "DISPLAY2"
+            }
+            .to_string(),
         ]
     }
 
@@ -1104,7 +1123,10 @@ mod tests {
 
         assert!(!wallpaper.follow(&wanted, &mut desktop, &names, 0));
         let given = told(&folder.join("a.png"));
-        assert_eq!((desktop.shows("one"), desktop.shows("two")), (given.clone(), given.clone()));
+        assert_eq!(
+            (desktop.shows("one"), desktop.shows("two")),
+            (given.clone(), given.clone())
+        );
         assert_eq!((desktop.position, desktop.colour), (3, 0x00030201));
         assert!(wallpaper.has_given() && kept.exists());
         // Asked again, nothing is set again.
@@ -1117,7 +1139,10 @@ mod tests {
         wallpaper.follow(&WallpaperConfig::default(), &mut desktop, &names, 9);
         assert_eq!(
             (desktop.shows("one"), desktop.shows("two")),
-            (r"C:\own\first.jpg".to_string(), r"C:\own\second.jpg".to_string())
+            (
+                r"C:\own\first.jpg".to_string(),
+                r"C:\own\second.jpg".to_string()
+            )
         );
         assert_eq!((desktop.position, desktop.colour), (5, 0x00112233));
         assert!(!wallpaper.has_given() && !kept.exists());
@@ -1182,7 +1207,10 @@ mod tests {
         let mut wallpaper = Wallpaper::kept_in(Some(kept.clone()));
         assert!(!wallpaper.follow(&wanted, &mut desktop, &names, 0));
         assert!(wallpaper.notice().is_none());
-        assert_eq!((desktop.shows("one"), desktop.kind), (given.clone(), Kind::Picture));
+        assert_eq!(
+            (desktop.shows("one"), desktop.kind),
+            (given.clone(), Kind::Picture)
+        );
         // (The system says for a moment that it still shows no picture:
         // gevrek does not take that for the person's choice.)
         desktop.kind = Kind::Plain;
@@ -1190,7 +1218,10 @@ mod tests {
         assert!(wallpaper.has_given());
         desktop.kind = Kind::Picture;
         wallpaper.give_back(&mut desktop);
-        assert_eq!((desktop.shows("one"), desktop.kind), (String::new(), Kind::Plain));
+        assert_eq!(
+            (desktop.shows("one"), desktop.kind),
+            (String::new(), Kind::Plain)
+        );
         assert_eq!((desktop.position, desktop.colour), (5, 0x00112233));
         assert!(!kept.exists());
 
@@ -1202,11 +1233,18 @@ mod tests {
             options: 1,
             tick: 1_800_000,
         };
-        let mut desktop = Fake::with(Kind::Slideshow, r"C:\own\pictures\x.jpg", r"C:\own\pictures\y.jpg");
+        let mut desktop = Fake::with(
+            Kind::Slideshow,
+            r"C:\own\pictures\x.jpg",
+            r"C:\own\pictures\y.jpg",
+        );
         desktop.slides = Some(slides.clone());
         let mut first = Wallpaper::kept_in(Some(kept.clone()));
         first.follow(&wanted, &mut desktop, &names, 0);
-        assert_eq!((desktop.shows("two"), desktop.kind), (given.clone(), Kind::Picture));
+        assert_eq!(
+            (desktop.shows("two"), desktop.kind),
+            (given.clone(), Kind::Picture)
+        );
         drop(first);
         let mut second = Wallpaper::kept_in(Some(kept.clone()));
         second.follow(&WallpaperConfig::default(), &mut desktop, &names, 1);
@@ -1223,7 +1261,10 @@ mod tests {
         assert!(wallpaper.holds() && wallpaper.has_work(&WallpaperConfig::default()));
         desktop.set_picture("one", &given);
         wallpaper.follow(&WallpaperConfig::default(), &mut desktop, &names, 1);
-        assert_eq!((desktop.shows("one"), desktop.kind), (String::new(), Kind::Plain));
+        assert_eq!(
+            (desktop.shows("one"), desktop.kind),
+            (String::new(), Kind::Plain)
+        );
         // (Not a picture that is somebody else's.)
         desktop.set_picture("one", r"C:\other\new.jpg");
         wallpaper.hold(&mut desktop);
@@ -1237,7 +1278,10 @@ mod tests {
         desktop.set_picture("one", r"C:\other\new.jpg");
         desktop.set_picture("two", r"C:\other\new.jpg");
         wallpaper.give_back(&mut desktop);
-        assert_eq!((desktop.shows("one"), desktop.kind), (r"C:\other\new.jpg".to_string(), Kind::Picture));
+        assert_eq!(
+            (desktop.shows("one"), desktop.kind),
+            (r"C:\other\new.jpg".to_string(), Kind::Picture)
+        );
         let _ = std::fs::remove_dir_all(folder);
     }
 
@@ -1262,7 +1306,10 @@ mod tests {
         wallpaper.give_back(&mut desktop);
         assert_eq!(
             (desktop.shows("one"), desktop.shows("two")),
-            (r"C:\own\first.jpg".to_string(), r"C:\other\new.jpg".to_string())
+            (
+                r"C:\own\first.jpg".to_string(),
+                r"C:\other\new.jpg".to_string()
+            )
         );
         let _ = std::fs::remove_dir_all(folder);
     }
@@ -1273,12 +1320,14 @@ mod tests {
         let mut desktop = Fake::with(Kind::Picture, r"C:\own\first.jpg", r"C:\own\second.jpg");
         let mut wallpaper = Wallpaper::kept_in(Some(folder.join("kept.json")));
         let mut wanted = config(&folder.join("a.png"));
-        wanted.outputs.push(gevrek_model::wallpaper::OutputWallpaper {
-            name: "display2".to_string(),
-            image: folder.join("b.jpg").display().to_string(),
-            fit: WallpaperFit::Tile,
-            ..Default::default()
-        });
+        wanted
+            .outputs
+            .push(gevrek_model::wallpaper::OutputWallpaper {
+                name: "display2".to_string(),
+                image: folder.join("b.jpg").display().to_string(),
+                fit: WallpaperFit::Tile,
+                ..Default::default()
+            });
         wallpaper.follow(&wanted, &mut desktop, &names, 0);
         assert_eq!(desktop.shows("one"), told(&folder.join("a.png")));
         assert_eq!(desktop.shows("two"), told(&folder.join("b.jpg")));
@@ -1306,10 +1355,12 @@ mod tests {
         let mut desktop = Fake::with(Kind::Picture, r"C:\own\first.jpg", r"C:\own\second.jpg");
         let mut wallpaper = Wallpaper::kept_in(Some(folder.join("other.json")));
         let mut wanted = config(&folder.join("missing.png"));
-        wanted.outputs.push(gevrek_model::wallpaper::OutputWallpaper {
-            name: "DISPLAY2".to_string(),
-            ..Default::default()
-        });
+        wanted
+            .outputs
+            .push(gevrek_model::wallpaper::OutputWallpaper {
+                name: "DISPLAY2".to_string(),
+                ..Default::default()
+            });
         wallpaper.follow(&wanted, &mut desktop, &names, 0);
         wallpaper.follow(&config(&folder.join("d.webp")), &mut desktop, &names, 1);
         assert_eq!(desktop.set, 0);
@@ -1334,7 +1385,10 @@ mod tests {
         second.follow(&WallpaperConfig::default(), &mut desktop, &names, 1);
         assert_eq!(
             (desktop.shows("one"), desktop.shows("two")),
-            (r"C:\own\first.jpg".to_string(), r"C:\own\second.jpg".to_string())
+            (
+                r"C:\own\first.jpg".to_string(),
+                r"C:\own\second.jpg".to_string()
+            )
         );
         assert_eq!((desktop.position, desktop.colour), (5, 0x00112233));
         assert!(!kept.exists());
@@ -1393,8 +1447,16 @@ mod tests {
             r"\\?\DISPLAY#ACM2702#1".to_string(),
         )];
         let names = names_of(r"\\?\display#acm2702#1", &known);
-        for name in ["Monitor ACM2702 (2)", "Monitor ACM2702", r"\\.\DISPLAY2", "DISPLAY2"] {
-            assert!(names.iter().any(|known| known == name), "{name} in {names:?}");
+        for name in [
+            "Monitor ACM2702 (2)",
+            "Monitor ACM2702",
+            r"\\.\DISPLAY2",
+            "DISPLAY2",
+        ] {
+            assert!(
+                names.iter().any(|known| known == name),
+                "{name} in {names:?}"
+            );
         }
         assert_eq!(names_of("another", &known), ["another"]);
     }

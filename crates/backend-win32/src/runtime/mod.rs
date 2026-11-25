@@ -21,21 +21,21 @@ mod wait;
 use crate::config::Config;
 use crate::dwm::HwndExt;
 use crate::dwm::{
-    FocusManager, MonitorManager, OverlayData, RuleEngine, WindowManager, WindowMonitor,
-    SnapZoneManager,
+    FocusManager, MonitorManager, OverlayData, RuleEngine, SnapZoneManager, WindowManager,
+    WindowMonitor,
 };
 use crate::hotkey::{GestureEvent, Hotkey, HotkeyManager};
 use crate::node_editor::LogEntry;
 use crate::persistence::PersistenceManager;
 use crate::settings::{DesktopConfig, SnapZoneSettings};
 use anyhow::Result;
-use std::sync::mpsc::Receiver;
 use gevrek_host::wm::bindings::{shortcut_name, Bindings as _};
 use gevrek_host::wm::commands::Commands as _;
 use gevrek_host::wm::configuration::Configuration as _;
 use gevrek_host::wm::published::Published as _;
 use gevrek_host::wm::reload::Reload as _;
 use gevrek_host::wm::{HostState, Parts, WmHost};
+use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 
 pub use command::{Direction, DispatchCommand, MonitorTarget, WindowSelector, WorkspaceSelector};
@@ -182,7 +182,9 @@ impl Drop for Runtime {
                 wm.restore_all_window_alpha_styles();
             });
             given_back("the windows' frames", || wm.restore_all_window_frames());
-            given_back("the windows cut at a display's edge", || wm.cut_at_displays(&[]));
+            given_back("the windows cut at a display's edge", || {
+                wm.cut_at_displays(&[])
+            });
             given_back("the system's own window movements", || {
                 wm.set_system_transitions_for_all(false)
             });
@@ -393,7 +395,8 @@ impl Runtime {
         let focus_manager = FocusManager::with_config(config.desktop.focus.clone());
         log::debug!("FocusManager created");
 
-        let snap_zone_manager = Self::build_snap_zone_manager(&config.desktop.snap_zones, &monitor_manager);
+        let snap_zone_manager =
+            Self::build_snap_zone_manager(&config.desktop.snap_zones, &monitor_manager);
         log::debug!("SnapZoneManager created");
 
         let persistence = PersistenceManager::new();
@@ -552,7 +555,8 @@ impl Runtime {
         }
 
         self.apply_appearance_profile();
-        self.host.startup
+        self.host
+            .startup
             .configure(&self.config.desktop.startup, false);
         self.host.startup.tick();
 
@@ -659,7 +663,9 @@ impl Runtime {
                     .as_ref()
                     .is_some_and(|trial| std::time::Instant::now() >= trial.until)
                 {
-                    log::warn!("The new display settings were not kept: going back to the ones before");
+                    log::warn!(
+                        "The new display settings were not kept: going back to the ones before"
+                    );
                     self.answer_display_trial(gevrek_model::command::TrialAnswer::Revert);
                 }
                 // A window that opened meanwhile was cloaked until this
@@ -1203,9 +1209,7 @@ impl Runtime {
             let active_animation_count = self.window_manager.active_animation_count();
             if active_animation_count != last_animation_count {
                 last_animation_count = active_animation_count;
-                self.publish_state(Some(format!(
-                    "Animations active: {active_animation_count}"
-                )));
+                self.publish_state(Some(format!("Animations active: {active_animation_count}")));
             }
 
             pass_times.mark(std::time::Instant::now());
@@ -1587,7 +1591,9 @@ impl Runtime {
         }
         self.elevated_helper = has;
         if has {
-            log::info!("Windows of programs that run as an administrator are managed (the helper answers)");
+            log::info!(
+                "Windows of programs that run as an administrator are managed (the helper answers)"
+            );
             if let Err(error) = self.window_manager.refresh_window_list() {
                 log::debug!("the windows were not listed anew: {error}");
             }
@@ -1649,7 +1655,10 @@ impl Runtime {
         let mut windows = Vec::new();
         if self.config.desktop.platform.windows.cut_columns_at_displays {
             for monitor in self.core.monitor_manager.get_all_monitors_ordered() {
-                let Some(workspace) = self.core.monitor_manager.get_focused_workspace(monitor.handle)
+                let Some(workspace) = self
+                    .core
+                    .monitor_manager
+                    .get_focused_workspace(monitor.handle)
                 else {
                     continue;
                 };
@@ -1797,7 +1806,11 @@ impl Runtime {
                         "Display {}: its scale is {} %{}",
                         change.name,
                         change.to,
-                        if change.back { ", as it was before" } else { "" }
+                        if change.back {
+                            ", as it was before"
+                        } else {
+                            ""
+                        }
                     );
                     if change.back {
                         self.scales_own.remove(&change.device);
@@ -1833,7 +1846,9 @@ impl Runtime {
         {
             return;
         }
-        log::info!("desktop.outputs asks nothing of the displays any more: they are as they were before");
+        log::info!(
+            "desktop.outputs asks nothing of the displays any more: they are as they were before"
+        );
         // The newest change first, back to the oldest.
         for saved in std::mem::take(&mut self.displays_own).iter().rev() {
             if !crate::display_settings::restore(saved) {
@@ -2089,8 +2104,10 @@ impl Runtime {
                 log::warn!("Could not create workspaces for a new monitor: {}", error);
             }
         }
-        self.core.snap_zone_manager =
-            Self::build_snap_zone_manager(&self.config.desktop.snap_zones, &self.core.monitor_manager);
+        self.core.snap_zone_manager = Self::build_snap_zone_manager(
+            &self.config.desktop.snap_zones,
+            &self.core.monitor_manager,
+        );
         self.core.executor.apply_monitor_changes(
             &mut self.window_manager,
             &self.core.monitor_manager,
@@ -2350,13 +2367,21 @@ impl Runtime {
             }
         }
         for (id, hotkey) in bindings {
-            let name = shortcut_name(&hotkey.key, hotkey.ctrl, hotkey.alt, hotkey.shift, hotkey.win);
+            let name = shortcut_name(
+                &hotkey.key,
+                hotkey.ctrl,
+                hotkey.alt,
+                hotkey.shift,
+                hotkey.win,
+            );
             match self.hotkey_manager.register(hotkey, id) {
                 Ok(()) => {
                     log::debug!("the shortcut {name} is registered (id {id})");
                     self.registered_hotkey_ids.push(id);
                 }
-                Err(error) => log::warn!("Failed to register the shortcut {name} (id {id}): {error}"),
+                Err(error) => {
+                    log::warn!("Failed to register the shortcut {name} (id {id}): {error}")
+                }
             }
         }
         let gestures = &self.config.desktop.gestures;
@@ -2377,7 +2402,9 @@ impl Runtime {
         self.gesture_progress = Some(crate::dwm::GestureProgressData {
             phase: event.phase.config_name().to_string(),
             fingers: event.fingers,
-            direction: event.direction.map(|direction| direction.config_name().to_string()),
+            direction: event
+                .direction
+                .map(|direction| direction.config_name().to_string()),
             progress: event.progress,
             delta_x: event.delta_x,
             delta_y: event.delta_y,
@@ -2577,7 +2604,10 @@ impl WmHost for Runtime {
 
     // On Windows a check sends real input through the system (tests/desktop
     // does); the WM has no input path of its own to feed.
-    fn inject_input(&mut self, _steps: &[gevrek_host::input_injection::InjectedInput]) -> Result<()> {
+    fn inject_input(
+        &mut self,
+        _steps: &[gevrek_host::input_injection::InjectedInput],
+    ) -> Result<()> {
         anyhow::bail!("Made-up input is not taken on Windows; send real input through the system")
     }
 }

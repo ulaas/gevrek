@@ -51,7 +51,12 @@ pub fn changed_profile_names(
         .filter(|(name, entries)| before.get(*name) != Some(*entries))
         .map(|(name, _)| name.clone())
         .collect();
-    changed.extend(before.keys().filter(|name| !after.contains_key(*name)).cloned());
+    changed.extend(
+        before
+            .keys()
+            .filter(|name| !after.contains_key(*name))
+            .cloned(),
+    );
     // Written in another order: the displays' workspaces are put in it.
     // Every one counts as changed then (nothing else says "the order").
     let order = |profiles: &[WorkspaceProfile]| -> Vec<String> {
@@ -66,7 +71,11 @@ pub fn changed_profile_names(
     };
     let (was, is) = (order(old), order(new));
     let kept = |names: &[String], other: &[String]| -> Vec<String> {
-        names.iter().filter(|name| other.contains(name)).cloned().collect()
+        names
+            .iter()
+            .filter(|name| other.contains(name))
+            .cloned()
+            .collect()
     };
     if kept(&was, &is) != kept(&is, &was) {
         changed.extend(is);
@@ -453,10 +462,13 @@ mod tests {
         // the change: a workspace taken out, or put elsewhere among the
         // display's, is a change of its profile.
         let mut fewer = base.clone();
-        fewer.desktop.workspaces.push(gevrek_model::settings::WorkspaceProfile {
-            name: "another".to_string(),
-            ..Default::default()
-        });
+        fewer
+            .desktop
+            .workspaces
+            .push(gevrek_model::settings::WorkspaceProfile {
+                name: "another".to_string(),
+                ..Default::default()
+            });
         let steps = ConfigDiff::between(&fewer, &base).steps();
         let at = |step: ReloadStep| steps.iter().position(|one| *one == step);
         assert!(at(ReapplyProfiles).is_some());

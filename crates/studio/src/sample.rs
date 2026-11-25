@@ -92,10 +92,7 @@ impl eframe::App for Sample {
                         .strong()
                         .color(colour),
                 );
-                ui.label(
-                    egui::RichText::new(self.says)
-                        .color(egui::Color32::from_gray(150)),
-                );
+                ui.label(egui::RichText::new(self.says).color(egui::Color32::from_gray(150)));
                 if let Some(stands) = &self.stands {
                     ui.add_space(6.0);
                     ui.label(egui::RichText::new(stands).size(16.0).color(colour));
@@ -121,7 +118,13 @@ impl eframe::App for Sample {
 
 /// Open a sample window called `name` and stay until it is closed.
 pub fn run(name: &str) -> anyhow::Result<()> {
-    open(name, "gevrek-sample", "A sample window of the sandbox", None, None)
+    open(
+        name,
+        "gevrek-sample",
+        "A sample window of the sandbox",
+        None,
+        None,
+    )
 }
 
 /// Open a practice window of the tutorial called `name`: a sample
@@ -185,8 +188,9 @@ fn open(
                 name: title,
                 fonts: false,
                 says,
-                link: address
-                    .map(|address| gevrek_link::Link::start(address, move || wake.request_repaint())),
+                link: address.map(|address| {
+                    gevrek_link::Link::start(address, move || wake.request_repaint())
+                }),
                 stands: None,
                 asked: None,
             }))

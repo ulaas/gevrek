@@ -51,7 +51,13 @@ pub fn side(rect: Rect, area: Rect) -> (Edge, i32) {
 /// `area`.
 pub fn region(display: &DisplayId, rect: Rect, area: Rect, zones: Vec<ZoneId>) -> ReservedRegion {
     let (edge, thickness) = side(rect, area);
-    ReservedRegion { display: display.clone(), rect, edge, thickness, zones }
+    ReservedRegion {
+        display: display.clone(),
+        rect,
+        edge,
+        thickness,
+        zones,
+    }
 }
 
 /// What a display's free room is once the regions kept on it are taken
@@ -102,11 +108,29 @@ mod tests {
         let area = Rect::new(0, 40, 1920, 1040);
         let display = DisplayId::new("one");
         let regions = [
-            region(&display, Rect::new(0, 40, 1920, 120), area, vec![ZoneId::new("top")]),
-            region(&display, Rect::new(1620, 200, 300, 800), area, vec![ZoneId::new("side")]),
-            region(&DisplayId::new("other"), Rect::new(0, 0, 500, 1080), area, vec![ZoneId::new("else")]),
+            region(
+                &display,
+                Rect::new(0, 40, 1920, 120),
+                area,
+                vec![ZoneId::new("top")],
+            ),
+            region(
+                &display,
+                Rect::new(1620, 200, 300, 800),
+                area,
+                vec![ZoneId::new("side")],
+            ),
+            region(
+                &DisplayId::new("other"),
+                Rect::new(0, 0, 500, 1080),
+                area,
+                vec![ZoneId::new("else")],
+            ),
         ];
-        assert_eq!(left_over(area, &display, &regions), Rect::new(0, 160, 1620, 920));
+        assert_eq!(
+            left_over(area, &display, &regions),
+            Rect::new(0, 160, 1620, 920)
+        );
         assert_eq!(left_over(area, &DisplayId::new("third"), &regions), area);
     }
 }

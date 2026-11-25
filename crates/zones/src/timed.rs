@@ -17,7 +17,11 @@ pub const SLOW: Duration = Duration::from_millis(100);
 /// Make the call, and say it: `asked` is what was asked ("listing
 /// /home/a/Desktop"), `outcome` what came of it ("12 items"). Neither is
 /// made where nothing is written.
-pub fn timed<T>(asked: impl FnOnce() -> String, call: impl FnOnce() -> T, outcome: impl FnOnce(&T) -> String) -> T {
+pub fn timed<T>(
+    asked: impl FnOnce() -> String,
+    call: impl FnOnce() -> T,
+    outcome: impl FnOnce(&T) -> String,
+) -> T {
     said(log::Level::Debug, asked, call, outcome)
 }
 
@@ -49,7 +53,13 @@ fn said<T>(
             outcome(&result)
         );
     } else if log::log_enabled!(quick) {
-        log::log!(quick, "{} took {} ms: {}", asked(), took.as_millis(), outcome(&result));
+        log::log!(
+            quick,
+            "{} took {} ms: {}",
+            asked(),
+            took.as_millis(),
+            outcome(&result)
+        );
     }
     result
 }
@@ -83,11 +93,16 @@ mod tests {
 
     #[test]
     fn a_call_gives_back_what_it_gave_and_says_how_it_came_out() {
-        let listed: Result<Vec<u32>, String> = timed(|| "listing".to_string(), || Ok(vec![1, 2]), |listed| {
-            result(listed, |items| count(items.len(), "item", "items"))
-        });
+        let listed: Result<Vec<u32>, String> = timed(
+            || "listing".to_string(),
+            || Ok(vec![1, 2]),
+            |listed| result(listed, |items| count(items.len(), "item", "items")),
+        );
         assert_eq!(listed, Ok(vec![1, 2]));
-        assert_eq!(result(&listed, |items| count(items.len(), "item", "items")), "2 items");
+        assert_eq!(
+            result(&listed, |items| count(items.len(), "item", "items")),
+            "2 items"
+        );
         assert_eq!(done::<String>(&Err("no".to_string())), "failed: no");
         assert_eq!(count(1, "item", "items"), "1 item");
     }

@@ -1453,7 +1453,8 @@ fn name_is(name: &str, wanted: &str) -> bool {
 #[cfg(not(windows))]
 fn program_of(pid: u32) -> Option<String> {
     let name = |path: &std::path::Path| {
-        path.file_name().map(|name| name.to_string_lossy().into_owned())
+        path.file_name()
+            .map(|name| name.to_string_lossy().into_owned())
     };
     if let Ok(program) = std::fs::read_link(format!("/proc/{pid}/exe")) {
         return name(&program);
@@ -1465,7 +1466,9 @@ fn program_of(pid: u32) -> Option<String> {
         .output()
         .ok()?;
     let said = String::from_utf8_lossy(&said.stdout).trim().to_string();
-    (!said.is_empty()).then(|| name(std::path::Path::new(&said))).flatten()
+    (!said.is_empty())
+        .then(|| name(std::path::Path::new(&said)))
+        .flatten()
 }
 
 #[cfg(windows)]
@@ -2064,7 +2067,11 @@ fn start_component(
             } else {
                 address
             };
-            let pid = macos_app::spawn_on_its_own(&binary_path, &["--address", component_address], &log_path)?;
+            let pid = macos_app::spawn_on_its_own(
+                &binary_path,
+                &["--address", component_address],
+                &log_path,
+            )?;
             log::debug!(
                 "{} was started on its own: {} as process {pid}, its log in {}",
                 component.name(),
@@ -2182,14 +2189,17 @@ mod macos_app {
     pub fn spawn_on_its_own(program: &Path, args: &[&str], log: &Path) -> Result<u32> {
         use std::ffi::{CString, OsStr};
         use std::os::unix::ffi::OsStrExt;
-        type Disclaim = unsafe extern "C" fn(*mut libc::posix_spawnattr_t, libc::c_int) -> libc::c_int;
-        let c = |text: &OsStr| CString::new(text.as_bytes()).map_err(|_| anyhow!("a NUL in {text:?}"));
+        type Disclaim =
+            unsafe extern "C" fn(*mut libc::posix_spawnattr_t, libc::c_int) -> libc::c_int;
+        let c =
+            |text: &OsStr| CString::new(text.as_bytes()).map_err(|_| anyhow!("a NUL in {text:?}"));
         let path = c(program.as_os_str())?;
         let mut argv = vec![path.clone()];
         for arg in args {
             argv.push(c(OsStr::new(arg))?);
         }
-        let mut argv_ptrs: Vec<*mut libc::c_char> = argv.iter().map(|arg| arg.as_ptr() as *mut _).collect();
+        let mut argv_ptrs: Vec<*mut libc::c_char> =
+            argv.iter().map(|arg| arg.as_ptr() as *mut _).collect();
         argv_ptrs.push(std::ptr::null_mut());
         let null = c(OsStr::new("/dev/null"))?;
         let log = c(log.as_os_str())?;
@@ -2204,15 +2214,30 @@ mod macos_app {
             libc::posix_spawnattr_init(&mut attributes);
             libc::posix_spawn_file_actions_init(&mut actions);
             // (Not in the SDK's headers, but in the system since 10.14.)
-            let disclaim = libc::dlsym(libc::RTLD_DEFAULT, c"responsibility_spawnattrs_setdisclaim".as_ptr());
+            let disclaim = libc::dlsym(
+                libc::RTLD_DEFAULT,
+                c"responsibility_spawnattrs_setdisclaim".as_ptr(),
+            );
             if disclaim.is_null() {
                 log::debug!("no way to disclaim responsibility: started as a child");
             } else {
                 let disclaim: Disclaim = std::mem::transmute(disclaim);
                 disclaim(&mut attributes, 1);
             }
-            libc::posix_spawn_file_actions_addopen(&mut actions, 0, null.as_ptr(), libc::O_RDONLY, 0);
-            libc::posix_spawn_file_actions_addopen(&mut actions, 1, null.as_ptr(), libc::O_WRONLY, 0);
+            libc::posix_spawn_file_actions_addopen(
+                &mut actions,
+                0,
+                null.as_ptr(),
+                libc::O_RDONLY,
+                0,
+            );
+            libc::posix_spawn_file_actions_addopen(
+                &mut actions,
+                1,
+                null.as_ptr(),
+                libc::O_WRONLY,
+                0,
+            );
             libc::posix_spawn_file_actions_addopen(
                 &mut actions,
                 2,
@@ -2246,7 +2271,10 @@ mod macos_app {
     /// written to `log`.
     pub fn start_wm(bundle: &Path, address: &str, log: &Path) -> Result<()> {
         let mut open = Command::new("/usr/bin/open");
-        open.args(["-g", "-n", "-a"]).arg(bundle).arg("--stderr").arg(log);
+        open.args(["-g", "-n", "-a"])
+            .arg(bundle)
+            .arg("--stderr")
+            .arg(log);
         for name in PASSED_ON {
             if let Ok(value) = std::env::var(name) {
                 open.arg("--env").arg(format!("{name}={value}"));
@@ -2255,7 +2283,10 @@ mod macos_app {
         open.args(["--args", "--address", address]);
         let status = open.status()?;
         if !status.success() {
-            return Err(anyhow!("{} could not be opened ({status})", bundle.display()));
+            return Err(anyhow!(
+                "{} could not be opened ({status})",
+                bundle.display()
+            ));
         }
         Ok(())
     }
@@ -2381,11 +2412,18 @@ mod macos_app {
                 Path::new("/tmp/main.wm.log"),
                 gevrek_model::paths::MAIN_INSTANCE,
             );
-            assert!(plist.contains("<string>/Users/someone/Applications/Gevrek.app/Contents/MacOS/gevrek-wm</string>"));
+            assert!(plist.contains(
+                "<string>/Users/someone/Applications/Gevrek.app/Contents/MacOS/gevrek-wm</string>"
+            ));
             assert!(plist.contains("<key>RunAtLoad</key>\n\t<true/>"));
             assert!(plist.contains(BUNDLE_ID));
             assert!(!plist.contains("EnvironmentVariables"));
-            let other = agent_plist(Path::new("/a & b/gevrek-wm"), "local:dev", Path::new("/tmp/x"), "dev");
+            let other = agent_plist(
+                Path::new("/a & b/gevrek-wm"),
+                "local:dev",
+                Path::new("/tmp/x"),
+                "dev",
+            );
             assert!(other.contains("<string>/a &amp; b/gevrek-wm</string>"));
             assert!(other.contains("<key>GEVREK_INSTANCE</key>\n\t\t<string>dev</string>"));
         }
@@ -2447,7 +2485,10 @@ async fn wait_for_wm(address: &str, timeout: Duration) -> Result<()> {
         let now = match WMClient::connect(address.to_string()).await {
             Ok(mut client) => match client.health_check().await {
                 Ok(health) if health.healthy => {
-                    log::debug!("the window manager at {address} is healthy: {}", health.version);
+                    log::debug!(
+                        "the window manager at {address} is healthy: {}",
+                        health.version
+                    );
                     return Ok(());
                 }
                 Ok(health) => format!(
@@ -3012,13 +3053,24 @@ fn elevated_helper(address: &str, action: &str) -> Result<()> {
             // would take the window manager's place at it.)
             let runs = std::fs::read_dir(r"\\.\pipe\")
                 .map(|pipes| {
-                    pipes.flatten().any(|entry| {
-                        pipe.ends_with(&*entry.file_name().to_string_lossy())
-                    })
+                    pipes
+                        .flatten()
+                        .any(|entry| pipe.ends_with(&*entry.file_name().to_string_lossy()))
                 })
                 .unwrap_or(false);
-            println!("helper program: {}{}", helper.display(), if helper.is_file() { "" } else { " (not there)" });
-            println!("task \"{task}\": {}", if registered { "registered" } else { "not registered (`gevrek elevated install`)" });
+            println!(
+                "helper program: {}{}",
+                helper.display(),
+                if helper.is_file() { "" } else { " (not there)" }
+            );
+            println!(
+                "task \"{task}\": {}",
+                if registered {
+                    "registered"
+                } else {
+                    "not registered (`gevrek elevated install`)"
+                }
+            );
             println!("helper: {}", if runs { "runs" } else { "does not run" });
             println!("windows of programs that run as an administrator are managed while the helper runs and `desktop.platform.windows.manage_elevated_windows` is on.");
         }
@@ -3565,7 +3617,8 @@ async fn zones_run(
             }
         };
     }
-    let pretty = |value: &serde_json::Value| serde_json::to_string_pretty(value).unwrap_or_default();
+    let pretty =
+        |value: &serde_json::Value| serde_json::to_string_pretty(value).unwrap_or_default();
 
     match &action {
         // ---- what only reads ----
@@ -3576,7 +3629,8 @@ async fn zones_run(
             if json {
                 println!("{}", pretty(&zones_cli::state_json(&state)));
             } else {
-                let text = attempt!(zones_cli::list_text(&state).map_err(|why| unread(&state, why)));
+                let text =
+                    attempt!(zones_cli::list_text(&state).map_err(|why| unread(&state, why)));
                 println!("{text}");
             }
         }
@@ -3592,10 +3646,12 @@ async fn zones_run(
                 .to_string();
             let one = client.get_zones_state_of(false, &id).await?;
             if json {
-                let zone = attempt!(zones_cli::show_json(&one, &id).map_err(|why| unread(&one, why)));
+                let zone =
+                    attempt!(zones_cli::show_json(&one, &id).map_err(|why| unread(&one, why)));
                 println!("{}", pretty(&zone));
             } else {
-                let text = attempt!(zones_cli::show_text(&one, &id).map_err(|why| unread(&one, why)));
+                let text =
+                    attempt!(zones_cli::show_text(&one, &id).map_err(|why| unread(&one, why)));
                 println!("{text}");
             }
         }
@@ -3671,7 +3727,10 @@ async fn zones_run(
                         println!("Operation {} was called off", only["request"]);
                     }
                 }
-                _ if json => println!("{}", pretty(&serde_json::json!({ "operations": operations }))),
+                _ if json => println!(
+                    "{}",
+                    pretty(&serde_json::json!({ "operations": operations }))
+                ),
                 _ => println!("{}", zones_cli::operations_text(&operations)),
             }
         }
@@ -3785,7 +3844,10 @@ async fn zones_run(
                 match &action {
                     ZonesAction::Create { .. } => {
                         if let Some(made) = zones_cli::event_of(&reply, "zone_created") {
-                            said = format!("Zone '{}' was made", made["zone"].as_str().unwrap_or_default());
+                            said = format!(
+                                "Zone '{}' was made",
+                                made["zone"].as_str().unwrap_or_default()
+                            );
                             answer["zone"] = made["zone"].clone();
                         }
                     }
@@ -3811,14 +3873,21 @@ async fn zones_run(
                             .map(|plan| plan["lines"].clone())
                             .unwrap_or_else(|| serde_json::json!([]));
                     }
-                    ZonesAction::AutoCreate { dry_run: true, scope, .. } => {
+                    ZonesAction::AutoCreate {
+                        dry_run: true,
+                        scope,
+                        ..
+                    } => {
                         let planned = zones_cli::event_of(&reply, "auto_planned");
                         let asked_of = match scope {
                             ask::RuleScope::Loose => "the items that are in no zone",
-                            ask::RuleScope::All => "every item that is loose or in a zone filled by hand",
+                            ask::RuleScope::All => {
+                                "every item that is loose or in a zone filled by hand"
+                            }
                         };
                         said = zones_cli::auto::plan_text(planned.as_ref(), &snapshot, asked_of);
-                        answer["plan"] = planned.map_or(serde_json::Value::Null, |event| event["plan"].clone());
+                        answer["plan"] =
+                            planned.map_or(serde_json::Value::Null, |event| event["plan"].clone());
                     }
                     ZonesAction::AutoCreate { dry_run: false, .. } => {
                         let made = zones_cli::event_of(&reply, "auto_created");
@@ -3831,9 +3900,8 @@ async fn zones_run(
                         answer["undone"] = undone.unwrap_or_default();
                     }
                     ZonesAction::Search { text } => {
-                        let found = zones_cli::event_of(&reply, "found").unwrap_or_else(
-                            || serde_json::json!({"typed": text, "hits": []}),
-                        );
+                        let found = zones_cli::event_of(&reply, "found")
+                            .unwrap_or_else(|| serde_json::json!({"typed": text, "hits": []}));
                         said = zones_cli::search_text(&found, &snapshot);
                         answer["hits"] = found["hits"].clone();
                     }
@@ -3845,16 +3913,22 @@ async fn zones_run(
                                 "The zones did not hand over the layout '{name}' (this shell may be older)"
                             ))
                         }));
-                        attempt!(std::fs::write(file, pretty(&document) + "\n").map_err(|error| {
-                            Failure::refused(format!("{} could not be written: {error}", file.display()))
-                        }));
+                        attempt!(
+                            std::fs::write(file, pretty(&document) + "\n").map_err(|error| {
+                                Failure::refused(format!(
+                                    "{} could not be written: {error}",
+                                    file.display()
+                                ))
+                            })
+                        );
                         said = format!("The layout '{name}' was written to {}", file.display());
                         answer["file"] = file.display().to_string().into();
                     }
                     ZonesAction::Snapshot {
                         action: SnapshotAction::Import { .. },
                     } => {
-                        let taken = zones_cli::event_of(&reply, "layout_imported").unwrap_or_default();
+                        let taken =
+                            zones_cli::event_of(&reply, "layout_imported").unwrap_or_default();
                         let name = taken["name"].as_str().unwrap_or_default();
                         said = if taken["applied"].as_bool().unwrap_or(false) {
                             match taken["kept_as"].as_str() {
@@ -3978,7 +4052,10 @@ fn start_updated(components: &[Component], foreground: bool) -> Option<std::proc
     // This program is the old build still (its file was moved aside): the
     // new one does the starting.
     let new = install.join(format!("gevrek{}", std::env::consts::EXE_SUFFIX));
-    log::debug!("gevrek {version} was put in place; {} does the starting", new.display());
+    log::debug!(
+        "gevrek {version} was put in place; {} does the starting",
+        new.display()
+    );
     let ended = Command::new(new)
         .args(std::env::args_os().skip(1))
         .status()
@@ -4023,7 +4100,10 @@ fn look_for_update_behind(address: &str) {
         .stderr(Stdio::null())
         .spawn()
     {
-        Ok(child) => log::debug!("the look for an update runs behind as process {}", child.id()),
+        Ok(child) => log::debug!(
+            "the look for an update runs behind as process {}",
+            child.id()
+        ),
         Err(error) => log::debug!("the look for an update was not started: {error}"),
     }
 }
@@ -4082,7 +4162,10 @@ async fn update_behind(address: &str) -> Result<()> {
         log::debug!("no look for an update now: it is not due, or this install is not updated");
         return Ok(());
     }
-    log::debug!("a newer release is looked for (this is {})", gevrek_update::current());
+    log::debug!(
+        "a newer release is looked for (this is {})",
+        gevrek_update::current()
+    );
     // Noted before asking: a check that fails is not made again at every start.
     settings.last_check = Some(gevrek_update::now());
     settings.save(&folder)?;
@@ -4215,7 +4298,9 @@ fn main() -> Result<()> {
 
 #[tokio::main]
 async fn run() -> Result<()> {
-    gevrek_logging::Logging::new("gevrek", log::LevelFilter::Warn).only_where_asked().init();
+    gevrek_logging::Logging::new("gevrek", log::LevelFilter::Warn)
+        .only_where_asked()
+        .init();
 
     let cli = Cli::parse();
 
@@ -4271,7 +4356,9 @@ async fn run() -> Result<()> {
                     let alone = foreground && components.len() == 1;
                     // In the foreground it is waited for, as the window
                     // manager is.
-                    if let Some(mut child) = start_component(comp, alone, &cli.address)?.filter(|_| alone) {
+                    if let Some(mut child) =
+                        start_component(comp, alone, &cli.address)?.filter(|_| alone)
+                    {
                         let ended = child.wait()?;
                         if !ended.success() {
                             std::process::exit(ended.code().unwrap_or(1));
@@ -6980,15 +7067,27 @@ mod tests {
             }
         };
         let work = || Some("work".to_string());
-        assert_eq!(zones(&["list"]), (ZonesAction::List { items: false }, false, None));
+        assert_eq!(
+            zones(&["list"]),
+            (ZonesAction::List { items: false }, false, None)
+        );
         assert_eq!(
             zones(&["list", "--json", "--items"]),
             (ZonesAction::List { items: true }, true, None)
         );
         // --json is every word's, before it or after.
-        assert_eq!(zones(&["show", "work", "--json"]), (ZonesAction::Show { zone: work() }, true, None));
-        assert_eq!(zones(&["--json", "info", "work"]), (ZonesAction::Show { zone: work() }, true, None));
-        assert_eq!(zones(&["show"]), (ZonesAction::Show { zone: None }, false, None));
+        assert_eq!(
+            zones(&["show", "work", "--json"]),
+            (ZonesAction::Show { zone: work() }, true, None)
+        );
+        assert_eq!(
+            zones(&["--json", "info", "work"]),
+            (ZonesAction::Show { zone: work() }, true, None)
+        );
+        assert_eq!(
+            zones(&["show"]),
+            (ZonesAction::Show { zone: None }, false, None)
+        );
         assert_eq!(
             zones(&["send", r#"{"command":"quick_hide"}"#]),
             (
@@ -7010,7 +7109,10 @@ mod tests {
             )
         );
         assert_eq!(zones(&["events"]), (ZonesAction::Events, false, None));
-        assert_eq!(zones(&["events", "--json"]), (ZonesAction::Events, true, None));
+        assert_eq!(
+            zones(&["events", "--json"]),
+            (ZonesAction::Events, true, None)
+        );
         assert_eq!(zones(&["restore-explorer"]).0, ZonesAction::RestoreExplorer);
         assert_eq!(zones(&["peek"]).0, ZonesAction::Peek { to: Switch::Toggle });
         assert_eq!(

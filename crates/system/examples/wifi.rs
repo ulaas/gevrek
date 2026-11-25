@@ -12,13 +12,23 @@ fn main() {
         let _: bool = msg_send![app, setActivationPolicy: 1isize];
         let _: () = msg_send![app, finishLaunching];
     }
-    println!("first: {:?}", gevrek_system::wifi::read().map(|wifi| (wifi.enabled, wifi.networks.len())));
+    println!(
+        "first: {:?}",
+        gevrek_system::wifi::read().map(|wifi| (wifi.enabled, wifi.networks.len()))
+    );
     #[cfg(target_os = "macos")]
     {
-        let seconds: f64 = std::env::args().nth(1).and_then(|text| text.parse().ok()).unwrap_or(8.0);
+        let seconds: f64 = std::env::args()
+            .nth(1)
+            .and_then(|text| text.parse().ok())
+            .unwrap_or(8.0);
         extern "C" {
             static kCFRunLoopDefaultMode: *const std::ffi::c_void;
-            fn CFRunLoopRunInMode(mode: *const std::ffi::c_void, seconds: f64, after_source: bool) -> i32;
+            fn CFRunLoopRunInMode(
+                mode: *const std::ffi::c_void,
+                seconds: f64,
+                after_source: bool,
+            ) -> i32;
         }
         // SAFETY: this thread's run loop, for a while.
         unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, false) };
@@ -26,7 +36,11 @@ fn main() {
     gevrek_system::wifi::rescan();
     match gevrek_system::wifi::read() {
         Some(wifi) => {
-            println!("then: on {}, {} network(s)", wifi.enabled, wifi.networks.len());
+            println!(
+                "then: on {}, {} network(s)",
+                wifi.enabled,
+                wifi.networks.len()
+            );
             for network in wifi.networks.iter().take(8) {
                 println!(
                     "  {}{} {}% {}{}",

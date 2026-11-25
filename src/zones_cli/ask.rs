@@ -521,7 +521,10 @@ pub enum SnapshotAction {
     Rename { name: String, to: String },
     /// Write a copy to a file, to carry it to another machine; the name
     /// `@current` writes the layout as it is now
-    Export { name: String, file: std::path::PathBuf },
+    Export {
+        name: String,
+        file: std::path::PathBuf,
+    },
     /// Take a copy in from a file such as `export` writes. It is kept
     /// under its own name (with a number if that is taken) and nothing
     /// else changes, unless --apply puts it in force at once
@@ -560,11 +563,19 @@ pub struct Asked {
 
 impl Asked {
     fn one(command: Value, done: impl Into<String>) -> Self {
-        Self { commands: vec![command], done: done.into(), then_changes: None }
+        Self {
+            commands: vec![command],
+            done: done.into(),
+            then_changes: None,
+        }
     }
 
     fn many(commands: Vec<Value>, done: impl Into<String>) -> Self {
-        Self { commands, done: done.into(), then_changes: None }
+        Self {
+            commands,
+            done: done.into(),
+            then_changes: None,
+        }
     }
 }
 
@@ -584,7 +595,9 @@ pub fn patch(pairs: &[String]) -> Result<Value, String> {
     let mut changes = Value::Object(Map::new());
     for written in pairs {
         let Some((path, value)) = written.split_once('=') else {
-            return Err(format!("'{written}' is no setting: write key=value, as snap.grid=16"));
+            return Err(format!(
+                "'{written}' is no setting: write key=value, as snap.grid=16"
+            ));
         };
         let value = value.trim();
         let value = if value.eq_ignore_ascii_case("none") {
@@ -592,16 +605,23 @@ pub fn patch(pairs: &[String]) -> Result<Value, String> {
         } else {
             serde_json::from_str(value).unwrap_or_else(|_| json!(value))
         };
-        let keys: Vec<String> = path.split('.').map(|key| key.trim().replace('-', "_")).collect();
+        let keys: Vec<String> = path
+            .split('.')
+            .map(|key| key.trim().replace('-', "_"))
+            .collect();
         if keys.iter().any(String::is_empty) {
             return Err(format!("'{written}' names no key"));
         }
         let mut at = &mut changes;
         for key in &keys[..keys.len() - 1] {
             let inside = at.as_object_mut().expect("an object, made here");
-            let next = inside.entry(key.clone()).or_insert_with(|| Value::Object(Map::new()));
+            let next = inside
+                .entry(key.clone())
+                .or_insert_with(|| Value::Object(Map::new()));
             if !next.is_object() {
-                return Err(format!("'{written}' goes into '{key}', which was given a value before"));
+                return Err(format!(
+                    "'{written}' goes into '{key}', which was given a value before"
+                ));
             }
             at = next;
         }
@@ -645,13 +665,18 @@ fn zone_label(zone: &ZoneSnapshot) -> String {
 /// with that title; else the one whose id or title begins so. Letters
 /// are compared without regard to case except for the id itself. Two
 /// that fit equally well are not chosen between.
-pub fn resolve_zone<'a>(snapshot: &'a ZonesSnapshot, text: &str) -> Result<&'a ZoneSnapshot, String> {
+pub fn resolve_zone<'a>(
+    snapshot: &'a ZonesSnapshot,
+    text: &str,
+) -> Result<&'a ZoneSnapshot, String> {
     if text == FOCUSED {
         return snapshot
             .zones
             .iter()
             .find(|zone| zone.focused)
-            .ok_or_else(|| "No zone has the keyboard (`gevrek zones focus <zone>` gives it to one)".to_string());
+            .ok_or_else(|| {
+                "No zone has the keyboard (`gevrek zones focus <zone>` gives it to one)".to_string()
+            });
     }
     if let Some(zone) = snapshot.zone(text) {
         return Ok(zone);
@@ -663,7 +688,11 @@ pub fn resolve_zone<'a>(snapshot: &'a ZonesSnapshot, text: &str) -> Result<&'a Z
         several => Err(format!(
             "'{text}' {how} {} zones: {}. Say which by its id",
             several.len(),
-            several.iter().map(|zone| zone_label(zone)).collect::<Vec<_>>().join(", ")
+            several
+                .iter()
+                .map(|zone| zone_label(zone))
+                .collect::<Vec<_>>()
+                .join(", ")
         )),
     };
     if !wanted.is_empty() {
@@ -695,11 +724,18 @@ pub fn resolve_zone<'a>(snapshot: &'a ZonesSnapshot, text: &str) -> Result<&'a Z
             return Ok(zone);
         }
     }
-    let known: Vec<String> = snapshot.zones.iter().map(|zone| zone.id.to_string()).collect();
+    let known: Vec<String> = snapshot
+        .zones
+        .iter()
+        .map(|zone| zone.id.to_string())
+        .collect();
     Err(if known.is_empty() {
         format!("There is no zone '{text}': there are no zones")
     } else {
-        format!("There is no zone '{text}'. The zones are: {}", known.join(", "))
+        format!(
+            "There is no zone '{text}'. The zones are: {}",
+            known.join(", ")
+        )
     })
 }
 
@@ -735,7 +771,10 @@ fn stem(name: &str) -> &str {
 /// the one with that name; else the one with that name before its
 /// extension; else the one whose name begins so. Two that fit equally
 /// well are not chosen between: they are listed with where they are.
-pub fn resolve_item<'a>(snapshot: &'a ZonesSnapshot, text: &str) -> Result<&'a ItemSnapshot, String> {
+pub fn resolve_item<'a>(
+    snapshot: &'a ZonesSnapshot,
+    text: &str,
+) -> Result<&'a ItemSnapshot, String> {
     let items = every_item(snapshot);
     if let Some((item, _)) = items
         .iter()
@@ -747,9 +786,18 @@ pub fn resolve_item<'a>(snapshot: &'a ZonesSnapshot, text: &str) -> Result<&'a I
     // The ways a name can fit, the nearest first.
     type Fits<'a> = Box<dyn Fn(&ItemSnapshot) -> bool + 'a>;
     let ways: [(&str, Fits); 3] = [
-        ("is the name of", Box::new(|item| item.name.to_lowercase() == wanted)),
-        ("is the name of", Box::new(|item| stem(&item.name).to_lowercase() == wanted)),
-        ("is the beginning of the names of", Box::new(|item| item.name.to_lowercase().starts_with(&wanted))),
+        (
+            "is the name of",
+            Box::new(|item| item.name.to_lowercase() == wanted),
+        ),
+        (
+            "is the name of",
+            Box::new(|item| stem(&item.name).to_lowercase() == wanted),
+        ),
+        (
+            "is the beginning of the names of",
+            Box::new(|item| item.name.to_lowercase().starts_with(&wanted)),
+        ),
     ];
     for (how, fits) in ways.iter().filter(|_| !wanted.is_empty()) {
         let found: Vec<&(&ItemSnapshot, Option<&ZoneSnapshot>)> =
@@ -778,7 +826,9 @@ pub fn resolve_item<'a>(snapshot: &'a ZonesSnapshot, text: &str) -> Result<&'a I
             }
         }
     }
-    Err(format!("There is no item '{text}' on the desktop or in a zone"))
+    Err(format!(
+        "There is no item '{text}' on the desktop or in a zone"
+    ))
 }
 
 /// Two whole numbers written as `X,Y` (or `WxH`).
@@ -787,9 +837,13 @@ pub fn pair(text: &str, what: &str) -> Result<(i32, i32), String> {
     match parts.as_slice() {
         [one, other] => match (one.parse(), other.parse()) {
             (Ok(one), Ok(other)) => Ok((one, other)),
-            _ => Err(format!("'{text}' is no {what}: two whole numbers, as 40,40")),
+            _ => Err(format!(
+                "'{text}' is no {what}: two whole numbers, as 40,40"
+            )),
         },
-        _ => Err(format!("'{text}' is no {what}: two whole numbers, as 40,40")),
+        _ => Err(format!(
+            "'{text}' is no {what}: two whole numbers, as 40,40"
+        )),
     }
 }
 
@@ -810,7 +864,12 @@ pub fn resolve_display<'a>(
     text: Option<&str>,
 ) -> Result<&'a gevrek_zones::geometry::Display, String> {
     let displays = &snapshot.displays;
-    let primary = || displays.iter().find(|display| display.primary).or(displays.first());
+    let primary = || {
+        displays
+            .iter()
+            .find(|display| display.primary)
+            .or(displays.first())
+    };
     let found = match text.map(str::trim) {
         None | Some("primary") => primary(),
         Some(text) => displays
@@ -821,7 +880,11 @@ pub fn resolve_display<'a>(
                     .iter()
                     .find(|display| display.id.as_str().eq_ignore_ascii_case(text))
             })
-            .or_else(|| text.parse::<usize>().ok().and_then(|number| displays.get(number.checked_sub(1)?))),
+            .or_else(|| {
+                text.parse::<usize>()
+                    .ok()
+                    .and_then(|number| displays.get(number.checked_sub(1)?))
+            }),
     };
     found.ok_or_else(|| {
         if displays.is_empty() {
@@ -830,7 +893,11 @@ pub fn resolve_display<'a>(
             format!(
                 "There is no display '{}'. The displays are: {}",
                 text.unwrap_or("primary"),
-                displays.iter().map(|display| display.id.to_string()).collect::<Vec<_>>().join(", ")
+                displays
+                    .iter()
+                    .map(|display| display.id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )
         }
     })
@@ -867,7 +934,9 @@ pub fn settings(pairs: &[String]) -> Result<Settings, String> {
     let mut settings = Settings::default();
     for written in pairs {
         let Some((key, value)) = written.split_once('=') else {
-            return Err(format!("'{written}' is no setting: write key=value (the keys: {KEYS})"));
+            return Err(format!(
+                "'{written}' is no setting: write key=value (the keys: {KEYS})"
+            ));
         };
         let key = key.trim().to_lowercase().replace('_', "-");
         let value = value.trim();
@@ -882,10 +951,14 @@ pub fn settings(pairs: &[String]) -> Result<Settings, String> {
         };
         let colour = || -> Result<Value, String> {
             let digits = value.strip_prefix('#').unwrap_or("");
-            if matches!(digits.len(), 6 | 8) && digits.chars().all(|digit| digit.is_ascii_hexdigit()) {
+            if matches!(digits.len(), 6 | 8)
+                && digits.chars().all(|digit| digit.is_ascii_hexdigit())
+            {
                 Ok(json!(value))
             } else {
-                Err(format!("{key} is a colour as #rrggbb or #rrggbbaa, not '{value}'"))
+                Err(format!(
+                    "{key} is a colour as #rrggbb or #rrggbbaa, not '{value}'"
+                ))
             }
         };
         match key.as_str() {
@@ -899,14 +972,22 @@ pub fn settings(pairs: &[String]) -> Result<Settings, String> {
                 "manual" | "name" | "type" | "date" | "size" => {
                     settings.view.insert("sort".into(), json!(word));
                 }
-                _ => return Err(format!("sort is manual, name, type, date or size, not '{value}'")),
+                _ => {
+                    return Err(format!(
+                        "sort is manual, name, type, date or size, not '{value}'"
+                    ))
+                }
             },
             "descending" => {
-                settings.view.insert("descending".into(), json!(on_off(&key, value)?));
+                settings
+                    .view
+                    .insert("descending".into(), json!(on_off(&key, value)?));
             }
             "icon-size" => {
                 let (least, most) = gevrek_model::zones::ICON_SIZES;
-                settings.view.insert("icon_size".into(), json!(number(least, most)?));
+                settings
+                    .view
+                    .insert("icon_size".into(), json!(number(least, most)?));
             }
             "background" | "title-colour" | "title-color" | "icon-tint" => {
                 let name = match key.as_str() {
@@ -914,18 +995,29 @@ pub fn settings(pairs: &[String]) -> Result<Settings, String> {
                     "icon-tint" => "icon_tint",
                     _ => "title_colour",
                 };
-                settings.look.insert(name.into(), if none { Value::Null } else { colour()? });
-            }
-            "opacity" | "icon-saturation" => {
                 settings
                     .look
-                    .insert(key.replace('-', "_"), if none { Value::Null } else { json!(number(0, 100)?) });
+                    .insert(name.into(), if none { Value::Null } else { colour()? });
+            }
+            "opacity" | "icon-saturation" => {
+                settings.look.insert(
+                    key.replace('-', "_"),
+                    if none {
+                        Value::Null
+                    } else {
+                        json!(number(0, 100)?)
+                    },
+                );
             }
             "corner-radius" => {
                 let most = gevrek_model::zones::MOST_CORNER_RADIUS;
                 settings.look.insert(
                     "corner_radius".into(),
-                    if none { Value::Null } else { json!(number(0, most)?) },
+                    if none {
+                        Value::Null
+                    } else {
+                        json!(number(0, most)?)
+                    },
                 );
             }
             "title-bar" => match word.as_str() {
@@ -940,11 +1032,17 @@ pub fn settings(pairs: &[String]) -> Result<Settings, String> {
             "blur" | "title-on-hover" | "labels" => {
                 settings.look.insert(
                     key.replace('-', "_"),
-                    if none { Value::Null } else { json!(on_off(&key, value)?) },
+                    if none {
+                        Value::Null
+                    } else {
+                        json!(on_off(&key, value)?)
+                    },
                 );
             }
             "always-visible" | "private" | "reserves-space" => {
-                settings.zone.insert(key.replace('-', "_"), json!(on_off(&key, value)?));
+                settings
+                    .zone
+                    .insert(key.replace('-', "_"), json!(on_off(&key, value)?));
             }
             _ => return Err(format!("'{key}' is nothing `set` knows. The keys: {KEYS}")),
         }
@@ -958,16 +1056,26 @@ pub fn settings(pairs: &[String]) -> Result<Settings, String> {
 pub fn query(text: &str) -> Result<Value, String> {
     let text = text.trim();
     if text.starts_with('[') || text.starts_with('{') {
-        let value: Value =
-            serde_json::from_str(text).map_err(|error| format!("the query is not JSON: {error}"))?;
-        return Ok(if value.is_array() { value } else { json!([value]) });
+        let value: Value = serde_json::from_str(text)
+            .map_err(|error| format!("the query is not JSON: {error}"))?;
+        return Ok(if value.is_array() {
+            value
+        } else {
+            json!([value])
+        });
     }
     const WORDS: &str = "ext:pdf,docx  name:report*  mime:image/*  kind:folder  target:*chrome*  \
                          untouched:30  older:30  newer:7  larger:1000000  smaller:1000000";
     let mut matchers = Vec::new();
-    for part in text.split('+').map(str::trim).filter(|part| !part.is_empty()) {
+    for part in text
+        .split('+')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
         let Some((word, value)) = part.split_once(':') else {
-            return Err(format!("'{part}' is no part of a query. A query is made of: {WORDS}"));
+            return Err(format!(
+                "'{part}' is no part of a query. A query is made of: {WORDS}"
+            ));
         };
         let value = value.trim();
         let list = || -> Vec<String> {
@@ -978,7 +1086,9 @@ pub fn query(text: &str) -> Result<Value, String> {
                 .collect()
         };
         let number = || -> Result<u64, String> {
-            value.parse::<u64>().map_err(|_| format!("'{value}' in '{part}' is no number"))
+            value
+                .parse::<u64>()
+                .map_err(|_| format!("'{value}' in '{part}' is no number"))
         };
         matchers.push(match word.trim().to_lowercase().as_str() {
             "ext" | "extension" => json!({"match": "extension", "any_of": list()}),
@@ -991,11 +1101,17 @@ pub fn query(text: &str) -> Result<Value, String> {
             "newer" => json!({"match": "date", "field": "modified", "newer_than_days": number()?}),
             "larger" => json!({"match": "size", "at_least": number()?}),
             "smaller" => json!({"match": "size", "at_most": number()?}),
-            _ => return Err(format!("'{part}' is no part of a query. A query is made of: {WORDS}")),
+            _ => {
+                return Err(format!(
+                    "'{part}' is no part of a query. A query is made of: {WORDS}"
+                ))
+            }
         });
     }
     if matchers.is_empty() {
-        return Err(format!("The query asks for nothing. A query is made of: {WORDS}"));
+        return Err(format!(
+            "The query asks for nothing. A query is made of: {WORDS}"
+        ));
     }
     Ok(Value::Array(matchers))
 }
@@ -1029,7 +1145,9 @@ fn create(
     let kind = match (kind, dir, asked.is_some() || from.is_some()) {
         (Some(kind), _, _) => kind,
         (None, Some(_), true) => {
-            return Err("--dir makes a portal and --query a smart zone: say one, or --kind".to_string())
+            return Err(
+                "--dir makes a portal and --query a smart zone: say one, or --kind".to_string(),
+            )
         }
         (None, Some(_), false) => KindWord::Portal,
         (None, None, true) => KindWord::Smart,
@@ -1049,13 +1167,17 @@ fn create(
                 return Err("A portal needs the folder it shows: --dir <folder>".to_string());
             };
             if asked.is_some() || from.is_some() {
-                return Err("A portal shows all of its folder: it has no --query or --from".to_string());
+                return Err(
+                    "A portal shows all of its folder: it has no --query or --from".to_string(),
+                );
             }
             json!({"type": "portal", "directory": dir})
         }
         KindWord::Smart => {
             if dir.is_some() {
-                return Err("A smart zone looks into a folder with --from <folder>, not --dir".to_string());
+                return Err(
+                    "A smart zone looks into a folder with --from <folder>, not --dir".to_string(),
+                );
             }
             let matchers = match asked {
                 Some(asked) => query(asked)?,
@@ -1093,7 +1215,10 @@ fn create(
         (at, wanted_size) => {
             let display = resolve_display(snapshot, display)?;
             // Without a place: a little in from the display's corner.
-            let (x, y) = at.map(|at| pair(at, "place")).transpose()?.unwrap_or((40, 40));
+            let (x, y) = at
+                .map(|at| pair(at, "place"))
+                .transpose()?
+                .unwrap_or((40, 40));
             let (width, height) = wanted_size.map(size).transpose()?.unwrap_or((320, 240));
             command.insert(
                 "rect".into(),
@@ -1117,7 +1242,13 @@ pub fn asked(action: &ZonesAction, snapshot: &ZonesSnapshot) -> Result<Asked, St
     let items_of = |texts: &[String]| -> Result<Vec<&ItemSnapshot>, String> {
         texts.iter().map(|text| item(text)).collect()
     };
-    let counted = |count: usize| if count == 1 { "1 item".to_string() } else { format!("{count} items") };
+    let counted = |count: usize| {
+        if count == 1 {
+            "1 item".to_string()
+        } else {
+            format!("{count} items")
+        }
+    };
     Ok(match action {
         ZonesAction::Create { title, kind, dir, query, from, display, at, size } => {
             let (command, then_changes) = create(
@@ -1747,7 +1878,8 @@ mod tests {
 
     fn read(words: &[&str]) -> Result<ZonesAction, clap::Error> {
         use clap::Parser;
-        Line::try_parse_from(std::iter::once("zones").chain(words.iter().copied())).map(|line| line.action)
+        Line::try_parse_from(std::iter::once("zones").chain(words.iter().copied()))
+            .map(|line| line.action)
     }
 
     fn file(path: &str) -> ItemSnapshot {
@@ -1830,13 +1962,28 @@ mod tests {
     fn a_zone_is_named_by_its_id_its_title_or_the_beginning_of_either() {
         let desk = desk();
         let found = |text: &str| resolve_zone(&desk, text).map(|zone| zone.id.to_string());
-        assert_eq!(found("work").unwrap(), "work", "the id itself, though another begins so");
+        assert_eq!(
+            found("work").unwrap(),
+            "work",
+            "the id itself, though another begins so"
+        );
         assert_eq!(found("WORKSHOP").unwrap(), "workshop");
         assert_eq!(found("wood").unwrap(), "workshop", "by its title");
-        assert_eq!(found("pl").unwrap(), "zone-3", "by the beginning of its title");
-        assert_eq!(found("zone").unwrap(), "zone-3", "by the beginning of its id");
+        assert_eq!(
+            found("pl").unwrap(),
+            "zone-3",
+            "by the beginning of its title"
+        );
+        assert_eq!(
+            found("zone").unwrap(),
+            "zone-3",
+            "by the beginning of its id"
+        );
         let two = found("wo").unwrap_err();
-        assert!(two.starts_with("'wo' is the beginning of 2 zones: work (Work), workshop (Wood)"), "{two}");
+        assert!(
+            two.starts_with("'wo' is the beginning of 2 zones: work (Work), workshop (Wood)"),
+            "{two}"
+        );
         assert_eq!(
             found("games").unwrap_err(),
             "There is no zone 'games'. The zones are: work, workshop, zone-3, dl, bank"
@@ -1853,15 +2000,29 @@ mod tests {
         let found = |text: &str| resolve_item(&desk, text).map(|item| item.id.to_string());
         assert_eq!(found("/desk/notes.txt").unwrap(), "/desk/notes.txt");
         assert_eq!(found("Report.PDF").unwrap(), "/desk/report.pdf");
-        assert_eq!(found("notes").unwrap(), "/desk/notes.txt", "without its extension");
-        assert_eq!(found("budget").unwrap(), "/desk/Budget 2026.xlsx", "by its beginning");
+        assert_eq!(
+            found("notes").unwrap(),
+            "/desk/notes.txt",
+            "without its extension"
+        );
+        assert_eq!(
+            found("budget").unwrap(),
+            "/desk/Budget 2026.xlsx",
+            "by its beginning"
+        );
         // `report` is the name of two before their extensions: neither.
         let two = found("report").unwrap_err();
-        assert!(two.starts_with("'report' is the name of 2 items. Say which by its id:"), "{two}");
+        assert!(
+            two.starts_with("'report' is the name of 2 items. Say which by its id:"),
+            "{two}"
+        );
         assert!(two.contains("  /desk/report.pdf  (in work)"), "{two}");
         assert!(two.contains("  /desk/report.txt  (loose)"), "{two}");
         let two = found("p").unwrap_err();
-        assert!(two.contains("is the beginning of the names of 2 items"), "{two}");
+        assert!(
+            two.contains("is the beginning of the names of 2 items"),
+            "{two}"
+        );
         // What a portal shows is named as everything else is.
         assert_eq!(found("setup").unwrap(), "/home/ada/Downloads/setup.exe");
         assert_eq!(
@@ -1873,7 +2034,8 @@ mod tests {
     #[test]
     fn a_display_is_named_by_its_id_its_number_or_as_the_primary_one() {
         let desk = desk();
-        let found = |text: Option<&str>| resolve_display(&desk, text).map(|display| display.id.to_string());
+        let found =
+            |text: Option<&str>| resolve_display(&desk, text).map(|display| display.id.to_string());
         assert_eq!(found(None).unwrap(), "DEL-A1B2-77");
         assert_eq!(found(Some("primary")).unwrap(), "DEL-A1B2-77");
         assert_eq!(found(Some("2")).unwrap(), "LG-0042");
@@ -1900,10 +2062,25 @@ mod tests {
 
     #[test]
     fn settings_are_sorted_by_the_command_that_carries_them() {
-        let pairs = |words: &[&str]| settings(&words.iter().map(|word| word.to_string()).collect::<Vec<_>>());
+        let pairs = |words: &[&str]| {
+            settings(
+                &words
+                    .iter()
+                    .map(|word| word.to_string())
+                    .collect::<Vec<_>>(),
+            )
+        };
         let read = pairs(&[
-            "view=list", "sort=name", "descending=on", "icon-size=32", "opacity=80", "blur=off",
-            "background=#102030", "title_colour=#ffffffcc", "corner-radius=none", "always-visible=yes",
+            "view=list",
+            "sort=name",
+            "descending=on",
+            "icon-size=32",
+            "opacity=80",
+            "blur=off",
+            "background=#102030",
+            "title_colour=#ffffffcc",
+            "corner-radius=none",
+            "always-visible=yes",
             "private=off",
         ])
         .unwrap();
@@ -1915,7 +2092,10 @@ mod tests {
             Value::Object(read.look).to_string(),
             r##"{"opacity":80,"blur":false,"background":"#102030","title_colour":"#ffffffcc","corner_radius":null}"##
         );
-        assert_eq!(Value::Object(read.zone).to_string(), r#"{"always_visible":true,"private":false}"#);
+        assert_eq!(
+            Value::Object(read.zone).to_string(),
+            r#"{"always_visible":true,"private":false}"#
+        );
         for (wrong, says) in [
             ("view", "write key=value"),
             ("view=tiles", "view is grid or list"),
@@ -1934,20 +2114,31 @@ mod tests {
     #[test]
     fn a_query_is_the_rules_own_json_or_its_short_form() {
         assert_eq!(
-            query("ext:pdf,.DOCX + name:report* + untouched:30").unwrap().to_string(),
+            query("ext:pdf,.DOCX + name:report* + untouched:30")
+                .unwrap()
+                .to_string(),
             r#"[{"match":"extension","any_of":["pdf","docx"]},{"match":"name","pattern":"report*"},{"match":"untouched","days":30}]"#
         );
         assert_eq!(
-            query("mime:image/*+larger:1000+newer:7").unwrap().to_string(),
+            query("mime:image/*+larger:1000+newer:7")
+                .unwrap()
+                .to_string(),
             r#"[{"match":"mime","pattern":"image/*"},{"match":"size","at_least":1000},{"match":"date","field":"modified","newer_than_days":7}]"#
         );
         // The rules' own words, one matcher or a list of them.
         assert_eq!(
-            query(r#"{"match":"kind","any_of":["folder"]}"#).unwrap().to_string(),
+            query(r#"{"match":"kind","any_of":["folder"]}"#)
+                .unwrap()
+                .to_string(),
             r#"[{"match":"kind","any_of":["folder"]}]"#
         );
         // Each is a list of matchers the configuration reads.
-        for text in ["ext:pdf", "kind:folder,shortcut", "target:*chrome*", "older:30+smaller:5"] {
+        for text in [
+            "ext:pdf",
+            "kind:folder,shortcut",
+            "target:*chrome*",
+            "older:30+smaller:5",
+        ] {
             let matchers = query(text).unwrap();
             serde_json::from_value::<Vec<gevrek_model::zones::Matcher>>(matchers)
                 .unwrap_or_else(|error| panic!("{text}: {error}"));
@@ -1961,29 +2152,76 @@ mod tests {
     #[test]
     fn every_word_becomes_the_commands_the_zones_read() {
         for (words, expected) in [
-            (&["delete", "Wood"][..], &[r#"{"command":"delete_zone","zone":"workshop"}"#][..]),
-            (&["rename", "work", "Papers and more"], &[r#"{"command":"rename_zone","zone":"work","title":"Papers and more"}"#]),
-            (&["move", "work", "100,-20"], &[r#"{"command":"move_zone","zone":"work","x":100,"y":-20,"snap":true}"#]),
+            (
+                &["delete", "Wood"][..],
+                &[r#"{"command":"delete_zone","zone":"workshop"}"#][..],
+            ),
+            (
+                &["rename", "work", "Papers and more"],
+                &[r#"{"command":"rename_zone","zone":"work","title":"Papers and more"}"#],
+            ),
+            (
+                &["move", "work", "100,-20"],
+                &[r#"{"command":"move_zone","zone":"work","x":100,"y":-20,"snap":true}"#],
+            ),
             (
                 &["move", "work", "100,50", "--display", "2", "--no-snap"],
                 &[r#"{"command":"move_zone","zone":"work","x":2020,"y":50,"snap":false}"#],
             ),
             (
                 &["resize", "workshop", "500x300"],
-                &[r#"{"command":"resize_zone","zone":"workshop","rect":{"x":400,"y":40,"width":500,"height":300},"edges":{"right":true,"bottom":true},"snap":true}"#],
+                &[
+                    r#"{"command":"resize_zone","zone":"workshop","rect":{"x":400,"y":40,"width":500,"height":300},"edges":{"right":true,"bottom":true},"snap":true}"#,
+                ],
             ),
-            (&["set", "work", "view=list", "icon-size=32"], &[r#"{"view":"list","icon_size":32,"command":"set_view","zone":"work"}"#]),
-            (&["roll-up", "work"], &[r#"{"command":"roll_up","zone":"work"}"#]),
-            (&["roll-up", "work", "on"], &[r#"{"command":"roll_up","zone":"work","rolled_up":true}"#]),
-            (&["roll-up", "work", "off"], &[r#"{"command":"roll_up","zone":"work","rolled_up":false}"#]),
-            (&["lock", "work"], &[r#"{"geometry":true,"members":true,"command":"lock","zone":"work"}"#]),
-            (&["lock", "work", "geometry"], &[r#"{"geometry":true,"command":"lock","zone":"work"}"#]),
-            (&["lock", "work", "members"], &[r#"{"members":true,"command":"lock","zone":"work"}"#]),
-            (&["lock", "work", "none"], &[r#"{"geometry":false,"members":false,"command":"lock","zone":"work"}"#]),
-            (&["unlock", "work"], &[r#"{"command":"lock","zone":"work","geometry":false,"members":false}"#]),
-            (&["tab", "play", "--with", "work"], &[r#"{"command":"tab","zone":"zone-3","with":"work"}"#]),
-            (&["untab", "play"], &[r#"{"command":"untab","zone":"zone-3"}"#]),
-            (&["front", "play"], &[r#"{"command":"activate_tab","zone":"zone-3"}"#]),
+            (
+                &["set", "work", "view=list", "icon-size=32"],
+                &[r#"{"view":"list","icon_size":32,"command":"set_view","zone":"work"}"#],
+            ),
+            (
+                &["roll-up", "work"],
+                &[r#"{"command":"roll_up","zone":"work"}"#],
+            ),
+            (
+                &["roll-up", "work", "on"],
+                &[r#"{"command":"roll_up","zone":"work","rolled_up":true}"#],
+            ),
+            (
+                &["roll-up", "work", "off"],
+                &[r#"{"command":"roll_up","zone":"work","rolled_up":false}"#],
+            ),
+            (
+                &["lock", "work"],
+                &[r#"{"geometry":true,"members":true,"command":"lock","zone":"work"}"#],
+            ),
+            (
+                &["lock", "work", "geometry"],
+                &[r#"{"geometry":true,"command":"lock","zone":"work"}"#],
+            ),
+            (
+                &["lock", "work", "members"],
+                &[r#"{"members":true,"command":"lock","zone":"work"}"#],
+            ),
+            (
+                &["lock", "work", "none"],
+                &[r#"{"geometry":false,"members":false,"command":"lock","zone":"work"}"#],
+            ),
+            (
+                &["unlock", "work"],
+                &[r#"{"command":"lock","zone":"work","geometry":false,"members":false}"#],
+            ),
+            (
+                &["tab", "play", "--with", "work"],
+                &[r#"{"command":"tab","zone":"zone-3","with":"work"}"#],
+            ),
+            (
+                &["untab", "play"],
+                &[r#"{"command":"untab","zone":"zone-3"}"#],
+            ),
+            (
+                &["front", "play"],
+                &[r#"{"command":"activate_tab","zone":"zone-3"}"#],
+            ),
             (
                 &["add", "play", "notes", "photo.png"],
                 &[
@@ -2007,112 +2245,308 @@ mod tests {
             ),
             (
                 &["place", "notes", "300,200", "--display", "LG-0042"],
-                &[r#"{"command":"place_loose_item","item":"/desk/notes.txt","display":"LG-0042","x":300,"y":200}"#],
+                &[
+                    r#"{"command":"place_loose_item","item":"/desk/notes.txt","display":"LG-0042","x":300,"y":200}"#,
+                ],
             ),
-            (&["rename-item", "notes", "todo.txt"], &[r#"{"command":"rename_item","item":"/desk/notes.txt","name":"todo.txt"}"#]),
-            (&["trash", "notes", "photo"], &[r#"{"command":"trash_items","items":["/desk/notes.txt","/desk/photo.png"]}"#]),
+            (
+                &["rename-item", "notes", "todo.txt"],
+                &[r#"{"command":"rename_item","item":"/desk/notes.txt","name":"todo.txt"}"#],
+            ),
+            (
+                &["trash", "notes", "photo"],
+                &[r#"{"command":"trash_items","items":["/desk/notes.txt","/desk/photo.png"]}"#],
+            ),
             (&["undo"], &[r#"{"command":"undo_file_operation"}"#]),
             (&["hide"], &[r#"{"command":"quick_hide","hidden":true}"#]),
             (&["unhide"], &[r#"{"command":"quick_hide","hidden":false}"#]),
             (&["show"], &[r#"{"command":"quick_hide","hidden":false}"#]),
             (&["toggle"], &[r#"{"command":"quick_hide"}"#]),
-            (&["hide", "work"], &[r#"{"command":"show_zone","zone":"work","shown":false}"#]),
-            (&["unhide", "work"], &[r#"{"command":"show_zone","zone":"work","shown":true}"#]),
+            (
+                &["hide", "work"],
+                &[r#"{"command":"show_zone","zone":"work","shown":false}"#],
+            ),
+            (
+                &["unhide", "work"],
+                &[r#"{"command":"show_zone","zone":"work","shown":true}"#],
+            ),
             (&["peek"], &[r#"{"command":"toggle_peek"}"#]),
             (&["peek", "on"], &[r#"{"command":"peek","on":true}"#]),
             (&["peek", "off"], &[r#"{"command":"peek","on":false}"#]),
             (
-                &["set", "work", "opacity=80", "blur=none", "private=on", "sort=name"],
+                &[
+                    "set",
+                    "work",
+                    "opacity=80",
+                    "blur=none",
+                    "private=on",
+                    "sort=name",
+                ],
                 &[
                     r#"{"sort":"name","command":"set_view","zone":"work"}"#,
                     r#"{"command":"modify_zone","zone":"work","changes":{"private":true,"look":{"opacity":80,"blur":null}}}"#,
                 ],
             ),
-            (&["open", "notes", "photo"], &[r#"{"command":"open","items":["/desk/notes.txt","/desk/photo.png"]}"#]),
-            (&["go-to", "plans"], &[r#"{"command":"focus_item","item":"/desk/plans.pdf"}"#]),
-            (&["next-tab", "work", "--backwards"], &[r#"{"command":"next_tab","zone":"work","backwards":true}"#]),
-            (&["lock-all"], &[r#"{"geometry":true,"members":true,"command":"lock_all"}"#]),
-            (&["lock-all", "none"], &[r#"{"geometry":false,"members":false,"command":"lock_all"}"#]),
-            (&["keep-zone", "work", "on"], &[r#"{"command":"always_visible","zone":"work","on":true}"#]),
-            (&["keep-item", "notes"], &[r#"{"command":"item_always_visible","item":"/desk/notes.txt"}"#]),
-            (&["refresh", "dl"], &[r#"{"command":"refresh_zone","zone":"dl"}"#]),
-            (&["new-folder", "dl", "Invoices"], &[r#"{"command":"new_folder","zone":"dl","name":"Invoices"}"#]),
-            (&["filter", "dl", "inv"], &[r#"{"command":"filter","zone":"dl","typed":"inv"}"#]),
-            (&["filter", "dl"], &[r#"{"command":"filter","zone":"dl","typed":""}"#]),
-            (&["go", "dl", "up"], &[r#"{"command":"navigate_up","zone":"dl"}"#]),
-            (&["go", "dl", "back"], &[r#"{"command":"navigate_back","zone":"dl"}"#]),
-            (&["go", "dl", "2026"], &[r#"{"command":"enter_folder","zone":"dl","item":"/home/ada/Downloads/2026"}"#]),
+            (
+                &["open", "notes", "photo"],
+                &[r#"{"command":"open","items":["/desk/notes.txt","/desk/photo.png"]}"#],
+            ),
+            (
+                &["go-to", "plans"],
+                &[r#"{"command":"focus_item","item":"/desk/plans.pdf"}"#],
+            ),
+            (
+                &["next-tab", "work", "--backwards"],
+                &[r#"{"command":"next_tab","zone":"work","backwards":true}"#],
+            ),
+            (
+                &["lock-all"],
+                &[r#"{"geometry":true,"members":true,"command":"lock_all"}"#],
+            ),
+            (
+                &["lock-all", "none"],
+                &[r#"{"geometry":false,"members":false,"command":"lock_all"}"#],
+            ),
+            (
+                &["keep-zone", "work", "on"],
+                &[r#"{"command":"always_visible","zone":"work","on":true}"#],
+            ),
+            (
+                &["keep-item", "notes"],
+                &[r#"{"command":"item_always_visible","item":"/desk/notes.txt"}"#],
+            ),
+            (
+                &["refresh", "dl"],
+                &[r#"{"command":"refresh_zone","zone":"dl"}"#],
+            ),
+            (
+                &["new-folder", "dl", "Invoices"],
+                &[r#"{"command":"new_folder","zone":"dl","name":"Invoices"}"#],
+            ),
+            (
+                &["filter", "dl", "inv"],
+                &[r#"{"command":"filter","zone":"dl","typed":"inv"}"#],
+            ),
+            (
+                &["filter", "dl"],
+                &[r#"{"command":"filter","zone":"dl","typed":""}"#],
+            ),
+            (
+                &["go", "dl", "up"],
+                &[r#"{"command":"navigate_up","zone":"dl"}"#],
+            ),
+            (
+                &["go", "dl", "back"],
+                &[r#"{"command":"navigate_back","zone":"dl"}"#],
+            ),
+            (
+                &["go", "dl", "2026"],
+                &[r#"{"command":"enter_folder","zone":"dl","item":"/home/ada/Downloads/2026"}"#],
+            ),
             (&["privacy"], &[r#"{"command":"mask","masked":true}"#]),
             (&["privacy", "on"], &[r#"{"command":"mask","masked":true}"#]),
             (&["privacy", "off"], &[r#"{"command":"reveal"}"#]),
             // A zone that is not private is made so; one that is, is
             // covered again or uncovered for now.
-            (&["privacy", "on", "--zone", "work"], &[r#"{"command":"modify_zone","zone":"work","changes":{"private":true}}"#]),
-            (&["privacy", "off", "--zone", "bank"], &[r#"{"command":"reveal","zone":"bank","revealed":true}"#]),
-            (&["privacy", "--zone", "bank"], &[r#"{"command":"reveal","zone":"bank","revealed":true}"#]),
-            (&["focus", "play"], &[r#"{"command":"focus_zone","zone":"zone-3"}"#]),
-            (&["focus", "left"], &[r#"{"command":"focus_neighbour","direction":"left"}"#]),
+            (
+                &["privacy", "on", "--zone", "work"],
+                &[r#"{"command":"modify_zone","zone":"work","changes":{"private":true}}"#],
+            ),
+            (
+                &["privacy", "off", "--zone", "bank"],
+                &[r#"{"command":"reveal","zone":"bank","revealed":true}"#],
+            ),
+            (
+                &["privacy", "--zone", "bank"],
+                &[r#"{"command":"reveal","zone":"bank","revealed":true}"#],
+            ),
+            (
+                &["focus", "play"],
+                &[r#"{"command":"focus_zone","zone":"zone-3"}"#],
+            ),
+            (
+                &["focus", "left"],
+                &[r#"{"command":"focus_neighbour","direction":"left"}"#],
+            ),
             (&["focus", "none"], &[r#"{"command":"focus_zone"}"#]),
             // The zone that has the keyboard, by its own word.
-            (&["roll-up", "@focused"], &[r#"{"command":"roll_up","zone":"workshop"}"#]),
+            (
+                &["roll-up", "@focused"],
+                &[r#"{"command":"roll_up","zone":"workshop"}"#],
+            ),
             (&["rules", "check"], &[r#"{"command":"check_timed_rules"}"#]),
-            (&["focus", "desk"], &[r#"{"command":"focus_zone","zone":"@desk"}"#]),
-            (&["new-folder", "--in", "/home/ada/Desktop", "Projects"], &[r#"{"command":"new_folder_in","folder":"/home/ada/Desktop","name":"Projects"}"#]),
             (
-                &["move-to-folder", "setup", "--folder", "/home/ada/Downloads/2026"],
-                &[r#"{"command":"move_items_to_folder","items":["/home/ada/Downloads/setup.exe"],"folder":"/home/ada/Downloads/2026","copy":false}"#],
+                &["focus", "desk"],
+                &[r#"{"command":"focus_zone","zone":"@desk"}"#],
             ),
             (
-                &["bring-in", "/media/usb/film.mkv", "--folder", "/home/ada/Desktop", "--zone", "play", "--copy"],
-                &[r#"{"command":"bring_in","paths":["/media/usb/film.mkv"],"folder":"/home/ada/Desktop","copy":true,"zone":"zone-3"}"#],
+                &["new-folder", "--in", "/home/ada/Desktop", "Projects"],
+                &[r#"{"command":"new_folder_in","folder":"/home/ada/Desktop","name":"Projects"}"#],
             ),
-            (&["cancel", "7"], &[r#"{"command":"cancel_operation","request":7}"#]),
-            (&["expand", "work"], &[r#"{"command":"expand","zone":"work"}"#]),
-            (&["expand", "work", "off"], &[r#"{"command":"expand","zone":"work","expanded":false}"#]),
-            (&["move-tab", "play", "0"], &[r#"{"command":"move_tab","zone":"zone-3","index":0}"#]),
-            (&["split-tab", "play", "640,300"], &[r#"{"command":"split_tab","zone":"zone-3","x":640,"y":300,"snap":true}"#]),
             (
-                &["settings", "snap.grid=16", "roll-up.expand_on=click", "look.blur=none", "privacy.everything=true"],
-                &[r#"{"command":"modify_settings","changes":{"snap":{"grid":16},"roll_up":{"expand_on":"click"},"look":{"blur":null},"privacy":{"everything":true}}}"#],
+                &[
+                    "move-to-folder",
+                    "setup",
+                    "--folder",
+                    "/home/ada/Downloads/2026",
+                ],
+                &[
+                    r#"{"command":"move_items_to_folder","items":["/home/ada/Downloads/setup.exe"],"folder":"/home/ada/Downloads/2026","copy":false}"#,
+                ],
+            ),
+            (
+                &[
+                    "bring-in",
+                    "/media/usb/film.mkv",
+                    "--folder",
+                    "/home/ada/Desktop",
+                    "--zone",
+                    "play",
+                    "--copy",
+                ],
+                &[
+                    r#"{"command":"bring_in","paths":["/media/usb/film.mkv"],"folder":"/home/ada/Desktop","copy":true,"zone":"zone-3"}"#,
+                ],
+            ),
+            (
+                &["cancel", "7"],
+                &[r#"{"command":"cancel_operation","request":7}"#],
+            ),
+            (
+                &["expand", "work"],
+                &[r#"{"command":"expand","zone":"work"}"#],
+            ),
+            (
+                &["expand", "work", "off"],
+                &[r#"{"command":"expand","zone":"work","expanded":false}"#],
+            ),
+            (
+                &["move-tab", "play", "0"],
+                &[r#"{"command":"move_tab","zone":"zone-3","index":0}"#],
+            ),
+            (
+                &["split-tab", "play", "640,300"],
+                &[r#"{"command":"split_tab","zone":"zone-3","x":640,"y":300,"snap":true}"#],
+            ),
+            (
+                &[
+                    "settings",
+                    "snap.grid=16",
+                    "roll-up.expand_on=click",
+                    "look.blur=none",
+                    "privacy.everything=true",
+                ],
+                &[
+                    r#"{"command":"modify_settings","changes":{"snap":{"grid":16},"roll_up":{"expand_on":"click"},"look":{"blur":null},"privacy":{"everything":true}}}"#,
+                ],
             ),
             (
                 &["select", "notes", "photo", "--mode", "toggle"],
-                &[r#"{"command":"select","items":["/desk/notes.txt","/desk/photo.png"],"mode":"toggle"}"#],
+                &[
+                    r#"{"command":"select","items":["/desk/notes.txt","/desk/photo.png"],"mode":"toggle"}"#,
+                ],
             ),
-            (&["select"], &[r#"{"command":"select","items":[],"mode":"replace"}"#]),
-            (&["walk", "down", "--extend"], &[r#"{"command":"move_item_focus","step":"down","extend":true}"#]),
+            (
+                &["select"],
+                &[r#"{"command":"select","items":[],"mode":"replace"}"#],
+            ),
+            (
+                &["walk", "down", "--extend"],
+                &[r#"{"command":"move_item_focus","step":"down","extend":true}"#],
+            ),
             (&["open-chosen"], &[r#"{"command":"open_focused"}"#]),
-            (&["move-chosen", "left"], &[r#"{"command":"move_focused_items","direction":"left"}"#]),
-            (&["move-chosen", "play"], &[r#"{"command":"move_focused_items","zone":"zone-3"}"#]),
-            (&["move-chosen", "desk"], &[r#"{"command":"move_focused_items","zone":"@desk"}"#]),
+            (
+                &["move-chosen", "left"],
+                &[r#"{"command":"move_focused_items","direction":"left"}"#],
+            ),
+            (
+                &["move-chosen", "play"],
+                &[r#"{"command":"move_focused_items","zone":"zone-3"}"#],
+            ),
+            (
+                &["move-chosen", "desk"],
+                &[r#"{"command":"move_focused_items","zone":"@desk"}"#],
+            ),
             (&["dismiss"], &[r#"{"command":"dismiss"}"#]),
-            (&["snapshot", "rename", "tidy", "neat"], &[r#"{"command":"rename_snapshot","name":"tidy","to":"neat"}"#]),
-            (&["snapshot", "export", "tidy", "tidy.json"], &[r#"{"command":"export_layout","name":"tidy"}"#]),
-            (&["snapshot", "export", "@current", "now.json"], &[r#"{"command":"export_layout"}"#]),
+            (
+                &["snapshot", "rename", "tidy", "neat"],
+                &[r#"{"command":"rename_snapshot","name":"tidy","to":"neat"}"#],
+            ),
+            (
+                &["snapshot", "export", "tidy", "tidy.json"],
+                &[r#"{"command":"export_layout","name":"tidy"}"#],
+            ),
+            (
+                &["snapshot", "export", "@current", "now.json"],
+                &[r#"{"command":"export_layout"}"#],
+            ),
             (
                 &["profile", "copy", "2"],
-                &[r#"{"command":"copy_arrangement","from":{"displays":[{"id":"DEL-A1B2-77","width":1920,"height":1080,"scale":1000}]}}"#],
+                &[
+                    r#"{"command":"copy_arrangement","from":{"displays":[{"id":"DEL-A1B2-77","width":1920,"height":1080,"scale":1000}]}}"#,
+                ],
             ),
-            (&["rules", "dry-run"], &[r#"{"command":"preview_rules","scope":"loose"}"#]),
-            (&["rules", "apply", "--scope", "all"], &[r#"{"command":"apply_rules","scope":"all"}"#]),
+            (
+                &["rules", "dry-run"],
+                &[r#"{"command":"preview_rules","scope":"loose"}"#],
+            ),
+            (
+                &["rules", "apply", "--scope", "all"],
+                &[r#"{"command":"apply_rules","scope":"all"}"#],
+            ),
             (&["rules", "undo"], &[r#"{"command":"undo_rules"}"#]),
-            (&["snapshot", "save", "tidy"], &[r#"{"command":"save_snapshot","name":"tidy"}"#]),
-            (&["layout", "apply", "tidy"], &[r#"{"command":"restore_snapshot","name":"tidy"}"#]),
-            (&["snapshot", "delete", "tidy"], &[r#"{"command":"delete_snapshot","name":"tidy"}"#]),
-            (&["search", "rep"], &[r#"{"command":"search","typed":"rep"}"#]),
+            (
+                &["snapshot", "save", "tidy"],
+                &[r#"{"command":"save_snapshot","name":"tidy"}"#],
+            ),
+            (
+                &["layout", "apply", "tidy"],
+                &[r#"{"command":"restore_snapshot","name":"tidy"}"#],
+            ),
+            (
+                &["snapshot", "delete", "tidy"],
+                &[r#"{"command":"delete_snapshot","name":"tidy"}"#],
+            ),
+            (
+                &["search", "rep"],
+                &[r#"{"command":"search","typed":"rep"}"#],
+            ),
             (&["grey"], &[r#"{"command":"grey_icons"}"#]),
             (&["grey", "toggle"], &[r#"{"command":"grey_icons"}"#]),
             (&["grey", "on"], &[r#"{"command":"grey_icons","on":true}"#]),
-            (&["grey", "off"], &[r#"{"command":"grey_icons","on":false}"#]),
-            (&["auto-create"], &[r#"{"command":"auto_create","scope":"loose","dry_run":false}"#]),
-            (&["auto-create", "--dry-run"], &[r#"{"command":"auto_create","scope":"loose","dry_run":true}"#]),
             (
-                &["auto-create", "--dry-run", "--scope", "all", "--min-items", "3", "--no-rules", "--display", "2"],
-                &[r#"{"command":"auto_create","scope":"all","dry_run":true,"min_items":3,"add_rules":false,"display":"LG-0042"}"#],
+                &["grey", "off"],
+                &[r#"{"command":"grey_icons","on":false}"#],
+            ),
+            (
+                &["auto-create"],
+                &[r#"{"command":"auto_create","scope":"loose","dry_run":false}"#],
+            ),
+            (
+                &["auto-create", "--dry-run"],
+                &[r#"{"command":"auto_create","scope":"loose","dry_run":true}"#],
+            ),
+            (
+                &[
+                    "auto-create",
+                    "--dry-run",
+                    "--scope",
+                    "all",
+                    "--min-items",
+                    "3",
+                    "--no-rules",
+                    "--display",
+                    "2",
+                ],
+                &[
+                    r#"{"command":"auto_create","scope":"all","dry_run":true,"min_items":3,"add_rules":false,"display":"LG-0042"}"#,
+                ],
             ),
             (
                 &["auto-create", "--display", "primary"],
-                &[r#"{"command":"auto_create","scope":"loose","dry_run":false,"display":"DEL-A1B2-77"}"#],
+                &[
+                    r#"{"command":"auto_create","scope":"loose","dry_run":false,"display":"DEL-A1B2-77"}"#,
+                ],
             ),
             (&["auto-undo"], &[r#"{"command":"undo_auto_create"}"#]),
         ] {
@@ -2121,21 +2555,31 @@ mod tests {
             // And the zones read each of them: what is written here is
             // what the core takes.
             for command in &made {
-                Request::from_json(command).unwrap_or_else(|why| panic!("{words:?}: {command}: {why}"));
+                Request::from_json(command)
+                    .unwrap_or_else(|why| panic!("{words:?}: {command}: {why}"));
             }
         }
         assert_eq!(
             commands(&["restore-explorer"]),
             [r#"{"command":"restore_system_icons"}"#]
         );
-        assert_eq!(Request::from_json(&commands(&["restore-explorer"])[0]).unwrap(), Request::RestoreSystemIcons);
+        assert_eq!(
+            Request::from_json(&commands(&["restore-explorer"])[0]).unwrap(),
+            Request::RestoreSystemIcons
+        );
     }
 
     #[test]
     fn a_zone_is_made_as_it_is_described() {
         for (words, expected) in [
-            (&["create"][..], r#"{"command":"create_zone","title":"Zone","kind":{"type":"manual"}}"#),
-            (&["create", "--title", "Play"], r#"{"command":"create_zone","title":"Play","kind":{"type":"manual"}}"#),
+            (
+                &["create"][..],
+                r#"{"command":"create_zone","title":"Zone","kind":{"type":"manual"}}"#,
+            ),
+            (
+                &["create", "--title", "Play"],
+                r#"{"command":"create_zone","title":"Play","kind":{"type":"manual"}}"#,
+            ),
             (
                 &["create", "--dir", "/home/ada/Downloads/"],
                 r#"{"command":"create_zone","title":"Downloads","kind":{"type":"portal","directory":"/home/ada/Downloads/"}}"#,
@@ -2149,7 +2593,17 @@ mod tests {
                 r#"{"command":"create_zone","title":"On the other","kind":{"type":"manual"},"rect":{"x":1960,"y":40,"width":320,"height":240}}"#,
             ),
             (
-                &["create", "--title", "Here", "--display", "2", "--at", "100,50", "--size", "400x300"],
+                &[
+                    "create",
+                    "--title",
+                    "Here",
+                    "--display",
+                    "2",
+                    "--at",
+                    "100,50",
+                    "--size",
+                    "400x300",
+                ],
                 r#"{"command":"create_zone","title":"Here","kind":{"type":"manual"},"rect":{"x":2020,"y":50,"width":400,"height":300}}"#,
             ),
             (
@@ -2162,12 +2616,19 @@ mod tests {
             Request::from_json(&made[0]).unwrap_or_else(|why| panic!("{words:?}: {why}"));
         }
         // What making a zone does not take is given to it once it is there.
-        let recent = asked(&read(&["create", "--title", "Recent", "--from", "recent"]).unwrap(), &desk()).unwrap();
+        let recent = asked(
+            &read(&["create", "--title", "Recent", "--from", "recent"]).unwrap(),
+            &desk(),
+        )
+        .unwrap();
         assert_eq!(
             recent.commands[0].to_string(),
             r#"{"command":"create_zone","title":"Recent","kind":{"type":"smart","query":[]}}"#
         );
-        assert_eq!(recent.then_changes.unwrap().to_string(), r#"{"source":{"from":"recent"}}"#);
+        assert_eq!(
+            recent.then_changes.unwrap().to_string(),
+            r#"{"source":{"from":"recent"}}"#
+        );
         let folder = asked(
             &read(&["create", "--query", "ext:pdf", "--from", "/home/ada/Papers"]).unwrap(),
             &desk(),
@@ -2180,12 +2641,27 @@ mod tests {
         );
         Request::from_value(change).unwrap();
         for (words, says) in [
-            (&["create", "--kind", "portal"][..], "A portal needs the folder it shows"),
-            (&["create", "--kind", "smart"], "A smart zone needs what it shows"),
-            (&["create", "--dir", "/a", "--query", "ext:pdf"], "say one, or --kind"),
-            (&["create", "--kind", "manual", "--dir", "/a"], "A manual zone has no --dir"),
+            (
+                &["create", "--kind", "portal"][..],
+                "A portal needs the folder it shows",
+            ),
+            (
+                &["create", "--kind", "smart"],
+                "A smart zone needs what it shows",
+            ),
+            (
+                &["create", "--dir", "/a", "--query", "ext:pdf"],
+                "say one, or --kind",
+            ),
+            (
+                &["create", "--kind", "manual", "--dir", "/a"],
+                "A manual zone has no --dir",
+            ),
             (&["create", "--at", "100"], "is no place"),
-            (&["create", "--display", "9", "--at", "1,1"], "There is no display '9'"),
+            (
+                &["create", "--display", "9", "--at", "1,1"],
+                "There is no display '9'",
+            ),
         ] {
             let why = refusal(words);
             assert!(why.contains(says), "{words:?}: {why}");
@@ -2199,21 +2675,39 @@ mod tests {
             (&["delete", "wo"], "is the beginning of 2 zones"),
             (&["add", "work", "report"], "is the name of 2 items"),
             (&["add", "work", "nothing"], "There is no item 'nothing'"),
-            (&["tab", "work", "--with", "work"], "cannot be a tab beside itself"),
+            (
+                &["tab", "work", "--with", "work"],
+                "cannot be a tab beside itself",
+            ),
             (&["move", "work", "here"], "is no place"),
             (&["resize", "work", "0x0"], "at least 1"),
             (&["set", "work", "colour=red"], "is nothing `set` knows"),
             (&["go", "work", "up"], "is no portal"),
             (&["new-folder", "dl"], "Say where and what it is called"),
-            (&["walk", "sideways"], "A step is left, right, up, down, first or last"),
-            (&["select", "notes", "--mode", "some"], "--mode is replace, add, remove or toggle"),
+            (
+                &["walk", "sideways"],
+                "A step is left, right, up, down, first or last",
+            ),
+            (
+                &["select", "notes", "--mode", "some"],
+                "--mode is replace, add, remove or toggle",
+            ),
             (&["settings", "snap"], "write key=value"),
-            (&["settings", "snap=1", "snap.grid=2"], "which was given a value before"),
+            (
+                &["settings", "snap=1", "snap.grid=2"],
+                "which was given a value before",
+            ),
             (&["go", "dl", "2027"], "shows nothing called '2027'"),
             (&["profile", "copy", "1"], "is the one in use"),
             (&["profile", "copy", "7"], "There is no arrangement 7"),
-            (&["auto-create", "--display", "9"], "There is no display '9'"),
-            (&["auto-create", "--min-items", "0"], "--min-items is at least 1"),
+            (
+                &["auto-create", "--display", "9"],
+                "There is no display '9'",
+            ),
+            (
+                &["auto-create", "--min-items", "0"],
+                "--min-items is at least 1",
+            ),
         ] {
             let why = refusal(words);
             assert!(why.contains(says), "{words:?}: {why}");
@@ -2257,10 +2751,20 @@ mod tests {
     fn every_word_and_every_flag_says_what_it_is_for() {
         use clap::CommandFactory;
         fn told(command: &clap::Command, path: &str) {
-            for flag in command.get_arguments().filter(|argument| argument.get_long().is_some()) {
-                assert!(flag.get_help().is_some(), "{path} --{} has no help", flag.get_id());
+            for flag in command
+                .get_arguments()
+                .filter(|argument| argument.get_long().is_some())
+            {
+                assert!(
+                    flag.get_help().is_some(),
+                    "{path} --{} has no help",
+                    flag.get_id()
+                );
             }
-            for word in command.get_subcommands().filter(|word| word.get_name() != "help") {
+            for word in command
+                .get_subcommands()
+                .filter(|word| word.get_name() != "help")
+            {
                 let path = format!("{path} {}", word.get_name());
                 assert!(word.get_about().is_some(), "{path} has no help");
                 told(word, &path);
@@ -2272,15 +2776,30 @@ mod tests {
     #[test]
     fn what_was_done_is_said_in_a_sentence() {
         let said = |words: &[&str]| asked(&read(words).unwrap(), &desk()).unwrap().done;
-        assert_eq!(said(&["delete", "work"]), "Zone 'work' was taken away; what it held is loose on the desktop");
-        assert_eq!(said(&["add", "play", "notes"]), "1 item put into zone 'zone-3'");
-        assert_eq!(said(&["remove", "plans", "budget"]), "2 items taken out; loose on the desktop");
+        assert_eq!(
+            said(&["delete", "work"]),
+            "Zone 'work' was taken away; what it held is loose on the desktop"
+        );
+        assert_eq!(
+            said(&["add", "play", "notes"]),
+            "1 item put into zone 'zone-3'"
+        );
+        assert_eq!(
+            said(&["remove", "plans", "budget"]),
+            "2 items taken out; loose on the desktop"
+        );
         assert_eq!(said(&["roll-up", "work"]), "Zone 'work' is rolled up");
-        assert_eq!(said(&["roll-up", "work", "off"]), "Zone 'work' is rolled down");
+        assert_eq!(
+            said(&["roll-up", "work", "off"]),
+            "Zone 'work' is rolled down"
+        );
         assert_eq!(said(&["toggle"]), "The zones are hidden");
         assert_eq!(said(&["peek"]), "The zones are above the windows");
         assert_eq!(said(&["grey"]), "The icons are drawn grey");
-        assert_eq!(said(&["grey", "off"]), "The icons are drawn in their colours");
+        assert_eq!(
+            said(&["grey", "off"]),
+            "The icons are drawn in their colours"
+        );
         let mut hidden = desk();
         hidden.quick_hidden = true;
         hidden.peeking = true;

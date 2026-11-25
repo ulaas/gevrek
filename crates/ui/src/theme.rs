@@ -423,7 +423,10 @@ impl Settings {
         let text = match std::fs::read_to_string(path) {
             Ok(text) => text,
             Err(error) => {
-                log::debug!("the appearance is gevrek's own: {}: {error}", path.display());
+                log::debug!(
+                    "the appearance is gevrek's own: {}: {error}",
+                    path.display()
+                );
                 return s;
             }
         };

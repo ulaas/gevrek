@@ -252,9 +252,17 @@ mod tests {
         for bits in 0..8u32 {
             let available = DndAction::from_bits_truncate(bits);
             for preferred in single {
-                for asked in [None, Some(DndAction::Copy), Some(DndAction::Move), Some(DndAction::Ask)] {
+                for asked in [
+                    None,
+                    Some(DndAction::Copy),
+                    Some(DndAction::Move),
+                    Some(DndAction::Ask),
+                ] {
                     let chosen = choose(available, preferred, asked);
-                    assert!(single.contains(&chosen), "{available:?} {preferred:?} {asked:?}");
+                    assert!(
+                        single.contains(&chosen),
+                        "{available:?} {preferred:?} {asked:?}"
+                    );
                     assert!(available.contains(chosen));
                 }
             }

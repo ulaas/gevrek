@@ -70,7 +70,10 @@ fn group(text: &str, name: &str) -> HashMap<String, Vec<String>> {
     let mut inside = false;
     for line in text.lines().map(str::trim) {
         if line.starts_with('[') {
-            inside = line.strip_prefix('[').and_then(|line| line.strip_suffix(']')) == Some(name);
+            inside = line
+                .strip_prefix('[')
+                .and_then(|line| line.strip_suffix(']'))
+                == Some(name);
             continue;
         }
         if !inside || line.starts_with('#') {
@@ -161,10 +164,17 @@ impl Associations {
                 Ok(text) => group(&text, "MIME Cache"),
                 Err(_) => scan(&folder),
             };
-            layers.push(Layer { cache, ..Layer::default() });
+            layers.push(Layer {
+                cache,
+                ..Layer::default()
+            });
             folders.push(folder);
         }
-        Self { layers, folders, locales: locales.to_vec() }
+        Self {
+            layers,
+            folders,
+            locales: locales.to_vec(),
+        }
     }
 
     /// The entry a program's id names: `kde-konsole.desktop` is
@@ -175,7 +185,11 @@ impl Associations {
         let mut at = 0;
         while let Some(dash) = id[at..].find('-') {
             let cut = at + dash;
-            names.push(format!("{}/{}", id[..cut].replace('-', "/"), &id[cut + 1..]));
+            names.push(format!(
+                "{}/{}",
+                id[..cut].replace('-', "/"),
+                &id[cut + 1..]
+            ));
             at = cut + 1;
         }
         self.folders.iter().find_map(|folder| {
@@ -188,10 +202,20 @@ impl Associations {
 
     /// The program an id names, where it is one that can be started.
     pub fn program(&self, id: &str) -> Option<Program> {
-        let id = if id.ends_with(".desktop") { id.to_string() } else { format!("{id}.desktop") };
+        let id = if id.ends_with(".desktop") {
+            id.to_string()
+        } else {
+            format!("{id}.desktop")
+        };
         let entry = self.entry_of(&id)?;
         let text = std::fs::read_to_string(&entry).ok()?;
-        let app = apps::parse_as(&text, id.trim_end_matches(".desktop"), &entry, &self.locales, false)?;
+        let app = apps::parse_as(
+            &text,
+            id.trim_end_matches(".desktop"),
+            &entry,
+            &self.locales,
+            false,
+        )?;
         let fields = apps::main_group(&text);
         // `TryExec`: the entry only counts when that program is there.
         if fields
@@ -219,7 +243,14 @@ impl Associations {
         for layer in &self.layers {
             removed.extend(layer.removed.get(mime).into_iter().flatten());
             let allowed = |id: &&String| !removed.contains(id);
-            defaults.extend(layer.defaults.get(mime).into_iter().flatten().filter(allowed));
+            defaults.extend(
+                layer
+                    .defaults
+                    .get(mime)
+                    .into_iter()
+                    .flatten()
+                    .filter(allowed),
+            );
             others.extend(layer.added.get(mime).into_iter().flatten().filter(allowed));
             others.extend(layer.cache.get(mime).into_iter().flatten().filter(allowed));
         }
@@ -266,13 +297,19 @@ mod tests {
         std::fs::create_dir_all(path.parent().expect("a folder")).expect("folders");
         std::fs::write(
             path,
-            format!("[Desktop Entry]\nType=Application\nName={name}\nExec={} %f\n{more}", name.to_lowercase()),
+            format!(
+                "[Desktop Entry]\nType=Application\nName={name}\nExec={} %f\n{more}",
+                name.to_lowercase()
+            ),
         )
         .expect("written");
     }
 
     fn names(programs: &[Program]) -> Vec<&str> {
-        programs.iter().map(|program| program.name.as_str()).collect()
+        programs
+            .iter()
+            .map(|program| program.name.as_str())
+            .collect()
     }
 
     #[test]
@@ -301,11 +338,20 @@ mod tests {
 
         // Nothing chosen: the first that says it can.
         let none = read();
-        assert_eq!(none.default_for(&mimes, "text/plain").expect("one").name, "Viewer");
-        assert_eq!(names(&none.candidates(&mimes, "text/plain")), ["Viewer", "Editor", "Kate"]);
+        assert_eq!(
+            none.default_for(&mimes, "text/plain").expect("one").name,
+            "Viewer"
+        );
+        assert_eq!(
+            names(&none.candidates(&mimes, "text/plain")),
+            ["Viewer", "Editor", "Kate"]
+        );
         assert!(none.default_for(&mimes, "video/mp4").is_none());
         // A kind of text is opened by what opens text, after its own.
-        assert_eq!(names(&none.candidates(&mimes, "text/html")), ["Browser", "Viewer", "Editor", "Kate"]);
+        assert_eq!(
+            names(&none.candidates(&mimes, "text/html")),
+            ["Browser", "Viewer", "Editor", "Kate"]
+        );
 
         // The system's list in the data directory names a default.
         std::fs::write(
@@ -313,7 +359,10 @@ mod tests {
             "[Default Applications]\ntext/plain=editor.desktop;\n",
         )
         .expect("written");
-        assert_eq!(read().default_for(&mimes, "text/plain").expect("one").name, "Editor");
+        assert_eq!(
+            read().default_for(&mimes, "text/plain").expect("one").name,
+            "Editor"
+        );
 
         // The system's configuration comes before it.
         std::fs::create_dir_all(&places.config_dirs[0]).expect("a folder");
@@ -322,7 +371,10 @@ mod tests {
             "[Default Applications]\ntext/plain=kde-kate.desktop;\n",
         )
         .expect("written");
-        assert_eq!(read().default_for(&mimes, "text/plain").expect("one").name, "Kate");
+        assert_eq!(
+            read().default_for(&mimes, "text/plain").expect("one").name,
+            "Kate"
+        );
 
         // The person's own before that; a default that is not installed
         // is passed over; what was added stands before what programs say.
@@ -333,11 +385,20 @@ mod tests {
         )
         .expect("written");
         let all = read();
-        assert_eq!(all.default_for(&mimes, "text/plain").expect("one").name, "Mine");
+        assert_eq!(
+            all.default_for(&mimes, "text/plain").expect("one").name,
+            "Mine"
+        );
         // The defaults of every list in order, then the rest; the removed
         // one is gone though its own folder's cache names it.
-        assert_eq!(names(&all.candidates(&mimes, "text/plain")), ["Mine", "Kate", "Editor"]);
-        assert_eq!(names(&all.candidates(&mimes, "image/png")), ["Mine", "Viewer"]);
+        assert_eq!(
+            names(&all.candidates(&mimes, "text/plain")),
+            ["Mine", "Kate", "Editor"]
+        );
+        assert_eq!(
+            names(&all.candidates(&mimes, "image/png")),
+            ["Mine", "Viewer"]
+        );
 
         // The desktop's own list comes before the plain one beside it.
         std::fs::write(
@@ -345,7 +406,10 @@ mod tests {
             "[Default Applications]\ntext/plain=editor.desktop;\n",
         )
         .expect("written");
-        assert_eq!(read().default_for(&mimes, "text/plain").expect("one").name, "Editor");
+        assert_eq!(
+            read().default_for(&mimes, "text/plain").expect("one").name,
+            "Editor"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -354,24 +418,58 @@ mod tests {
         let root = crate::zones::linux::testing::folder("mimeapps-scan");
         let places = Places::under(&root);
         let user_apps = places.data_home.join("applications");
-        entry(&user_apps, "paint.desktop", "Paint", "MimeType=image/png;image/jpeg;\n");
-        entry(&user_apps, "hidden.desktop", "Hidden", "MimeType=image/png;\nHidden=true\n");
-        entry(&user_apps, "quiet.desktop", "Quiet", "MimeType=image/png;\nNoDisplay=true\n");
-        entry(&user_apps, "absent.desktop", "Absent", "MimeType=image/png;\nTryExec=/no/such/program\n");
+        entry(
+            &user_apps,
+            "paint.desktop",
+            "Paint",
+            "MimeType=image/png;image/jpeg;\n",
+        );
+        entry(
+            &user_apps,
+            "hidden.desktop",
+            "Hidden",
+            "MimeType=image/png;\nHidden=true\n",
+        );
+        entry(
+            &user_apps,
+            "quiet.desktop",
+            "Quiet",
+            "MimeType=image/png;\nNoDisplay=true\n",
+        );
+        entry(
+            &user_apps,
+            "absent.desktop",
+            "Absent",
+            "MimeType=image/png;\nTryExec=/no/such/program\n",
+        );
         let mimes = MimeDatabase::default();
         let read = Associations::load(&places, &[]);
         // One that says it was deleted, or whose program is not there, is
         // not offered; one that only keeps out of lists is.
-        assert_eq!(names(&read.candidates(&mimes, "image/png")), ["Paint", "Quiet"]);
+        assert_eq!(
+            names(&read.candidates(&mimes, "image/png")),
+            ["Paint", "Quiet"]
+        );
         assert_eq!(names(&read.candidates(&mimes, "image/jpeg")), ["Paint"]);
         let paint = read.program("paint").expect("a program");
-        assert_eq!((paint.id.as_str(), paint.exec.as_str()), ("paint.desktop", "paint %f"));
+        assert_eq!(
+            (paint.id.as_str(), paint.exec.as_str()),
+            ("paint.desktop", "paint %f")
+        );
         assert!(read.program("nothing.desktop").is_none());
         // The person's entry of a name stands in front of the system's.
         let system_apps = places.data_dirs[1].join("applications");
-        entry(&system_apps, "paint.desktop", "System Paint", "MimeType=image/png;\n");
+        entry(
+            &system_apps,
+            "paint.desktop",
+            "System Paint",
+            "MimeType=image/png;\n",
+        );
         let read = Associations::load(&places, &[]);
-        assert_eq!(names(&read.candidates(&mimes, "image/png")), ["Paint", "Quiet"]);
+        assert_eq!(
+            names(&read.candidates(&mimes, "image/png")),
+            ["Paint", "Quiet"]
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }

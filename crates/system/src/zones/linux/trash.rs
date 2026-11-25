@@ -108,7 +108,9 @@ impl Trash {
             .is_ok_and(|data| data.is_dir() && data.permissions().mode() & 0o1000 != 0);
         if usable {
             let can = shared.join(self.uid.to_string());
-            if super::private_folder(&can.join("files")).is_ok() && super::private_folder(&can.join("info")).is_ok() {
+            if super::private_folder(&can.join("files")).is_ok()
+                && super::private_folder(&can.join("info")).is_ok()
+            {
                 return Ok(can);
             }
         }
@@ -126,7 +128,10 @@ impl Trash {
         // above it that is there is on the same file system.)
         let there = original.ancestors().skip(1).find(|folder| folder.is_dir());
         if let Some(top) = there.and_then(|folder| top_of(folder).ok()) {
-            for can in [top.join(".Trash").join(self.uid.to_string()), top.join(format!(".Trash-{}", self.uid))] {
+            for can in [
+                top.join(".Trash").join(self.uid.to_string()),
+                top.join(format!(".Trash-{}", self.uid)),
+            ] {
                 cans.push((can, Some(top.clone())));
             }
         }
@@ -138,13 +143,21 @@ impl Trash {
     pub fn put(&self, path: &Path) -> std::io::Result<Trashed> {
         let (folder, name) = match (path.parent(), path.file_name()) {
             (Some(folder), Some(name)) if path.is_absolute() => (folder, name),
-            _ => return Err(Error::new(ErrorKind::InvalidInput, "not the path of a file")),
+            _ => {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "not the path of a file",
+                ))
+            }
         };
         std::fs::symlink_metadata(path)?;
         // (By its real place, whatever links lead to its folder.)
         let original = std::fs::canonicalize(folder)?.join(name);
         if self.home.starts_with(&original) {
-            return Err(Error::new(ErrorKind::InvalidInput, "the trash cannot be thrown away"));
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "the trash cannot be thrown away",
+            ));
         }
         let (can, top) = self.can_for(folder)?;
         self.put_into(&can, top.as_deref(), &original)
@@ -152,7 +165,12 @@ impl Trash {
 
     /// Move `original` into the can `can`, noting its path whole, or
     /// from `top` on.
-    fn put_into(&self, can: &Path, top: Option<&Path>, original: &Path) -> std::io::Result<Trashed> {
+    fn put_into(
+        &self,
+        can: &Path,
+        top: Option<&Path>,
+        original: &Path,
+    ) -> std::io::Result<Trashed> {
         let name = original
             .file_name()
             .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "no name"))?;
@@ -180,7 +198,10 @@ impl Trash {
             let mut info_name = kept_as.clone();
             info_name.push(".trashinfo");
             let info = can.join("info").join(info_name);
-            let made = std::fs::OpenOptions::new().write(true).create_new(true).open(&info);
+            let made = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&info);
             let mut file = match made {
                 Ok(file) => file,
                 Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
@@ -195,13 +216,19 @@ impl Trash {
                 Err(error) => {
                     // The file stays where it was; no note without one.
                     if let Err(again) = std::fs::remove_file(&info) {
-                        log::debug!("zones: the trash's note {} is left without its file: {again}", info.display());
+                        log::debug!(
+                            "zones: the trash's note {} is left without its file: {again}",
+                            info.display()
+                        );
                     }
                     Err(error)
                 }
             };
         }
-        Err(Error::new(ErrorKind::AlreadyExists, "no free name in the trash"))
+        Err(Error::new(
+            ErrorKind::AlreadyExists,
+            "no free name in the trash",
+        ))
     }
 
     /// The notes of one can.
@@ -231,19 +258,28 @@ impl Trash {
             let Some(path) = said("Path").and_then(uris::unescape) else {
                 continue;
             };
-            let path = PathBuf::from(<std::ffi::OsString as std::os::unix::ffi::OsStringExt>::from_vec(path));
+            let path = PathBuf::from(
+                <std::ffi::OsString as std::os::unix::ffi::OsStringExt>::from_vec(path),
+            );
             // A whole path as it is; a relative one from the top of the
             // can's file system. (A relative one in the home can, or one
             // that climbs out with `..`, is not a note to act on.)
             let original = match (path.is_absolute(), top) {
                 (true, _) => path,
-                (false, Some(top)) if !path.components().any(|part| part == std::path::Component::ParentDir) => {
+                (false, Some(top))
+                    if !path
+                        .components()
+                        .any(|part| part == std::path::Component::ParentDir) =>
+                {
                     top.join(path)
                 }
                 _ => continue,
             };
             notes.push(Note {
-                trashed: Trashed { file: can.join("files").join(kept_as), info: info.clone() },
+                trashed: Trashed {
+                    file: can.join("files").join(kept_as),
+                    info: info.clone(),
+                },
                 original,
                 deleted: said("DeletionDate").unwrap_or_default().trim().to_string(),
                 written: entry.metadata().and_then(|data| data.modified()).ok(),
@@ -276,9 +312,13 @@ impl Trash {
             .cans_of(original)
             .iter()
             .flat_map(|(can, top)| Self::notes(can, top.as_deref()))
-            .filter(|note| note.original == original && note.trashed.file.symlink_metadata().is_ok())
+            .filter(|note| {
+                note.original == original && note.trashed.file.symlink_metadata().is_ok()
+            })
             .collect();
-        found.sort_by(|one, other| (&one.deleted, one.written).cmp(&(&other.deleted, other.written)));
+        found.sort_by(|one, other| {
+            (&one.deleted, one.written).cmp(&(&other.deleted, other.written))
+        });
         let note = found
             .pop()
             .ok_or_else(|| Error::new(ErrorKind::NotFound, "nothing from there is in the trash"))?;
@@ -289,14 +329,20 @@ impl Trash {
     /// Move one trashed file back to `original` and take its note away.
     fn restore_this(&self, trashed: &Trashed, original: &Path) -> std::io::Result<()> {
         if original.symlink_metadata().is_ok() {
-            return Err(Error::new(ErrorKind::AlreadyExists, "something is there again"));
+            return Err(Error::new(
+                ErrorKind::AlreadyExists,
+                "something is there again",
+            ));
         }
         if let Some(folder) = original.parent() {
             std::fs::create_dir_all(folder)?;
         }
         std::fs::rename(&trashed.file, original)?;
         if let Err(error) = std::fs::remove_file(&trashed.info) {
-            log::debug!("zones: the trash's note {} stays after its file came back: {error}", trashed.info.display());
+            log::debug!(
+                "zones: the trash's note {} stays after its file came back: {error}",
+                trashed.info.display()
+            );
         }
         Ok(())
     }
@@ -312,7 +358,9 @@ impl Trash {
             .flat_map(|(can, top)| Self::notes(can, top.as_deref()))
             .filter(|note| note.original == original)
             .collect();
-        found.sort_by(|one, other| (&one.deleted, one.written).cmp(&(&other.deleted, other.written)));
+        found.sort_by(|one, other| {
+            (&one.deleted, one.written).cmp(&(&other.deleted, other.written))
+        });
         found.into_iter().map(|note| note.trashed).collect()
     }
 }
@@ -337,7 +385,10 @@ mod tests {
 
         let trashed = trash.put(&file).expect("thrown away");
         assert!(!file.exists());
-        assert_eq!(trashed.file, root.join("home/.local/share/Trash/files/çay notları %1.txt"));
+        assert_eq!(
+            trashed.file,
+            root.join("home/.local/share/Trash/files/çay notları %1.txt")
+        );
         assert_eq!(
             trashed.info,
             root.join("home/.local/share/Trash/info/çay notları %1.txt.trashinfo")
@@ -356,8 +407,15 @@ mod tests {
             )
         );
         // The time as the specification writes it: 2026-11-19T14:03:27.
-        let date = lines.next().expect("a date").strip_prefix("DeletionDate=").expect("named");
-        let shape: String = date.chars().map(|letter| if letter.is_ascii_digit() { '0' } else { letter }).collect();
+        let date = lines
+            .next()
+            .expect("a date")
+            .strip_prefix("DeletionDate=")
+            .expect("named");
+        let shape: String = date
+            .chars()
+            .map(|letter| if letter.is_ascii_digit() { '0' } else { letter })
+            .collect();
         assert_eq!(shape, "0000-00-00T00:00:00");
         // The can is the person's alone.
         let rights = std::fs::metadata(root.join("home/.local/share/Trash/files")).expect("there");
@@ -366,7 +424,10 @@ mod tests {
         // A second file of the same name gets another name in the can.
         std::fs::write(&file, "two").expect("written");
         let second = trash.put(&file).expect("thrown away");
-        assert_eq!(second.file, root.join("home/.local/share/Trash/files/çay notları %1.2.txt"));
+        assert_eq!(
+            second.file,
+            root.join("home/.local/share/Trash/files/çay notları %1.2.txt")
+        );
         assert_eq!(trash.find(&file).len(), 2);
 
         // Back comes one of them, to where it was; the other stays.
@@ -385,7 +446,10 @@ mod tests {
         assert_eq!(both, ["one", "two"]);
         // Nothing from there is left.
         std::fs::remove_file(&file).expect("removed");
-        assert_eq!(trash.restore(&file).expect_err("nothing left").kind(), ErrorKind::NotFound);
+        assert_eq!(
+            trash.restore(&file).expect_err("nothing left").kind(),
+            ErrorKind::NotFound
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -418,19 +482,34 @@ mod tests {
         std::fs::create_dir_all(desktop.join("Folder/inner")).expect("folders");
         std::fs::write(desktop.join("Folder/inner/a.txt"), "a").expect("written");
         std::fs::write(desktop.join("target.txt"), "kept").expect("written");
-        std::os::unix::fs::symlink(desktop.join("target.txt"), desktop.join("link")).expect("a link");
+        std::os::unix::fs::symlink(desktop.join("target.txt"), desktop.join("link"))
+            .expect("a link");
 
         trash.put(&desktop.join("Folder")).expect("thrown away");
         let link = trash.put(&desktop.join("link")).expect("thrown away");
         // The link went, not what it leads to.
         assert!(desktop.join("target.txt").exists());
-        assert!(link.file.symlink_metadata().expect("there").file_type().is_symlink());
+        assert!(link
+            .file
+            .symlink_metadata()
+            .expect("there")
+            .file_type()
+            .is_symlink());
         // The folder that held a file is gone too; putting the file's
         // folder back brings everything in it.
         trash.restore(&desktop.join("Folder")).expect("put back");
-        assert_eq!(std::fs::read_to_string(desktop.join("Folder/inner/a.txt")).expect("read"), "a");
+        assert_eq!(
+            std::fs::read_to_string(desktop.join("Folder/inner/a.txt")).expect("read"),
+            "a"
+        );
         // What is not there cannot be thrown away, nor the trash itself.
-        assert_eq!(trash.put(&desktop.join("nothing")).expect_err("absent").kind(), ErrorKind::NotFound);
+        assert_eq!(
+            trash
+                .put(&desktop.join("nothing"))
+                .expect_err("absent")
+                .kind(),
+            ErrorKind::NotFound
+        );
         assert!(trash.put(&root.join("home/.local/share")).is_err());
         assert!(trash.put(Path::new("relative.txt")).is_err());
         let _ = std::fs::remove_dir_all(&root);
@@ -451,7 +530,9 @@ mod tests {
         // Nobody made `.Trash`: the person's own can at the top.
         let can = trash.can_at(&top).expect("a can");
         assert_eq!(can, top.join(".Trash-1000"));
-        let trashed = trash.put_into(&can, Some(&top), &file).expect("thrown away");
+        let trashed = trash
+            .put_into(&can, Some(&top), &file)
+            .expect("thrown away");
         assert_eq!(trashed.file, top.join(".Trash-1000/files/a b.jpg"));
         let note = std::fs::read_to_string(&trashed.info).expect("read");
         assert!(note.contains("\nPath=photos/a%20b.jpg\n"), "{note}");
@@ -459,7 +540,9 @@ mod tests {
         let notes = Trash::notes(&can, Some(&top));
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].original, file);
-        trash.restore_this(&notes[0].trashed, &file).expect("put back");
+        trash
+            .restore_this(&notes[0].trashed, &file)
+            .expect("put back");
         assert_eq!(std::fs::read_to_string(&file).expect("read"), "picture");
 
         // An administrator's `.Trash` is used only when it is a real
@@ -472,7 +555,11 @@ mod tests {
         assert_eq!(trash.can_at(&top).expect("a can"), shared.join("1000"));
         std::fs::remove_dir_all(&shared).expect("removed");
         std::fs::create_dir_all(root.join("elsewhere")).expect("a folder");
-        std::fs::set_permissions(root.join("elsewhere"), std::fs::Permissions::from_mode(0o1777)).expect("rights");
+        std::fs::set_permissions(
+            root.join("elsewhere"),
+            std::fs::Permissions::from_mode(0o1777),
+        )
+        .expect("rights");
         std::os::unix::fs::symlink(root.join("elsewhere"), &shared).expect("a link");
         assert_eq!(trash.can_at(&top).expect("a can"), top.join(".Trash-1000"));
 

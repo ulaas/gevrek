@@ -57,7 +57,12 @@ impl ZonesCore {
 
     /// A name no snapshot has: the one wanted, or that with a number.
     fn free_name(&self, wanted: &str) -> String {
-        let taken = |name: &str| self.state.snapshots.iter().any(|snapshot| snapshot.name == name);
+        let taken = |name: &str| {
+            self.state
+                .snapshots
+                .iter()
+                .any(|snapshot| snapshot.name == name)
+        };
         if !taken(wanted) {
             return wanted.to_string();
         }
@@ -74,12 +79,26 @@ impl ZonesCore {
     /// person saved are never touched.
     fn keep_what_there_is(&mut self, before: &str, now: u64) -> String {
         let current = self.current_layout("", now);
-        if let Some(same) = self.state.snapshots.iter().find(|snapshot| snapshot.same_layout(&current)) {
+        if let Some(same) = self
+            .state
+            .snapshots
+            .iter()
+            .find(|snapshot| snapshot.same_layout(&current))
+        {
             return same.name.clone();
         }
         let name = self.free_name(&format!("Before {before}"));
-        self.state.snapshots.push(Snapshot { name: name.clone(), automatic: true, ..current });
-        let automatic = self.state.snapshots.iter().filter(|snapshot| snapshot.automatic).count();
+        self.state.snapshots.push(Snapshot {
+            name: name.clone(),
+            automatic: true,
+            ..current
+        });
+        let automatic = self
+            .state
+            .snapshots
+            .iter()
+            .filter(|snapshot| snapshot.automatic)
+            .count();
         let mut to_drop = automatic.saturating_sub(AUTOMATIC_KEPT);
         self.state.snapshots.retain(|snapshot| {
             let drop = snapshot.automatic && to_drop > 0;
@@ -120,11 +139,19 @@ impl ZonesCore {
             return Err("a snapshot needs a name".to_string());
         }
         let snapshot = self.current_layout(&name, now);
-        match self.state.snapshots.iter_mut().find(|snapshot| snapshot.name == name) {
+        match self
+            .state
+            .snapshots
+            .iter_mut()
+            .find(|snapshot| snapshot.name == name)
+        {
             Some(existing) => *existing = snapshot,
             None => self.state.snapshots.push(snapshot),
         }
-        Ok(vec![Effect::Notify(ZonesEvent::SnapshotSaved { name }), Effect::SaveState])
+        Ok(vec![
+            Effect::Notify(ZonesEvent::SnapshotSaved { name }),
+            Effect::SaveState,
+        ])
     }
 
     pub(super) fn restore_snapshot(&mut self, name: &str, now: u64) -> Outcome {
@@ -136,7 +163,9 @@ impl ZonesCore {
             .cloned()
             .ok_or_else(|| format!("no snapshot is called {name}"))?;
         self.keep_what_there_is("restoring", now);
-        let mut effects = vec![Effect::Notify(ZonesEvent::SnapshotRestored { name: name.to_string() })];
+        let mut effects = vec![Effect::Notify(ZonesEvent::SnapshotRestored {
+            name: name.to_string(),
+        })];
         effects.extend(self.put_layout(snapshot));
         Ok(effects)
     }
@@ -148,7 +177,12 @@ impl ZonesCore {
         if name == to {
             return Ok(Vec::new());
         }
-        if self.state.snapshots.iter().any(|snapshot| snapshot.name == to) {
+        if self
+            .state
+            .snapshots
+            .iter()
+            .any(|snapshot| snapshot.name == to)
+        {
             return Err(format!("a snapshot is called {to} already"));
         }
         let snapshot = self
@@ -161,7 +195,10 @@ impl ZonesCore {
         // One a person named is theirs to keep.
         snapshot.automatic = false;
         Ok(vec![
-            Effect::Notify(ZonesEvent::SnapshotRenamed { name: name.to_string(), to: to.to_string() }),
+            Effect::Notify(ZonesEvent::SnapshotRenamed {
+                name: name.to_string(),
+                to: to.to_string(),
+            }),
             Effect::SaveState,
         ])
     }
@@ -178,7 +215,9 @@ impl ZonesCore {
             None => self.current_layout("Layout", now),
         };
         let document = Box::new(LayoutDocument::of(layout, now));
-        Ok(vec![Effect::Notify(ZonesEvent::LayoutExported { document })])
+        Ok(vec![Effect::Notify(ZonesEvent::LayoutExported {
+            document,
+        })])
     }
 
     pub(super) fn import_layout(&mut self, document: &Value, apply: bool, now: u64) -> Outcome {
@@ -189,10 +228,17 @@ impl ZonesCore {
         // (Under a name of its own: taking one in never replaces a
         // snapshot that is there.)
         let name = self.free_name(&read.layout.name);
-        let layout = Snapshot { name: name.clone(), automatic: false, ..read.layout };
+        let layout = Snapshot {
+            name: name.clone(),
+            automatic: false,
+            ..read.layout
+        };
         self.state.snapshots.push(layout.clone());
-        let mut effects =
-            vec![Effect::Notify(ZonesEvent::LayoutImported { name, applied: apply, kept_as })];
+        let mut effects = vec![Effect::Notify(ZonesEvent::LayoutImported {
+            name,
+            applied: apply,
+            kept_as,
+        })];
         if apply {
             effects.extend(self.put_layout(layout));
         } else {
@@ -216,24 +262,42 @@ impl ZonesCore {
         if &self.state.profiles[index].key == from {
             return Ok(Vec::new());
         }
-        let known: Vec<ZoneId> = self.config.zones.iter().map(|zone| zone.id.clone()).collect();
+        let known: Vec<ZoneId> = self
+            .config
+            .zones
+            .iter()
+            .map(|zone| zone.id.clone())
+            .collect();
         let profile = &mut self.state.profiles[index];
         for zone in &known {
             if let Some(place) = source.geometry.get(zone) {
                 profile.geometry.insert(zone.clone(), place.clone());
             }
         }
-        profile.hidden = source.hidden.iter().filter(|zone| known.contains(zone)).cloned().collect();
+        profile.hidden = source
+            .hidden
+            .iter()
+            .filter(|zone| known.contains(zone))
+            .cloned()
+            .collect();
         // Zones that were on a display that is not here come to one that is.
         self.reconcile();
-        Ok(vec![Effect::Notify(ZonesEvent::LayoutChanged), Effect::SaveState])
+        Ok(vec![
+            Effect::Notify(ZonesEvent::LayoutChanged),
+            Effect::SaveState,
+        ])
     }
 
     // ---- the configuration, changed by a patch ------------------------
 
     pub(super) fn modify_zone(&mut self, zone: &ZoneId, changes: &Value) -> Outcome {
         let before = self.known(zone)?.clone();
-        let index = self.config.zones.iter().position(|definition| &definition.id == zone).unwrap_or(0);
+        let index = self
+            .config
+            .zones
+            .iter()
+            .position(|definition| &definition.id == zone)
+            .unwrap_or(0);
         if !changes.is_object() {
             return Err("the changes to a zone are an object of its keys".to_string());
         }
@@ -250,8 +314,15 @@ impl ZonesCore {
         let mut tried = self.config.clone();
         tried.zones[index] = after.clone();
         let place = format!("desktop.zones.zones[{index}]");
-        if let Some((path, message)) = tried.problems().into_iter().find(|(path, _)| path.starts_with(&place)) {
-            let key = path.strip_prefix(&place).unwrap_or(&path).trim_start_matches('.');
+        if let Some((path, message)) = tried
+            .problems()
+            .into_iter()
+            .find(|(path, _)| path.starts_with(&place))
+        {
+            let key = path
+                .strip_prefix(&place)
+                .unwrap_or(&path)
+                .trim_start_matches('.');
             return Err(format!("{key}: {message}"));
         }
         let group = before.tab_group.clone();
@@ -259,13 +330,17 @@ impl ZonesCore {
         if group != self.config.zones[index].tab_group {
             self.dissolve_lone_tab(group);
         }
-        let mut effects = vec![Effect::Notify(ZonesEvent::ZoneChanged { zone: zone.clone() })];
+        let mut effects = vec![Effect::Notify(ZonesEvent::ZoneChanged {
+            zone: zone.clone(),
+        })];
         effects.extend(self.sync_watches());
         if self.reconcile() {
             effects.push(Effect::SaveState);
         }
         effects.extend([
-            Effect::Notify(ZonesEvent::ItemsChanged { zone: Some(zone.clone()) }),
+            Effect::Notify(ZonesEvent::ItemsChanged {
+                zone: Some(zone.clone()),
+            }),
             Effect::Notify(ZonesEvent::LayoutChanged),
             Effect::SaveConfig,
         ]);
@@ -277,12 +352,14 @@ impl ZonesCore {
             return Err("the changes to the settings are an object of their keys".to_string());
         };
         if keys.contains_key("zones") {
-            return Err("the zones are changed one by one (modify_zone), not with the settings".to_string());
+            return Err(
+                "the zones are changed one by one (modify_zone), not with the settings".to_string(),
+            );
         }
         let mut written = serde_json::to_value(&self.config).map_err(|error| error.to_string())?;
         merge(&mut written, changes);
-        let after: ZonesConfig =
-            serde_json::from_value(written).map_err(|error| format!("those are no settings: {error}"))?;
+        let after: ZonesConfig = serde_json::from_value(written)
+            .map_err(|error| format!("those are no settings: {error}"))?;
         if let Some((path, message)) = after.problems().into_iter().next() {
             let key = path.strip_prefix("desktop.zones.").unwrap_or(&path);
             return Err(format!("{key}: {message}"));
@@ -304,11 +381,24 @@ mod tests {
 
     #[test]
     fn a_patch_is_laid_over_key_by_key() {
-        let mut target = json!({"title": "Papers", "look": {"opacity": 60, "blur": true}, "private": true});
-        merge(&mut target, &json!({"look": {"opacity": 80, "blur": null}, "private": null, "limit": 5}));
-        assert_eq!(target, json!({"title": "Papers", "look": {"opacity": 80}, "limit": 5}));
+        let mut target =
+            json!({"title": "Papers", "look": {"opacity": 60, "blur": true}, "private": true});
+        merge(
+            &mut target,
+            &json!({"look": {"opacity": 80, "blur": null}, "private": null, "limit": 5}),
+        );
+        assert_eq!(
+            target,
+            json!({"title": "Papers", "look": {"opacity": 80}, "limit": 5})
+        );
         // What is no object replaces what was there, whatever that was.
-        merge(&mut target, &json!({"look": "plain", "title": {"long": "Papers", "short": null}}));
-        assert_eq!(target, json!({"title": {"long": "Papers"}, "look": "plain", "limit": 5}));
+        merge(
+            &mut target,
+            &json!({"look": "plain", "title": {"long": "Papers", "short": null}}),
+        );
+        assert_eq!(
+            target,
+            json!({"title": {"long": "Papers"}, "look": "plain", "limit": 5})
+        );
     }
 }

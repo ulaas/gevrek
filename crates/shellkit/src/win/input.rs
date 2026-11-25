@@ -132,7 +132,11 @@ pub fn button(message: u32, wparam: usize) -> Option<(egui::PointerButton, bool)
 pub fn double_click(time_ms: u32, across: i32, down: i32, scale: f32) -> (f64, f32) {
     // (A time of nothing, or of minutes, is no setting anyone made.)
     let delay = f64::from(time_ms.clamp(100, 5000)) / 1000.0;
-    let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
     let half = across.max(down).max(0) as f32 / 2.0 / scale;
     (delay, half.max(6.0))
 }
@@ -350,9 +354,7 @@ mod tests {
 
     #[test]
     fn a_wheel_message_says_where_the_pointer_is_on_the_surface() {
-        let message = |x: i16, y: i16| {
-            ((y as u16 as isize) << 16) | (x as u16 as isize)
-        };
+        let message = |x: i16, y: i16| ((y as u16 as isize) << 16) | (x as u16 as isize);
         // A surface at 2566, 6 of the desktop (a panel on a second display).
         assert_eq!(
             point_on(message(2600, 24), 2566, 6, 1.0),

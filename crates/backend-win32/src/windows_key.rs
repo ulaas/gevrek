@@ -136,8 +136,16 @@ const LEAST: (i32, i32) = (160, 100);
 /// The edges that follow the pointer when a window is resized from where
 /// it was pressed: those of the corner nearest to it.
 fn corner(at: (i32, i32), window: Edges) -> (i32, i32) {
-    let across = if at.0 * 2 < window.0 + window.2 { -1 } else { 1 };
-    let down = if at.1 * 2 < window.1 + window.3 { -1 } else { 1 };
+    let across = if at.0 * 2 < window.0 + window.2 {
+        -1
+    } else {
+        1
+    };
+    let down = if at.1 * 2 < window.1 + window.3 {
+        -1
+    } else {
+        1
+    };
     (across, down)
 }
 
@@ -335,7 +343,11 @@ mod system {
         let Some(drag) = drag.as_ref() else {
             return;
         };
-        let edges = dragged(drag.start, drag.way, (at.0 - drag.from.0, at.1 - drag.from.1));
+        let edges = dragged(
+            drag.start,
+            drag.way,
+            (at.0 - drag.from.0, at.1 - drag.from.1),
+        );
         want(Wanted {
             window: drag.window,
             edges,
@@ -531,11 +543,22 @@ mod tests {
 
     #[test]
     fn a_press_on_the_zones_of_the_desktop_is_a_press_on_the_desktop() {
-        for class in ["Progman", "WorkerW", "Gevrek_Shell_gevrek-zones", "Gevrek_Shell_gevrek-zones.dev"] {
+        for class in [
+            "Progman",
+            "WorkerW",
+            "Gevrek_Shell_gevrek-zones",
+            "Gevrek_Shell_gevrek-zones.dev",
+        ] {
             assert!(is_the_desktop(class), "{class}");
         }
         // Not the panel, not a menu or the box of the zones, not a program.
-        for class in ["Gevrek_Shell_gevrek-panel", "Shell_TrayWnd", "Chrome_WidgetWin_1", "Gevrek_Border", ""] {
+        for class in [
+            "Gevrek_Shell_gevrek-panel",
+            "Shell_TrayWnd",
+            "Chrome_WidgetWin_1",
+            "Gevrek_Border",
+            "",
+        ] {
             assert!(!is_the_desktop(class), "{class}");
         }
     }
@@ -544,7 +567,13 @@ mod tests {
     fn the_desktop_and_gevreks_own_windows_are_not_dragged() {
         assert!(may_be_dragged("CASCADIA_HOSTING_WINDOW_CLASS"));
         assert!(may_be_dragged("Chrome_WidgetWin_1"));
-        for class in ["Progman", "WorkerW", "Shell_TrayWnd", "Gevrek_Shell_gevrek-panel", "Gevrek_Border"] {
+        for class in [
+            "Progman",
+            "WorkerW",
+            "Shell_TrayWnd",
+            "Gevrek_Shell_gevrek-panel",
+            "Gevrek_Border",
+        ] {
             assert!(!may_be_dragged(class), "{class}");
         }
     }

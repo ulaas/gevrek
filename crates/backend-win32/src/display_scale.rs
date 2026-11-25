@@ -148,9 +148,8 @@ mod system {
     use windows::Win32::Devices::Display::{
         DisplayConfigGetDeviceInfo, DisplayConfigSetDeviceInfo, GetDisplayConfigBufferSizes,
         QueryDisplayConfig, DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
-        DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_DEVICE_INFO_TYPE,
-        DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SOURCE_DEVICE_NAME,
-        QDC_ONLY_ACTIVE_PATHS,
+        DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_DEVICE_INFO_TYPE, DISPLAYCONFIG_MODE_INFO,
+        DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SOURCE_DEVICE_NAME, QDC_ONLY_ACTIVE_PATHS,
     };
     use windows::Win32::Foundation::ERROR_SUCCESS;
 
@@ -296,7 +295,12 @@ mod tests {
     #[ignore = "asks the machine's own displays; prints what they say"]
     fn the_displays_of_this_machine_say_their_scale() {
         for display in crate::display_settings::displays() {
-            println!("{} ({}): {:?}", display.name, display.device, now(&display.device));
+            println!(
+                "{} ({}): {:?}",
+                display.name,
+                display.device,
+                now(&display.device)
+            );
         }
     }
 
@@ -332,15 +336,27 @@ mod tests {
     #[test]
     fn a_scale_is_set_where_an_entry_gives_one_the_display_offers() {
         let displays = vec![
-            (display(r"\\.\DISPLAY1", "Left"), Scale::read(-1, 0, 3).unwrap()),
-            (display(r"\\.\DISPLAY2", "Right"), Scale::read(0, 0, 1).unwrap()),
+            (
+                display(r"\\.\DISPLAY1", "Left"),
+                Scale::read(-1, 0, 3).unwrap(),
+            ),
+            (
+                display(r"\\.\DISPLAY2", "Right"),
+                Scale::read(0, 0, 1).unwrap(),
+            ),
         ];
         let nothing = HashMap::new();
         // Nothing is asked: nothing changes.
         assert_eq!(plan(&[], &displays, &nothing), Ok(Vec::new()));
-        assert_eq!(plan(&[entry("Left", None)], &displays, &nothing), Ok(Vec::new()));
+        assert_eq!(
+            plan(&[entry("Left", None)], &displays, &nothing),
+            Ok(Vec::new())
+        );
         // The scale it has already: nothing changes.
-        assert_eq!(plan(&[entry("Left", Some(1.25))], &displays, &nothing), Ok(Vec::new()));
+        assert_eq!(
+            plan(&[entry("Left", Some(1.25))], &displays, &nothing),
+            Ok(Vec::new())
+        );
 
         // Another one: that display alone, counted from its recommended.
         let changes = plan(&[entry("left", Some(2.0))], &displays, &nothing).unwrap();
@@ -356,7 +372,10 @@ mod tests {
         );
         // By Windows' own name for it too.
         let changes = plan(&[entry("DISPLAY2", Some(1.25))], &displays, &nothing).unwrap();
-        assert_eq!((changes[0].name.as_str(), changes[0].to, changes[0].steps), ("Right", 125, 1));
+        assert_eq!(
+            (changes[0].name.as_str(), changes[0].to, changes[0].steps),
+            ("Right", 125, 1)
+        );
 
         // One the display does not offer: said, and nothing is changed.
         let refused = plan(
@@ -365,7 +384,10 @@ mod tests {
             &nothing,
         )
         .unwrap_err();
-        assert_eq!(refused, "the display Right has no scale of 200 % (it offers 100 %, 125 %)");
+        assert_eq!(
+            refused,
+            "the display Right has no scale of 200 % (it offers 100 %, 125 %)"
+        );
 
         // An entry that is switched off says nothing.
         let mut off = entry("Left", Some(2.0));
@@ -376,15 +398,24 @@ mod tests {
     #[test]
     fn a_display_whose_entry_gives_no_scale_any_more_gets_its_own_back() {
         // gevrek made it 200 %; it had 125 %.
-        let displays = vec![(display(r"\\.\DISPLAY1", "Left"), Scale::read(-1, 3, 3).unwrap())];
+        let displays = vec![(
+            display(r"\\.\DISPLAY1", "Left"),
+            Scale::read(-1, 3, 3).unwrap(),
+        )];
         let before = HashMap::from([(r"\\.\DISPLAY1".to_string(), 125)]);
         // Still asked for: stays.
-        assert_eq!(plan(&[entry("Left", Some(2.0))], &displays, &before), Ok(Vec::new()));
+        assert_eq!(
+            plan(&[entry("Left", Some(2.0))], &displays, &before),
+            Ok(Vec::new())
+        );
         // No longer: back to what it had.
         for profiles in [vec![], vec![entry("Left", None)]] {
             let changes = plan(&profiles, &displays, &before).unwrap();
             assert_eq!(changes.len(), 1);
-            assert_eq!((changes[0].to, changes[0].steps, changes[0].back), (125, 0, true));
+            assert_eq!(
+                (changes[0].to, changes[0].steps, changes[0].back),
+                (125, 0, true)
+            );
         }
         // What it had is not offered any more: left as it is.
         let before = HashMap::from([(r"\\.\DISPLAY1".to_string(), 500)]);

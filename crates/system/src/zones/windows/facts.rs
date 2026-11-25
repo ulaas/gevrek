@@ -45,8 +45,15 @@ pub const FOLDER_TYPE: &str = "inode/directory";
 /// and the ending (`image/x-xcf`), so that a rule for `image/*` holds for
 /// every picture Windows knows to be one. Sorts that are no first half of
 /// a type (`document`, `compressed`, `system`) come under `application`.
-pub fn type_of(extension: &str, content_type: Option<&str>, perceived: Option<&str>) -> Option<String> {
-    if let Some(content) = content_type.map(str::trim).filter(|content| content.contains('/')) {
+pub fn type_of(
+    extension: &str,
+    content_type: Option<&str>,
+    perceived: Option<&str>,
+) -> Option<String> {
+    if let Some(content) = content_type
+        .map(str::trim)
+        .filter(|content| content.contains('/'))
+    {
         return Some(content.to_lowercase());
     }
     let perceived = perceived?.trim().to_lowercase();
@@ -112,7 +119,12 @@ pub const RECYCLE_BIN: &str = "::{645FF040-5081-101B-9F08-00AA002F954E}";
 /// (`registered`: it stands under Explorer's `Desktop\NameSpace` key,
 /// and is none of Windows' own places, which stand there too and are
 /// shown by the setting alone).
-pub fn shown_on_desktop(id: &str, user: Option<u32>, machine: Option<u32>, registered: bool) -> bool {
+pub fn shown_on_desktop(
+    id: &str,
+    user: Option<u32>,
+    machine: Option<u32>,
+    registered: bool,
+) -> bool {
     match user.or(machine) {
         Some(hidden) => hidden == 0,
         None => id.eq_ignore_ascii_case(RECYCLE_BIN) || registered && !of_windows(id),
@@ -149,7 +161,11 @@ const OF_WINDOWS: [&str; 20] = [
 ];
 
 fn of_windows(id: &str) -> bool {
-    class_of(id).is_some_and(|class| OF_WINDOWS.iter().any(|known| known.eq_ignore_ascii_case(class)))
+    class_of(id).is_some_and(|class| {
+        OF_WINDOWS
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(class))
+    })
 }
 
 /// The class of a thing of the shell's that lies directly under the
@@ -177,7 +193,12 @@ mod tests {
 
     #[test]
     fn the_kind_follows_what_the_shell_says() {
-        let nature = |file_system, folder, stream, link| Nature { file_system, folder, stream, link };
+        let nature = |file_system, folder, stream, link| Nature {
+            file_system,
+            folder,
+            stream,
+            link,
+        };
         for (what, kind) in [
             (nature(true, false, true, false), ItemKind::File),
             (nature(true, true, false, false), ItemKind::Folder),
@@ -206,7 +227,11 @@ mod tests {
             ("abc", None, None, None),
             ("", None, Some("text"), None),
         ] {
-            assert_eq!(type_of(extension, content, perceived).as_deref(), wanted, "{extension}");
+            assert_eq!(
+                type_of(extension, content, perceived).as_deref(),
+                wanted,
+                "{extension}"
+            );
         }
     }
 
@@ -224,7 +249,10 @@ mod tests {
         ] {
             assert_eq!(is_path(id), path, "{id}");
         }
-        assert!(same_path("C:\\Users\\Ada\\Desktop\\", "c:/users/ada/desktop"));
+        assert!(same_path(
+            "C:\\Users\\Ada\\Desktop\\",
+            "c:/users/ada/desktop"
+        ));
         assert!(!same_path("C:\\a", "C:\\b"));
     }
 
@@ -239,7 +267,12 @@ mod tests {
         // Nothing said: only the Recycle Bin is there.
         assert!(!shown_on_desktop(this_pc, None, None, false));
         assert!(shown_on_desktop(RECYCLE_BIN, None, None, true));
-        assert!(shown_on_desktop(&RECYCLE_BIN.to_lowercase(), None, None, false));
+        assert!(shown_on_desktop(
+            &RECYCLE_BIN.to_lowercase(),
+            None,
+            None,
+            false
+        ));
         assert!(!shown_on_desktop(RECYCLE_BIN, Some(1), None, true));
         // A thing another program registered on the desktop is there
         // unless it is switched off; Windows' own places are registered
@@ -249,10 +282,18 @@ mod tests {
         assert!(!shown_on_desktop(of_a_program, None, None, false));
         assert!(!shown_on_desktop(of_a_program, Some(1), None, true));
         assert!(!shown_on_desktop(this_pc, None, None, true));
-        assert!(!shown_on_desktop("::{f874310e-b6b7-47dc-bc84-b9e6b38f5903}", None, None, true));
+        assert!(!shown_on_desktop(
+            "::{f874310e-b6b7-47dc-bc84-b9e6b38f5903}",
+            None,
+            None,
+            true
+        ));
         assert!(shown_on_desktop(this_pc, Some(0), None, true));
 
-        assert_eq!(class_of(this_pc), Some("{20D04FE0-3AEA-1069-A2D8-08002B30309D}"));
+        assert_eq!(
+            class_of(this_pc),
+            Some("{20D04FE0-3AEA-1069-A2D8-08002B30309D}")
+        );
         assert_eq!(class_of("::{A}\\::{B}"), None);
         assert_eq!(class_of("C:\\Users\\ada"), None);
         assert_eq!(class_of("::nothing"), None);
@@ -272,7 +313,11 @@ mod tests {
             (OF_THE_SYSTEM, true, false),
             (SYSTEM_ONLY, false, true),
         ] {
-            assert_eq!(listed(attributes, hidden_shown), shown, "{attributes:#x} {hidden_shown}");
+            assert_eq!(
+                listed(attributes, hidden_shown),
+                shown,
+                "{attributes:#x} {hidden_shown}"
+            );
         }
     }
 
@@ -280,7 +325,10 @@ mod tests {
     fn times_are_seconds_since_1970() {
         let time = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         assert_eq!(seconds(Ok(time)), Some(1_700_000_000));
-        assert_eq!(seconds(Ok(std::time::UNIX_EPOCH - std::time::Duration::from_secs(5))), None);
+        assert_eq!(
+            seconds(Ok(std::time::UNIX_EPOCH - std::time::Duration::from_secs(5))),
+            None
+        );
         assert_eq!(seconds(Err(std::io::Error::other("none"))), None);
     }
 }

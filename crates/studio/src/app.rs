@@ -288,17 +288,17 @@ impl Studio {
                 let config = Config::load(&path)
                     .inspect(|_| log::debug!("the configuration is read from {}", path.display()))
                     .unwrap_or_else(|error| {
-                    log::warn!(
-                        "{}: {error}; starting from gevrek's defaults",
-                        path.display()
-                    );
-                    // (A file that is not there yet is made by the first
-                    // save; one that is there is not written over.)
-                    if path.exists() {
-                        file_problem = Some(format!("{}: {error}", path.display()));
-                    }
-                    Config::default()
-                });
+                        log::warn!(
+                            "{}: {error}; starting from gevrek's defaults",
+                            path.display()
+                        );
+                        // (A file that is not there yet is made by the first
+                        // save; one that is there is not written over.)
+                        if path.exists() {
+                            file_problem = Some(format!("{}: {error}", path.display()));
+                        }
+                        Config::default()
+                    });
                 (
                     Link::none(),
                     Some(path),
@@ -528,9 +528,11 @@ impl Studio {
                 }
                 // The configuration could not be fetched: what the window
                 // shows is not what the window manager runs.
-                Event::Log { level: gevrek_link::Level::Error, ref message, .. }
-                    if message.starts_with(gevrek_link::FETCH_FAILED) && self.session.is_none() =>
-                {
+                Event::Log {
+                    level: gevrek_link::Level::Error,
+                    ref message,
+                    ..
+                } if message.starts_with(gevrek_link::FETCH_FAILED) && self.session.is_none() => {
                     log::debug!("the configuration was not fetched: {message}");
                     self.fetch_problem = Some(message.clone());
                 }
@@ -545,7 +547,11 @@ impl Studio {
                 Event::Changed { revision, origin } => {
                     log::debug!(
                         "the configuration changed to revision {revision}, by {}",
-                        if origin.is_empty() { "a file edit or a toggle" } else { origin.as_str() }
+                        if origin.is_empty() {
+                            "a file edit or a toggle"
+                        } else {
+                            origin.as_str()
+                        }
                     );
                     let notice = self
                         .session
@@ -651,7 +657,10 @@ impl Studio {
                         (false, true, _) => self.toast(Tone::Note, format!("Done: {command}")),
                         (false, false, error) => self.toast(
                             Tone::Bad,
-                            format!("{command}: {}", error.unwrap_or_else(|| "refused".to_string())),
+                            format!(
+                                "{command}: {}",
+                                error.unwrap_or_else(|| "refused".to_string())
+                            ),
                         ),
                     }
                 }
@@ -757,7 +766,10 @@ impl Studio {
             // A second Save is the answer that it is to be.
             let now = file_mark(&path);
             if now != self.file_mark {
-                log::debug!("{} is not saved: it was changed elsewhere since it was read", path.display());
+                log::debug!(
+                    "{} is not saved: it was changed elsewhere since it was read",
+                    path.display()
+                );
                 self.file_mark = now;
                 self.toast(
                     Tone::Warn,
@@ -779,7 +791,10 @@ impl Studio {
                     self.toast(Tone::Good, format!("Saved {}", path.display()));
                 }
                 Err(error) => {
-                    log::debug!("the configuration was not saved to {}: {error}", path.display());
+                    log::debug!(
+                        "the configuration was not saved to {}: {error}",
+                        path.display()
+                    );
                     self.toast(Tone::Bad, format!("Not saved: {error}"))
                 }
             }
@@ -791,7 +806,10 @@ impl Studio {
         };
         self.sent_generation = self.document.generation();
         self.applying = true;
-        log::debug!("the draft is sent to the window manager, on revision {}", request.base_revision);
+        log::debug!(
+            "the draft is sent to the window manager, on revision {}",
+            request.base_revision
+        );
         self.link.send(Request::Apply {
             config: Box::new(request.config),
             base_revision: request.base_revision,
@@ -1103,9 +1121,7 @@ impl Studio {
         if widgets::brand_icon_button(ui, sign, or, says).clicked() {
             context.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
         }
-        if widgets::brand_icon_button(ui, BrandIcon::Minimize, icons::MINUS, "Put away")
-            .clicked()
-        {
+        if widgets::brand_icon_button(ui, BrandIcon::Minimize, icons::MINUS, "Put away").clicked() {
             context.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
         }
     }
@@ -1157,16 +1173,12 @@ impl Studio {
             }
         }
         ui.add_enabled_ui(self.document.can_redo(), |ui| {
-            if widgets::icon_button(ui, icons::ARROW_CLOCKWISE, "Redo (Ctrl+Shift+Z)")
-                .clicked()
-            {
+            if widgets::icon_button(ui, icons::ARROW_CLOCKWISE, "Redo (Ctrl+Shift+Z)").clicked() {
                 self.document.redo();
             }
         });
         ui.add_enabled_ui(self.document.can_undo(), |ui| {
-            if widgets::icon_button(ui, icons::ARROW_COUNTER_CLOCKWISE, "Undo (Ctrl+Z)")
-                .clicked()
-            {
+            if widgets::icon_button(ui, icons::ARROW_COUNTER_CLOCKWISE, "Undo (Ctrl+Z)").clicked() {
                 self.document.undo();
             }
         });
@@ -1548,9 +1560,7 @@ impl Studio {
                     self.ask_state();
                     // What the window manager says of the wallpaper: on
                     // Windows, why the picture named here is not shown.
-                    for (title, text) in
-                        crate::wallpaper_preview::said_of_it(self.state.as_ref())
-                    {
+                    for (title, text) in crate::wallpaper_preview::said_of_it(self.state.as_ref()) {
                         let warn = theme::pal(ui.ctx()).warn;
                         widgets::banner(ui, warn, icons::WARNING, |ui| {
                             ui.label(format!("{title}. {text}"));
@@ -2808,7 +2818,9 @@ impl eframe::App for Studio {
                 }
             }
             if !answered {
-                log::warn!("the configuration from before the trial was sent, and not answered in time");
+                log::warn!(
+                    "the configuration from before the trial was sent, and not answered in time"
+                );
             }
         }
         crate::tryout::forget_revert();
@@ -3359,12 +3371,10 @@ mod tests {
             // has come to rest.)
             let mut pixels = Vec::new();
             for step in 0..5 {
-                pixels = painter.frame_of(
-                    &context,
-                    10.0 + f64::from(step) * 0.5,
-                    Vec::new(),
-                    |ui| studio.frame(ui),
-                );
+                pixels =
+                    painter.frame_of(&context, 10.0 + f64::from(step) * 0.5, Vec::new(), |ui| {
+                        studio.frame(ui)
+                    });
             }
             let name = format!("{page:?}").to_lowercase();
             let file = folder.join(format!("{name}.png"));
@@ -3434,20 +3444,26 @@ mod tests {
         let size = said("GEVREK_LOOK_SIZE")
             .and_then(|text| pair(&text, 'x'))
             .map_or((1400, 900), |(width, height)| (width as u32, height as u32));
-        let out = std::path::PathBuf::from(said("GEVREK_LOOK_OUT").expect("GEVREK_LOOK_OUT: a file"));
+        let out =
+            std::path::PathBuf::from(said("GEVREK_LOOK_OUT").expect("GEVREK_LOOK_OUT: a file"));
         let at = said("GEVREK_LOOK_AT").and_then(|text| pair(&text, ','));
         let press = said("GEVREK_LOOK_PRESS").and_then(|text| pair(&text, ','));
-        let mut painter = Painter::sized(size).expect("a graphics device that computes on the processor");
+        let mut painter =
+            Painter::sized(size).expect("a graphics device that computes on the processor");
         let context = egui::Context::default();
         let file = said("GEVREK_LOOK_FILE")
             .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| std::path::PathBuf::from("/nonexistent/gevrek-studio-look/config.json"));
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from("/nonexistent/gevrek-studio-look/config.json")
+            });
         let mut studio = Studio::new(
             &context,
             Options {
                 source: Source::File(file),
                 page: Page::from_key(&what).unwrap_or(Page::Overview),
-                appearance: std::path::PathBuf::from("/nonexistent/gevrek-studio-look/appearance.json"),
+                appearance: std::path::PathBuf::from(
+                    "/nonexistent/gevrek-studio-look/appearance.json",
+                ),
                 script: Vec::new(),
             },
         );
@@ -3463,7 +3479,8 @@ mod tests {
             // nobody to.)
             let settings = gevrek_ui::Settings::default();
             gevrek_ui::theme::install_fonts(&context, false);
-            let palette = settings.resolve(egui::Theme::Dark, egui::Color32::from_rgb(64, 224, 208));
+            let palette =
+                settings.resolve(egui::Theme::Dark, egui::Color32::from_rgb(64, 224, 208));
             gevrek_ui::theme::apply(&context, &palette, &settings);
         }
         let mut pixels = Vec::new();
@@ -3525,7 +3542,9 @@ mod tests {
         let change = |studio: &mut Studio, size: u64| {
             studio
                 .document
-                .edit("/desktop/focus/history_size", |value| *value = serde_json::json!(size));
+                .edit("/desktop/focus/history_size", |value| {
+                    *value = serde_json::json!(size)
+                });
             studio.follow_edits();
         };
         let on_disk = || Config::load(&path).unwrap().desktop.focus.history_size;
@@ -3563,7 +3582,9 @@ mod tests {
         studio.forget_changes();
         studio
             .document
-            .edit("/desktop/focus/history_size", |value| *value = serde_json::json!(7));
+            .edit("/desktop/focus/history_size", |value| {
+                *value = serde_json::json!(7)
+            });
         studio.follow_edits();
         // Changed, and nowhere to apply it to.
         assert!(studio.dirty());

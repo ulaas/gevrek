@@ -21,7 +21,10 @@ impl Bench {
     pub fn from_args() -> Self {
         let only = std::env::args().skip(1).find(|word| !word.starts_with('-'));
         println!("{:<44} {:>14} {:>14}", "one run of", "median", "quickest");
-        Self { only, rows: Vec::new() }
+        Self {
+            only,
+            rows: Vec::new(),
+        }
     }
 
     /// With `GEVREK_BENCH_OUT=<file>`: the medians are added to that
@@ -42,7 +45,11 @@ impl Bench {
     }
 
     pub fn case(&mut self, name: &str, mut run: impl FnMut()) {
-        if self.only.as_ref().is_some_and(|only| !name.contains(only.as_str())) {
+        if self
+            .only
+            .as_ref()
+            .is_some_and(|only| !name.contains(only.as_str()))
+        {
             return;
         }
         // How many runs fill a sample (which also warms it up).
@@ -81,4 +88,3 @@ fn time(nanos: u128) -> String {
         _ => format!("{:.2} ms", nanos as f64 / 1e6),
     }
 }
-

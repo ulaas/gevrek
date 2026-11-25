@@ -90,15 +90,17 @@ mod mac {
             }
         }
         let (sender, answer) = channel();
-        let block = RcBlock::new(move |content: *mut SCShareableContent, error: *mut NSError| {
-            // SAFETY: the answer's objects, retained to be carried.
-            let content = unsafe { Retained::retain(content) };
-            if content.is_none() && !error.is_null() {
-                let error = unsafe { &*error };
-                log::debug!("no windows to picture: {}", error.localizedDescription());
-            }
-            let _ = sender.send(content.map(Carried));
-        });
+        let block = RcBlock::new(
+            move |content: *mut SCShareableContent, error: *mut NSError| {
+                // SAFETY: the answer's objects, retained to be carried.
+                let content = unsafe { Retained::retain(content) };
+                if content.is_none() && !error.is_null() {
+                    let error = unsafe { &*error };
+                    log::debug!("no windows to picture: {}", error.localizedDescription());
+                }
+                let _ = sender.send(content.map(Carried));
+            },
+        );
         // SAFETY: the block is kept by ScreenCaptureKit until it answers.
         unsafe { SCShareableContent::getShareableContentWithCompletionHandler(&block) };
         let content = answer.recv_timeout(WAIT).ok().flatten()?.0;
@@ -148,7 +150,10 @@ mod mac {
             let (width, height) = (frame.size.width.max(1.0), frame.size.height.max(1.0));
             // (At most twice the points: a display's pixels.)
             let by = (f64::from(side.max(1)) / width.max(height)).min(2.0);
-            let filter = SCContentFilter::initWithDesktopIndependentWindow(SCContentFilter::alloc(), &window);
+            let filter = SCContentFilter::initWithDesktopIndependentWindow(
+                SCContentFilter::alloc(),
+                &window,
+            );
             let configuration = SCStreamConfiguration::new();
             configuration.setWidth((width * by).round().max(1.0) as usize);
             configuration.setHeight((height * by).round().max(1.0) as usize);
@@ -168,7 +173,9 @@ mod mac {
     type Answer = block2::DynBlock<dyn Fn(*mut CGImage, *mut NSError)>;
 
     /// The image a capture answers with, waited for.
-    fn captured(capture: impl FnOnce(&Answer)) -> Option<objc2_core_foundation::CFRetained<CGImage>> {
+    fn captured(
+        capture: impl FnOnce(&Answer),
+    ) -> Option<objc2_core_foundation::CFRetained<CGImage>> {
         let (sender, answer) = channel();
         let block = RcBlock::new(move |image: *mut CGImage, _error: *mut NSError| {
             // SAFETY: the answer's image, retained to be carried.
@@ -177,13 +184,22 @@ mod mac {
             let _ = sender.send(image.map(CarriedImage));
         });
         capture(&block);
-        answer.recv_timeout(WAIT).ok().flatten().map(|image| image.0)
+        answer
+            .recv_timeout(WAIT)
+            .ok()
+            .flatten()
+            .map(|image| image.0)
     }
 
     /// What the screen shows in a rectangle of it, in points from the top
     /// left of the main display (the menu bar's items). A picture with
     /// its pixels as they are; `None` until the screen may be recorded.
-    pub fn of_screen_area(x: f64, y: f64, width: f64, height: f64) -> Option<crate::icons::Picture> {
+    pub fn of_screen_area(
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    ) -> Option<crate::icons::Picture> {
         if !allowed() || width <= 0.0 || height <= 0.0 {
             return None;
         }

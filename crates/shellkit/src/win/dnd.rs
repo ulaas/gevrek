@@ -50,17 +50,17 @@ use windows::Win32::System::Memory::{
 };
 use windows::Win32::System::Ole::{
     DoDragDrop, IDropSource, IDropSource_Impl, IDropTarget, IDropTarget_Impl, OleInitialize,
-    OleUninitialize, RegisterDragDrop, ReleaseStgMedium, RevokeDragDrop, CF_HDROP,
-    CF_UNICODETEXT, DROPEFFECT,
+    OleUninitialize, RegisterDragDrop, ReleaseStgMedium, RevokeDragDrop, CF_HDROP, CF_UNICODETEXT,
+    DROPEFFECT,
 };
 use windows::Win32::System::SystemServices::MODIFIERKEYS_FLAGS;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON,
 };
 use windows::Win32::UI::Shell::{
-    DragQueryFileW, IDragSourceHelper, IDropTargetHelper, SHCreateDataObject,
-    CFSTR_INETURLW, CFSTR_LOGICALPERFORMEDDROPEFFECT, CFSTR_PERFORMEDDROPEFFECT,
-    CFSTR_SHELLIDLIST, CLSID_DragDropHelper, HDROP, SHDRAGIMAGE,
+    CLSID_DragDropHelper, DragQueryFileW, IDragSourceHelper, IDropTargetHelper, SHCreateDataObject,
+    CFSTR_INETURLW, CFSTR_LOGICALPERFORMEDDROPEFFECT, CFSTR_PERFORMEDDROPEFFECT, CFSTR_SHELLIDLIST,
+    HDROP, SHDRAGIMAGE,
 };
 
 /// The thread may drag and be dropped on while this lives.
@@ -78,7 +78,9 @@ impl Ole {
         match unsafe { OleInitialize(None) } {
             Ok(()) => Some(Self(())),
             Err(error) => {
-                log::warn!("no drag and drop for the shell's surfaces: OLE refused this thread ({error})");
+                log::warn!(
+                    "no drag and drop for the shell's surfaces: OLE refused this thread ({error})"
+                );
                 None
             }
         }
@@ -106,9 +108,20 @@ struct Standing {
 /// What a drop target was told, for the host.
 pub(super) enum Told {
     /// (Places are in the pixels of the window's inside.)
-    Entered { window: isize, x: i32, y: i32, offered: Offered },
-    Moved { window: isize, x: i32, y: i32 },
-    Left { window: isize },
+    Entered {
+        window: isize,
+        x: i32,
+        y: i32,
+        offered: Offered,
+    },
+    Moved {
+        window: isize,
+        x: i32,
+        y: i32,
+    },
+    Left {
+        window: isize,
+    },
     Dropped {
         window: isize,
         x: i32,
@@ -225,7 +238,10 @@ fn with_data<T>(
             let size = GlobalSize(memory);
             let at = GlobalLock(memory);
             if !at.is_null() {
-                out = Some(read(memory, std::slice::from_raw_parts(at.cast::<u8>(), size)));
+                out = Some(read(
+                    memory,
+                    std::slice::from_raw_parts(at.cast::<u8>(), size),
+                ));
                 let _ = GlobalUnlock(memory);
             }
         }
@@ -403,8 +419,7 @@ pub fn payload_of(object: &IDataObject, allowed: DragActions) -> DragPayload {
 /// object for them and drags that.
 pub fn object_for(payload: &DragPayload) -> windows::core::Result<IDataObject> {
     // SAFETY: no folder, no items and no inner object are all allowed.
-    let object: IDataObject =
-        unsafe { SHCreateDataObject(None, None, None::<&IDataObject>) }?;
+    let object: IDataObject = unsafe { SHCreateDataObject(None, None, None::<&IDataObject>) }?;
     if !payload.paths.is_empty() {
         put(&object, CF_HDROP.0, &hdrop::encode(&payload.paths))?;
     }
@@ -616,7 +631,11 @@ impl IDropTarget_Impl for Target_Impl {
                 // would delete the files before they were moved), and,
                 // for those that ask, that it was a move all the same.
                 let said = if action == DragAction::Move {
-                    let _ = put(object, named(CFSTR_PERFORMEDDROPEFFECT), &0u32.to_le_bytes());
+                    let _ = put(
+                        object,
+                        named(CFSTR_PERFORMEDDROPEFFECT),
+                        &0u32.to_le_bytes(),
+                    );
                     let _ = put(
                         object,
                         named(CFSTR_LOGICALPERFORMEDDROPEFFECT),
@@ -708,7 +727,9 @@ fn buttons_down() -> u32 {
         // SAFETY: no pointers.
         (unsafe { GetKeyState(i32::from(key.0)) }) < 0
     };
-    u32::from(down(VK_LBUTTON)) | u32::from(down(VK_RBUTTON)) << 1 | u32::from(down(VK_MBUTTON)) << 4
+    u32::from(down(VK_LBUTTON))
+        | u32::from(down(VK_RBUTTON)) << 1
+        | u32::from(down(VK_MBUTTON)) << 4
 }
 
 /// Give an object the picture that follows the pointer while it is
@@ -812,7 +833,10 @@ pub(super) fn run(
     let result = unsafe { DoDragDrop(object, &source, DROPEFFECT(allowed.effects()), &mut effect) };
     shared.set(None);
     if result.is_err() {
-        log::warn!("a drag could not be made: {}", windows::core::Error::from(result));
+        log::warn!(
+            "a drag could not be made: {}",
+            windows::core::Error::from(result)
+        );
     }
     dnd::outcome(
         result == DRAGDROP_S_DROP,
@@ -876,7 +900,12 @@ mod tests {
         let _ole = ole();
         let object = object_for(&DragPayload::files([r"C:\a"])).expect("the shell's data object");
         assert_eq!(number(&object, CFSTR_PERFORMEDDROPEFFECT), None);
-        put(&object, named(CFSTR_PERFORMEDDROPEFFECT), &2u32.to_le_bytes()).unwrap();
+        put(
+            &object,
+            named(CFSTR_PERFORMEDDROPEFFECT),
+            &2u32.to_le_bytes(),
+        )
+        .unwrap();
         assert_eq!(number(&object, CFSTR_PERFORMEDDROPEFFECT), Some(2));
     }
 
@@ -918,17 +947,31 @@ mod tests {
         // Nothing was said for the window: nothing can be dropped.
         // SAFETY (all calls below): the pointers are to places that live
         // through the call, as Windows' own would.
-        assert_eq!(ask(&|effect| unsafe { target.DragEnter(&object, MK_LBUTTON, at, effect).unwrap() }), 0);
+        assert_eq!(
+            ask(&|effect| unsafe { target.DragEnter(&object, MK_LBUTTON, at, effect).unwrap() }),
+            0
+        );
         unsafe { target.DragLeave().unwrap() };
         told();
 
-        set_standing(HWND(window as *mut _), DropAnswer::accept(DragActions::COPY_OR_MOVE));
-        assert_eq!(ask(&|effect| unsafe { target.DragEnter(&object, MK_LBUTTON, at, effect).unwrap() }), 1);
+        set_standing(
+            HWND(window as *mut _),
+            DropAnswer::accept(DragActions::COPY_OR_MOVE),
+        );
+        assert_eq!(
+            ask(&|effect| unsafe { target.DragEnter(&object, MK_LBUTTON, at, effect).unwrap() }),
+            1
+        );
         // Shift moves; Ctrl and Shift ask for a link, which is not taken.
-        assert_eq!(ask(&|effect| unsafe { target.DragOver(MK_LBUTTON | MK_SHIFT, at, effect).unwrap() }), 2);
+        assert_eq!(
+            ask(&|effect| unsafe { target.DragOver(MK_LBUTTON | MK_SHIFT, at, effect).unwrap() }),
+            2
+        );
         assert_eq!(
             ask(&|effect| unsafe {
-                target.DragOver(MK_LBUTTON | MK_SHIFT | MK_CONTROL, at, effect).unwrap()
+                target
+                    .DragOver(MK_LBUTTON | MK_SHIFT | MK_CONTROL, at, effect)
+                    .unwrap()
             }),
             0
         );
@@ -938,21 +981,39 @@ mod tests {
             DropAnswer::preferring(DragActions::COPY_OR_MOVE, DragAction::Move),
         );
         let moved = POINTL { x: 31, y: 40 };
-        assert_eq!(ask(&|effect| unsafe { target.DragOver(MK_LBUTTON, moved, effect).unwrap() }), 2);
+        assert_eq!(
+            ask(&|effect| unsafe { target.DragOver(MK_LBUTTON, moved, effect).unwrap() }),
+            2
+        );
         // Dropped as a move: the source is told to delete nothing, and
         // can read that it was a move.
-        assert_eq!(ask(&|effect| unsafe { target.Drop(&object, MODIFIERKEYS_FLAGS(0), moved, effect).unwrap() }), 0);
+        assert_eq!(
+            ask(&|effect| unsafe {
+                target
+                    .Drop(&object, MODIFIERKEYS_FLAGS(0), moved, effect)
+                    .unwrap()
+            }),
+            0
+        );
         assert_eq!(number(&object, CFSTR_PERFORMEDDROPEFFECT), Some(0));
         assert_eq!(number(&object, CFSTR_LOGICALPERFORMEDDROPEFFECT), Some(2));
         assert_eq!(
             dnd::outcome(true, 0, Some(0), Some(2)),
-            DragOutcome::Taken { action: DragAction::Move, remove: false }
+            DragOutcome::Taken {
+                action: DragAction::Move,
+                remove: false
+            }
         );
 
         let heard = told();
         assert_eq!(heard.len(), 3, "entered, moved once, dropped");
         match &heard[0] {
-            Told::Entered { window: on, x, y, offered } => {
+            Told::Entered {
+                window: on,
+                x,
+                y,
+                offered,
+            } => {
                 assert_eq!((*on, *x, *y), (window, 30, 40));
                 assert!(offered.files);
                 assert_eq!(offered.allowed, DragActions::ALL);
@@ -962,7 +1023,9 @@ mod tests {
         }
         assert!(matches!(heard[1], Told::Moved { x: 31, y: 40, .. }));
         match &heard[2] {
-            Told::Dropped { payload, action, x, .. } => {
+            Told::Dropped {
+                payload, action, x, ..
+            } => {
                 assert_eq!(payload.paths, [r"C:\a.txt"]);
                 assert_eq!(*action, DragAction::Move);
                 assert_eq!(*x, 31);
@@ -970,11 +1033,16 @@ mod tests {
             _ => panic!("the last thing told is the drop"),
         }
         // What was said of that drag is not held against the next.
-        assert_eq!(ask(&|effect| unsafe { target.DragEnter(&object, MK_LBUTTON, at, effect).unwrap() }), 1);
+        assert_eq!(
+            ask(&|effect| unsafe { target.DragEnter(&object, MK_LBUTTON, at, effect).unwrap() }),
+            1
+        );
         // A drop where the keys ask for what is not taken is no drop.
         assert_eq!(
             ask(&|effect| unsafe {
-                target.Drop(&object, MK_SHIFT | MK_CONTROL, at, effect).unwrap()
+                target
+                    .Drop(&object, MK_SHIFT | MK_CONTROL, at, effect)
+                    .unwrap()
             }),
             0
         );

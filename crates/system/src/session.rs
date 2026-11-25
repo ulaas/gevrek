@@ -154,9 +154,18 @@ pub fn carry_out(end: End) -> Result<Outcome, String> {
         // default), the session is locked behind them.
         End::Lock | End::DisplaysOff => ("/usr/bin/pmset", vec!["displaysleepnow"]),
         End::Sleep => ("/usr/bin/pmset", vec!["sleepnow"]),
-        End::SignOut => ("/usr/bin/osascript", vec!["-e", "tell application \"loginwindow\" to «event aevtrlgo»"]),
-        End::Restart => ("/usr/bin/osascript", vec!["-e", "tell application \"loginwindow\" to «event aevtrrst»"]),
-        End::ShutDown => ("/usr/bin/osascript", vec!["-e", "tell application \"loginwindow\" to «event aevtrsdn»"]),
+        End::SignOut => (
+            "/usr/bin/osascript",
+            vec!["-e", "tell application \"loginwindow\" to «event aevtrlgo»"],
+        ),
+        End::Restart => (
+            "/usr/bin/osascript",
+            vec!["-e", "tell application \"loginwindow\" to «event aevtrrst»"],
+        ),
+        End::ShutDown => (
+            "/usr/bin/osascript",
+            vec!["-e", "tell application \"loginwindow\" to «event aevtrsdn»"],
+        ),
     };
     let output = std::process::Command::new(program)
         .args(&arguments)

@@ -39,20 +39,24 @@ fn examples(text: &str) -> Vec<String> {
 /// defaults the example had no need to say.
 fn missing(example: &Value, written: &Value, at: &str) -> Option<String> {
     match (example, written) {
-        (Value::Object(example), Value::Object(written)) => example.iter().find_map(|(key, value)| {
-            let place = format!("{at}.{key}");
-            match written.get(key) {
-                Some(other) => missing(value, other, &place),
-                None => Some(format!("{place} is not a key that is written")),
-            }
-        }),
+        (Value::Object(example), Value::Object(written)) => {
+            example.iter().find_map(|(key, value)| {
+                let place = format!("{at}.{key}");
+                match written.get(key) {
+                    Some(other) => missing(value, other, &place),
+                    None => Some(format!("{place} is not a key that is written")),
+                }
+            })
+        }
         (Value::Array(example), Value::Array(written)) if example.len() == written.len() => example
             .iter()
             .zip(written)
             .enumerate()
             .find_map(|(index, (value, other))| missing(value, other, &format!("{at}[{index}]"))),
         (example, written) if example == written => None,
-        (example, written) => Some(format!("{at} is written {written}, and the example says {example}")),
+        (example, written) => Some(format!(
+            "{at} is written {written}, and the example says {example}"
+        )),
     }
 }
 
@@ -80,14 +84,30 @@ fn there_and_back(example: &Value) -> Result<Value, String> {
     }
     // (A key the configuration does not know is kept and written back,
     // for the sake of newer versions; in an example it is a mistake.)
-    let unknown = [&config.extra, &config.look.extra, &config.snap.extra, &config.roll_up.extra]
-        .into_iter()
-        .chain([&config.privacy.extra, &config.timed_rules.extra])
-        .chain([&config.gestures.extra, &config.auto.extra])
-        .chain(config.auto.categories.iter().map(|category| &category.extra))
-        .chain(config.zones.iter().flat_map(|zone| [&zone.extra, &zone.look.extra]))
-        .chain(config.rules.iter().map(|rule| &rule.extra))
-        .find_map(|extra| extra.0.keys().next());
+    let unknown = [
+        &config.extra,
+        &config.look.extra,
+        &config.snap.extra,
+        &config.roll_up.extra,
+    ]
+    .into_iter()
+    .chain([&config.privacy.extra, &config.timed_rules.extra])
+    .chain([&config.gestures.extra, &config.auto.extra])
+    .chain(
+        config
+            .auto
+            .categories
+            .iter()
+            .map(|category| &category.extra),
+    )
+    .chain(
+        config
+            .zones
+            .iter()
+            .flat_map(|zone| [&zone.extra, &zone.look.extra]),
+    )
+    .chain(config.rules.iter().map(|rule| &rule.extra))
+    .find_map(|extra| extra.0.keys().next());
     if let Some(key) = unknown {
         return Err(format!("{key} is no key of the configuration"));
     }
@@ -97,11 +117,17 @@ fn there_and_back(example: &Value) -> Result<Value, String> {
 #[test]
 fn every_example_in_the_contract_is_read() {
     let examples = examples(CONTRACT);
-    assert!(examples.len() >= 50, "only {} examples were found", examples.len());
+    assert!(
+        examples.len() >= 50,
+        "only {} examples were found",
+        examples.len()
+    );
     let (mut commands, mut events, mut configurations) = (0, 0, 0);
     for text in examples {
-        let example: Value = serde_json::from_str(&text).unwrap_or_else(|error| panic!("not JSON ({error}):\n{text}"));
-        let written = there_and_back(&example).unwrap_or_else(|error| panic!("not read ({error}):\n{text}"));
+        let example: Value = serde_json::from_str(&text)
+            .unwrap_or_else(|error| panic!("not JSON ({error}):\n{text}"));
+        let written =
+            there_and_back(&example).unwrap_or_else(|error| panic!("not read ({error}):\n{text}"));
         assert_eq!(missing(&example, &written, ""), None, "\n{text}");
         if example.get("command").is_some() {
             commands += 1;
@@ -111,7 +137,10 @@ fn every_example_in_the_contract_is_read() {
             configurations += 1;
         }
     }
-    assert!(commands >= 25 && events >= 12 && configurations >= 8, "{commands} {events} {configurations}");
+    assert!(
+        commands >= 25 && events >= 12 && configurations >= 8,
+        "{commands} {events} {configurations}"
+    );
 }
 
 #[test]
@@ -124,7 +153,9 @@ fn an_example_that_does_not_fit_is_noticed() {
     // A word the code does not know, a field it does not have, a value
     // it would write otherwise, a configuration that cannot be right.
     assert!(read(r#"{"command": "unroll", "zone": "a"}"#).is_err());
-    assert!(read(r#"{"command": "expand", "zone": "a", "open": true}"#).unwrap().is_some());
+    assert!(read(r#"{"command": "expand", "zone": "a", "open": true}"#)
+        .unwrap()
+        .is_some());
     assert!(read(r#"{"roll_up": {"expand": "click"}}"#).is_err());
     assert!(read(r#"{"look": {"background": "blue"}}"#).is_err());
     assert!(read(r#"{"event": "nothing_at_all"}"#).is_err());

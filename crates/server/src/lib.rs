@@ -1429,9 +1429,7 @@ fn dispatcher_argument_kind(command: DispatchType) -> &'static str {
         }
         DispatchType::MoveWindowToMonitor
         | DispatchType::ToggleWindowCentered
-        | DispatchType::MoveWindowToMonitorAndFollow => {
-            "window_selector_and_monitor_selector"
-        }
+        | DispatchType::MoveWindowToMonitorAndFollow => "window_selector_and_monitor_selector",
         DispatchType::FocusMonitorWorkspace => "monitor_selector_and_workspace_selector",
         DispatchType::ManageWindow | DispatchType::UnmanageWindow => "window_selector",
         DispatchType::MoveActive | DispatchType::ResizeActive => "x_y_pixels",
@@ -2111,9 +2109,7 @@ impl WMService for WMServer {
                 .as_ref()
                 .map(|data| data.tiling_suspended)
                 .unwrap_or(false),
-            desktop_shown: overlay_data
-                .as_ref()
-                .is_some_and(|data| data.desktop_shown),
+            desktop_shown: overlay_data.as_ref().is_some_and(|data| data.desktop_shown),
             dim_inactive: appearance.dim_inactive,
             inactive_window_opacity: appearance.inactive_window_opacity as u32,
             dim_fullscreen: appearance.dim_fullscreen,
@@ -2297,7 +2293,6 @@ impl WMService for WMServer {
         &self,
         _request: Request<Empty>,
     ) -> Result<Response<NodeGraph>, Status> {
-
         let config = self.running_config();
         let proto_graph = gevrek_protocol::conversions::node_graph_to_proto(&config.node_graph);
 
@@ -2402,7 +2397,6 @@ impl WMService for WMServer {
         &self,
         _request: Request<Empty>,
     ) -> Result<Response<NodeGraph>, Status> {
-
         let working = self.working_graph.lock().unwrap_or_else(|p| p.into_inner());
         let proto_graph = gevrek_protocol::conversions::node_graph_to_proto(&working);
 

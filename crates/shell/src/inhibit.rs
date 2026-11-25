@@ -95,7 +95,9 @@ pub fn start() -> anyhow::Result<Awake> {
                 held: None,
                 handle,
             };
-            if let Err(error) = WaylandSource::new(connection.clone(), queue).insert(event_loop.handle()) {
+            if let Err(error) =
+                WaylandSource::new(connection.clone(), queue).insert(event_loop.handle())
+            {
                 log::warn!("the screen cannot be kept awake for the portal: {error}");
                 return;
             }

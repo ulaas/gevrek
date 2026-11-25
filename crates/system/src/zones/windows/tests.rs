@@ -27,9 +27,13 @@ fn folder(name: &str) -> String {
 fn backend(root: &str, explorer: FakeExplorer) -> (SystemBackend, mpsc::Receiver<()>) {
     let (woken, wakes) = mpsc::channel();
     let woken = Mutex::new(woken);
-    let mut backend = SystemBackend::at(&Path::new(root).join("state"), Box::new(explorer), move || {
-        let _ = woken.lock().expect("the channel").send(());
-    });
+    let mut backend = SystemBackend::at(
+        &Path::new(root).join("state"),
+        Box::new(explorer),
+        move || {
+            let _ = woken.lock().expect("the channel").send(());
+        },
+    );
     backend.set_quiet(true);
     (backend, wakes)
 }
@@ -69,7 +73,9 @@ fn a_folder_is_listed_with_the_facts_of_what_is_in_it() {
     .expect("written");
     let (mut backend, _wakes) = backend(&root, FakeExplorer::default());
     // Written with the other separator, as a configuration may.
-    let at = Location::Directory { path: shown.replace('\\', "/") };
+    let at = Location::Directory {
+        path: shown.replace('\\', "/"),
+    };
     let items = backend.list(&at).expect("listed");
     let by_name = |name: &str| {
         items
@@ -91,39 +97,66 @@ fn a_folder_is_listed_with_the_facts_of_what_is_in_it() {
         .as_secs();
     for time in [notes.facts.created, notes.facts.modified] {
         let time = time.expect("a time");
-        assert!(time <= now + 5 && time + 600 > now, "{time} is not about {now}");
+        assert!(
+            time <= now + 5 && time + 600 > now,
+            "{time} is not about {now}"
+        );
     }
     // Nobody opened it: the file system's own time of last access is
     // not taken for that (see `recent`).
     assert_eq!(notes.facts.accessed, None);
-    assert_eq!(notes.facts.last_touched(), notes.facts.created.max(notes.facts.modified));
+    assert_eq!(
+        notes.facts.last_touched(),
+        notes.facts.created.max(notes.facts.modified)
+    );
     // The name is the shell's (with or without the ending, as the person
     // has Explorer show names); the ending is the file's.
-    assert!(notes.name == "notes" || notes.name == "notes.txt", "{}", notes.name);
+    assert!(
+        notes.name == "notes" || notes.name == "notes.txt",
+        "{}",
+        notes.name
+    );
 
     let picture = by_name("Picture.PNG");
     assert_eq!(picture.facts.extension.as_deref(), Some("png"));
     assert_eq!(picture.facts.mime.as_deref(), Some("image/png"));
     let inner = by_name("Folder");
     assert_eq!(
-        (inner.kind, inner.facts.mime.as_deref(), inner.facts.size, inner.facts.extension.as_deref()),
+        (
+            inner.kind,
+            inner.facts.mime.as_deref(),
+            inner.facts.size,
+            inner.facts.extension.as_deref()
+        ),
         (ItemKind::Folder, Some("inode/directory"), None, None)
     );
     let plain = by_name("Makefile");
     assert_eq!(
-        (plain.kind, plain.facts.extension.as_deref(), plain.facts.size),
+        (
+            plain.kind,
+            plain.facts.extension.as_deref(),
+            plain.facts.size
+        ),
         (ItemKind::File, None, Some(0))
     );
     let link = by_name("site.url");
     assert_eq!(link.kind, ItemKind::Shortcut);
-    assert_eq!(link.facts.shortcut_target.as_deref(), Some("https://example.org/"));
+    assert_eq!(
+        link.facts.shortcut_target.as_deref(),
+        Some("https://example.org/")
+    );
 
     // One item's facts, read now, are the listed ones; of what is not
     // there, none.
     assert_eq!(backend.facts(&notes.id), Some(notes.facts.clone()));
-    assert_eq!(backend.facts(&ItemId::new(format!("{shown}\\gone.txt"))), None);
+    assert_eq!(
+        backend.facts(&ItemId::new(format!("{shown}\\gone.txt"))),
+        None
+    );
     assert!(matches!(
-        backend.list(&Location::Directory { path: format!("{root}\\nowhere") }),
+        backend.list(&Location::Directory {
+            path: format!("{root}\\nowhere")
+        }),
         Err(BackendError::NotFound { .. })
     ));
     let _ = std::fs::remove_dir_all(&root);
@@ -136,15 +169,20 @@ fn a_watched_folder_tells_through_the_backend_and_wakes_its_host() {
     std::fs::create_dir_all(&shown).expect("made");
     std::fs::write(format!("{shown}\\there.txt"), b"x").expect("written");
     let (mut backend, wakes) = backend(&root, FakeExplorer::default());
-    let at = Location::Directory { path: shown.clone() };
+    let at = Location::Directory {
+        path: shown.clone(),
+    };
     // Watching begins before the listing, as the host does it. Neither
     // goes to the folder on this thread: what is in it is told.
     let watch = backend.watch(&at).expect("watched");
     assert!(backend.list(&at).expect("listed").len() <= 1);
     let mut all = Vec::new();
-    until(&mut backend, &wakes, &mut all, |event| {
-        matches!(event, BackendEvent::Listed { location, items } if location == &at && items.len() == 1)
-    });
+    until(
+        &mut backend,
+        &wakes,
+        &mut all,
+        |event| matches!(event, BackendEvent::Listed { location, items } if location == &at && items.len() == 1),
+    );
     assert_eq!(backend.list(&at).expect("known").len(), 1);
     assert_eq!(backend.unreachable(), []);
 
@@ -176,9 +214,12 @@ fn a_watched_folder_tells_through_the_backend_and_wakes_its_host() {
             if from.as_str() == format!("{shown}\\new.txt") && item.id.as_str() == format!("{shown}\\old.txt"))
     });
     backend.perform(&undo).expect("renamed back");
-    until(&mut backend, &wakes, &mut all, |event| {
-        matches!(event, BackendEvent::ItemRenamed { from, .. } if from.as_str() == format!("{shown}\\old.txt"))
-    });
+    until(
+        &mut backend,
+        &wakes,
+        &mut all,
+        |event| matches!(event, BackendEvent::ItemRenamed { from, .. } if from.as_str() == format!("{shown}\\old.txt")),
+    );
 
     // (What was told before it was let go of, as of the renaming back
     // after its last step, may still be there to be taken.)
@@ -190,11 +231,16 @@ fn a_watched_folder_tells_through_the_backend_and_wakes_its_host() {
 
     // A folder that is not there is watched all the same: it is told as
     // away, with nothing in it, and shown when it comes.
-    let nowhere = Location::Directory { path: format!("{root}\\nowhere") };
+    let nowhere = Location::Directory {
+        path: format!("{root}\\nowhere"),
+    };
     let waiting = backend.watch(&nowhere).expect("watched");
-    until(&mut backend, &wakes, &mut all, |event| {
-        matches!(event, BackendEvent::ListingFailed { location, .. } if location == &nowhere)
-    });
+    until(
+        &mut backend,
+        &wakes,
+        &mut all,
+        |event| matches!(event, BackendEvent::ListingFailed { location, .. } if location == &nowhere),
+    );
     assert_eq!(backend.list(&nowhere).expect("known"), []);
     assert_eq!(backend.unreachable().len(), 1);
     std::fs::create_dir(format!("{root}\\nowhere")).expect("made");
@@ -216,9 +262,27 @@ fn an_icon_is_drawn_by_the_shell_off_this_thread_at_the_displays_size() {
     std::fs::write(&file, b"dear").expect("written");
     let (mut backend, wakes) = backend(&root, FakeExplorer::default());
     let item = ItemId::new(file);
-    let icon = backend.request_icon(&item, IconSize { size: 32, scale: 1.5 });
-    let thumbnail = backend.request_thumbnail(&item, IconSize { size: 32, scale: 1.0 });
-    let gone = backend.request_icon(&ItemId::new(format!("{root}\\gone.txt")), IconSize { size: 32, scale: 1.0 });
+    let icon = backend.request_icon(
+        &item,
+        IconSize {
+            size: 32,
+            scale: 1.5,
+        },
+    );
+    let thumbnail = backend.request_thumbnail(
+        &item,
+        IconSize {
+            size: 32,
+            scale: 1.0,
+        },
+    );
+    let gone = backend.request_icon(
+        &ItemId::new(format!("{root}\\gone.txt")),
+        IconSize {
+            size: 32,
+            scale: 1.0,
+        },
+    );
     let mut all = Vec::new();
     let answered = |all: &[BackendEvent], wanted: IconRequest| {
         all.iter().find_map(|event| match event {
@@ -227,15 +291,28 @@ fn an_icon_is_drawn_by_the_shell_off_this_thread_at_the_displays_size() {
         })
     };
     for wanted in [icon, thumbnail, gone] {
-        until(&mut backend, &wakes, &mut all, |event| {
-            matches!(event, BackendEvent::IconReady { request, .. } if *request == wanted)
-        });
+        until(
+            &mut backend,
+            &wakes,
+            &mut all,
+            |event| matches!(event, BackendEvent::IconReady { request, .. } if *request == wanted),
+        );
     }
-    let handle = answered(&all, icon).flatten().expect("an icon for a text file");
+    let handle = answered(&all, icon)
+        .flatten()
+        .expect("an icon for a text file");
     let picture = backend.picture(handle).expect("its pixels");
     assert_eq!((picture.width, picture.height), (48, 48));
     assert_eq!(picture.pixels.len(), 48 * 48 * 4);
-    assert!(picture.pixels.as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 0), "the icon is empty");
+    assert!(
+        picture
+            .pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[3] != 0),
+        "the icon is empty"
+    );
     // A text file holds no picture, and what is not there has no icon.
     assert_eq!(answered(&all, thumbnail), Some(None));
     assert_eq!(answered(&all, gone), Some(None));
@@ -246,7 +323,13 @@ fn an_icon_is_drawn_by_the_shell_off_this_thread_at_the_displays_size() {
 fn the_journal_of_explorers_icons_is_the_backends_and_survives_it() {
     let root = folder("backend-journal");
     let shown = DesktopView {
-        view: View { icons_shown: true, snap_to_grid: true, view_mode: 1, icon_size: 48, ..View::default() },
+        view: View {
+            icons_shown: true,
+            snap_to_grid: true,
+            view_mode: 1,
+            icon_size: 48,
+            ..View::default()
+        },
         icons: vec![Icon {
             id: "C:\\Users\\ada\\Desktop\\a.txt".to_string(),
             name: "a.txt".to_string(),
@@ -261,8 +344,8 @@ fn the_journal_of_explorers_icons_is_the_backends_and_survives_it() {
     first.journal_system_icons().expect("written down");
     assert!(first.system_icons_to_restore());
     first.hide_system_icons().expect("put away");
-    let written =
-        std::fs::read_to_string(Path::new(&root).join("state").join(explorer::FILE)).expect("the journal");
+    let written = std::fs::read_to_string(Path::new(&root).join("state").join(explorer::FILE))
+        .expect("the journal");
     let journal = explorer::Journal::decode(&written).expect("a journal");
     assert!(journal.open && journal.hidden);
     assert_eq!(journal.desktop, shown);
@@ -290,21 +373,34 @@ fn what_is_dragged_out_is_handed_over_once_and_what_is_over_is_kept() {
     let items = [ItemId::new(file.clone())];
     assert!(backend.take_drag().is_none());
     backend
-        .start_drag(&items, DragActions { copy: true, moving: true, link: false })
+        .start_drag(
+            &items,
+            DragActions {
+                copy: true,
+                moving: true,
+                link: false,
+            },
+        )
         .expect("begun");
     let carried = backend.take_drag().expect("what is dragged");
     assert!(backend.take_drag().is_none());
     assert_eq!(dnd::effects_of(carried.allowed), 3);
     // Dropped on a zone of this program, it is the items again.
     let payload = dnd::payload_of(&carried.object, carried.allowed);
-    assert_eq!((payload.items.as_slice(), payload.paths.as_slice()), (&items[..], &[file][..]));
+    assert_eq!(
+        (payload.items.as_slice(), payload.paths.as_slice()),
+        (&items[..], &[file][..])
+    );
     assert_eq!(backend.drop_payload(), None);
     backend.set_drop(Some(payload.clone()));
     assert_eq!(backend.drop_payload(), Some(payload));
     backend.set_drop(None);
     assert_eq!(backend.drop_payload(), None);
     assert!(backend
-        .start_drag(&[ItemId::new(format!("{root}\\gone.txt"))], DragActions::ALL)
+        .start_drag(
+            &[ItemId::new(format!("{root}\\gone.txt"))],
+            DragActions::ALL
+        )
         .is_err());
     drop(carried);
     let _ = std::fs::remove_dir_all(&root);
@@ -314,7 +410,10 @@ fn what_is_dragged_out_is_handed_over_once_and_what_is_over_is_kept() {
 fn displays_the_window_manager_tells_are_told_on_and_replace_the_systems() {
     let root = folder("backend-displays");
     let (mut backend, wakes) = backend(&root, FakeExplorer::default());
-    let mut left = Display::new("no display of this machine", gevrek_zones::Rect::new(0, 0, 1280, 720));
+    let mut left = Display::new(
+        "no display of this machine",
+        gevrek_zones::Rect::new(0, 0, 1280, 720),
+    );
     left.primary = true;
     left.scale = 1.5;
     let kept = vec![ReservedArea {
@@ -326,7 +425,10 @@ fn displays_the_window_manager_tells_are_told_on_and_replace_the_systems() {
     wakes.recv_timeout(Duration::from_secs(10)).expect("woken");
     assert_eq!(
         backend.drain_events(),
-        [BackendEvent::Displays { displays: vec![left.clone()], reserved: kept.clone() }]
+        [BackendEvent::Displays {
+            displays: vec![left.clone()],
+            reserved: kept.clone()
+        }]
     );
     // The same again is no news.
     backend.set_displays(vec![left.clone()], kept.clone());
@@ -354,21 +456,39 @@ fn the_desktop_is_listed_by_the_shell_with_ids_it_takes_back() {
     backend.unwatch(watch);
     backend.unwatch(again);
     assert!(backend.desktop.is_none());
-    let mut ids: Vec<String> = items.iter().map(|item| item.id.as_str().to_lowercase()).collect();
+    let mut ids: Vec<String> = items
+        .iter()
+        .map(|item| item.id.as_str().to_lowercase())
+        .collect();
     ids.sort_unstable();
     ids.dedup();
     assert_eq!(ids.len(), items.len(), "an id is there twice");
     let folders = shell::desktop_folders();
     for item in &items {
         assert!(!item.name.is_empty(), "{item:?}");
-        assert!(shell::on_the_desktop(item.id.as_str(), &folders), "{} is not on the desktop", item.id);
+        assert!(
+            shell::on_the_desktop(item.id.as_str(), &folders),
+            "{} is not on the desktop",
+            item.id
+        );
         // What is a file has a path; what is none has none.
-        assert_eq!(item.path.is_some(), item.kind != ItemKind::Virtual, "{item:?}");
-        assert_eq!(facts::is_path(item.id.as_str()), item.kind != ItemKind::Virtual, "{item:?}");
+        assert_eq!(
+            item.path.is_some(),
+            item.kind != ItemKind::Virtual,
+            "{item:?}"
+        );
+        assert_eq!(
+            facts::is_path(item.id.as_str()),
+            item.kind != ItemKind::Virtual,
+            "{item:?}"
+        );
         // The shell finds the same item by its id again.
         let again = shell::item_by_id(&item.id, &mut shell::Types::default())
             .unwrap_or_else(|| panic!("{} is not found by its id", item.id));
-        assert_eq!((again.id.as_str(), again.kind), (item.id.as_str(), item.kind));
+        assert_eq!(
+            (again.id.as_str(), again.kind),
+            (item.id.as_str(), item.kind)
+        );
     }
     // Only what lies on the desktop itself is the desktop's.
     for (id, on) in [
@@ -376,7 +496,10 @@ fn the_desktop_is_listed_by_the_shell_with_ids_it_takes_back() {
         (format!("{}\\A.TXT", folders[0].to_uppercase()), true),
         (format!("{}\\Projects\\deep.txt", folders[0]), false),
         ("C:\\gevrek-no-such-folder\\a.txt".to_string(), false),
-        ("::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\\::{X}".to_string(), false),
+        (
+            "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\\::{X}".to_string(),
+            false,
+        ),
         (String::new(), false),
     ] {
         assert_eq!(shell::on_the_desktop(&id, &folders), on, "{id}");
@@ -410,14 +533,29 @@ fn recent_files_and_downloads_are_told_whole_from_folders_of_the_tests_own() {
     std::fs::write(format!("{shown}\\report.txt"), b"report").expect("written");
     let (mut backend, wakes) = backend_under(&root);
     let mut all = Vec::new();
-    let names = |items: &[Item]| items.iter().map(|item| item.name.clone()).collect::<Vec<_>>();
+    let names = |items: &[Item]| {
+        items
+            .iter()
+            .map(|item| item.name.clone())
+            .collect::<Vec<_>>()
+    };
 
     // What is no list of the backend's is said to be none.
-    assert_eq!(backend.watch_source(&SmartSource::Desktop), Err(BackendError::Unsupported));
-    assert_eq!(backend.list_source(&SmartSource::Folder { directory: shown.clone() }), Err(BackendError::Unsupported));
+    assert_eq!(
+        backend.watch_source(&SmartSource::Desktop),
+        Err(BackendError::Unsupported)
+    );
+    assert_eq!(
+        backend.list_source(&SmartSource::Folder {
+            directory: shown.clone()
+        }),
+        Err(BackendError::Unsupported)
+    );
 
     // A portal shows the folder; nobody has opened the file in it.
-    let at = Location::Directory { path: shown.clone() };
+    let at = Location::Directory {
+        path: shown.clone(),
+    };
     backend.watch(&at).expect("watched");
     until(&mut backend, &wakes, &mut all, |event| {
         matches!(event, BackendEvent::Listed { location, items }
@@ -426,9 +564,12 @@ fn recent_files_and_downloads_are_told_whole_from_folders_of_the_tests_own() {
 
     // Recent files: none yet, and told so.
     let recent = backend.watch_source(&SmartSource::Recent).expect("watched");
-    until(&mut backend, &wakes, &mut all, |event| {
-        matches!(event, BackendEvent::SourceListed { source: SmartSource::Recent, items } if items.is_empty())
-    });
+    until(
+        &mut backend,
+        &wakes,
+        &mut all,
+        |event| matches!(event, BackendEvent::SourceListed { source: SmartSource::Recent, items } if items.is_empty()),
+    );
     // The person opens the file: the shell writes a shortcut to it into
     // the Recent folder. The list has it, and the item in the portal
     // knows when it was opened.
@@ -442,15 +583,25 @@ fn recent_files_and_downloads_are_told_whole_from_folders_of_the_tests_own() {
         matches!(event, BackendEvent::ItemChanged { location, item }
             if location == &at && item.facts.accessed.is_some() && item.facts.last_touched() == item.facts.accessed)
     });
-    assert_eq!(names(&backend.list_source(&SmartSource::Recent).expect("known")).len(), 1);
-    let facts = backend.facts(&ItemId::new(format!("{shown}\\report.txt"))).expect("facts");
+    assert_eq!(
+        names(&backend.list_source(&SmartSource::Recent).expect("known")).len(),
+        1
+    );
+    let facts = backend
+        .facts(&ItemId::new(format!("{shown}\\report.txt")))
+        .expect("facts");
     assert!(facts.accessed.is_some());
 
     // Downloads: the newest first, told whole whenever a file arrives.
-    let downloads = backend.watch_source(&SmartSource::Downloads).expect("watched");
-    until(&mut backend, &wakes, &mut all, |event| {
-        matches!(event, BackendEvent::SourceListed { source: SmartSource::Downloads, items } if items.is_empty())
-    });
+    let downloads = backend
+        .watch_source(&SmartSource::Downloads)
+        .expect("watched");
+    until(
+        &mut backend,
+        &wakes,
+        &mut all,
+        |event| matches!(event, BackendEvent::SourceListed { source: SmartSource::Downloads, items } if items.is_empty()),
+    );
     std::fs::write(format!("{root}\\Downloads\\setup.exe"), b"MZ").expect("written");
     until(&mut backend, &wakes, &mut all, |event| {
         matches!(event, BackendEvent::SourceListed { source: SmartSource::Downloads, items }
@@ -463,7 +614,10 @@ fn recent_files_and_downloads_are_told_whole_from_folders_of_the_tests_own() {
     let _ = backend.drain_events();
     std::fs::write(format!("{root}\\Downloads\\late.txt"), b"late").expect("written");
     std::thread::sleep(Duration::from_millis(300));
-    assert!(!backend.drain_events().iter().any(|event| matches!(event, BackendEvent::SourceListed { .. })));
+    assert!(!backend
+        .drain_events()
+        .iter()
+        .any(|event| matches!(event, BackendEvent::SourceListed { .. })));
     drop(backend);
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -473,7 +627,9 @@ fn programs_are_items_that_open_and_have_no_menu_of_the_shells() {
     let root = folder("programs");
     let (mut backend, wakes) = backend_under(&root);
     let mut all = Vec::new();
-    backend.watch_source(&SmartSource::RunningApps).expect("watched");
+    backend
+        .watch_source(&SmartSource::RunningApps)
+        .expect("watched");
     backend.set_wm_state(&serde_json::json!({"monitors": [{"workspaces": [{"detailed_windows": [
         {"window_id": 21, "title": "notes", "class": "Notepad", "exe": "C:\\Windows\\notepad.exe", "is_focused": true}]}]}]}));
     until(&mut backend, &wakes, &mut all, |event| {
@@ -482,7 +638,10 @@ fn programs_are_items_that_open_and_have_no_menu_of_the_shells() {
     });
     let running = ItemId::new("running:c:\\windows\\notepad.exe");
     assert_eq!(
-        backend.facts(&running).and_then(|facts| facts.shortcut_target).as_deref(),
+        backend
+            .facts(&running)
+            .and_then(|facts| facts.shortcut_target)
+            .as_deref(),
         Some("C:\\Windows\\notepad.exe")
     );
     // Opening it is a command for the window manager, by the line the
@@ -493,20 +652,44 @@ fn programs_are_items_that_open_and_have_no_menu_of_the_shells() {
         let _ = sent.send(command);
     });
     backend.open(&running).expect("sent");
-    assert_eq!(commands.try_recv().expect("a command"), crate::zones::programs::focus_command(21));
-    assert_eq!(backend.context_menu(std::slice::from_ref(&running), Point { x: 0, y: 0 }), Err(BackendError::Unsupported));
-    assert_eq!(backend.open_with(&running, None), Err(BackendError::Unsupported));
-    assert!(backend.start_drag(std::slice::from_ref(&running), DragActions::ALL).is_err());
+    assert_eq!(
+        commands.try_recv().expect("a command"),
+        crate::zones::programs::focus_command(21)
+    );
+    assert_eq!(
+        backend.context_menu(std::slice::from_ref(&running), Point { x: 0, y: 0 }),
+        Err(BackendError::Unsupported)
+    );
+    assert_eq!(
+        backend.open_with(&running, None),
+        Err(BackendError::Unsupported)
+    );
+    assert!(backend
+        .start_drag(std::slice::from_ref(&running), DragActions::ALL)
+        .is_err());
     // Its picture is its program's file's, drawn by the shell.
-    let asked = backend.request_icon(&running, IconSize { size: 32, scale: 1.0 });
-    until(&mut backend, &wakes, &mut all, |event| {
-        matches!(event, BackendEvent::IconReady { request, icon: Some(_) } if *request == asked)
-    });
+    let asked = backend.request_icon(
+        &running,
+        IconSize {
+            size: 32,
+            scale: 1.0,
+        },
+    );
+    until(
+        &mut backend,
+        &wakes,
+        &mut all,
+        |event| matches!(event, BackendEvent::IconReady { request, icon: Some(_) } if *request == asked),
+    );
 
     // Pins are written down under the state folder of the test.
     backend.pin_launcher("editor", true).expect("pinned");
     assert_eq!(backend.pinned_launchers(), ["editor"]);
-    assert!(Path::new(&root).join("state").join("zones").join("pinned-launchers.json").is_file());
+    assert!(Path::new(&root)
+        .join("state")
+        .join("zones")
+        .join("pinned-launchers.json")
+        .is_file());
     backend.set_pinned_launchers(&[]).expect("written");
     assert_eq!(backend.pinned_launchers(), Vec::<String>::new());
     assert_eq!(backend.installed_programs(), []);
@@ -519,9 +702,18 @@ fn a_file_a_cloud_keeps_is_known_by_its_attributes_and_others_are_not() {
     let root = folder("cloud");
     std::fs::write(format!("{root}\\here.txt"), b"here").expect("written");
     let (backend, _wakes) = backend(&root, FakeExplorer::default());
-    assert_eq!(backend.cloud_state(&ItemId::new(format!("{root}\\here.txt"))), None);
-    assert_eq!(backend.cloud_state(&ItemId::new(format!("{root}\\gone.txt"))), None);
-    assert_eq!(backend.cloud_state(&ItemId::new("::{645FF040-5081-101B-9F08-00AA002F954E}")), None);
+    assert_eq!(
+        backend.cloud_state(&ItemId::new(format!("{root}\\here.txt"))),
+        None
+    );
+    assert_eq!(
+        backend.cloud_state(&ItemId::new(format!("{root}\\gone.txt"))),
+        None
+    );
+    assert_eq!(
+        backend.cloud_state(&ItemId::new("::{645FF040-5081-101B-9F08-00AA002F954E}")),
+        None
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -537,33 +729,63 @@ fn shortcuts_say_where_they_lead_also_when_that_is_gone() {
     std::fs::write(format!("{targets}\\gone.txt"), b"soon gone").expect("written");
     // (A program that is on every Windows: only its path is written
     // into the shortcut, nothing of it is read or started.)
-    let program = std::env::var("SystemRoot").map(|windows| format!("{windows}\\System32\\notepad.exe")).expect("Windows");
+    let program = std::env::var("SystemRoot")
+        .map(|windows| format!("{windows}\\System32\\notepad.exe"))
+        .expect("Windows");
     let link = |name: &str, target: &str| {
-        assert!(recent::write_link(Path::new(&format!("{shown}\\{name}.lnk")), target), "{name}");
+        assert!(
+            recent::write_link(Path::new(&format!("{shown}\\{name}.lnk")), target),
+            "{name}"
+        );
     };
     link("to folder", &format!("{targets}\\Folder"));
     link("to program", &program);
     link("broken", &format!("{targets}\\gone.txt"));
     std::fs::remove_file(format!("{targets}\\gone.txt")).expect("removed");
-    std::fs::write(format!("{shown}\\site.url"), b"[InternetShortcut]\r\nURL=https://example.org/page\r\n").expect("written");
+    std::fs::write(
+        format!("{shown}\\site.url"),
+        b"[InternetShortcut]\r\nURL=https://example.org/page\r\n",
+    )
+    .expect("written");
 
     let (mut backend, _wakes) = backend(&root, FakeExplorer::default());
-    let items = backend.list(&Location::Directory { path: shown.clone() }).expect("listed");
+    let items = backend
+        .list(&Location::Directory {
+            path: shown.clone(),
+        })
+        .expect("listed");
     let target_of = |file: &str| {
         let item = items
             .iter()
             .find(|item| item.id.as_str() == format!("{shown}\\{file}"))
             .unwrap_or_else(|| panic!("{file} is not listed: {items:#?}"));
         assert_eq!(item.kind, ItemKind::Shortcut, "{file}");
-        item.facts.shortcut_target.clone().unwrap_or_else(|| panic!("{file} leads nowhere: {item:#?}"))
+        item.facts
+            .shortcut_target
+            .clone()
+            .unwrap_or_else(|| panic!("{file} leads nowhere: {item:#?}"))
     };
-    assert!(facts::same_path(&target_of("to folder.lnk"), &format!("{targets}\\Folder")));
+    assert!(facts::same_path(
+        &target_of("to folder.lnk"),
+        &format!("{targets}\\Folder")
+    ));
     assert!(facts::same_path(&target_of("to program.lnk"), &program));
-    assert!(facts::same_path(&target_of("broken.lnk"), &format!("{targets}\\gone.txt")));
+    assert!(facts::same_path(
+        &target_of("broken.lnk"),
+        &format!("{targets}\\gone.txt")
+    ));
     assert_eq!(target_of("site.url"), "https://example.org/page");
     // The ending and the type are the shortcut's own, not its target's.
-    let by_name = |file: &str| items.iter().find(|item| item.id.as_str() == format!("{shown}\\{file}")).expect("listed");
-    assert_eq!(by_name("to program.lnk").facts.extension.as_deref(), Some("lnk"));
+    let by_name = |file: &str| {
+        items
+            .iter()
+            .find(|item| item.id.as_str() == format!("{shown}\\{file}"))
+            .expect("listed")
+    };
+    assert_eq!(
+        by_name("to program.lnk").facts.extension.as_deref(),
+        Some("lnk")
+    );
     assert_eq!(by_name("site.url").facts.extension.as_deref(), Some("url"));
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -582,32 +804,76 @@ fn an_operation_that_ends_later_is_told_when_it_ends_and_can_be_called_off() {
 
     // Begun: the caller is answered at once, and the end is told with
     // what takes it back, as `perform` would have answered.
-    assert!(backend.begin_operation(7, &FileOperation::Copy { from: plain(format!("{shown}/a.txt")), to_folder: plain(archive.clone()) }));
+    assert!(backend.begin_operation(
+        7,
+        &FileOperation::Copy {
+            from: plain(format!("{shown}/a.txt")),
+            to_folder: plain(archive.clone())
+        }
+    ));
     until(&mut backend, &wakes, &mut all, |event| {
         matches!(event, BackendEvent::OperationDone { request: 7, undo: Some(FileOperation::Trash { path }), error: None }
             if facts::same_path(path, &format!("{archive}/a.txt")))
     });
     assert!(Path::new(&format!("{archive}/a.txt")).is_file());
     // What goes wrong is told the same way.
-    assert!(backend.begin_operation(8, &FileOperation::Copy { from: plain(format!("{shown}/gone.txt")), to_folder: plain(archive.clone()) }));
+    assert!(backend.begin_operation(
+        8,
+        &FileOperation::Copy {
+            from: plain(format!("{shown}/gone.txt")),
+            to_folder: plain(archive.clone())
+        }
+    ));
     until(&mut backend, &wakes, &mut all, |event| {
-        matches!(event, BackendEvent::OperationDone { request: 8, undo: None, error: Some(BackendError::NotFound { .. }) })
+        matches!(
+            event,
+            BackendEvent::OperationDone {
+                request: 8,
+                undo: None,
+                error: Some(BackendError::NotFound { .. })
+            }
+        )
     });
     // Called off while it waits behind another: it is not begun, and
     // that is told. The one before it is carried out.
-    assert!(backend.begin_operation(9, &FileOperation::Copy { from: plain(format!("{shown}/b.txt")), to_folder: plain(archive.clone()) }));
-    assert!(backend.begin_operation(10, &FileOperation::Move { from: plain(format!("{shown}/b.txt")), to_folder: plain(archive.clone()) }));
+    assert!(backend.begin_operation(
+        9,
+        &FileOperation::Copy {
+            from: plain(format!("{shown}/b.txt")),
+            to_folder: plain(archive.clone())
+        }
+    ));
+    assert!(backend.begin_operation(
+        10,
+        &FileOperation::Move {
+            from: plain(format!("{shown}/b.txt")),
+            to_folder: plain(archive.clone())
+        }
+    ));
     backend.cancel_operation(10);
     until(&mut backend, &wakes, &mut all, |event| {
         matches!(event, BackendEvent::OperationDone { request: 10, .. })
     });
-    assert!(all.iter().any(|event| matches!(event, BackendEvent::OperationDone { request: 9, .. })));
+    assert!(all
+        .iter()
+        .any(|event| matches!(event, BackendEvent::OperationDone { request: 9, .. })));
     let called_off = all.iter().any(|event| {
-        matches!(event, BackendEvent::OperationDone { request: 10, undo: None, error: Some(BackendError::Cancelled) })
+        matches!(
+            event,
+            BackendEvent::OperationDone {
+                request: 10,
+                undo: None,
+                error: Some(BackendError::Cancelled)
+            }
+        )
     });
     // (Called off in time, the file is where it was; too late, it was
     // moved and the answer says so.)
-    assert_eq!(Path::new(&format!("{shown}/b.txt")).is_file(), called_off, "{all:#?}");
+    assert_eq!(
+        Path::new(&format!("{shown}/b.txt")).is_file(),
+        called_off,
+        "{all:#?}"
+    );
     drop(backend);
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -623,17 +889,27 @@ fn the_shell_is_told_to_stop_when_an_operation_was_called_off() {
     std::fs::create_dir_all(&archive).expect("made");
     std::fs::write(format!("{shown}/a.txt"), b"a").expect("written");
     let plain = |path: String| path.replace('/', "\u{5c}");
-    let copy = FileOperation::Copy { from: plain(format!("{shown}/a.txt")), to_folder: plain(archive.clone()) };
+    let copy = FileOperation::Copy {
+        from: plain(format!("{shown}/a.txt")),
+        to_folder: plain(archive.clone()),
+    };
     let quiet: crate::zones::sources::Tell = Arc::new(|_| {});
     let mut files = fileops::FileOperations::default();
     files.quiet = true;
-    files.watched = Some(crate::zones::operations::Watched::alone(1, Arc::clone(&quiet), true));
+    files.watched = Some(crate::zones::operations::Watched::alone(
+        1,
+        Arc::clone(&quiet),
+        true,
+    ));
     assert_eq!(files.perform(&copy), Err(BackendError::Cancelled));
     assert_eq!(std::fs::read_dir(&archive).expect("listed").count(), 0);
     assert!(Path::new(&format!("{shown}/a.txt")).is_file());
     // Not called off, the same operation is carried out.
     files.watched = Some(crate::zones::operations::Watched::alone(2, quiet, false));
-    assert!(matches!(files.perform(&copy), Ok(FileOperation::Trash { .. })));
+    assert!(matches!(
+        files.perform(&copy),
+        Ok(FileOperation::Trash { .. })
+    ));
     assert!(Path::new(&format!("{archive}/a.txt")).is_file());
     let _ = std::fs::remove_dir_all(&root);
 }

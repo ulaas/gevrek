@@ -357,7 +357,11 @@ impl Stack {
         // arrival: one that had waited longer than it stays was gone
         // with the next look, never seen.)
         if at < self.at_once {
-            if let Some(came) = self.at_once.checked_sub(1).and_then(|last| self.items.get_mut(last)) {
+            if let Some(came) = self
+                .at_once
+                .checked_sub(1)
+                .and_then(|last| self.items.get_mut(last))
+            {
                 came.since = Instant::now();
             }
         }
@@ -452,7 +456,10 @@ impl Stack {
             // (An age as large as numbers get, as a file from outside
             // may say, is as old as can be.)
             let age = Duration::from_secs(
-                note["age"].as_u64().unwrap_or(0).saturating_add(since_saved),
+                note["age"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    .saturating_add(since_saved),
             );
             self.last_id = self.last_id.wrapping_add(1).max(1);
             self.history.push(Notification {
@@ -1035,7 +1042,10 @@ pub fn draw_centre(
                             for (app, notes) in by_sender(history) {
                                 ui.add_space(4.0);
                                 ui.horizontal(|ui| {
-                                    widgets::caption(ui, if app.is_empty() { "a program" } else { app });
+                                    widgets::caption(
+                                        ui,
+                                        if app.is_empty() { "a program" } else { app },
+                                    );
                                     if notes.len() > 1 {
                                         ui.label(
                                             egui::RichText::new(notes.len().to_string())
@@ -1072,9 +1082,9 @@ pub fn draw_centre(
                                                 // When, at the right end; the
                                                 // title has what is left, cut
                                                 // where it is longer.
-                                                let when = ago(
-                                                    now.saturating_duration_since(note.since).as_secs(),
-                                                );
+                                                let when = ago(now
+                                                    .saturating_duration_since(note.since)
+                                                    .as_secs());
                                                 let when = ui.painter().layout_no_wrap(
                                                     when,
                                                     egui::FontId::proportional(11.5),
@@ -1203,17 +1213,34 @@ mod tests {
     #[ignore = "draws a picture to look at: GEVREK_LOOK_OUT=<file>"]
     fn the_notification_centre_is_drawn_to_be_looked_at() {
         let said = |name: &str| std::env::var(name).ok().filter(|text| !text.is_empty());
-        let out = std::path::PathBuf::from(said("GEVREK_LOOK_OUT").expect("GEVREK_LOOK_OUT: a file"));
+        let out =
+            std::path::PathBuf::from(said("GEVREK_LOOK_OUT").expect("GEVREK_LOOK_OUT: a file"));
         let start = Instant::now();
         let mut stack = Stack::default();
         if said("GEVREK_LOOK").as_deref() != Some("empty") {
             for (app, title, text) in [
-                ("Mail", "Weekly report", "The numbers for the week are in the sheet that is attached."),
+                (
+                    "Mail",
+                    "Weekly report",
+                    "The numbers for the week are in the sheet that is attached.",
+                ),
                 ("gevrek", "A new configuration is applied", ""),
-                ("Chat", "Deniz", "Are you coming to the simit place at twelve? We have a table by the window."),
-                ("Mail", "Your order has shipped and will arrive on Thursday before noon", "Track it with the number in this message."),
+                (
+                    "Chat",
+                    "Deniz",
+                    "Are you coming to the simit place at twelve? We have a table by the window.",
+                ),
+                (
+                    "Mail",
+                    "Your order has shipped and will arrive on Thursday before noon",
+                    "Track it with the number in this message.",
+                ),
                 ("Chat", "Deniz", "Bring the cables."),
-                ("gevrek", "Recording the screen", "gevrek does not record the screen on Windows yet."),
+                (
+                    "gevrek",
+                    "Recording the screen",
+                    "gevrek does not record the screen on Windows yet.",
+                ),
                 ("Calendar", "Stand-up in ten minutes", "Room 3"),
             ] {
                 stack.tell(app, title, text, -1, start);
@@ -1231,7 +1258,14 @@ mod tests {
         let mut pixels = Vec::new();
         for step in 0..4 {
             pixels = painter.frame_of(&context, 10.0 + f64::from(step) * 0.4, Vec::new(), |ui| {
-                draw_centre(ui, &palette, &stack, later, false, &crate::frost::Look::plain());
+                draw_centre(
+                    ui,
+                    &palette,
+                    &stack,
+                    later,
+                    false,
+                    &crate::frost::Look::plain(),
+                );
             });
         }
         painter.save(&pixels, &out).expect("the picture is written");
@@ -1534,7 +1568,10 @@ mod tests {
         // its foot, as wide as what is above it.
         let clear = asked.clear.expect("the button");
         assert!(
-            clear.min.x >= 18.0 && clear.max.x <= 382.0 && clear.min.y > 600.0 && clear.max.y <= 700.0,
+            clear.min.x >= 18.0
+                && clear.max.x <= 382.0
+                && clear.min.y > 600.0
+                && clear.max.y <= 700.0,
             "{clear:?}"
         );
     }

@@ -189,7 +189,10 @@ mod tests {
         assert_eq!(logical_key(0x10, Some("y")), Some(egui::Key::Y));
         // What writes no letter is named by its place.
         assert_eq!(logical_key(0x12, Some("&")), Some(egui::Key::Num1));
-        assert_eq!(logical_key(0x7B, Some("\u{F702}")), Some(egui::Key::ArrowLeft));
+        assert_eq!(
+            logical_key(0x7B, Some("\u{F702}")),
+            Some(egui::Key::ArrowLeft)
+        );
         assert_eq!(logical_key(0x00, None), Some(egui::Key::A));
     }
 }

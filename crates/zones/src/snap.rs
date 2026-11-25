@@ -30,7 +30,12 @@ pub struct Edges {
 }
 
 impl Edges {
-    pub const BOTTOM_RIGHT: Edges = Edges { left: false, top: false, right: true, bottom: true };
+    pub const BOTTOM_RIGHT: Edges = Edges {
+        left: false,
+        top: false,
+        right: true,
+        bottom: true,
+    };
 }
 
 /// One direction of a rectangle: where it starts and how long it is.
@@ -129,7 +134,12 @@ pub fn snap_move(rect: Rect, around: &Surroundings, settings: &SnapSettings) -> 
             None => on_grid(span.0, pick(around.work_area).0, settings.grid),
         }
     };
-    let snapped = Rect::new(one_way(across, down), one_way(down, across), rect.width, rect.height);
+    let snapped = Rect::new(
+        one_way(across, down),
+        one_way(down, across),
+        rect.width,
+        rect.height,
+    );
     keep_reachable(snapped, around.work_area)
 }
 
@@ -201,25 +211,61 @@ pub fn within(rect: Rect, bounds: Rect) -> bool {
 mod tests {
     use super::*;
 
-    const DISPLAY: Rect = Rect { x: 0, y: 0, width: 1920, height: 1080 };
+    const DISPLAY: Rect = Rect {
+        x: 0,
+        y: 0,
+        width: 1920,
+        height: 1080,
+    };
     /// A panel of 40 at the top.
-    const WORK: Rect = Rect { x: 0, y: 40, width: 1920, height: 1040 };
+    const WORK: Rect = Rect {
+        x: 0,
+        y: 40,
+        width: 1920,
+        height: 1040,
+    };
 
     fn settings() -> SnapSettings {
-        SnapSettings { enabled: true, distance: 12, gap: 8, grid: 0, ..SnapSettings::default() }
+        SnapSettings {
+            enabled: true,
+            distance: 12,
+            gap: 8,
+            grid: 0,
+            ..SnapSettings::default()
+        }
     }
 
     #[test]
     fn a_moved_zone_snaps_to_what_is_near() {
         let neighbour = Rect::new(600, 300, 300, 200);
         let others = [neighbour];
-        let around = Surroundings { display: DISPLAY, work_area: WORK, others: &others };
+        let around = Surroundings {
+            display: DISPLAY,
+            work_area: WORK,
+            others: &others,
+        };
         // (what, moved to, comes to rest at)
         for (what, to, rest) in [
-            ("the display's left side", Rect::new(7, 500, 200, 100), Rect::new(0, 500, 200, 100)),
-            ("its right side", Rect::new(1711, 500, 200, 100), Rect::new(1720, 500, 200, 100)),
-            ("the free room's top", Rect::new(300, 49, 200, 100), Rect::new(300, 40, 200, 100)),
-            ("the bottom", Rect::new(300, 975, 200, 100), Rect::new(300, 980, 200, 100)),
+            (
+                "the display's left side",
+                Rect::new(7, 500, 200, 100),
+                Rect::new(0, 500, 200, 100),
+            ),
+            (
+                "its right side",
+                Rect::new(1711, 500, 200, 100),
+                Rect::new(1720, 500, 200, 100),
+            ),
+            (
+                "the free room's top",
+                Rect::new(300, 49, 200, 100),
+                Rect::new(300, 40, 200, 100),
+            ),
+            (
+                "the bottom",
+                Rect::new(300, 975, 200, 100),
+                Rect::new(300, 980, 200, 100),
+            ),
             (
                 "the room wins over the display's own top",
                 Rect::new(300, 20, 200, 100),
@@ -245,13 +291,21 @@ mod tests {
                 Rect::new(908, 305, 200, 100),
                 Rect::new(908, 300, 200, 100),
             ),
-            ("nothing near", Rect::new(1200, 700, 200, 100), Rect::new(1200, 700, 200, 100)),
+            (
+                "nothing near",
+                Rect::new(1200, 700, 200, 100),
+                Rect::new(1200, 700, 200, 100),
+            ),
             (
                 "a neighbour far above pulls nothing sideways",
                 Rect::new(903, 800, 200, 100),
                 Rect::new(903, 800, 200, 100),
             ),
-            ("beyond the display", Rect::new(-500, 5000, 200, 100), Rect::new(0, 980, 200, 100)),
+            (
+                "beyond the display",
+                Rect::new(-500, 5000, 200, 100),
+                Rect::new(0, 980, 200, 100),
+            ),
         ] {
             assert_eq!(snap_move(to, &around, &settings()), rest, "{what}");
         }
@@ -261,7 +315,11 @@ mod tests {
     fn two_zones_snapped_to_each_other_keep_the_same_gap_on_every_side() {
         let middle = Rect::new(800, 400, 300, 200);
         let others = [middle];
-        let around = Surroundings { display: DISPLAY, work_area: WORK, others: &others };
+        let around = Surroundings {
+            display: DISPLAY,
+            work_area: WORK,
+            others: &others,
+        };
         let settings = settings();
         let left = snap_move(Rect::new(495, 400, 300, 200), &around, &settings);
         let right = snap_move(Rect::new(1105, 400, 300, 200), &around, &settings);
@@ -275,8 +333,15 @@ mod tests {
 
     #[test]
     fn a_grid_holds_what_nothing_else_pulls() {
-        let around = Surroundings { display: DISPLAY, work_area: WORK, others: &[] };
-        let settings = SnapSettings { grid: 50, ..settings() };
+        let around = Surroundings {
+            display: DISPLAY,
+            work_area: WORK,
+            others: &[],
+        };
+        let settings = SnapSettings {
+            grid: 50,
+            ..settings()
+        };
         // The grid starts at the free room's corner (0, 40).
         for (to, rest) in [
             (Rect::new(120, 160, 200, 100), Rect::new(100, 140, 200, 100)),
@@ -287,7 +352,10 @@ mod tests {
             assert_eq!(snap_move(to, &around, &settings), rest, "{to:?}");
         }
         // Without snapping a zone goes where it is put, if it can be reached there.
-        let off = SnapSettings { enabled: false, ..settings };
+        let off = SnapSettings {
+            enabled: false,
+            ..settings
+        };
         assert_eq!(
             snap_move(Rect::new(7, 49, 200, 100), &around, &off),
             Rect::new(7, 49, 200, 100)
@@ -298,11 +366,25 @@ mod tests {
     fn a_sized_zone_snaps_with_the_sides_that_move() {
         let neighbour = Rect::new(600, 300, 300, 200);
         let others = [neighbour];
-        let around = Surroundings { display: DISPLAY, work_area: WORK, others: &others };
+        let around = Surroundings {
+            display: DISPLAY,
+            work_area: WORK,
+            others: &others,
+        };
         let least = (120, 28);
-        let right = Edges { right: true, ..Edges::default() };
-        let left = Edges { left: true, ..Edges::default() };
-        let top_left = Edges { left: true, top: true, ..Edges::default() };
+        let right = Edges {
+            right: true,
+            ..Edges::default()
+        };
+        let left = Edges {
+            left: true,
+            ..Edges::default()
+        };
+        let top_left = Edges {
+            left: true,
+            top: true,
+            ..Edges::default()
+        };
         for (what, to, moving, becomes) in [
             (
                 "the right side meets the neighbour's gap",
@@ -347,7 +429,11 @@ mod tests {
                 Rect::new(1700, 900, 220, 180),
             ),
         ] {
-            assert_eq!(snap_resize(to, moving, &around, &settings(), least), becomes, "{what}");
+            assert_eq!(
+                snap_resize(to, moving, &around, &settings(), least),
+                becomes,
+                "{what}"
+            );
         }
     }
 
@@ -356,7 +442,10 @@ mod tests {
         for (rect, expected) in [
             (Rect::new(100, 100, 200, 100), Rect::new(100, 100, 200, 100)),
             (Rect::new(-50, 10, 200, 100), Rect::new(0, 40, 200, 100)),
-            (Rect::new(1900, 1070, 200, 100), Rect::new(1720, 980, 200, 100)),
+            (
+                Rect::new(1900, 1070, 200, 100),
+                Rect::new(1720, 980, 200, 100),
+            ),
             (Rect::new(10, 50, 5000, 5000), Rect::new(0, 40, 1920, 1040)),
         ] {
             let reachable = keep_reachable(rect, WORK);

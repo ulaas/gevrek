@@ -104,7 +104,11 @@ mod macos {
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
         fn CGEventSourceFlagsState(state: i32) -> u64;
-        fn CGEventCreateKeyboardEvent(source: *const c_void, code: u16, down: bool) -> *const c_void;
+        fn CGEventCreateKeyboardEvent(
+            source: *const c_void,
+            code: u16,
+            down: bool,
+        ) -> *const c_void;
         fn CGEventSetFlags(event: *const c_void, flags: u64);
         fn CGEventPost(tap: u32, event: *const c_void);
     }
@@ -274,8 +278,9 @@ mod windows {
                     wake: Box::new(wake),
                 });
             }
-            match unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(key_heard), HINSTANCE::default(), 0) }
-            {
+            match unsafe {
+                SetWindowsHookExW(WH_KEYBOARD_LL, Some(key_heard), HINSTANCE::default(), 0)
+            } {
                 Ok(hook) => Some(Self {
                     hook: hook.0 as isize,
                 }),
@@ -361,8 +366,7 @@ mod windows {
     /// terminal, or the output is already sent somewhere.)
     pub fn say_to_the_terminal_it_was_started_from() {
         use windows::Win32::System::Console::{
-            AttachConsole, GetStdHandle, ATTACH_PARENT_PROCESS, STD_ERROR_HANDLE,
-            STD_OUTPUT_HANDLE,
+            AttachConsole, GetStdHandle, ATTACH_PARENT_PROCESS, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
         };
         // SAFETY: plain calls about this process's own handles.
         unsafe {

@@ -41,17 +41,16 @@ use windows::Win32::Foundation::{HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, WPARA
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
-    ILClone, SHChangeNotification_Lock, SHChangeNotification_Unlock,
-    SHChangeNotifyDeregister, SHChangeNotifyEntry, SHChangeNotifyRegister, SHCNE_ATTRIBUTES,
-    SHCNE_CREATE, SHCNE_DELETE, SHCNE_INTERRUPT, SHCNE_MKDIR, SHCNE_RENAMEFOLDER,
-    SHCNE_RENAMEITEM, SHCNE_RMDIR, SHCNE_UPDATEDIR, SHCNE_UPDATEIMAGE, SHCNE_UPDATEITEM,
-    SHCNE_ID, SHCNRF_InterruptLevel, SHCNRF_NewDelivery, SHCNRF_ShellLevel, SHCNRF_SOURCE,
+    ILClone, SHCNRF_InterruptLevel, SHCNRF_NewDelivery, SHCNRF_ShellLevel,
+    SHChangeNotification_Lock, SHChangeNotification_Unlock, SHChangeNotifyDeregister,
+    SHChangeNotifyEntry, SHChangeNotifyRegister, SHCNE_ATTRIBUTES, SHCNE_CREATE, SHCNE_DELETE,
+    SHCNE_ID, SHCNE_INTERRUPT, SHCNE_MKDIR, SHCNE_RENAMEFOLDER, SHCNE_RENAMEITEM, SHCNE_RMDIR,
+    SHCNE_UPDATEDIR, SHCNE_UPDATEIMAGE, SHCNE_UPDATEITEM, SHCNRF_SOURCE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-    PostMessageW, PostQuitMessage, RegisterClassW, TranslateMessage, HMENU, MSG, WM_APP,
-    WM_CLOSE, WM_DESTROY, WM_DISPLAYCHANGE, WM_SETTINGCHANGE, WNDCLASSW, WS_EX_TOOLWINDOW,
-    WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, PostMessageW,
+    PostQuitMessage, RegisterClassW, TranslateMessage, HMENU, MSG, WM_APP, WM_CLOSE, WM_DESTROY,
+    WM_DISPLAYCHANGE, WM_SETTINGCHANGE, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 
 /// The shell tells of a change on the desktop.
@@ -77,12 +76,20 @@ pub struct News {
 impl News {
     /// How the host is woken, from now on.
     pub fn on_news(&self, wake: Box<dyn Fn() + Send>) {
-        *self.wake.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(wake);
+        *self
+            .wake
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(wake);
     }
 
     /// There is something to drain.
     pub fn wake(&self) {
-        if let Some(wake) = self.wake.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref() {
+        if let Some(wake) = self
+            .wake
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+        {
             wake();
         }
     }
@@ -99,7 +106,12 @@ impl News {
     }
 
     pub fn take(&self) -> Vec<BackendEvent> {
-        std::mem::take(&mut *self.events.lock().unwrap_or_else(|poisoned| poisoned.into_inner()))
+        std::mem::take(
+            &mut *self
+                .events
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        )
     }
 
     /// How often the shell has told of a change since the start.
@@ -139,14 +151,19 @@ pub struct Folder {
 
 impl Drop for Folder {
     fn drop(&mut self) {
-        *self.ended.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+        *self
+            .ended
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
     }
 }
 
 /// Watch a folder a zone shows: every change in it (not below it) is
 /// told to `news`.
 pub fn watch_folder(path: &str, news: Arc<News>) -> Result<Folder, BackendError> {
-    let location = Location::Directory { path: path.to_string() };
+    let location = Location::Directory {
+        path: path.to_string(),
+    };
     let seen: Shared = Arc::new(Mutex::new(Seen::new(location)));
     watch_into(path, seen, news, Types::default(), || {})
 }
@@ -201,16 +218,22 @@ pub fn watch_into(
             // (Windows tells of a watched folder's own going this way.)
             Ok(event)
                 if matches!(event.kind, EventKind::Remove(_))
-                    && event.paths.first().is_some_and(|path| super::facts::same_path(&path.to_string_lossy(), &itself)) =>
+                    && event.paths.first().is_some_and(|path| {
+                        super::facts::same_path(&path.to_string_lossy(), &itself)
+                    }) =>
             {
                 lost();
             }
             Ok(event) => {
                 let id = |index: usize| {
-                    event.paths.get(index).map(|path| ItemId::new(path.to_string_lossy().into_owned()))
+                    event
+                        .paths
+                        .get(index)
+                        .map(|path| ItemId::new(path.to_string_lossy().into_owned()))
                 };
                 // (Only what a listing would show: a hidden file is none.)
-                let mut item = |index: usize| id(index).and_then(|id| shell::item_if_listed(&id, &mut types));
+                let mut item =
+                    |index: usize| id(index).and_then(|id| shell::item_if_listed(&id, &mut types));
                 // It is there, to be shown; or it is there and hidden
                 // now, which is a going. What is not there at all any
                 // more is left to the telling of its going or renaming
@@ -229,12 +252,18 @@ pub fn watch_into(
                     EventKind::Modify(ModifyKind::Name(RenameMode::From)) => renamed_from = id(0),
                     EventKind::Modify(ModifyKind::Name(RenameMode::To)) => {
                         changes.extend(match renamed_from.take() {
-                            Some(from) => Some(Change::Renamed { from, item: item(0) }),
+                            Some(from) => Some(Change::Renamed {
+                                from,
+                                item: item(0),
+                            }),
                             None => there(0),
                         });
                     }
                     EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => {
-                        changes.extend(id(0).map(|from| Change::Renamed { from, item: item(1) }));
+                        changes.extend(id(0).map(|from| Change::Renamed {
+                            from,
+                            item: item(1),
+                        }));
                     }
                     EventKind::Modify(_) => changes.extend(there(0)),
                     _ => {}
@@ -256,12 +285,18 @@ pub fn watch_into(
             news.tell(events);
         }
     };
-    let refused = |error: notify::Error| BackendError::Refused { what: format!("{folder}: {error}") };
+    let refused = |error: notify::Error| BackendError::Refused {
+        what: format!("{folder}: {error}"),
+    };
     let mut watcher = notify::recommended_watcher(handler).map_err(refused)?;
     watcher
         .watch(std::path::Path::new(&folder), RecursiveMode::NonRecursive)
         .map_err(refused)?;
-    Ok(Folder { seen, ended, _watcher: watcher })
+    Ok(Folder {
+        seen,
+        ended,
+        _watcher: watcher,
+    })
 }
 
 // ---------------------------------------------------------------------
@@ -334,16 +369,31 @@ impl Window {
                 }
                 LISTENING.with(|listening| *listening.borrow_mut() = None);
             })
-            .map_err(|error| BackendError::Refused { what: format!("no thread: {error}") })?;
+            .map_err(|error| BackendError::Refused {
+                what: format!("no thread: {error}"),
+            })?;
         match handle.recv() {
-            Ok(Some(handle)) => Ok(Self { handle, thread: Some(thread) }),
-            _ => Err(BackendError::Refused { what: "no window to be told of changes by".to_string() }),
+            Ok(Some(handle)) => Ok(Self {
+                handle,
+                thread: Some(thread),
+            }),
+            _ => Err(BackendError::Refused {
+                what: "no window to be told of changes by".to_string(),
+            }),
         }
     }
 
     fn post(&self, message: u32, with: isize) -> bool {
         // SAFETY: a message to a window of this process.
-        unsafe { PostMessageW(HWND(self.handle as *mut _), message, WPARAM(0), LPARAM(with)) }.is_ok()
+        unsafe {
+            PostMessageW(
+                HWND(self.handle as *mut _),
+                message,
+                WPARAM(0),
+                LPARAM(with),
+            )
+        }
+        .is_ok()
     }
 
     /// Have the shell tell of the desktop from now on, measured against
@@ -362,7 +412,9 @@ impl Window {
     }
 
     fn listen(&self, seen: &Shared, only: Option<String>) -> Result<(), BackendError> {
-        let refused = || BackendError::Refused { what: "the desktop cannot be watched".to_string() };
+        let refused = || BackendError::Refused {
+            what: "the desktop cannot be watched".to_string(),
+        };
         let (answer, answered) = mpsc::channel();
         // (The window's thread takes it over and gives it back.)
         let handed: *mut Asked = Box::into_raw(Box::new((Arc::clone(seen), only, answer)));
@@ -535,7 +587,11 @@ fn desktop_itself() -> Option<Pidl> {
 
 unsafe fn deafen() {
     LISTENING.with(|listening| {
-        if let Some((_, number)) = listening.borrow_mut().as_mut().and_then(|listening| listening.desktop.take()) {
+        if let Some((_, number)) = listening
+            .borrow_mut()
+            .as_mut()
+            .and_then(|listening| listening.desktop.take())
+        {
             let _ = SHChangeNotifyDeregister(number);
         }
     });
@@ -633,9 +689,15 @@ unsafe fn told(wparam: WPARAM, lparam: LPARAM) {
         } else if is(SHCNE_UPDATEDIR) {
             // "Look again": only when it is the desktop that is meant,
             // not a folder that lies on it.
-            let meant = first.as_ref().and_then(Pidl::parsing_name).unwrap_or_default();
-            let the_desktop = whole && (meant.is_empty() || !super::facts::is_path(&meant) && !meant.contains('\\'))
-                || folders.iter().any(|folder| super::facts::same_path(folder, &meant));
+            let meant = first
+                .as_ref()
+                .and_then(Pidl::parsing_name)
+                .unwrap_or_default();
+            let the_desktop = whole
+                && (meant.is_empty() || !super::facts::is_path(&meant) && !meant.contains('\\'))
+                || folders
+                    .iter()
+                    .any(|folder| super::facts::same_path(folder, &meant));
             the_desktop
                 .then(|| shell::list(&place, types).ok())
                 .flatten()
@@ -664,7 +726,8 @@ mod tests {
     /// A folder of this test's own under the system's folder for
     /// temporary files, by its long name. Nothing outside it is touched.
     fn folder(name: &str) -> String {
-        let folder = std::env::temp_dir().join(format!("gevrek-zones-{name}-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("gevrek-zones-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(&folder).expect("a folder");
         std::fs::canonicalize(&folder)
@@ -739,21 +802,42 @@ mod tests {
         std::fs::remove_file(path("Folder\\deep.txt")).expect("removed");
         std::fs::remove_dir(path("Folder")).expect("removed");
         std::fs::remove_file(path("b.txt")).expect("removed");
-        until(&news, &wakes, &mut all, |event| {
-            matches!(event, BackendEvent::ItemRemoved { item, .. } if item.as_str() == path("b.txt"))
-        });
-        until(&news, &wakes, &mut all, |event| {
-            matches!(event, BackendEvent::ItemRemoved { item, .. } if item.as_str() == path("Folder"))
-        });
+        until(
+            &news,
+            &wakes,
+            &mut all,
+            |event| matches!(event, BackendEvent::ItemRemoved { item, .. } if item.as_str() == path("b.txt")),
+        );
+        until(
+            &news,
+            &wakes,
+            &mut all,
+            |event| matches!(event, BackendEvent::ItemRemoved { item, .. } if item.as_str() == path("Folder")),
+        );
         assert!(
-            !all.iter().any(|event| format!("{event:?}").contains("deep.txt")),
+            !all.iter()
+                .any(|event| format!("{event:?}").contains("deep.txt")),
             "what is below the folder was told: {all:#?}"
         );
         // Each coming and going once.
-        let count = |wanted: &dyn Fn(&BackendEvent) -> bool| all.iter().filter(|event| wanted(event)).count();
-        assert_eq!(count(&|event| matches!(event, BackendEvent::ItemAdded { .. })), 2, "{all:#?}");
-        assert_eq!(count(&|event| matches!(event, BackendEvent::ItemRemoved { .. })), 2, "{all:#?}");
-        assert_eq!(count(&|event| matches!(event, BackendEvent::ItemRenamed { .. })), 1, "{all:#?}");
+        let count = |wanted: &dyn Fn(&BackendEvent) -> bool| {
+            all.iter().filter(|event| wanted(event)).count()
+        };
+        assert_eq!(
+            count(&|event| matches!(event, BackendEvent::ItemAdded { .. })),
+            2,
+            "{all:#?}"
+        );
+        assert_eq!(
+            count(&|event| matches!(event, BackendEvent::ItemRemoved { .. })),
+            2,
+            "{all:#?}"
+        );
+        assert_eq!(
+            count(&|event| matches!(event, BackendEvent::ItemRenamed { .. })),
+            1,
+            "{all:#?}"
+        );
 
         // Ended, nothing more is told.
         drop(watched);
@@ -841,28 +925,58 @@ mod tests {
         std::fs::write(path("quiet.txt"), b"quiet").expect("written");
         std::fs::remove_file(path("b.txt")).expect("removed");
         say(SHCNE_UPDATEDIR, &root, None);
-        until(&news, &wakes, &mut all, |event| {
-            matches!(event, BackendEvent::ItemAdded { item, .. } if item.id.as_str() == path("quiet.txt"))
-        });
-        until(&news, &wakes, &mut all, |event| {
-            matches!(event, BackendEvent::ItemRemoved { item, .. } if item.as_str() == path("b.txt"))
-        });
+        until(
+            &news,
+            &wakes,
+            &mut all,
+            |event| matches!(event, BackendEvent::ItemAdded { item, .. } if item.id.as_str() == path("quiet.txt")),
+        );
+        until(
+            &news,
+            &wakes,
+            &mut all,
+            |event| matches!(event, BackendEvent::ItemRemoved { item, .. } if item.as_str() == path("b.txt")),
+        );
         std::fs::remove_dir(path("Folder")).expect("removed");
         say(SHCNE_RMDIR, &path("Folder"), None);
         std::fs::remove_file(path("quiet.txt")).expect("removed");
         say(SHCNE_DELETE, &path("quiet.txt"), None);
-        until(&news, &wakes, &mut all, |event| {
-            matches!(event, BackendEvent::ItemRemoved { item, .. } if item.as_str() == path("Folder"))
-        });
-        until(&news, &wakes, &mut all, |event| {
-            matches!(event, BackendEvent::ItemRemoved { item, .. } if item.as_str() == path("quiet.txt"))
-        });
+        until(
+            &news,
+            &wakes,
+            &mut all,
+            |event| matches!(event, BackendEvent::ItemRemoved { item, .. } if item.as_str() == path("Folder")),
+        );
+        until(
+            &news,
+            &wakes,
+            &mut all,
+            |event| matches!(event, BackendEvent::ItemRemoved { item, .. } if item.as_str() == path("quiet.txt")),
+        );
         // Each coming and going once, and nothing of what lies deeper.
-        let count = |wanted: &dyn Fn(&BackendEvent) -> bool| all.iter().filter(|event| wanted(event)).count();
-        assert_eq!(count(&|event| matches!(event, BackendEvent::ItemAdded { .. })), 3, "{all:#?}");
-        assert_eq!(count(&|event| matches!(event, BackendEvent::ItemRemoved { .. })), 3, "{all:#?}");
-        assert_eq!(count(&|event| matches!(event, BackendEvent::ItemRenamed { .. })), 1, "{all:#?}");
-        assert!(!all.iter().any(|event| format!("{event:?}").contains("deep.txt")), "{all:#?}");
+        let count = |wanted: &dyn Fn(&BackendEvent) -> bool| {
+            all.iter().filter(|event| wanted(event)).count()
+        };
+        assert_eq!(
+            count(&|event| matches!(event, BackendEvent::ItemAdded { .. })),
+            3,
+            "{all:#?}"
+        );
+        assert_eq!(
+            count(&|event| matches!(event, BackendEvent::ItemRemoved { .. })),
+            3,
+            "{all:#?}"
+        );
+        assert_eq!(
+            count(&|event| matches!(event, BackendEvent::ItemRenamed { .. })),
+            1,
+            "{all:#?}"
+        );
+        assert!(
+            !all.iter()
+                .any(|event| format!("{event:?}").contains("deep.txt")),
+            "{all:#?}"
+        );
         drop(window);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -882,6 +996,11 @@ mod tests {
         assert!(!news.displays_changed());
         let folders = desktop_folders();
         assert!(!folders.is_empty());
-        assert!(folders.iter().all(|folder| super::super::facts::is_path(folder)), "{folders:?}");
+        assert!(
+            folders
+                .iter()
+                .all(|folder| super::super::facts::is_path(folder)),
+            "{folders:?}"
+        );
     }
 }

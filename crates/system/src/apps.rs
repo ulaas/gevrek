@@ -614,7 +614,11 @@ pub fn bundles_in(folders: &[PathBuf]) -> Vec<App> {
             if path.extension().and_then(|extension| extension.to_str()) != Some("app") {
                 continue;
             }
-            let Some(name) = path.file_stem().and_then(|stem| stem.to_str()).map(str::to_string) else {
+            let Some(name) = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(str::to_string)
+            else {
                 continue;
             };
             if found.iter().any(|app| app.name == name) {
@@ -752,7 +756,9 @@ pub fn start(app: &App) -> std::io::Result<Option<u32>> {
         .command
         .split_first()
         .ok_or_else(|| std::io::Error::other(format!("{} has nothing to start", app.name)))?;
-    std::process::Command::new(program).args(arguments).spawn()?;
+    std::process::Command::new(program)
+        .args(arguments)
+        .spawn()?;
     Ok(None)
 }
 
@@ -1031,16 +1037,28 @@ mod tests {
         // All of them in one program, each an argument of its own.
         assert_eq!(
             commands("edit --new %F", &two),
-            [vec!["edit", "--new", "/home/ada/a b.txt", "/home/ada/c.txt"]]
+            [vec![
+                "edit",
+                "--new",
+                "/home/ada/a b.txt",
+                "/home/ada/c.txt"
+            ]]
         );
         assert_eq!(
             commands("view %U", &two),
-            [vec!["view", "file:///home/ada/a%20b.txt", "file:///home/ada/c.txt"]]
+            [vec![
+                "view",
+                "file:///home/ada/a%20b.txt",
+                "file:///home/ada/c.txt"
+            ]]
         );
         // One at a time: a program for each.
         assert_eq!(
             commands("show %f", &two),
-            [vec!["show", "/home/ada/a b.txt"], vec!["show", "/home/ada/c.txt"]]
+            [
+                vec!["show", "/home/ada/a b.txt"],
+                vec!["show", "/home/ada/c.txt"]
+            ]
         );
         assert_eq!(
             commands("show --uri=%u", &two[..1]),
@@ -1079,7 +1097,14 @@ mod tests {
         let app = parse_as(hidden, "viewer", path, &[], false).expect("an application");
         assert_eq!(app.command, ["viewer"]);
         // Deleted is deleted.
-        assert!(parse_as(&format!("{hidden}Hidden=true\n"), "viewer", path, &[], false).is_none());
+        assert!(parse_as(
+            &format!("{hidden}Hidden=true\n"),
+            "viewer",
+            path,
+            &[],
+            false
+        )
+        .is_none());
         let fields = main_group(hidden);
         assert_eq!(fields.plain("Exec"), Some("viewer %f"));
         assert_eq!(fields.list("OnlyShowIn"), ["GNOME"]);

@@ -733,9 +733,8 @@ impl Config {
                 log::debug!("{} holds this already: no backup is kept", path.display());
             }
         }
-        crate::files::write_atomic(path, content.as_bytes()).inspect_err(|error| {
-            log::debug!("{} could not be written: {error}", path.display())
-        })?;
+        crate::files::write_atomic(path, content.as_bytes())
+            .inspect_err(|error| log::debug!("{} could not be written: {error}", path.display()))?;
         log::debug!("{} was written ({} bytes)", path.display(), content.len());
         Ok(())
     }
@@ -1147,7 +1146,10 @@ mod live_binding_tests {
         // Its keys bound to something else.
         config.desktop.bindings = vec![on_super("A", DispatchCommand::CloseActive)];
         assert_eq!(live_on(&config, "A"), [DispatchCommand::CloseActive]);
-        assert_eq!(config.live_bindings()[0].command, DispatchCommand::CloseActive);
+        assert_eq!(
+            config.live_bindings()[0].command,
+            DispatchCommand::CloseActive
+        );
 
         // Taken away: a binding switched off on its keys.
         config.desktop.bindings[0].enabled = false;

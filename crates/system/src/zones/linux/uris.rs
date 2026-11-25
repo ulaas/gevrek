@@ -121,7 +121,10 @@ pub fn path_of_item(item: &ItemId) -> Option<PathBuf> {
 /// Files as `text/uri-list`: one address to a line, each line ended as
 /// the RFC asks (CR LF).
 pub fn uri_list(paths: &[PathBuf]) -> String {
-    paths.iter().map(|path| format!("{}\r\n", uri_of(path))).collect()
+    paths
+        .iter()
+        .map(|path| format!("{}\r\n", uri_of(path)))
+        .collect()
 }
 
 /// The addresses of a `text/uri-list`. Lines that begin with `#` are
@@ -152,21 +155,34 @@ pub fn read_gnome_copied_files(text: &str) -> Option<(bool, Vec<String>)> {
         "copy" => false,
         _ => return None,
     };
-    Some((cut, lines.filter(|line| !line.is_empty()).map(str::to_string).collect()))
+    Some((
+        cut,
+        lines
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect(),
+    ))
 }
 
 /// Of the kinds of data a drag offers, the one to ask for: addresses
 /// before text. `None` when it offers nothing a zone can take.
 pub fn wanted_kind(offered: &[String]) -> Option<&str> {
     let named = |kind: &str| {
-        offered
-            .iter()
-            .map(String::as_str)
-            .find(|offer| offer.split(';').next().is_some_and(|base| base.trim().eq_ignore_ascii_case(kind)))
+        offered.iter().map(String::as_str).find(|offer| {
+            offer
+                .split(';')
+                .next()
+                .is_some_and(|base| base.trim().eq_ignore_ascii_case(kind))
+        })
     };
     named(URI_LIST)
         .or_else(|| named(GNOME_COPIED_FILES))
-        .or_else(|| offered.iter().map(String::as_str).find(|offer| offer.eq_ignore_ascii_case(TEXT)))
+        .or_else(|| {
+            offered
+                .iter()
+                .map(String::as_str)
+                .find(|offer| offer.eq_ignore_ascii_case(TEXT))
+        })
         .or_else(|| named("text/plain"))
         .or_else(|| named("UTF8_STRING"))
 }
@@ -186,9 +202,15 @@ pub fn payload(kind: &str, data: &[u8], allowed: DragActions) -> DropPayload {
         match read_gnome_copied_files(&text) {
             Some((cut, found)) => {
                 allowed = if cut {
-                    DragActions { moving: true, ..DragActions::default() }
+                    DragActions {
+                        moving: true,
+                        ..DragActions::default()
+                    }
                 } else {
-                    DragActions { copy: true, ..DragActions::default() }
+                    DragActions {
+                        copy: true,
+                        ..DragActions::default()
+                    }
                 };
                 found
             }
@@ -244,7 +266,10 @@ pub fn data_for(kind: &str, items: &[ItemId]) -> Option<Vec<u8>> {
         Some(gnome_copied_files(&paths, false).into_bytes())
     } else if base.eq_ignore_ascii_case("text/plain") {
         // As text, files are their paths, one to a line.
-        let lines: Vec<&[u8]> = paths.iter().map(|path| path.as_os_str().as_bytes()).collect();
+        let lines: Vec<&[u8]> = paths
+            .iter()
+            .map(|path| path.as_os_str().as_bytes())
+            .collect();
         Some(lines.join(&b"\n"[..]))
     } else {
         None
@@ -260,10 +285,16 @@ mod tests {
         for (path, uri) in [
             ("/home/ada/Desktop/a.txt", "file:///home/ada/Desktop/a.txt"),
             ("/home/ada/a b.txt", "file:///home/ada/a%20b.txt"),
-            ("/home/ada/Masaüstü/çay.txt", "file:///home/ada/Masa%C3%BCst%C3%BC/%C3%A7ay.txt"),
+            (
+                "/home/ada/Masaüstü/çay.txt",
+                "file:///home/ada/Masa%C3%BCst%C3%BC/%C3%A7ay.txt",
+            ),
             ("/tmp/100% #1?.txt", "file:///tmp/100%25%20%231%3F.txt"),
             // What GLib leaves alone is left alone.
-            ("/tmp/a(1)+b,c;d=e@f:g!h$i&j'k~l", "file:///tmp/a(1)+b,c;d=e@f:g!h$i&j'k~l"),
+            (
+                "/tmp/a(1)+b,c;d=e@f:g!h$i&j'k~l",
+                "file:///tmp/a(1)+b,c;d=e@f:g!h$i&j'k~l",
+            ),
             ("/tmp/[x]{y}\"z\"\\", "file:///tmp/%5Bx%5D%7By%7D%22z%22%5C"),
         ] {
             assert_eq!(uri_of(Path::new(path)), uri, "{path}");
@@ -278,9 +309,18 @@ mod tests {
 
     #[test]
     fn only_a_file_of_this_machine_is_a_path() {
-        assert_eq!(path_of("file://localhost/etc/hosts"), Some(PathBuf::from("/etc/hosts")));
-        assert_eq!(path_of("FILE:///etc/hosts"), Some(PathBuf::from("/etc/hosts")));
-        assert_eq!(path_of("file:/etc/hosts"), Some(PathBuf::from("/etc/hosts")));
+        assert_eq!(
+            path_of("file://localhost/etc/hosts"),
+            Some(PathBuf::from("/etc/hosts"))
+        );
+        assert_eq!(
+            path_of("FILE:///etc/hosts"),
+            Some(PathBuf::from("/etc/hosts"))
+        );
+        assert_eq!(
+            path_of("file:/etc/hosts"),
+            Some(PathBuf::from("/etc/hosts"))
+        );
         assert_eq!(path_of("file:///a%2fb"), Some(PathBuf::from("/a/b")));
         for not_a_file_here in [
             "file://server/share/a.txt",
@@ -310,7 +350,10 @@ mod tests {
         );
         let all = DragActions::ALL;
         let back = payload(URI_LIST, list.as_bytes(), all);
-        assert_eq!(back.paths, ["/home/ada/Desktop/a b.txt", "/home/ada/Desktop/çay ☕.txt"]);
+        assert_eq!(
+            back.paths,
+            ["/home/ada/Desktop/a b.txt", "/home/ada/Desktop/çay ☕.txt"]
+        );
         assert_eq!((back.text, back.allowed), (None, all));
         // Comments, plain line ends, an address that is no file of ours.
         let mixed = "# from a browser\nfile:///tmp/x.txt\nhttps://example.org/a%20b\n\n";
@@ -321,15 +364,35 @@ mod tests {
 
     #[test]
     fn what_a_file_manager_copied_is_read_with_whether_it_was_cut() {
-        let paths = vec![PathBuf::from("/home/ada/a b.txt"), PathBuf::from("/home/ada/c.txt")];
+        let paths = vec![
+            PathBuf::from("/home/ada/a b.txt"),
+            PathBuf::from("/home/ada/c.txt"),
+        ];
         let copied = gnome_copied_files(&paths, false);
-        assert_eq!(copied, "copy\nfile:///home/ada/a%20b.txt\nfile:///home/ada/c.txt");
+        assert_eq!(
+            copied,
+            "copy\nfile:///home/ada/a%20b.txt\nfile:///home/ada/c.txt"
+        );
         let back = payload(GNOME_COPIED_FILES, copied.as_bytes(), DragActions::ALL);
         assert_eq!(back.paths, ["/home/ada/a b.txt", "/home/ada/c.txt"]);
-        assert_eq!(back.allowed, DragActions { copy: true, moving: false, link: false });
+        assert_eq!(
+            back.allowed,
+            DragActions {
+                copy: true,
+                moving: false,
+                link: false
+            }
+        );
         let cut = gnome_copied_files(&paths[..1], true);
         let back = payload(GNOME_COPIED_FILES, cut.as_bytes(), DragActions::ALL);
-        assert_eq!(back.allowed, DragActions { copy: false, moving: true, link: false });
+        assert_eq!(
+            back.allowed,
+            DragActions {
+                copy: false,
+                moving: true,
+                link: false
+            }
+        );
         assert_eq!(read_gnome_copied_files("paste\nfile:///x"), None);
     }
 
@@ -342,7 +405,12 @@ mod tests {
 
     #[test]
     fn of_what_a_drag_offers_addresses_are_asked_for_first() {
-        let offers = |kinds: &[&str]| kinds.iter().map(|kind| kind.to_string()).collect::<Vec<_>>();
+        let offers = |kinds: &[&str]| {
+            kinds
+                .iter()
+                .map(|kind| kind.to_string())
+                .collect::<Vec<_>>()
+        };
         let browser = offers(&["text/html", "text/plain", "text/uri-list"]);
         assert_eq!(wanted_kind(&browser), Some("text/uri-list"));
         let files = offers(&["x-special/gnome-copied-files", "text/plain;charset=utf-8"]);
@@ -358,19 +426,26 @@ mod tests {
             item_id(Path::new("/home/ada/Desktop/a b.txt")),
             item_id(Path::new("/home/ada/Desktop/ö.txt")),
         ];
-        let said = |kind: &str| String::from_utf8(data_for(kind, &items).expect("data")).expect("text");
+        let said =
+            |kind: &str| String::from_utf8(data_for(kind, &items).expect("data")).expect("text");
         assert_eq!(
             said(URI_LIST),
             "file:///home/ada/Desktop/a%20b.txt\r\nfile:///home/ada/Desktop/%C3%B6.txt\r\n"
         );
         assert!(said(GNOME_COPIED_FILES).starts_with("copy\nfile:///home/ada/Desktop/a%20b.txt\n"));
-        assert_eq!(said(TEXT), "/home/ada/Desktop/a b.txt\n/home/ada/Desktop/ö.txt");
+        assert_eq!(
+            said(TEXT),
+            "/home/ada/Desktop/a b.txt\n/home/ada/Desktop/ö.txt"
+        );
         assert_eq!(data_for("image/png", &items), None);
         for kind in OFFERED {
             assert!(data_for(kind, &items).is_some(), "{kind}");
         }
         let carried = payload_of_items(&items, DragActions::ALL);
         assert_eq!(carried.items, items);
-        assert_eq!(carried.paths, ["/home/ada/Desktop/a b.txt", "/home/ada/Desktop/ö.txt"]);
+        assert_eq!(
+            carried.paths,
+            ["/home/ada/Desktop/a b.txt", "/home/ada/Desktop/ö.txt"]
+        );
     }
 }

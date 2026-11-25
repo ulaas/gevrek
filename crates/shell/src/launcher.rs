@@ -188,9 +188,17 @@ pub fn always_there() -> Vec<(&'static str, Entry)> {
     // not be on the path.)
     let studio = std::env::current_exe()
         .ok()
-        .and_then(|own| Some(own.parent()?.join(format!("gevrek-studio{}", std::env::consts::EXE_SUFFIX))))
+        .and_then(|own| {
+            Some(
+                own.parent()?
+                    .join(format!("gevrek-studio{}", std::env::consts::EXE_SUFFIX)),
+            )
+        })
         .filter(|file| file.is_file())
-        .map_or_else(|| "gevrek-studio".to_string(), |file| file.display().to_string());
+        .map_or_else(
+            || "gevrek-studio".to_string(),
+            |file| file.display().to_string(),
+        );
     let shell = |action: &str| serde_json::json!({"command": "shell", "action": action});
     vec![
         (
@@ -203,11 +211,19 @@ pub fn always_there() -> Vec<(&'static str, Entry)> {
         ),
         (
             icons::FADERS,
-            own("Control centre", "Sound, networks, the night light", shell("control_center")),
+            own(
+                "Control centre",
+                "Sound, networks, the night light",
+                shell("control_center"),
+            ),
         ),
         (
             icons::BELL,
-            own("Notifications", "What was told lately", shell("notification_center")),
+            own(
+                "Notifications",
+                "What was told lately",
+                shell("notification_center"),
+            ),
         ),
     ]
 }
@@ -671,10 +687,10 @@ pub fn draw(
             let side = 36.0;
             let mut over = None;
             let button = |ui: &mut egui::Ui,
-                              index: usize,
-                              entry: &Entry,
-                              sign: Option<&str>,
-                              picture: Option<egui::TextureHandle>|
+                          index: usize,
+                          entry: &Entry,
+                          sign: Option<&str>,
+                          picture: Option<egui::TextureHandle>|
              -> egui::Response {
                 let (rect, response) =
                     ui.allocate_exact_size(egui::vec2(side, side), egui::Sense::click());
@@ -721,7 +737,12 @@ pub fn draw(
                         ui.painter().text(
                             place.center(),
                             egui::Align2::CENTER_CENTER,
-                            entry.title.chars().take(1).collect::<String>().to_uppercase(),
+                            entry
+                                .title
+                                .chars()
+                                .take(1)
+                                .collect::<String>()
+                                .to_uppercase(),
                             egui::FontId::proportional(13.0),
                             palette.muted,
                         );
@@ -919,8 +940,16 @@ fn commands() -> Vec<Entry> {
         // keys a person has for them.
         .chain(
             [
-                ("Tutorial", "Learn gevrek by doing: begin, or go on where it was left", "tutorial"),
-                ("Welcome", "The window of the first start: the setup and the tour", "welcome"),
+                (
+                    "Tutorial",
+                    "Learn gevrek by doing: begin, or go on where it was left",
+                    "tutorial",
+                ),
+                (
+                    "Welcome",
+                    "The window of the first start: the setup and the tour",
+                    "welcome",
+                ),
             ]
             .map(|(title, detail, action)| Entry {
                 title: title.to_string(),
@@ -1180,7 +1209,8 @@ mod tests {
             app("Firefox", &["firefox"], false),
             app("Figma", &["figma"], false),
         ];
-        let folder = std::env::temp_dir().join(format!("gevrek-launcher-row-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("gevrek-launcher-row-{}", std::process::id()));
         let path = folder.join("usage.json");
         let mut usage = Usage::load(&path);
         assert!(usage.recent().is_empty());
@@ -1201,7 +1231,11 @@ mod tests {
         assert_eq!(many.recent()[0], format!("app-{}", REMEMBERED + 4));
         // In the row: those of them that are installed, as their lines.
         let launcher = Launcher::new(apps, "foot").with(Vec::new(), read);
-        let row: Vec<String> = launcher.recent().into_iter().map(|entry| entry.title).collect();
+        let row: Vec<String> = launcher
+            .recent()
+            .into_iter()
+            .map(|entry| entry.title)
+            .collect();
         assert_eq!(row, ["Files", "Firefox"]);
         assert_eq!(launcher.recent()[0].app.as_deref(), Some("files"));
         // Tab: from the list along the row and back to the list; Shift+Tab
@@ -1242,9 +1276,22 @@ mod tests {
     #[ignore = "draws a picture to look at: GEVREK_LOOK_OUT=<file>"]
     fn the_launcher_is_drawn_to_be_looked_at() {
         let said = |name: &str| std::env::var(name).ok().filter(|text| !text.is_empty());
-        let out = std::path::PathBuf::from(said("GEVREK_LOOK_OUT").expect("GEVREK_LOOK_OUT: a file"));
-        let tabs: usize = said("GEVREK_LOOK_TABS").and_then(|text| text.parse().ok()).unwrap_or(0);
-        let names = ["Files", "Firefox", "Figma", "Terminal", "Calculator", "Music", "Mail", "Maps", "Notes"];
+        let out =
+            std::path::PathBuf::from(said("GEVREK_LOOK_OUT").expect("GEVREK_LOOK_OUT: a file"));
+        let tabs: usize = said("GEVREK_LOOK_TABS")
+            .and_then(|text| text.parse().ok())
+            .unwrap_or(0);
+        let names = [
+            "Files",
+            "Firefox",
+            "Figma",
+            "Terminal",
+            "Calculator",
+            "Music",
+            "Mail",
+            "Maps",
+            "Notes",
+        ];
         let apps: Vec<App> = names.iter().map(|name| app(name, &[name], false)).collect();
         let mut usage = Usage::default();
         for id in ["mail", "music", "terminal", "firefox"] {
@@ -1272,7 +1319,13 @@ mod tests {
                 Vec::new()
             };
             pixels = painter.frame_of(&context, 10.0 + step as f64 * 0.4, events, |ui| {
-                draw(ui, &palette, &mut launcher, "An application · > a command", &mut |_, _| None);
+                draw(
+                    ui,
+                    &palette,
+                    &mut launcher,
+                    "An application · > a command",
+                    &mut |_, _| None,
+                );
             });
         }
         println!("on the row: {:?}", launcher.on_row);

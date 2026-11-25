@@ -9,8 +9,8 @@
 use crate::elevated_helper::{client, After, Answer, Ask};
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
-    PostMessageW, SetWindowPos, ShowWindow, ShowWindowAsync,
-    SET_WINDOW_POS_FLAGS, SHOW_WINDOW_CMD, WM_CLOSE,
+    PostMessageW, SetWindowPos, ShowWindow, ShowWindowAsync, SET_WINDOW_POS_FLAGS, SHOW_WINDOW_CMD,
+    WM_CLOSE,
 };
 
 /// Whether what is done to this window is asked of the helper: the

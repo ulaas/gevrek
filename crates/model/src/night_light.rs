@@ -194,8 +194,14 @@ mod tests {
             let mut before = between(from, to, 0.0);
             for step in 1..=60 {
                 let now = between(from, to, step as f32 / 60.0);
-                assert!(now >= low / 25 * 25 && now <= high, "{now} between {low} and {high}");
-                assert!(now.abs_diff(before) <= (high - low) / 20 + 25, "{before} to {now}");
+                assert!(
+                    now >= low / 25 * 25 && now <= high,
+                    "{now} between {low} and {high}"
+                );
+                assert!(
+                    now.abs_diff(before) <= (high - low) / 20 + 25,
+                    "{before} to {now}"
+                );
                 before = now;
             }
         }

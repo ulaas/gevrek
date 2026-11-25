@@ -60,7 +60,11 @@ fn read(app: &NSRunningApplication) -> App {
             .next()
             .unwrap_or_default()
             .to_string(),
-        path: if bundle.is_empty() { executable } else { bundle },
+        path: if bundle.is_empty() {
+            executable
+        } else {
+            bundle
+        },
         regular: app.activationPolicy() == NSApplicationActivationPolicy::Regular,
     }
 }

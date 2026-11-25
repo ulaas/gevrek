@@ -163,7 +163,11 @@ unsafe extern "system" fn procedure(
         WM_PAINT => {
             let mut paint = PAINTSTRUCT::default();
             let context = BeginPaint(window, &mut paint);
-            FillRect(context, &paint.rcPaint, HBRUSH(GetStockObject(BLACK_BRUSH).0));
+            FillRect(
+                context,
+                &paint.rcPaint,
+                HBRUSH(GetStockObject(BLACK_BRUSH).0),
+            );
             let _ = EndPaint(window, &paint);
             LRESULT(0)
         }

@@ -10,11 +10,11 @@
 //! object: its shapes are gevrek-zones' and still move, and the shell that
 //! runs the zones is the one that says what a command means.
 
+use gevrek_engine::shell_room::{ShellRoom, Side};
 use gevrek_protocol::proto::{
     execution_event, zones_report, ExecutionEvent, RuntimeEvent, ZonesCommandReply, ZonesReport,
     ZonesRequest, ZonesStateResponse,
 };
-use gevrek_engine::shell_room::{ShellRoom, Side};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -90,9 +90,14 @@ pub fn room_of(snapshot: &str) -> Vec<ShellRoom> {
         .flatten()
         .filter_map(|region| {
             Some(ShellRoom {
-                display: region["display"].as_str().filter(|id| !id.is_empty())?.to_string(),
+                display: region["display"]
+                    .as_str()
+                    .filter(|id| !id.is_empty())?
+                    .to_string(),
                 side: Side::named(region["edge"].as_str()?)?,
-                depth: i32::try_from(region["thickness"].as_i64()?).ok().filter(|depth| *depth > 0)?,
+                depth: i32::try_from(region["thickness"].as_i64()?)
+                    .ok()
+                    .filter(|depth| *depth > 0)?,
             })
         })
         .collect()
@@ -219,7 +224,10 @@ impl ZonesHub {
                 .collect()
         };
         if !waiting.is_empty() {
-            log::debug!("{} waiting for the shell that went are told it went", waiting.len());
+            log::debug!(
+                "{} waiting for the shell that went are told it went",
+                waiting.len()
+            );
         }
         for waiting in waiting {
             let _ = waiting.answer.send(not_answered(
@@ -246,7 +254,10 @@ impl ZonesHub {
                 }
                 inner.sequence += 1;
                 let sequence = inner.sequence;
-                log::trace!("the zones' snapshot {sequence} came from session {session} ({} bytes)", snapshot.json.len());
+                log::trace!(
+                    "the zones' snapshot {sequence} came from session {session} ({} bytes)",
+                    snapshot.json.len()
+                );
                 let room = room_of(&snapshot.json);
                 inner.keep_room(room);
                 inner.snapshot = Some(Kept {
@@ -435,7 +446,10 @@ impl ZonesHub {
             )),
             Err(_) => {
                 self.lock().waiting.remove(&id);
-                log::debug!("the shell did not answer zones request {id} within {} ms", wait.as_millis());
+                log::debug!(
+                    "the shell did not answer zones request {id} within {} ms",
+                    wait.as_millis()
+                );
                 Ok(not_answered(
                     format!(
                         "The shell did not answer within {} ms; what was asked may still be carried out",
@@ -457,7 +471,10 @@ impl ZonesHub {
 fn trimmed(json: &str, without_items: bool, zone: &str) -> Option<String> {
     let mut value: serde_json::Value = serde_json::from_str(json).ok()?;
     let snapshot = value.as_object_mut()?;
-    if let Some(zones) = snapshot.get_mut("zones").and_then(|zones| zones.as_array_mut()) {
+    if let Some(zones) = snapshot
+        .get_mut("zones")
+        .and_then(|zones| zones.as_array_mut())
+    {
         if !zone.is_empty() {
             zones.retain(|one| one.get("id").and_then(|id| id.as_str()) == Some(zone));
         }
@@ -596,14 +613,24 @@ mod tests {
         assert_eq!(
             read,
             [
-                ShellRoom { display: "edid:A".to_string(), side: Side::Left, depth: 64 },
-                ShellRoom { display: "edid:B".to_string(), side: Side::Bottom, depth: 48 },
+                ShellRoom {
+                    display: "edid:A".to_string(),
+                    side: Side::Left,
+                    depth: 64
+                },
+                ShellRoom {
+                    display: "edid:B".to_string(),
+                    side: Side::Bottom,
+                    depth: 48
+                },
             ]
         );
     }
 
     /// The next thing subscribers were told: its kind and fields.
-    fn told(receiver: &mut broadcast::Receiver<ExecutionEvent>) -> (String, HashMap<String, String>) {
+    fn told(
+        receiver: &mut broadcast::Receiver<ExecutionEvent>,
+    ) -> (String, HashMap<String, String>) {
         match receiver.try_recv().expect("something was told").event {
             Some(execution_event::Event::RuntimeEvent(event)) => (event.kind, event.fields),
             other => panic!("told {other:?}"),
@@ -723,7 +750,10 @@ mod tests {
         assert!(read["zones"][0].get("items").is_none());
         assert!(read.get("loose").is_none());
         assert_eq!(read["loose_count"], 4000);
-        assert_eq!((small.sequence, small.running, small.stale), (1, true, false));
+        assert_eq!(
+            (small.sequence, small.running, small.stale),
+            (1, true, false)
+        );
         println!(
             "5000 items: the whole snapshot is {} bytes, without items {} bytes, trimmed in {took:?}",
             whole.len(),
@@ -735,16 +765,19 @@ mod tests {
         assert!(took < Duration::from_secs(2), "{took:?}");
 
         // One zone, with its items and without.
-        let one: serde_json::Value = serde_json::from_str(&hub.state_of(false, "play").json).unwrap();
+        let one: serde_json::Value =
+            serde_json::from_str(&hub.state_of(false, "play").json).unwrap();
         assert_eq!(one["zones"].as_array().unwrap().len(), 1);
         assert_eq!(one["zones"][0]["id"], "play");
         assert_eq!(one["zones"][0]["items"].as_array().unwrap().len(), 500);
         assert_eq!(one["loose"].as_array().unwrap().len(), 4000);
-        let one: serde_json::Value = serde_json::from_str(&hub.state_of(true, "play").json).unwrap();
+        let one: serde_json::Value =
+            serde_json::from_str(&hub.state_of(true, "play").json).unwrap();
         assert_eq!(one["zones"][0]["item_count"], 500);
         assert!(one["zones"][0].get("items").is_none());
         // A zone that is not there: none, and the rest as ever.
-        let none: serde_json::Value = serde_json::from_str(&hub.state_of(true, "nowhere").json).unwrap();
+        let none: serde_json::Value =
+            serde_json::from_str(&hub.state_of(true, "nowhere").json).unwrap();
         assert_eq!(none["zones"].as_array().unwrap().len(), 0);
         assert_eq!(none["enabled"], true);
 
@@ -752,7 +785,10 @@ mod tests {
         hub.report(session, snapshot("[1]"));
         assert_eq!(hub.state_of(true, "work").json, "[1]");
         // A shell that does not count: counted here.
-        hub.report(session, snapshot(r#"{"zones":[{"id":"a","items":[1,2]}],"loose":[1]}"#));
+        hub.report(
+            session,
+            snapshot(r#"{"zones":[{"id":"a","items":[1,2]}],"loose":[1]}"#),
+        );
         assert_eq!(
             hub.state_of(true, "").json,
             r#"{"zones":[{"id":"a","item_count":2}],"loose_count":1}"#
@@ -786,7 +822,10 @@ mod tests {
             shell.report(session, answer(done.request_id, None));
             let refused = requests.recv().await.unwrap().unwrap();
             assert!(refused.request_id > done.request_id);
-            shell.report(session, answer(refused.request_id, Some("the zone is locked")));
+            shell.report(
+                session,
+                answer(refused.request_id, Some("the zone is locked")),
+            );
             // (Kept, so that the line stays up.)
             std::future::pending::<()>().await;
         });
@@ -808,7 +847,10 @@ mod tests {
         let reply = hub.command(HIDE.to_string(), 1, 60).await.unwrap();
         assert!(began.elapsed() < Duration::from_secs(3));
         assert!(!reply.success && reply.delivered);
-        assert!(reply.error.unwrap().starts_with("The shell did not answer within 60 ms"));
+        assert!(reply
+            .error
+            .unwrap()
+            .starts_with("The shell did not answer within 60 ms"));
         assert!(hub.lock().waiting.is_empty());
         // An answer that comes after all is nobody's.
         let late = requests.recv().await.unwrap().unwrap();
@@ -849,7 +891,10 @@ mod tests {
         let (kind, fields) = told(&mut events);
         assert_eq!(kind, "zones.zone_created");
         assert_eq!(fields["json"], r#"{"event":"zone_created","zone":"a"}"#);
-        assert_eq!((fields["sequence"].as_str(), fields["version"].as_str()), ("1", "1"));
+        assert_eq!(
+            (fields["sequence"].as_str(), fields["version"].as_str()),
+            ("1", "1")
+        );
         // A name that is no plain word does not become part of a kind.
         hub.report(session, event("a.b c"));
         assert_eq!(told(&mut events).0, "zones.abc");

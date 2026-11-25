@@ -53,23 +53,25 @@ impl Source {
         let kept = Arc::clone(&known);
         let anyway = Arc::new(AtomicBool::new(false));
         let asked_anyway = Arc::clone(&anyway);
-        let started = std::thread::Builder::new().name("gevrek-zones-source".to_string()).spawn(move || {
-            // (Ends when nobody can ask any more: the source went.)
-            while asked.recv().is_ok() {
-                // Everything asked meanwhile is answered by this one
-                // reading.
-                while asked.try_recv().is_ok() {}
-                let anyway = asked_anyway.swap(false, Ordering::SeqCst);
-                let items = read();
-                let mut known = kept.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                if anyway || known.as_ref() != Some(&items) {
-                    *known = Some(items.clone());
-                    // (Told while the list is held, so that two readings
-                    // are told in the order they were made in.)
-                    tell(event(items));
+        let started = std::thread::Builder::new()
+            .name("gevrek-zones-source".to_string())
+            .spawn(move || {
+                // (Ends when nobody can ask any more: the source went.)
+                while asked.recv().is_ok() {
+                    // Everything asked meanwhile is answered by this one
+                    // reading.
+                    while asked.try_recv().is_ok() {}
+                    let anyway = asked_anyway.swap(false, Ordering::SeqCst);
+                    let items = read();
+                    let mut known = kept.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    if anyway || known.as_ref() != Some(&items) {
+                        *known = Some(items.clone());
+                        // (Told while the list is held, so that two readings
+                        // are told in the order they were made in.)
+                        tell(event(items));
+                    }
                 }
-            }
-        });
+            });
         if let Err(error) = started {
             log::warn!("zones: a list is not read: no thread: {error}");
         }
@@ -87,7 +89,9 @@ impl Source {
             }
         };
         let mut watcher = notify::recommended_watcher(handler)
-            .inspect_err(|error| log::debug!("zones: a list is not watched, and read again only when asked: {error}"))
+            .inspect_err(|error| {
+                log::debug!("zones: a list is not watched, and read again only when asked: {error}")
+            })
             .ok();
         if let Some(watcher) = &mut watcher {
             for folder in watched.iter().filter(|folder| folder.is_dir()) {
@@ -96,7 +100,12 @@ impl Source {
                 }
             }
         }
-        Self { again, known, anyway, _watcher: watcher }
+        Self {
+            again,
+            known,
+            anyway,
+            _watcher: watcher,
+        }
     }
 
     /// The list may be other than it was: read it again (on its thread)
@@ -129,7 +138,8 @@ mod tests {
     use std::time::Duration;
 
     fn folder(name: &str) -> PathBuf {
-        let folder = std::env::temp_dir().join(format!("gevrek-zones-source-{name}-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("gevrek-zones-source-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(&folder).expect("a folder");
         std::fs::canonicalize(&folder).expect("a real folder")
@@ -159,14 +169,21 @@ mod tests {
         };
         let told_as = at.clone();
         let source = Source::new(
-            move |items| vec![BackendEvent::SourceListed { source: told_as.clone(), items }],
+            move |items| {
+                vec![BackendEvent::SourceListed {
+                    source: told_as.clone(),
+                    items,
+                }]
+            },
             read,
             std::slice::from_ref(&root),
             |path| path.extension().is_some_and(|ending| ending == "txt"),
             tell,
         );
         let next = || -> Vec<String> {
-            let events = tellings.recv_timeout(Duration::from_secs(20)).expect("told");
+            let events = tellings
+                .recv_timeout(Duration::from_secs(20))
+                .expect("told");
             let [BackendEvent::SourceListed { source, items }] = &events[..] else {
                 panic!("one listing at a time: {events:?}");
             };

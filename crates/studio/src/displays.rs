@@ -240,17 +240,27 @@ pub fn scale_of(state: &Value, name: &str) -> Option<f64> {
 /// the configuration gives it (`configured`), else the one it has
 /// (`has`), else 1. A scale that is none of the usual four (a display at
 /// 1.75) is offered too, in its place, so that what is so is shown.
-pub fn scale_choice(configured: Option<f64>, has: Option<f64>) -> (Vec<(f64, String)>, Option<f64>) {
+pub fn scale_choice(
+    configured: Option<f64>,
+    has: Option<f64>,
+) -> (Vec<(f64, String)>, Option<f64>) {
     let mut scales = vec![1.0, 1.25, 1.5, 2.0];
     let current = configured.or(has).unwrap_or(1.0);
     for scale in [configured, has].into_iter().flatten() {
-        if (0.25..=8.0).contains(&scale) && !scales.iter().any(|known| (known - scale).abs() < 0.01) {
+        if (0.25..=8.0).contains(&scale) && !scales.iter().any(|known| (known - scale).abs() < 0.01)
+        {
             scales.push((scale * 100.0).round() / 100.0);
         }
     }
     scales.sort_by(|one, other| one.total_cmp(other));
-    let selected = scales.iter().copied().find(|scale| (scale - current).abs() < 0.01);
-    let options = scales.into_iter().map(|scale| (scale, format!("{scale}×"))).collect();
+    let selected = scales
+        .iter()
+        .copied()
+        .find(|scale| (scale - current).abs() < 0.01);
+    let options = scales
+        .into_iter()
+        .map(|scale| (scale, format!("{scale}×")))
+        .collect();
     (options, selected)
 }
 
@@ -288,7 +298,11 @@ fn written_down(ui: &mut Ui, document: &mut Document, attached: &[String], runni
         .flatten()
         .enumerate()
         .map(|(index, entry)| (index, entry["name"].as_str().unwrap_or("").to_string()))
-        .filter(|(_, name)| !attached.iter().any(|known| known.eq_ignore_ascii_case(name)))
+        .filter(|(_, name)| {
+            !attached
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(name))
+        })
         .collect();
     if !running {
         ui.label(
@@ -697,7 +711,10 @@ mod tests {
         assert_eq!(labels(&options), ["1×", "1.25×", "1.5×", "1.75×", "2×"]);
         assert_eq!(selected, Some(1.75));
         let (options, _) = scale_choice(Some(2.5), Some(1.75));
-        assert_eq!(labels(&options), ["1×", "1.25×", "1.5×", "1.75×", "2×", "2.5×"]);
+        assert_eq!(
+            labels(&options),
+            ["1×", "1.25×", "1.5×", "1.75×", "2×", "2.5×"]
+        );
 
         let state = json!({"monitors": [
             {"name": "Left", "connector": "DP-1", "scale": 1.5},

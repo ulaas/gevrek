@@ -53,7 +53,9 @@ pub fn watch(wanted: Arc<AtomicBool>, lock: impl Fn() + Send + 'static) -> anyho
                 };
                 if going {
                     if !wanted.load(Ordering::Relaxed) {
-                        log::debug!("the machine sleeps, unlocked: the configuration wants no lock first");
+                        log::debug!(
+                            "the machine sleeps, unlocked: the configuration wants no lock first"
+                        );
                     }
                     if wanted.load(Ordering::Relaxed) {
                         log::info!("The machine is about to sleep: locking first");

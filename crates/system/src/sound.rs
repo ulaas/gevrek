@@ -291,7 +291,10 @@ pub fn outputs() -> Vec<Output> {
 #[cfg(not(windows))]
 pub fn choose_output(id: u32) -> bool {
     let took = choose_output_by(id);
-    log::debug!("sound is to be played on device {id}: {}", if took { "taken" } else { "not taken" });
+    log::debug!(
+        "sound is to be played on device {id}: {}",
+        if took { "taken" } else { "not taken" }
+    );
     took
 }
 
@@ -347,7 +350,10 @@ fn mixer_by() -> Mixer {
 #[cfg(not(windows))]
 pub fn choose_input(id: u32) -> bool {
     let took = choose_input_by(id);
-    log::debug!("sound is to be recorded from device {id}: {}", if took { "taken" } else { "not taken" });
+    log::debug!(
+        "sound is to be recorded from device {id}: {}",
+        if took { "taken" } else { "not taken" }
+    );
     took
 }
 
@@ -376,7 +382,10 @@ pub fn set_stream(id: u32, percent: u32) -> bool {
 #[cfg(not(windows))]
 pub fn toggle_stream_mute(id: u32) -> bool {
     let took = toggle_stream_mute_by(id);
-    log::debug!("program {id} is muted or heard again: {}", if took { "taken" } else { "not taken" });
+    log::debug!(
+        "program {id} is muted or heard again: {}",
+        if took { "taken" } else { "not taken" }
+    );
     took
 }
 
@@ -513,7 +522,14 @@ mod core_audio {
         let mut size = std::mem::size_of::<u32>() as u32;
         // SAFETY: a plain property read into a value of its size.
         let status = unsafe {
-            AudioObjectGetPropertyData(SYSTEM, &address, 0, std::ptr::null(), &mut size, &mut id as *mut u32 as *mut c_void)
+            AudioObjectGetPropertyData(
+                SYSTEM,
+                &address,
+                0,
+                std::ptr::null(),
+                &mut size,
+                &mut id as *mut u32 as *mut c_void,
+            )
         };
         (status == 0 && id != 0).then_some(id)
     }
@@ -524,7 +540,14 @@ mod core_audio {
         let mut size = std::mem::size_of::<f32>() as u32;
         // SAFETY: as above.
         let status = unsafe {
-            AudioHardwareServiceGetPropertyData(id, &address, 0, std::ptr::null(), &mut size, &mut volume as *mut f32 as *mut c_void)
+            AudioHardwareServiceGetPropertyData(
+                id,
+                &address,
+                0,
+                std::ptr::null(),
+                &mut size,
+                &mut volume as *mut f32 as *mut c_void,
+            )
         };
         (status == 0).then_some(volume)
     }
@@ -535,7 +558,14 @@ mod core_audio {
         let mut size = std::mem::size_of::<u32>() as u32;
         // SAFETY: as above.
         let status = unsafe {
-            AudioObjectGetPropertyData(id, &address, 0, std::ptr::null(), &mut size, &mut mute as *mut u32 as *mut c_void)
+            AudioObjectGetPropertyData(
+                id,
+                &address,
+                0,
+                std::ptr::null(),
+                &mut size,
+                &mut mute as *mut u32 as *mut c_void,
+            )
         };
         status == 0 && mute != 0
     }
@@ -558,7 +588,14 @@ mod core_audio {
         let address = volume_address(device);
         // SAFETY: a plain property written from a value of its size.
         unsafe {
-            AudioHardwareServiceSetPropertyData(id, &address, 0, std::ptr::null(), std::mem::size_of::<f32>() as u32, &volume as *const f32 as *const c_void);
+            AudioHardwareServiceSetPropertyData(
+                id,
+                &address,
+                0,
+                std::ptr::null(),
+                std::mem::size_of::<f32>() as u32,
+                &volume as *const f32 as *const c_void,
+            );
         }
         // Louder is heard: a muted device is let be heard again.
         if by_percent > 0 && muted(id, device) {
@@ -572,7 +609,14 @@ mod core_audio {
         let value = u32::from(mute);
         // SAFETY: as above.
         unsafe {
-            AudioObjectSetPropertyData(id, &address, 0, std::ptr::null(), std::mem::size_of::<u32>() as u32, &value as *const u32 as *const c_void);
+            AudioObjectSetPropertyData(
+                id,
+                &address,
+                0,
+                std::ptr::null(),
+                std::mem::size_of::<u32>() as u32,
+                &value as *const u32 as *const c_void,
+            );
         }
     }
 
@@ -592,13 +636,21 @@ mod core_audio {
         told: Mutex<Option<Level>>,
     }
 
-    extern "C" fn heard(_object: u32, _count: u32, _addresses: *const Address, client: *mut c_void) -> i32 {
+    extern "C" fn heard(
+        _object: u32,
+        _count: u32,
+        _addresses: *const Address,
+        client: *mut c_void,
+    ) -> i32 {
         // SAFETY: the client is the `Watched` given when listening began,
         // kept for the program's life (see `watch`).
         let watched = unsafe { &*(client as *const Watched) };
         follow(watched);
         if let Some(level) = level(Device::Speaker) {
-            let mut told = watched.told.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut told = watched
+                .told
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if *told != Some(level) {
                 *told = Some(level);
                 drop(told);
@@ -614,7 +666,10 @@ mod core_audio {
         let Some(id) = device_id(Device::Speaker) else {
             return;
         };
-        let mut on = watched.on.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut on = watched
+            .on
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if *on == Some(id) {
             return;
         }
@@ -622,7 +677,12 @@ mod core_audio {
         let client = watched as *const Watched as *mut c_void;
         // SAFETY: listeners with the kept `Watched` as their client.
         unsafe {
-            AudioHardwareServiceAddPropertyListener(id, &volume_address(Device::Speaker), heard, client);
+            AudioHardwareServiceAddPropertyListener(
+                id,
+                &volume_address(Device::Speaker),
+                heard,
+                client,
+            );
             AudioObjectAddPropertyListener(id, &mute_address(Device::Speaker), heard, client);
         }
     }
@@ -642,7 +702,12 @@ mod core_audio {
             let client = watched as *const Watched as *mut c_void;
             // SAFETY: as above, on the system object (the default output).
             unsafe {
-                AudioObjectAddPropertyListener(SYSTEM, &default_device_address(Device::Speaker), heard, client);
+                AudioObjectAddPropertyListener(
+                    SYSTEM,
+                    &default_device_address(Device::Speaker),
+                    heard,
+                    client,
+                );
             }
             true
         }
@@ -670,8 +735,8 @@ pub fn mixer() -> Mixer {
 
 #[cfg(windows)]
 pub use endpoint::{
-    change, choose_input, choose_output, inputs, level, measure, outputs, set, set_stream,
-    streams, toggle_mute, toggle_stream_mute, watch,
+    change, choose_input, choose_output, inputs, level, measure, outputs, set, set_stream, streams,
+    toggle_mute, toggle_stream_mute, watch,
 };
 
 /// What a program that plays is called: the name it gave what it plays,
@@ -703,6 +768,7 @@ mod endpoint {
     use super::{percent_of, stepped, Device, Level, Output};
     use std::ffi::c_void;
     use std::sync::{mpsc, Arc};
+    use windows::core::Interface;
     use windows::core::{implement, Result, HRESULT, PCWSTR};
     use windows::Win32::Media::Audio::Endpoints::{
         IAudioEndpointVolume, IAudioEndpointVolumeCallback, IAudioEndpointVolumeCallback_Impl,
@@ -716,7 +782,6 @@ mod endpoint {
     use windows::Win32::Media::Audio::{
         AudioSessionStateActive, IAudioSessionControl2, IAudioSessionManager2, ISimpleAudioVolume,
     };
-    use windows::core::Interface;
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED,
     };
@@ -1006,7 +1071,14 @@ mod endpoint {
         });
         match chosen {
             Ok(taken) => {
-                log::debug!("sound device {id} is the one in use: {}", if taken { "taken" } else { "there is no such device" });
+                log::debug!(
+                    "sound device {id} is the one in use: {}",
+                    if taken {
+                        "taken"
+                    } else {
+                        "there is no such device"
+                    }
+                );
                 taken
             }
             Err(error) => {
@@ -1101,7 +1173,10 @@ mod endpoint {
                 let (loud, muted) = unsafe {
                     (
                         volume.GetMasterVolume().unwrap_or(1.0),
-                        volume.GetMute().map(|muted| muted.as_bool()).unwrap_or(false),
+                        volume
+                            .GetMute()
+                            .map(|muted| muted.as_bool())
+                            .unwrap_or(false),
                     )
                 };
                 let level = Level {
@@ -1339,11 +1414,17 @@ mod tests {
     #[test]
     fn a_program_that_plays_is_called_by_its_own_name_or_its_files() {
         assert_eq!(stream_name("Spotify", r"C:\Apps\Spotify.exe"), "Spotify");
-        assert_eq!(stream_name("", r"C:\Program Files\Mozilla Firefox\firefox.exe"), "firefox");
+        assert_eq!(
+            stream_name("", r"C:\Program Files\Mozilla Firefox\firefox.exe"),
+            "firefox"
+        );
         assert_eq!(stream_name("  ", "vlc.EXE"), "vlc");
         // A place in one of the system's files is no name.
         assert_eq!(
-            stream_name(r"@%SystemRoot%\System32\AudioSrv.Dll,-202", r"C:\x\player.exe"),
+            stream_name(
+                r"@%SystemRoot%\System32\AudioSrv.Dll,-202",
+                r"C:\x\player.exe"
+            ),
             "player"
         );
         assert_eq!(stream_name("", "my.app.exe"), "my.app");

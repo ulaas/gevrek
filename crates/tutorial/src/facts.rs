@@ -75,8 +75,8 @@ impl Standing {
                     .iter()
                     .filter(|window| place(window) == place(own))
                     .count();
-                let tab_of = (!floating && places < tiled.len() as u64 && sharing > 1)
-                    .then_some(sharing);
+                let tab_of =
+                    (!floating && places < tiled.len() as u64 && sharing > 1).then_some(sharing);
                 return Some(Standing {
                     keyboard: is(own, "is_focused"),
                     floating,
@@ -172,7 +172,10 @@ impl Facts {
         Facts {
             display: monitor["name"].as_str().unwrap_or_default().to_string(),
             workspace: workspace["name"].as_str().unwrap_or_default().to_string(),
-            layout: workspace["layout_type"].as_str().unwrap_or_default().to_string(),
+            layout: workspace["layout_type"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             windows,
             containers: workspace["container_count"].as_u64().unwrap_or(0) as usize,
             displays: monitors.len(),
@@ -202,7 +205,10 @@ impl Facts {
     }
 
     fn tiled(&self) -> usize {
-        self.windows.iter().filter(|window| !window.floating).count()
+        self.windows
+            .iter()
+            .filter(|window| !window.floating)
+            .count()
     }
 }
 
@@ -265,19 +271,22 @@ pub fn met(goal: Goal, before: &Facts, now: &Facts, carried_out: &[String]) -> b
         Goal::LayoutChanged => same_place && !now.layout.is_empty() && now.layout != before.layout,
         Goal::Layout(name) => now.layout.eq_ignore_ascii_case(name),
         Goal::FocusChanged => {
-            same_place
-                && matches!((had, has), (Some(had), Some(has)) if had.id != has.id)
+            same_place && matches!((had, has), (Some(had), Some(has)) if had.id != has.id)
         }
-        Goal::WindowMoved => same_place
-            && had.is_some_and(|had| {
-                now.window(had.id)
-                    .is_some_and(|window| (window.at.0, window.at.1) != (had.at.0, had.at.1))
-            }),
-        Goal::WindowResized => same_place
-            && had.is_some_and(|had| {
-                now.window(had.id)
-                    .is_some_and(|window| (window.at.2, window.at.3) != (had.at.2, had.at.3))
-            }),
+        Goal::WindowMoved => {
+            same_place
+                && had.is_some_and(|had| {
+                    now.window(had.id)
+                        .is_some_and(|window| (window.at.0, window.at.1) != (had.at.0, had.at.1))
+                })
+        }
+        Goal::WindowResized => {
+            same_place
+                && had.is_some_and(|had| {
+                    now.window(had.id)
+                        .is_some_and(|window| (window.at.2, window.at.3) != (had.at.2, had.at.3))
+                })
+        }
         Goal::WorkspaceChanged => !now.workspace.is_empty() && !same_place,
         Goal::WindowCarried => {
             !now.workspace.is_empty()
@@ -337,16 +346,21 @@ mod tests {
         };
         // Three places: two tiles beside each other and a floating one.
         let state = json!({"monitors": [{"is_focused": true,
-            "workspace": {"name": "Tutorial", "container_count": 2, "detailed_windows": []},
-            "workspaces": [{"name": "Tutorial", "container_count": 2, "detailed_windows": [
-                window("Notes", 0, true, false),
-                window("Browser", 600, false, false),
-                window("Music", 100, false, true),
-            ]}]}]});
+        "workspace": {"name": "Tutorial", "container_count": 2, "detailed_windows": []},
+        "workspaces": [{"name": "Tutorial", "container_count": 2, "detailed_windows": [
+            window("Notes", 0, true, false),
+            window("Browser", 600, false, false),
+            window("Music", 100, false, true),
+        ]}]}]});
         let notes = Standing::of(&state, "Notes").unwrap();
         assert_eq!(
             notes,
-            Standing { keyboard: true, floating: false, maximized: false, tab_of: None }
+            Standing {
+                keyboard: true,
+                floating: false,
+                maximized: false,
+                tab_of: None
+            }
         );
         assert_eq!(notes.words(), "Has the keyboard  ·  tiled");
         assert_eq!(
@@ -357,10 +371,10 @@ mod tests {
 
         // Two of them joined as tabs: one place for both, and each says so.
         let tabs = json!({"monitors": [{"is_focused": true,
-            "workspace": {"name": "Tutorial", "container_count": 1, "detailed_windows": [
-                window("Notes", 0, false, false),
-                window("Browser", 0, true, false),
-            ]}}]});
+        "workspace": {"name": "Tutorial", "container_count": 1, "detailed_windows": [
+            window("Notes", 0, false, false),
+            window("Browser", 0, true, false),
+        ]}}]});
         assert_eq!(
             Standing::of(&tabs, "Browser").unwrap().words(),
             "Has the keyboard  ·  one of 2 tabs"
@@ -388,8 +402,14 @@ mod tests {
                 ]}},
         ]});
         let facts = Facts::of(&state);
-        assert_eq!((facts.workspace.as_str(), facts.layout.as_str()), ("Tutorial", "Floating"));
-        assert_eq!((facts.displays, facts.containers, facts.windows.len()), (2, 2, 2));
+        assert_eq!(
+            (facts.workspace.as_str(), facts.layout.as_str()),
+            ("Tutorial", "Floating")
+        );
+        assert_eq!(
+            (facts.displays, facts.containers, facts.windows.len()),
+            (2, 2, 2)
+        );
         assert_eq!(facts.focused().map(|window| window.id), Some(7));
         assert_eq!(facts.windows[0].at, (14, 65, 800, 600));
         assert_eq!(facts.windows[1].app, "Notes");
@@ -472,7 +492,17 @@ mod tests {
         assert!(met(Goal::Gone("gevrek-launcher"), &now, &before, &none));
         // Put away before the step began: done all the same.
         assert!(met(Goal::Gone("gevrek-launcher"), &before, &before, &none));
-        assert!(met(Goal::Done("toggle_expose"), &before, &before, &["toggle_expose".to_string()]));
-        assert!(!met(Goal::Done("toggle_expose"), &before, &before, &["quit".to_string()]));
+        assert!(met(
+            Goal::Done("toggle_expose"),
+            &before,
+            &before,
+            &["toggle_expose".to_string()]
+        ));
+        assert!(!met(
+            Goal::Done("toggle_expose"),
+            &before,
+            &before,
+            &["quit".to_string()]
+        ));
     }
 }

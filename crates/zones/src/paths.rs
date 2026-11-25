@@ -17,7 +17,11 @@ pub fn parent(path: &str) -> Option<&str> {
     let trimmed = path.trim_end_matches(is_separator);
     let cut = trimmed.rfind(is_separator)?;
     // (The root keeps its separator: the parent of `/a` is `/`.)
-    Some(if cut == 0 { &trimmed[..1] } else { &trimmed[..cut] })
+    Some(if cut == 0 {
+        &trimmed[..1]
+    } else {
+        &trimmed[..cut]
+    })
 }
 
 /// `name` in `folder`, with the separator the folder is written with.
@@ -54,7 +58,11 @@ mod tests {
     #[test]
     fn paths_of_both_systems_are_taken_apart() {
         for (path, name, folder) in [
-            ("/home/ada/Desktop/a.txt", "a.txt", Some("/home/ada/Desktop")),
+            (
+                "/home/ada/Desktop/a.txt",
+                "a.txt",
+                Some("/home/ada/Desktop"),
+            ),
             ("C:\\Users\\ada\\a.txt", "a.txt", Some("C:\\Users\\ada")),
             ("/home/ada/Desktop/", "Desktop", Some("/home/ada")),
             ("/a", "a", Some("/")),

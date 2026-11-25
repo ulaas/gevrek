@@ -317,7 +317,9 @@ mod tests {
         let list = shortcuts_of(&config);
         // (The standard keys the configuration does not override follow.)
         assert!(
-            !list.iter().any(|shortcut| shortcut.action.starts_with("Off")),
+            !list
+                .iter()
+                .any(|shortcut| shortcut.action.starts_with("Off")),
             "a disabled binding is not listed: {list:?}"
         );
         assert!(list.len() > 2);

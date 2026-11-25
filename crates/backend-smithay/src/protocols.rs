@@ -199,10 +199,7 @@ impl State {
         if before.is_some_and(|before| Some(before.0) != standing.map(|now| now.0)) {
             self.desktop.needs_redraw = true;
             let (x, y) = self.pointer_exact;
-            self.pointer_moved(
-                (x, y).into(),
-                self.start_time.elapsed().as_millis() as u32,
-            );
+            self.pointer_moved((x, y).into(), self.start_time.elapsed().as_millis() as u32);
         }
         true
     }

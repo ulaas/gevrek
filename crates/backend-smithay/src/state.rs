@@ -487,7 +487,10 @@ pub struct ClientState {
 impl ClientState {
     /// For a client that connected through `stream`.
     pub fn of(stream: &std::os::unix::net::UnixStream) -> Self {
-        Self { who: who_is(stream), ..Default::default() }
+        Self {
+            who: who_is(stream),
+            ..Default::default()
+        }
     }
 
     fn named(&self) -> &str {
@@ -502,7 +505,11 @@ impl ClientState {
 /// The process at the other end of `stream`: its id and its name.
 fn who_is(stream: &std::os::unix::net::UnixStream) -> String {
     use std::os::fd::AsRawFd;
-    let mut credentials = libc::ucred { pid: 0, uid: 0, gid: 0 };
+    let mut credentials = libc::ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
     let mut size = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
     // SAFETY: the buffer is a `ucred` and `size` says so.
     let asked = unsafe {
@@ -517,7 +524,8 @@ fn who_is(stream: &std::os::unix::net::UnixStream) -> String {
     if asked != 0 || credentials.pid <= 0 {
         return String::new();
     }
-    let name = std::fs::read_to_string(format!("/proc/{}/comm", credentials.pid)).unwrap_or_default();
+    let name =
+        std::fs::read_to_string(format!("/proc/{}/comm", credentials.pid)).unwrap_or_default();
     format!("pid {} ({})", credentials.pid, name.trim())
 }
 
@@ -529,7 +537,10 @@ impl ClientData for ClientState {
     fn disconnected(&self, _client_id: ClientId, reason: DisconnectReason) {
         match reason {
             DisconnectReason::ProtocolError(error) => {
-                log::warn!("{} was disconnected for a protocol error: {error}", self.named())
+                log::warn!(
+                    "{} was disconnected for a protocol error: {error}",
+                    self.named()
+                )
             }
             // (Also what the library says where the client read nothing
             // for so long that what it was sent no longer fit in its

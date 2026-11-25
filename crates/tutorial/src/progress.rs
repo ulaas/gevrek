@@ -53,14 +53,20 @@ impl Progress {
             // (Trace: the studio's overview reads it each time it is drawn,
             // and where nothing is kept yet that is as it should be.)
             Err(error) => {
-                log::trace!("the tutorial remembers nothing yet: {}: {error}", path.display());
+                log::trace!(
+                    "the tutorial remembers nothing yet: {}: {error}",
+                    path.display()
+                );
                 return Self::default();
             }
         };
         match serde_json::from_str(&text) {
             Ok(progress) => progress,
             Err(error) => {
-                log::debug!("the tutorial's memory {} is not understood: {error}", path.display());
+                log::debug!(
+                    "the tutorial's memory {} is not understood: {error}",
+                    path.display()
+                );
                 Self::default()
             }
         }
@@ -71,12 +77,10 @@ impl Progress {
             let _ = std::fs::create_dir_all(folder);
         }
         match serde_json::to_string_pretty(self) {
-            Ok(text) => {
-                match std::fs::write(path, text) {
-                    Ok(()) => log::debug!("the tutorial's memory is written to {}", path.display()),
-                    Err(error) => log::warn!("the tutorial's memory is not written: {error}"),
-                }
-            }
+            Ok(text) => match std::fs::write(path, text) {
+                Ok(()) => log::debug!("the tutorial's memory is written to {}", path.display()),
+                Err(error) => log::warn!("the tutorial's memory is not written: {error}"),
+            },
             Err(error) => log::warn!("the tutorial's memory is not written: {error}"),
         }
     }
@@ -173,7 +177,10 @@ mod tests {
         assert!(progress.first_launch(false));
         assert!(!progress.first_launch(true));
         // The first lesson is the one to offer.
-        assert_eq!(progress.next().map(|(lesson, step)| (lesson.id, step)), Some(("tiling", 0)));
+        assert_eq!(
+            progress.next().map(|(lesson, step)| (lesson.id, step)),
+            Some(("tiling", 0))
+        );
         let focus = lesson("focus").expect("the lesson");
         progress.welcomed = true;
         progress.finish(lesson("tiling").expect("the lesson"));
@@ -184,10 +191,16 @@ mod tests {
         assert!(!read.first_launch(false));
         assert_eq!(read.count().0, 1);
         // The one that was left is offered where it was left.
-        assert_eq!(read.next().map(|(lesson, step)| (lesson.id, step)), Some(("focus", 2)));
+        assert_eq!(
+            read.next().map(|(lesson, step)| (lesson.id, step)),
+            Some(("focus", 2))
+        );
         // Finished: the next one, from its beginning.
         progress.finish(focus);
-        assert_eq!(progress.next().map(|(lesson, step)| (lesson.id, step)), Some(("move", 0)));
+        assert_eq!(
+            progress.next().map(|(lesson, step)| (lesson.id, step)),
+            Some(("move", 0))
+        );
         // A lesson that was changed since is not finished any more.
         progress.finished.insert("tiling".to_string(), 0);
         assert_eq!(progress.next().map(|(lesson, _)| lesson.id), Some("tiling"));
@@ -228,7 +241,9 @@ mod tests {
             ..Progress::default()
         };
         for lesson in lessons() {
-            whole.finished.insert(lesson.id.to_string(), lesson.revision);
+            whole
+                .finished
+                .insert(lesson.id.to_string(), lesson.revision);
         }
         let whole = serde_json::to_value(&whole).expect("as json");
         let text = whole.to_string();

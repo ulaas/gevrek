@@ -56,7 +56,11 @@ pub struct Seen {
 
 impl Seen {
     pub fn new(location: Location) -> Self {
-        Self { location, known: BTreeMap::new(), touched: None }
+        Self {
+            location,
+            known: BTreeMap::new(),
+            touched: None,
+        }
     }
 
     /// Whether an item of this id is known to be at the place.
@@ -103,7 +107,10 @@ impl Seen {
 
     /// The place was listed for the core: this is what the core knows now.
     pub fn listed(&mut self, items: &[Item]) {
-        self.known = items.iter().map(|item| (key(&item.id), item.clone())).collect();
+        self.known = items
+            .iter()
+            .map(|item| (key(&item.id), item.clone()))
+            .collect();
     }
 
     /// What a change is to the core, measured against what is known.
@@ -113,11 +120,16 @@ impl Seen {
         match change {
             Change::Came(item) => match self.known.insert(key(&item.id), item.clone()) {
                 None => vec![BackendEvent::ItemAdded { location, item }],
-                Some(before) if before != item => vec![BackendEvent::ItemChanged { location, item }],
+                Some(before) if before != item => {
+                    vec![BackendEvent::ItemChanged { location, item }]
+                }
                 Some(_) => Vec::new(),
             },
             Change::Went(id) => match self.known.remove(&key(&id)) {
-                Some(item) => vec![BackendEvent::ItemRemoved { location, item: item.id }],
+                Some(item) => vec![BackendEvent::ItemRemoved {
+                    location,
+                    item: item.id,
+                }],
                 None => Vec::new(),
             },
             Change::Renamed { from, item } => {
@@ -126,16 +138,26 @@ impl Seen {
                     return item.map_or_else(Vec::new, |item| self.apply(Change::Came(item)));
                 };
                 let Some(item) = item else {
-                    return vec![BackendEvent::ItemRemoved { location, item: before.id }];
+                    return vec![BackendEvent::ItemRemoved {
+                        location,
+                        item: before.id,
+                    }];
                 };
                 match self.known.insert(key(&item.id), item.clone()) {
                     // It took the place of something that was here: that
                     // one is gone, and this one is what it is now.
                     Some(_) if key(&item.id) != key(&before.id) => vec![
-                        BackendEvent::ItemRemoved { location: location.clone(), item: before.id },
+                        BackendEvent::ItemRemoved {
+                            location: location.clone(),
+                            item: before.id,
+                        },
                         BackendEvent::ItemChanged { location, item },
                     ],
-                    _ => vec![BackendEvent::ItemRenamed { location, from: before.id, item }],
+                    _ => vec![BackendEvent::ItemRenamed {
+                        location,
+                        from: before.id,
+                        item,
+                    }],
                 }
             }
             Change::Touched(item) => match self.known.insert(key(&item.id), item.clone()) {
@@ -146,11 +168,16 @@ impl Seen {
                 .known
                 .values()
                 .filter(|item| item.kind == ItemKind::Virtual)
-                .map(|item| BackendEvent::ItemChanged { location: location.clone(), item: item.clone() })
+                .map(|item| BackendEvent::ItemChanged {
+                    location: location.clone(),
+                    item: item.clone(),
+                })
                 .collect(),
             Change::Relisted(items) => {
-                let now: BTreeMap<String, Item> =
-                    items.into_iter().map(|item| (key(&item.id), item)).collect();
+                let now: BTreeMap<String, Item> = items
+                    .into_iter()
+                    .map(|item| (key(&item.id), item))
+                    .collect();
                 let mut events = Vec::new();
                 for (key, before) in &self.known {
                     if !now.contains_key(key) {
@@ -214,19 +241,31 @@ mod tests {
         // The same coming told twice, as the shell does for the desktop.
         assert_eq!(
             seen.apply(Change::Came(file("b.txt"))),
-            [BackendEvent::ItemAdded { location: AT, item: file("b.txt") }]
+            [BackendEvent::ItemAdded {
+                location: AT,
+                item: file("b.txt")
+            }]
         );
         assert_eq!(seen.apply(Change::Came(file("b.txt"))), []);
         // Written to: told as a coming of what is there already.
         assert_eq!(
             seen.apply(Change::Came(sized("b.txt", 9))),
-            [BackendEvent::ItemChanged { location: AT, item: sized("b.txt", 9) }]
+            [BackendEvent::ItemChanged {
+                location: AT,
+                item: sized("b.txt", 9)
+            }]
         );
         // Going, told twice; and in letters of the other case, which
         // Windows does not tell apart. The id told is the one known.
         assert_eq!(
-            seen.apply(Change::Went(ItemId::new(format!("{}\\B.TXT", DESK.to_lowercase())))),
-            [BackendEvent::ItemRemoved { location: AT, item: id("b.txt") }]
+            seen.apply(Change::Went(ItemId::new(format!(
+                "{}\\B.TXT",
+                DESK.to_lowercase()
+            )))),
+            [BackendEvent::ItemRemoved {
+                location: AT,
+                item: id("b.txt")
+            }]
         );
         assert_eq!(seen.apply(Change::Went(id("b.txt"))), []);
         assert_eq!(seen.apply(Change::Went(id("never.txt"))), []);
@@ -236,49 +275,116 @@ mod tests {
     fn a_rename_keeps_the_item_and_knows_where_it_went() {
         let mut seen = seen(&[file("a.txt"), file("c.txt")]);
         assert_eq!(
-            seen.apply(Change::Renamed { from: id("a.txt"), item: Some(file("b.txt")) }),
-            [BackendEvent::ItemRenamed { location: AT, from: id("a.txt"), item: file("b.txt") }]
+            seen.apply(Change::Renamed {
+                from: id("a.txt"),
+                item: Some(file("b.txt"))
+            }),
+            [BackendEvent::ItemRenamed {
+                location: AT,
+                from: id("a.txt"),
+                item: file("b.txt")
+            }]
         );
         // Told again: the old name is not known any more, the new one is.
-        assert_eq!(seen.apply(Change::Renamed { from: id("a.txt"), item: Some(file("b.txt")) }), []);
+        assert_eq!(
+            seen.apply(Change::Renamed {
+                from: id("a.txt"),
+                item: Some(file("b.txt"))
+            }),
+            []
+        );
         // Only the letters' case.
         assert_eq!(
-            seen.apply(Change::Renamed { from: id("b.txt"), item: Some(file("B.txt")) }),
-            [BackendEvent::ItemRenamed { location: AT, from: id("b.txt"), item: file("B.txt") }]
+            seen.apply(Change::Renamed {
+                from: id("b.txt"),
+                item: Some(file("B.txt"))
+            }),
+            [BackendEvent::ItemRenamed {
+                location: AT,
+                from: id("b.txt"),
+                item: file("B.txt")
+            }]
         );
         // Onto another's name: that one is gone.
         assert_eq!(
-            seen.apply(Change::Renamed { from: id("B.txt"), item: Some(file("c.txt")) }),
+            seen.apply(Change::Renamed {
+                from: id("B.txt"),
+                item: Some(file("c.txt"))
+            }),
             [
-                BackendEvent::ItemRemoved { location: AT, item: id("B.txt") },
-                BackendEvent::ItemChanged { location: AT, item: file("c.txt") },
+                BackendEvent::ItemRemoved {
+                    location: AT,
+                    item: id("B.txt")
+                },
+                BackendEvent::ItemChanged {
+                    location: AT,
+                    item: file("c.txt")
+                },
             ]
         );
         // Out of the place, and into it from elsewhere.
         assert_eq!(
-            seen.apply(Change::Renamed { from: id("c.txt"), item: None }),
-            [BackendEvent::ItemRemoved { location: AT, item: id("c.txt") }]
+            seen.apply(Change::Renamed {
+                from: id("c.txt"),
+                item: None
+            }),
+            [BackendEvent::ItemRemoved {
+                location: AT,
+                item: id("c.txt")
+            }]
         );
         assert_eq!(
-            seen.apply(Change::Renamed { from: ItemId::new("D:\\elsewhere\\x.txt"), item: Some(file("x.txt")) }),
-            [BackendEvent::ItemAdded { location: AT, item: file("x.txt") }]
+            seen.apply(Change::Renamed {
+                from: ItemId::new("D:\\elsewhere\\x.txt"),
+                item: Some(file("x.txt"))
+            }),
+            [BackendEvent::ItemAdded {
+                location: AT,
+                item: file("x.txt")
+            }]
         );
-        assert_eq!(seen.apply(Change::Renamed { from: id("gone.txt"), item: None }), []);
+        assert_eq!(
+            seen.apply(Change::Renamed {
+                from: id("gone.txt"),
+                item: None
+            }),
+            []
+        );
     }
 
     #[test]
     fn looking_again_tells_exactly_what_differs() {
         let mut seen = seen(&[file("a.txt"), file("b.txt"), file("c.txt")]);
-        let events = seen.apply(Change::Relisted(vec![file("a.txt"), sized("b.txt", 4), file("d.txt")]));
+        let events = seen.apply(Change::Relisted(vec![
+            file("a.txt"),
+            sized("b.txt", 4),
+            file("d.txt"),
+        ]));
         assert_eq!(
             events,
             [
-                BackendEvent::ItemRemoved { location: AT, item: id("c.txt") },
-                BackendEvent::ItemChanged { location: AT, item: sized("b.txt", 4) },
-                BackendEvent::ItemAdded { location: AT, item: file("d.txt") },
+                BackendEvent::ItemRemoved {
+                    location: AT,
+                    item: id("c.txt")
+                },
+                BackendEvent::ItemChanged {
+                    location: AT,
+                    item: sized("b.txt", 4)
+                },
+                BackendEvent::ItemAdded {
+                    location: AT,
+                    item: file("d.txt")
+                },
             ]
         );
-        assert_eq!(seen.apply(Change::Relisted(vec![file("a.txt"), sized("b.txt", 4), file("d.txt")])), []);
+        assert_eq!(
+            seen.apply(Change::Relisted(vec![
+                file("a.txt"),
+                sized("b.txt", 4),
+                file("d.txt")
+            ])),
+            []
+        );
     }
 
     #[test]
@@ -292,12 +398,24 @@ mod tests {
         let mut seen = seen(&[file("a.txt"), bin.clone()]);
         assert_eq!(
             seen.apply(Change::Touched(file("a.txt"))),
-            [BackendEvent::ItemChanged { location: AT, item: file("a.txt") }]
+            [BackendEvent::ItemChanged {
+                location: AT,
+                item: file("a.txt")
+            }]
         );
         assert_eq!(
             seen.apply(Change::Touched(file("new.txt"))),
-            [BackendEvent::ItemAdded { location: AT, item: file("new.txt") }]
+            [BackendEvent::ItemAdded {
+                location: AT,
+                item: file("new.txt")
+            }]
         );
-        assert_eq!(seen.apply(Change::Pictures), [BackendEvent::ItemChanged { location: AT, item: bin }]);
+        assert_eq!(
+            seen.apply(Change::Pictures),
+            [BackendEvent::ItemChanged {
+                location: AT,
+                item: bin
+            }]
+        );
     }
 }

@@ -69,9 +69,15 @@ impl ZonesCore {
             .zones
             .iter()
             .filter(|zone| self.is_shown(&zone.id))
-            .filter(|zone| layout::group_of(&groups, &zone.id).is_none_or(|group| self.front_of(group) == zone.id))
+            .filter(|zone| {
+                layout::group_of(&groups, &zone.id)
+                    .is_none_or(|group| self.front_of(group) == zone.id)
+            })
             .filter_map(|zone| Some((Place::Zone(zone.id.clone()), self.zone_rect(&zone.id)?)));
-        let desks = self.desks().into_iter().map(|(display, around, _)| (Place::Desk(display), around));
+        let desks = self
+            .desks()
+            .into_iter()
+            .map(|(display, around, _)| (Place::Desk(display), around));
         zones.chain(desks).collect()
     }
 
@@ -87,7 +93,11 @@ impl ZonesCore {
     /// The items of a place as the keyboard walks them, in their order.
     fn items_of(&self, place: &Place, now: u64) -> Vec<ItemId> {
         match place {
-            Place::Zone(zone) => self.zone_items(zone, now).iter().map(|item| item.id.clone()).collect(),
+            Place::Zone(zone) => self
+                .zone_items(zone, now)
+                .iter()
+                .map(|item| item.id.clone())
+                .collect(),
             Place::Desk(display) => self
                 .desks()
                 .into_iter()
@@ -137,7 +147,11 @@ impl ZonesCore {
             // The bare desktop, by its name: the first display that has
             // loose items to go to.
             Some(zone) if zone.as_str() == DESK => {
-                let display = self.desks().into_iter().next().map(|(display, _, _)| display);
+                let display = self
+                    .desks()
+                    .into_iter()
+                    .next()
+                    .map(|(display, _, _)| display);
                 let display = display.ok_or("nothing lies loose on the desktop to go to")?;
                 self.take_focus(&Place::Desk(display), None)
             }
@@ -160,7 +174,10 @@ impl ZonesCore {
             _ => Vec::new(),
         };
         let all = self.reachable();
-        let from = own.as_ref().and_then(|own| all.iter().find(|(place, _)| place == own)).map(|(_, rect)| *rect);
+        let from = own
+            .as_ref()
+            .and_then(|own| all.iter().find(|(place, _)| place == own))
+            .map(|(_, rect)| *rect);
         // (A zone that has the keyboard and is no longer among the
         // reachable ones, a tab behind, is gone from where it is drawn.)
         let from = from.or_else(|| match &own {
@@ -196,14 +213,22 @@ impl ZonesCore {
             return Some(Place::Zone(zone.clone()));
         }
         let lies_loose = |items: &[PlacedItem]| items.iter().any(|placed| &placed.item == item);
-        if let Some((display, _, _)) = self.desks().into_iter().find(|(_, _, items)| lies_loose(items)) {
+        if let Some((display, _, _)) = self
+            .desks()
+            .into_iter()
+            .find(|(_, _, items)| lies_loose(items))
+        {
             return Some(Place::Desk(display));
         }
         self.config
             .zones
             .iter()
             .filter(|zone| self.is_shown(&zone.id))
-            .find(|zone| self.zone_holds(&zone.id, now).iter().any(|held| &held.id == item))
+            .find(|zone| {
+                self.zone_holds(&zone.id, now)
+                    .iter()
+                    .any(|held| &held.id == item)
+            })
             .map(|zone| Place::Zone(zone.id.clone()))
     }
 
@@ -214,17 +239,27 @@ impl ZonesCore {
             }
             return Ok(Vec::new());
         };
-        let place = self.shown_in(&item, now).ok_or_else(|| format!("{item} is nowhere that is shown"))?;
+        let place = self
+            .shown_in(&item, now)
+            .ok_or_else(|| format!("{item} is nowhere that is shown"))?;
         let mut effects = Vec::new();
         if let Place::Zone(zone) = &place {
             if self.is_masked(zone) {
                 return Err(format!("{zone} is covered"));
             }
             // A filter that hides the item would hide the keyboard with it.
-            let hidden = !self.zone_items(zone, now).iter().any(|shown| shown.id == item);
+            let hidden = !self
+                .zone_items(zone, now)
+                .iter()
+                .any(|shown| shown.id == item);
             if hidden && self.view.filters.remove(zone).is_some() {
-                effects.push(Effect::Notify(ZonesEvent::FilterChanged { zone: zone.clone(), typed: String::new() }));
-                effects.push(Effect::Notify(ZonesEvent::ItemsChanged { zone: Some(zone.clone()) }));
+                effects.push(Effect::Notify(ZonesEvent::FilterChanged {
+                    zone: zone.clone(),
+                    typed: String::new(),
+                }));
+                effects.push(Effect::Notify(ZonesEvent::ItemsChanged {
+                    zone: Some(zone.clone()),
+                }));
             }
         }
         effects.extend(self.take_focus(&place, Some(item.clone()))?);
@@ -237,12 +272,18 @@ impl ZonesCore {
         let place = match self.keyboard_place() {
             Some(place) => place,
             None => {
-                let first = self.neighbour(Direction::Right).ok_or("nothing is shown to go to")?;
+                let first = self
+                    .neighbour(Direction::Right)
+                    .ok_or("nothing is shown to go to")?;
                 effects.extend(self.take_focus(&first, None)?);
                 first
             }
         };
-        let from = self.view.focus.as_ref().and_then(|focus| focus.item.clone());
+        let from = self
+            .view
+            .focus
+            .as_ref()
+            .and_then(|focus| focus.item.clone());
         let next = match &place {
             Place::Zone(zone) => {
                 if self.is_masked(zone) {
@@ -265,9 +306,14 @@ impl ZonesCore {
             }
             // Loose items lie where they were put: to the nearest that way.
             Place::Desk(display) => {
-                let placed =
-                    self.desks().into_iter().find(|(on, _, _)| on == display).map(|(_, _, items)| items).unwrap_or_default();
-                focus::step_free(&placed, from.as_ref(), step).map(|index| placed[index].item.clone())
+                let placed = self
+                    .desks()
+                    .into_iter()
+                    .find(|(on, _, _)| on == display)
+                    .map(|(_, _, items)| items)
+                    .unwrap_or_default();
+                focus::step_free(&placed, from.as_ref(), step)
+                    .map(|index| placed[index].item.clone())
             }
         };
         let Some(item) = next else {
@@ -286,7 +332,11 @@ impl ZonesCore {
     }
 
     pub(super) fn select(&mut self, items: &[ItemId], mode: SelectMode) -> Vec<Effect> {
-        let known: Vec<ItemId> = items.iter().filter(|item| self.item(item).is_some()).cloned().collect();
+        let known: Vec<ItemId> = items
+            .iter()
+            .filter(|item| self.item(item).is_some())
+            .cloned()
+            .collect();
         let chosen = &mut self.view.selection;
         match mode {
             SelectMode::Replace => *chosen = known.into_iter().collect(),
@@ -310,7 +360,12 @@ impl ZonesCore {
         if !self.view.selection.is_empty() {
             return self.view.selection.iter().cloned().collect();
         }
-        self.view.focus.as_ref().and_then(|focus| focus.item.clone()).into_iter().collect()
+        self.view
+            .focus
+            .as_ref()
+            .and_then(|focus| focus.item.clone())
+            .into_iter()
+            .collect()
     }
 
     pub(super) fn move_focused_items(
@@ -328,10 +383,12 @@ impl ZonesCore {
         let to_zone = match (zone, direction) {
             (Some(zone), _) if zone.as_str() == DESK => None,
             (Some(zone), _) => Some(zone),
-            (None, Some(direction)) => match self.neighbour(direction).ok_or("nothing lies that way")? {
-                Place::Zone(zone) => Some(zone),
-                Place::Desk(_) => None,
-            },
+            (None, Some(direction)) => {
+                match self.neighbour(direction).ok_or("nothing lies that way")? {
+                    Place::Zone(zone) => Some(zone),
+                    Place::Desk(_) => None,
+                }
+            }
             (None, None) => return Err("say which zone, or which way".to_string()),
         };
         if let Some(zone) = &to_zone {
@@ -342,7 +399,9 @@ impl ZonesCore {
         let source = self.keyboard_place();
         let stood_at = source.as_ref().and_then(|place| {
             let item = self.view.focus.as_ref()?.item.clone()?;
-            self.items_of(place, now).iter().position(|shown| shown == &item)
+            self.items_of(place, now)
+                .iter()
+                .position(|shown| shown == &item)
         });
         let mut effects = Vec::new();
         let mut refusal = None;
@@ -363,7 +422,9 @@ impl ZonesCore {
         }
         if let (Some(place), Some(stood_at)) = (source, stood_at) {
             let left = self.items_of(&place, now);
-            let item = left.get(stood_at.min(left.len().saturating_sub(1))).cloned();
+            let item = left
+                .get(stood_at.min(left.len().saturating_sub(1)))
+                .cloned();
             self.view.selection = item.iter().cloned().collect();
             if let Some(focus) = &mut self.view.focus {
                 focus.item = item;

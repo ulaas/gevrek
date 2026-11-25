@@ -115,7 +115,8 @@ pub(crate) fn test_runtime(config: Config) -> ManuallyDrop<Runtime> {
         config.desktop.workspaces.clone(),
         config.desktop.appearance.clone(),
     );
-    let snap_zone_manager = Runtime::build_snap_zone_manager(&config.desktop.snap_zones, &monitor_manager);
+    let snap_zone_manager =
+        Runtime::build_snap_zone_manager(&config.desktop.snap_zones, &monitor_manager);
     let (_config_sender, config_receiver) = std::sync::mpsc::channel();
     let (_command_sender, manual_command_receiver) = std::sync::mpsc::channel();
     ManuallyDrop::new(Runtime {

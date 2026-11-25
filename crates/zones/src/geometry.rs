@@ -328,7 +328,11 @@ mod tests {
         let after = Display::new("a", Rect::new(0, 0, 2560, 1440));
         // (rect on the display before, anchor expected, rect on the one after)
         for (rect, anchor, expected) in [
-            (Rect::new(20, 30, 300, 200), Anchor::TopLeft, Rect::new(20, 30, 300, 200)),
+            (
+                Rect::new(20, 30, 300, 200),
+                Anchor::TopLeft,
+                Rect::new(20, 30, 300, 200),
+            ),
             (
                 Rect::new(1600, 30, 300, 200),
                 Anchor::TopRight,
@@ -349,7 +353,11 @@ mod tests {
                 Anchor::Centre,
                 Rect::new(1130, 620, 300, 200),
             ),
-            (Rect::new(810, 10, 300, 200), Anchor::Top, Rect::new(1130, 10, 300, 200)),
+            (
+                Rect::new(810, 10, 300, 200),
+                Anchor::Top,
+                Rect::new(1130, 10, 300, 200),
+            ),
         ] {
             let stored = ZoneGeometry::nearest(rect, &before);
             assert_eq!(stored.anchor, anchor, "{rect:?}");
@@ -362,14 +370,33 @@ mod tests {
         let display = Display::new("a", Rect::new(100, 0, 1920, 1080));
         let other = DisplayId::new("b");
         let reserved = [
-            ReservedArea { display: display.id.clone(), edge: Edge::Top, thickness: 32 },
-            ReservedArea { display: display.id.clone(), edge: Edge::Left, thickness: 48 },
-            ReservedArea { display: other, edge: Edge::Bottom, thickness: 500 },
+            ReservedArea {
+                display: display.id.clone(),
+                edge: Edge::Top,
+                thickness: 32,
+            },
+            ReservedArea {
+                display: display.id.clone(),
+                edge: Edge::Left,
+                thickness: 48,
+            },
+            ReservedArea {
+                display: other,
+                edge: Edge::Bottom,
+                thickness: 500,
+            },
         ];
-        assert_eq!(work_area(&display, &reserved), Rect::new(148, 32, 1872, 1048));
+        assert_eq!(
+            work_area(&display, &reserved),
+            Rect::new(148, 32, 1872, 1048)
+        );
         assert_eq!(work_area(&display, &[]), display.rect);
         // More kept than there is: the display as it is.
-        let all = [ReservedArea { display: display.id.clone(), edge: Edge::Top, thickness: 5000 }];
+        let all = [ReservedArea {
+            display: display.id.clone(),
+            edge: Edge::Top,
+            thickness: 5000,
+        }];
         assert_eq!(work_area(&display, &all), display.rect);
     }
 

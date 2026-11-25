@@ -255,11 +255,7 @@ struct State {
     /// The control centre, while it is open: its surface, what is held
     /// in it, and what the system's sound has (the devices to play on
     /// and to record from, the programs that play) as it was last read.
-    control_centre: Option<(
-        SurfaceId,
-        crate::control::Held,
-        gevrek_system::sound::Mixer,
-    )>,
+    control_centre: Option<(SurfaceId, crate::control::Held, gevrek_system::sound::Mixer)>,
     /// What is playing, as the system last said (asked while the control
     /// centre is open).
     playing: Option<crate::media::Playing>,
@@ -1053,7 +1049,9 @@ fn ask_workspace_name(
                         name.trim()
                     );
                     apply_configuration(state, changed);
-                    state.link.send(Request::StateAfter(Duration::from_millis(120)));
+                    state
+                        .link
+                        .send(Request::StateAfter(Duration::from_millis(120)));
                     close = true;
                 }
             },
@@ -1098,7 +1096,10 @@ fn zones_configured(state: &Rc<RefCell<State>>, control: &mut Control) {
     let mut shared = state.borrow_mut();
     let shared = &mut *shared;
     let Some((config, hide_icons)) = shared.config.as_ref().map(|config| {
-        (config.desktop.zones.clone(), config.desktop.platform.windows.hide_desktop_icons)
+        (
+            config.desktop.zones.clone(),
+            config.desktop.platform.windows.hide_desktop_icons,
+        )
     }) else {
         return;
     };
@@ -1115,7 +1116,10 @@ fn zones_configured(state: &Rc<RefCell<State>>, control: &mut Control) {
         move || {
             Rc::new(move |ui: &egui::Ui, fonts: &mut bool| {
                 let state = look.borrow();
-                (themed(&state, ui, fonts, gevrek_ui::fonts::Area::Zones), state.settings.clone())
+                (
+                    themed(&state, ui, fonts, gevrek_ui::fonts::Area::Zones),
+                    state.settings.clone(),
+                )
             })
         },
         // (Windows opens an item through its own shell; what the zones
@@ -1619,7 +1623,10 @@ fn toggle_control(state: &Rc<RefCell<State>>, control: &mut Control) {
     // it is put away, nobody does, and the asking ends).
     let open = std::sync::Arc::new(());
     {
-        let (still_open, sender) = (std::sync::Arc::downgrade(&open), state.borrow().sender.clone());
+        let (still_open, sender) = (
+            std::sync::Arc::downgrade(&open),
+            state.borrow().sender.clone(),
+        );
         let mut said = state.borrow().playing.clone();
         std::thread::spawn(move || {
             let mut first = true;
@@ -1906,7 +1913,10 @@ fn tutorial_start(state: &Rc<RefCell<State>>, lesson: Option<&str>, control: &mu
         log::warn!("the tutorial has no lesson to take");
         return;
     };
-    log::info!("the tutorial begins with the lesson {}", tutoring.lesson().id);
+    log::info!(
+        "the tutorial begins with the lesson {}",
+        tutoring.lesson().id
+    );
     let place = Place {
         name: surface_name("gevrek-coach"),
         edge: Edge::Bottom,
@@ -2578,7 +2588,9 @@ fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
                 let name = fields
                     .iter()
                     .find(|(name, _)| name == "payload")
-                    .and_then(|(_, payload)| serde_json::from_str::<serde_json::Value>(payload).ok())
+                    .and_then(|(_, payload)| {
+                        serde_json::from_str::<serde_json::Value>(payload).ok()
+                    })
                     .and_then(|payload| payload["command"].as_str().map(str::to_string));
                 if let Some(name) = name {
                     let mut state = state.borrow_mut();
@@ -2599,7 +2611,10 @@ fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
                     .iter()
                     .find(|(name, _)| name == "action")
                     .map(|(_, value)| value.as_str());
-                log::debug!("the window manager asks the shell for {}", action.unwrap_or("nothing"));
+                log::debug!(
+                    "the window manager asks the shell for {}",
+                    action.unwrap_or("nothing")
+                );
                 if let Some(action) = action {
                     shell_action(state, action, &fields, control);
                 }
@@ -2663,7 +2678,11 @@ fn take_in(state: &Rc<RefCell<State>>, control: &mut Control) {
                         zones.told(&wm);
                     }
                     state.facts = gevrek_tutorial::Facts::of(&wm);
-                    crate::tutoring::tidy_after_a_stop(&wm, &mut state.tidy_asked, state.link.teller());
+                    crate::tutoring::tidy_after_a_stop(
+                        &wm,
+                        &mut state.tidy_asked,
+                        state.link.teller(),
+                    );
                     if let Some((surface, ..)) = &state.tutorial {
                         control.redraw(*surface);
                     }
@@ -2982,7 +3001,11 @@ fn draw_panel(
                     log::debug!("the panel of {display} shows the hint {words:?}");
                     let hint = control.hint(surface, anchor, size, beside, move |ui, _| {
                         if !fonts {
-                            theme::install_fonts_for(ui.ctx(), &settings, gevrek_ui::fonts::Area::Panel);
+                            theme::install_fonts_for(
+                                ui.ctx(),
+                                &settings,
+                                gevrek_ui::fonts::Area::Panel,
+                            );
                             fonts = true;
                         }
                         panel::draw_hint(ui, &look, &said);
@@ -3079,7 +3102,10 @@ fn draw_panel(
         .or(asked.sound_menu.map(|anchor| (Menu::Sound, anchor)))
         .or(tray_list.map(|anchor| (Menu::Tray, anchor)))
         .or(asked.task_menu.as_ref().map(|(anchor, windows)| {
-            (Menu::Windows(windows.first().copied().unwrap_or(0)), *anchor)
+            (
+                Menu::Windows(windows.first().copied().unwrap_or(0)),
+                *anchor,
+            )
         }))
         .or(asked
             .task_actions
@@ -3177,7 +3203,10 @@ fn draw_panel(
         }
         Menu::Windows(_) => {
             // The windows as they are now; a press on one goes to it.
-            let listed = asked.task_menu.as_ref().map(|(_, windows)| windows.as_slice());
+            let listed = asked
+                .task_menu
+                .as_ref()
+                .map(|(_, windows)| windows.as_slice());
             let tasks = panel::tasks_of_ids(&view, listed.unwrap_or_default());
             if tasks.is_empty() {
                 return Flow::Continue;

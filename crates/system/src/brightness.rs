@@ -126,7 +126,10 @@ mod mac {
     fn calls() -> Option<(Get, Set)> {
         static CALLS: OnceLock<Option<(usize, usize)>> = OnceLock::new();
         let (get, set) = (*CALLS.get_or_init(|| {
-            let path = CString::new("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices").ok()?;
+            let path = CString::new(
+                "/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices",
+            )
+            .ok()?;
             // SAFETY: the framework loaded once and kept; its two calls
             // looked up by name.
             unsafe {
@@ -141,7 +144,12 @@ mod mac {
         }))?;
         // SAFETY: the calls' signatures, as every tool that uses them has
         // them.
-        Some(unsafe { (std::mem::transmute::<usize, Get>(get), std::mem::transmute::<usize, Set>(set)) })
+        Some(unsafe {
+            (
+                std::mem::transmute::<usize, Get>(get),
+                std::mem::transmute::<usize, Set>(set),
+            )
+        })
     }
 
     fn built_in() -> Option<u32> {
@@ -150,7 +158,10 @@ mod mac {
         // SAFETY: room for 16 ids.
         unsafe {
             CGGetActiveDisplayList(16, ids.as_mut_ptr(), &mut count);
-            ids[..count as usize].iter().copied().find(|id| CGDisplayIsBuiltin(*id) != 0)
+            ids[..count as usize]
+                .iter()
+                .copied()
+                .find(|id| CGDisplayIsBuiltin(*id) != 0)
         }
     }
 
@@ -305,7 +316,8 @@ mod lcd {
             // (Which of the two counts, the level on the mains, the level
             // on the battery.)
             let mut answer = [0u8; 3];
-            self.ask(QUERY, None, &mut answer).filter(|count| *count >= 3)?;
+            self.ask(QUERY, None, &mut answer)
+                .filter(|count| *count >= 3)?;
             let mut status = SYSTEM_POWER_STATUS::default();
             // SAFETY: the call fills in the structure it is given.
             let on_mains =
@@ -348,7 +360,10 @@ pub fn change(by_percent: i32) -> Option<Brightness> {
         // that gives it to the user, or a folder of the checks'), else
         // through logind, which sets it for the user at the machine.
         if let Err(error) = std::fs::write(&file, wanted.to_string()) {
-            log::debug!("{} was not written ({error}): logind is asked", file.display());
+            log::debug!(
+                "{} was not written ({error}): logind is asked",
+                file.display()
+            );
             let asked = std::process::Command::new("busctl")
                 .args([
                     "call",

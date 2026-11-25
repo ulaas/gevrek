@@ -34,11 +34,11 @@ pub mod preview;
 pub mod rawtext;
 pub mod reorder;
 pub mod rules_live;
-pub mod workspaces;
 pub mod sample;
 pub mod sandbox;
 pub mod session;
 pub mod shortcuts;
+pub mod snap_zones_edit;
 /// The system's own idle times, where the system keeps them.
 #[cfg(windows)]
 pub mod system_idle;
@@ -46,6 +46,6 @@ pub mod theme_card;
 pub mod tryout;
 pub mod wallpaper_preview;
 pub mod welcome;
-pub mod snap_zones_edit;
+pub mod workspaces;
 /// The zones that hold the desktop's icons (not the snap zones).
 pub mod zones_page;

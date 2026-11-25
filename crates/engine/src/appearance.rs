@@ -343,7 +343,10 @@ impl WmCore {
         let focused_window = desktop
             .active_window()
             .filter(|active| {
-                workspace.floating_windows.iter().any(|window| window == active)
+                workspace
+                    .floating_windows
+                    .iter()
+                    .any(|window| window == active)
                     || workspace
                         .containers
                         .iter()

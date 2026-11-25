@@ -6,10 +6,10 @@
 use crate::core::WmCore;
 use crate::outputs::{MonitorHandle, MonitorInfo, Outputs};
 use crate::rules::{FloatRule, MatchKind, MatchStrategy, RuleEngine, WindowRule};
-use crate::workspace_profile::WorkspaceProfileApply;
 use crate::snap_zones::SnapZoneManager;
+use crate::workspace_profile::WorkspaceProfileApply;
 use gevrek_model::settings::{
-    AppearanceProfile, DesktopConfig, MonitorSelector, WorkspaceProfile, SnapZoneSettings,
+    AppearanceProfile, DesktopConfig, MonitorSelector, SnapZoneSettings, WorkspaceProfile,
 };
 use gevrek_model::snap_zones::SnapZoneModifier;
 
@@ -197,13 +197,17 @@ impl WmCore {
                 .get_workspaces(monitor)
                 .is_none_or(|workspaces| workspaces.is_empty());
             for profile in there.iter().filter(|profile| include(profile)) {
-                let existing_index = self.monitor_manager.get_workspaces(monitor).and_then(
-                    |workspaces| {
-                        workspaces.iter().position(|workspace| {
-                            workspace.name.trim().eq_ignore_ascii_case(profile.name.trim())
-                        })
-                    },
-                );
+                let existing_index =
+                    self.monitor_manager
+                        .get_workspaces(monitor)
+                        .and_then(|workspaces| {
+                            workspaces.iter().position(|workspace| {
+                                workspace
+                                    .name
+                                    .trim()
+                                    .eq_ignore_ascii_case(profile.name.trim())
+                            })
+                        });
                 // Persistent/default profiles are eagerly materialized.
                 // Other profiles remain declarative until a named selector
                 // visits them.
@@ -238,7 +242,8 @@ impl WmCore {
                 // as of a renaming by hand.)
                 if let Some((id, before, now)) = shown_as {
                     log::info!("Workspace '{before}' is shown as '{now}' on this display now");
-                    self.executor.emit_workspace_renamed(monitor, id, &before, &now);
+                    self.executor
+                        .emit_workspace_renamed(monitor, id, &before, &now);
                 }
                 if profile.default && (focus_default || new_display) {
                     self.monitor_manager.focus_workspace_at(monitor, index);

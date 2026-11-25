@@ -5,13 +5,13 @@
 
 mod common;
 
-use gevrek_host::wm::reload::Reload as _;
-use gevrek_host::wm::commands::Commands as _;
 use common::{Harness, SCREEN};
 use gevrek_engine::layouts::LayoutType;
 use gevrek_engine::WindowQueries;
 use gevrek_host::command::{ManualCommand, RuntimeCommand, RuntimeCommandResult};
 use gevrek_host::config_store::{config_channel, ConfigRequest};
+use gevrek_host::wm::commands::Commands as _;
+use gevrek_host::wm::reload::Reload as _;
 use gevrek_model::command::{DispatchCommand, WorkspaceSelector};
 use gevrek_model::config::Config;
 use gevrek_model::settings::BindingProfile;
@@ -444,7 +444,10 @@ fn bindings_on_mouse_buttons_the_wheel_long_presses_and_repeats() {
     assert_eq!(harness.state.host.active_submap, "long");
     reset(&mut harness);
     harness.state.tick_held(start + Duration::from_millis(900));
-    assert_eq!(harness.state.host.active_submap, "default", "once per press");
+    assert_eq!(
+        harness.state.host.active_submap, "default",
+        "once per press"
+    );
     harness
         .state
         .key_event((KEY_F10 + 8).into(), KeyState::Released, 0);
@@ -605,14 +608,21 @@ fn the_overview_of_the_windows_has_titles_a_mark_and_keys() {
     let client = harness.connect();
     let (_, editor) = harness.open(client, "editor", "org.test.editor");
     let (_, terminal) = harness.open(client, "terminal", "org.test.terminal");
-    let focused = harness.state.desktop.focused.expect("a window has the keyboard");
+    let focused = harness
+        .state
+        .desktop
+        .focused
+        .expect("a window has the keyboard");
     let other = if focused == editor { terminal } else { editor };
     let before = (harness.rect(editor), harness.rect(terminal));
     assert!(!harness.state.window_overview_is_up());
 
     // The overview: a picture of each, smaller, with its title, and the
     // window with the keyboard pointed at.
-    harness.state.run_command(DispatchCommand::ToggleExpose).unwrap();
+    harness
+        .state
+        .run_command(DispatchCommand::ToggleExpose)
+        .unwrap();
     harness.pump();
     harness.state.sync_window_overview();
     assert!(harness.state.window_overview_is_up());
@@ -644,7 +654,10 @@ fn the_overview_of_the_windows_has_titles_a_mark_and_keys() {
     assert!(harness.clients[client].app.keys.is_empty());
 
     // Up again, and Escape puts it away with nothing chosen.
-    harness.state.run_command(DispatchCommand::ToggleExpose).unwrap();
+    harness
+        .state
+        .run_command(DispatchCommand::ToggleExpose)
+        .unwrap();
     harness.pump();
     harness.state.sync_window_overview();
     assert!(harness.state.window_overview_is_up());
@@ -681,7 +694,9 @@ fn the_pointer_left_in_a_corner_runs_that_corners_command() {
     // Elsewhere, and in another corner: nothing.
     harness.state.pointer_moved((400.0, 300.0).into(), 0);
     harness.state.pointer_moved((0.0, 0.0).into(), 0);
-    harness.state.tick_hot_corners(start + Duration::from_secs(2));
+    harness
+        .state
+        .tick_hot_corners(start + Duration::from_secs(2));
     assert_eq!(harness.state.host.active_submap, "default");
     assert!(!harness.state.hot_corners.waits());
     // In its corner: not at once, and the host is asked to look again.
@@ -689,7 +704,9 @@ fn the_pointer_left_in_a_corner_runs_that_corners_command() {
     assert_eq!(harness.state.host.active_submap, "default");
     assert!(harness.state.hot_corners.waits());
     // Left there for its moment: once.
-    harness.state.tick_hot_corners(Instant::now() + Duration::from_millis(600));
+    harness
+        .state
+        .tick_hot_corners(Instant::now() + Duration::from_millis(600));
     assert_eq!(harness.state.host.active_submap, "corner");
     assert!(!harness.state.hot_corners.waits());
 }
@@ -1247,7 +1264,10 @@ fn a_release_is_matched_in_the_submap_its_press_was_made_in() {
 
     // A key pressed in "held" is let go in it: F10 leaves on its
     // release.
-    harness.state.run_command(submap("held")).expect("the submap");
+    harness
+        .state
+        .run_command(submap("held"))
+        .expect("the submap");
     key(&mut harness, KEY_F10, KeyState::Pressed);
     assert_eq!(harness.state.host.active_submap, "held");
     key(&mut harness, KEY_F10, KeyState::Released);

@@ -30,12 +30,12 @@ impl Runtime {
 mod tests {
     use super::*;
     use crate::config::Config;
-    use gevrek_host::wm::reload::Reload as _;
     use crate::dwm::layouts::LayoutType;
     use crate::node_editor::{BorderStyle, NodeGraph, NodeType};
     use crate::runtime::test_support::{finish, run_startup, test_runtime, TestWindow, MONITOR};
     use crate::settings::WorkspaceProfile;
     use gevrek_engine::reload::{changed_profile_names, same};
+    use gevrek_host::wm::reload::Reload as _;
 
     /// Everything a reload must not touch unless the config says so.
     fn workspace_state(runtime: &Runtime) -> Vec<String> {

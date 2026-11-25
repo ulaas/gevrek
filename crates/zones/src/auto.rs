@@ -16,7 +16,9 @@
 //! new of the type goes into the one there is, and a desktop that is
 //! sorted already gives an empty plan.
 
-use crate::config::{AutoCategory, Matcher, Rule, RuleAction, ZoneKind, ZonesConfig, DEFAULT_ICON_SIZE};
+use crate::config::{
+    AutoCategory, Matcher, Rule, RuleAction, ZoneKind, ZonesConfig, DEFAULT_ICON_SIZE,
+};
 use crate::ids::{DisplayId, ItemId, ZoneId};
 use crate::item::{Item, ItemKind};
 use crate::layout::{self, Metrics};
@@ -117,14 +119,19 @@ pub fn category_of<'a>(categories: &'a [AutoCategory], item: &Item) -> Option<&'
     if item.kind == ItemKind::Virtual {
         return None;
     }
-    let by_kind = || categories.iter().find(|category| category.kinds.contains(&item.kind));
+    let by_kind = || {
+        categories
+            .iter()
+            .find(|category| category.kinds.contains(&item.kind))
+    };
     let by_extension = || {
         let extension = item.facts.extension.as_ref()?;
         categories.iter().find(|category| {
-            category
-                .extensions
-                .iter()
-                .any(|wanted| wanted.trim_start_matches('.').eq_ignore_ascii_case(extension))
+            category.extensions.iter().any(|wanted| {
+                wanted
+                    .trim_start_matches('.')
+                    .eq_ignore_ascii_case(extension)
+            })
         })
     };
     let by_mime = || {
@@ -160,14 +167,22 @@ pub fn rule_name(title: &str) -> String {
 /// picture known by its MIME type alone) is caught by asking for the
 /// zones by type again.
 pub fn rule_for(category: &AutoCategory, zone: &ZoneId) -> Option<Rule> {
-    let kinds: Vec<ItemKind> =
-        category.kinds.iter().copied().filter(|kind| *kind != ItemKind::Virtual).collect();
+    let kinds: Vec<ItemKind> = category
+        .kinds
+        .iter()
+        .copied()
+        .filter(|kind| *kind != ItemKind::Virtual)
+        .collect();
     let matcher = if !category.extensions.is_empty() {
-        Matcher::Extension { any_of: category.extensions.clone() }
+        Matcher::Extension {
+            any_of: category.extensions.clone(),
+        }
     } else if !kinds.is_empty() {
         Matcher::Kind { any_of: kinds }
     } else if let [prefix] = category.mime_prefixes.as_slice() {
-        Matcher::Mime { pattern: format!("{prefix}*") }
+        Matcher::Mime {
+            pattern: format!("{prefix}*"),
+        }
     } else {
         return None;
     };
@@ -202,8 +217,12 @@ fn size_of(columns: usize, rows: usize, icon_size: u32, metrics: &Metrics) -> (i
     let (columns, rows) = (columns as i32, rows as i32);
     let (least_width, least_height) = metrics.least();
     (
-        (2 * metrics.padding + columns * cell_width + (columns - 1) * metrics.spacing).max(least_width),
-        (metrics.title_height + 2 * metrics.padding + rows * cell_height + (rows - 1) * metrics.spacing)
+        (2 * metrics.padding + columns * cell_width + (columns - 1) * metrics.spacing)
+            .max(least_width),
+        (metrics.title_height
+            + 2 * metrics.padding
+            + rows * cell_height
+            + (rows - 1) * metrics.spacing)
             .max(least_height),
     )
 }
@@ -246,7 +265,13 @@ struct Shelf {
 /// come to, and where they have come to with it: along the row, past
 /// whatever is in the way, and into the next row where this one is full.
 /// None when no row has room for it.
-fn find(shelf: Shelf, (width, height): (i32, i32), inner: Rect, blocked: &[Rect], gap: i32) -> Option<(Rect, Shelf)> {
+fn find(
+    shelf: Shelf,
+    (width, height): (i32, i32),
+    inner: Rect,
+    blocked: &[Rect],
+    gap: i32,
+) -> Option<(Rect, Shelf)> {
     let (right, bottom) = (inner.x + inner.width, inner.y + inner.height);
     let mut shelf = shelf;
     loop {
@@ -266,7 +291,11 @@ fn find(shelf: Shelf, (width, height): (i32, i32), inner: Rect, blocked: &[Rect]
                 // of where it begins.)
                 Some(past) => x = past.max(x + 1),
                 None => {
-                    let shelf = Shelf { x: x + width + gap, y: shelf.y, bottom: shelf.bottom.max(shelf.y + height) };
+                    let shelf = Shelf {
+                        x: x + width + gap,
+                        y: shelf.y,
+                        bottom: shelf.bottom.max(shelf.y + height),
+                    };
                     return Some((wanted, shelf));
                 }
             }
@@ -284,7 +313,11 @@ fn find(shelf: Shelf, (width, height): (i32, i32), inner: Rect, blocked: &[Rect]
                 .filter(|below| *below > shelf.y)
                 .min()?
         };
-        shelf = Shelf { x: inner.x, y: next, bottom: next };
+        shelf = Shelf {
+            x: inner.x,
+            y: next,
+            bottom: next,
+        };
     }
 }
 
@@ -304,13 +337,27 @@ pub fn place(area: Rect, gap: i32, taken: &[Rect], sizes: &[Sizes]) -> Vec<Rect>
     let gap = gap.max(0);
     // (A room too small for its own margins has none.)
     let inner = if area.width > 2 * gap && area.height > 2 * gap {
-        Rect::new(area.x + gap, area.y + gap, area.width - 2 * gap, area.height - 2 * gap)
+        Rect::new(
+            area.x + gap,
+            area.y + gap,
+            area.width - 2 * gap,
+            area.height - 2 * gap,
+        )
     } else {
         area
     };
-    let fitted = |(width, height): (i32, i32)| (width.min(inner.width).max(1), height.min(inner.height).max(1));
+    let fitted = |(width, height): (i32, i32)| {
+        (
+            width.min(inner.width).max(1),
+            height.min(inner.height).max(1),
+        )
+    };
     let mut blocked: Vec<Rect> = taken.to_vec();
-    let mut shelf = Shelf { x: inner.x, y: inner.y, bottom: inner.y };
+    let mut shelf = Shelf {
+        x: inner.x,
+        y: inner.y,
+        bottom: inner.y,
+    };
     let mut cascaded = 0;
     let mut placed = Vec::with_capacity(sizes.len());
     for size in sizes {
@@ -326,7 +373,10 @@ pub fn place(area: Rect, gap: i32, taken: &[Rect], sizes: &[Sizes]) -> Vec<Rect>
                 let (width, height) = fitted(size.least);
                 let step = CASCADE * cascaded;
                 cascaded += 1;
-                snap::keep_reachable(Rect::new(inner.x + step, inner.y + step, width, height), inner)
+                snap::keep_reachable(
+                    Rect::new(inner.x + step, inner.y + step, width, height),
+                    inner,
+                )
             }
         };
         blocked.push(rect);
@@ -378,7 +428,10 @@ pub fn plan<'a>(
     rect_of: &dyn Fn(&ZoneId) -> Option<Rect>,
 ) -> AutoPlan {
     let categories = &config.auto.categories;
-    let mut plan = AutoPlan { display: Some(room.display.clone()), ..AutoPlan::default() };
+    let mut plan = AutoPlan {
+        display: Some(room.display.clone()),
+        ..AutoPlan::default()
+    };
     // The zone an item is shown in: one that is there and filled by hand.
     let zone_of = |item: &ItemId| {
         placements
@@ -398,8 +451,11 @@ pub fn plan<'a>(
             Some(zone) if asked.scope == Scope::All && zone.auto.is_none() && !locked(zone) => {}
             Some(_) => continue,
         }
-        let place = category_of(categories, item)
-            .and_then(|category| categories.iter().position(|other| std::ptr::eq(other, category)));
+        let place = category_of(categories, item).and_then(|category| {
+            categories
+                .iter()
+                .position(|other| std::ptr::eq(other, category))
+        });
         match place {
             Some(place) => of_type[place].push(item),
             None => of_none.push(item),
@@ -416,10 +472,9 @@ pub fn plan<'a>(
             continue;
         }
         by_name(&mut items);
-        let existing = config
-            .zones
-            .iter()
-            .find(|zone| zone.kind == ZoneKind::Manual && zone.auto.as_deref() == Some(category.id.as_str()));
+        let existing = config.zones.iter().find(|zone| {
+            zone.kind == ZoneKind::Manual && zone.auto.as_deref() == Some(category.id.as_str())
+        });
         match existing {
             _ if config.lock.members => plan.left.extend(ids(&items)),
             Some(zone) if locked(zone) => plan.left.extend(ids(&items)),
@@ -448,8 +503,15 @@ pub fn plan<'a>(
     }
     by_name(&mut of_none);
     plan.left.extend(ids(&of_none));
-    let gap = if config.snap.gap > 0 { config.snap.gap } else { 0 };
-    for (place, rect) in made.into_iter().zip(place(room.area, gap, room.taken, &wanted)) {
+    let gap = if config.snap.gap > 0 {
+        config.snap.gap
+    } else {
+        0
+    };
+    for (place, rect) in made
+        .into_iter()
+        .zip(place(room.area, gap, room.taken, &wanted))
+    {
         plan.zones[place].rect = rect;
     }
     plan
@@ -471,7 +533,10 @@ mod tests {
 
     fn with_mime(name: &str, mime: &str) -> Item {
         let mut item = file(name);
-        item.facts = ItemFacts { mime: Some(mime.to_string()), ..item.facts };
+        item.facts = ItemFacts {
+            mime: Some(mime.to_string()),
+            ..item.facts
+        };
         item
     }
 
@@ -480,17 +545,42 @@ mod tests {
     }
 
     fn config() -> ZonesConfig {
-        ZonesConfig { enabled: true, ..ZonesConfig::default() }
+        ZonesConfig {
+            enabled: true,
+            ..ZonesConfig::default()
+        }
     }
 
-    const AREA: Rect = Rect { x: 0, y: 40, width: 1920, height: 1040 };
+    const AREA: Rect = Rect {
+        x: 0,
+        y: 40,
+        width: 1920,
+        height: 1040,
+    };
 
-    fn planned(config: &ZonesConfig, items: &[Item], placements: &Placements, scope: Scope, taken: &[Rect]) -> AutoPlan {
+    fn planned(
+        config: &ZonesConfig,
+        items: &[Item],
+        placements: &Placements,
+        scope: Scope,
+        taken: &[Rect],
+    ) -> AutoPlan {
         let display = DisplayId::new("d");
         let metrics = Metrics::default();
-        let room = Room { display: &display, area: AREA, taken, metrics: &metrics };
-        let asked = Asked { scope, min_items: config.auto.min_items, add_rules: config.auto.add_rules };
-        plan(config, items, placements, asked, &room, &|_| Some(Rect::new(1000, 500, 300, 200)))
+        let room = Room {
+            display: &display,
+            area: AREA,
+            taken,
+            metrics: &metrics,
+        };
+        let asked = Asked {
+            scope,
+            min_items: config.auto.min_items,
+            add_rules: config.auto.add_rules,
+        };
+        plan(config, items, placements, asked, &room, &|_| {
+            Some(Rect::new(1000, 500, 300, 200))
+        })
     }
 
     fn overlap(one: Rect, other: Rect) -> bool {
@@ -500,7 +590,8 @@ mod tests {
     #[test]
     fn an_item_is_of_the_type_its_kind_its_extension_or_its_mime_says() {
         let categories = AutoCategory::built_in();
-        let type_of = |item: &Item| category_of(&categories, item).map(|category| category.id.as_str());
+        let type_of =
+            |item: &Item| category_of(&categories, item).map(|category| category.id.as_str());
         for (item, expected) in [
             (Item::folder("/desk/Projects"), Some("folders")),
             // Kind before extension: a folder is a folder whatever it is called.
@@ -523,7 +614,10 @@ mod tests {
             // By MIME alone, where the name says nothing.
             (with_mime("scan", "image/png"), Some("pictures")),
             (with_mime("LICENSE", "text/plain"), Some("documents")),
-            (with_mime("letter", "application/vnd.oasis.opendocument.text"), Some("documents")),
+            (
+                with_mime("letter", "application/vnd.oasis.opendocument.text"),
+                Some("documents"),
+            ),
             (with_mime("clip", "VIDEO/mp4"), Some("video")),
             (with_mime("voice", "audio/ogg"), Some("audio")),
             // What nothing names goes to the type that takes the rest.
@@ -540,26 +634,37 @@ mod tests {
 
     #[test]
     fn the_order_of_the_types_breaks_a_tie_and_without_a_rest_some_items_are_of_none() {
-        let category = |id: &str, extensions: &[&str], mime: &[&str], kinds: &[ItemKind]| AutoCategory {
-            id: id.to_string(),
-            title: id.to_uppercase(),
-            extensions: extensions.iter().map(|text| text.to_string()).collect(),
-            mime_prefixes: mime.iter().map(|text| text.to_string()).collect(),
-            kinds: kinds.to_vec(),
-            ..AutoCategory::default()
-        };
+        let category =
+            |id: &str, extensions: &[&str], mime: &[&str], kinds: &[ItemKind]| AutoCategory {
+                id: id.to_string(),
+                title: id.to_uppercase(),
+                extensions: extensions.iter().map(|text| text.to_string()).collect(),
+                mime_prefixes: mime.iter().map(|text| text.to_string()).collect(),
+                kinds: kinds.to_vec(),
+                ..AutoCategory::default()
+            };
         let categories = vec![
             category("notes", &["txt", ".MD"], &["text/"], &[]),
             category("texts", &["txt", "rtf"], &["text/"], &[]),
             category("files", &[], &[], &[ItemKind::File]),
         ];
-        let type_of = |item: &Item| category_of(&categories, item).map(|category| category.id.as_str());
+        let type_of =
+            |item: &Item| category_of(&categories, item).map(|category| category.id.as_str());
         // Kind is asked first, so the last one takes every file.
         assert_eq!(type_of(&file("a.txt")), Some("files"));
         let categories = categories[..2].to_vec();
-        let type_of = |item: &Item| category_of(&categories, item).map(|category| category.id.as_str());
-        assert_eq!(type_of(&file("a.txt")), Some("notes"), "the first that names it");
-        assert_eq!(type_of(&file("a.md")), Some("notes"), "written with a dot and in capitals");
+        let type_of =
+            |item: &Item| category_of(&categories, item).map(|category| category.id.as_str());
+        assert_eq!(
+            type_of(&file("a.txt")),
+            Some("notes"),
+            "the first that names it"
+        );
+        assert_eq!(
+            type_of(&file("a.md")),
+            Some("notes"),
+            "written with a dot and in capitals"
+        );
         assert_eq!(type_of(&file("a.rtf")), Some("texts"));
         assert_eq!(type_of(&with_mime("a", "text/plain")), Some("notes"));
         assert_eq!(type_of(&file("a.bin")), None, "no type takes the rest");
@@ -571,16 +676,32 @@ mod tests {
         let categories = AutoCategory::built_in();
         let zone = ZoneId::new("zone-7");
         let rule = |id: &str| {
-            let category = categories.iter().find(|category| category.id == id).unwrap();
+            let category = categories
+                .iter()
+                .find(|category| category.id == id)
+                .unwrap();
             rule_for(category, &zone)
         };
         let pictures = rule("pictures").unwrap();
         assert_eq!(pictures.name, "Auto: Pictures");
         assert!(pictures.enabled);
-        assert_eq!(pictures.action, RuleAction::AssignToZone { zone: zone.clone() });
-        assert!(matches!(pictures.matchers.as_slice(), [Matcher::Extension { any_of }] if any_of.contains(&"png".to_string())));
-        assert_eq!(rule("folders").unwrap().matchers, [Matcher::Kind { any_of: vec![ItemKind::Folder] }]);
-        assert!(matches!(rule("programs").unwrap().matchers.as_slice(), [Matcher::Extension { .. }]));
+        assert_eq!(
+            pictures.action,
+            RuleAction::AssignToZone { zone: zone.clone() }
+        );
+        assert!(
+            matches!(pictures.matchers.as_slice(), [Matcher::Extension { any_of }] if any_of.contains(&"png".to_string()))
+        );
+        assert_eq!(
+            rule("folders").unwrap().matchers,
+            [Matcher::Kind {
+                any_of: vec![ItemKind::Folder]
+            }]
+        );
+        assert!(matches!(
+            rule("programs").unwrap().matchers.as_slice(),
+            [Matcher::Extension { .. }]
+        ));
         // A rule that would match everything is not made.
         assert_eq!(rule("other"), None);
         // By MIME where that is all the type names, and it names one.
@@ -590,23 +711,58 @@ mod tests {
             ..AutoCategory::default()
         };
         let made = rule_for(&by_mime, &zone).unwrap();
-        assert_eq!(made.name, "Auto: fonts", "called by its id where it has no title");
-        assert_eq!(made.matchers, [Matcher::Mime { pattern: "font/*".to_string() }]);
-        let two = AutoCategory { mime_prefixes: vec!["a/".to_string(), "b/".to_string()], ..by_mime };
-        assert_eq!(rule_for(&two, &zone), None, "one rule cannot say either of two");
+        assert_eq!(
+            made.name, "Auto: fonts",
+            "called by its id where it has no title"
+        );
+        assert_eq!(
+            made.matchers,
+            [Matcher::Mime {
+                pattern: "font/*".to_string()
+            }]
+        );
+        let two = AutoCategory {
+            mime_prefixes: vec!["a/".to_string(), "b/".to_string()],
+            ..by_mime
+        };
+        assert_eq!(
+            rule_for(&two, &zone),
+            None,
+            "one rule cannot say either of two"
+        );
         // Each rule matches what its type takes by that fact.
-        for (name, id) in [("cat.png", "pictures"), ("setup.exe", "programs"), ("a.pdf", "documents")] {
-            assert!(crate::rules::matches(&rule(id).unwrap(), &file(name), 0), "{name}");
+        for (name, id) in [
+            ("cat.png", "pictures"),
+            ("setup.exe", "programs"),
+            ("a.pdf", "documents"),
+        ] {
+            assert!(
+                crate::rules::matches(&rule(id).unwrap(), &file(name), 0),
+                "{name}"
+            );
         }
-        assert!(crate::rules::matches(&rule("folders").unwrap(), &Item::folder("/desk/x"), 0));
-        assert!(!crate::rules::matches(&rule("folders").unwrap(), &file("x.png"), 0));
+        assert!(crate::rules::matches(
+            &rule("folders").unwrap(),
+            &Item::folder("/desk/x"),
+            0
+        ));
+        assert!(!crate::rules::matches(
+            &rule("folders").unwrap(),
+            &file("x.png"),
+            0
+        ));
     }
 
     #[test]
     fn a_new_zone_is_as_large_as_what_it_holds_within_limits() {
         let metrics = Metrics::default();
         // 48 units an icon: a cell is 76 by 82, 4 apart, 8 around, 28 of title.
-        let size = |columns: i32, rows: i32| (16 + columns * 76 + (columns - 1) * 4, 28 + 16 + rows * 82 + (rows - 1) * 4);
+        let size = |columns: i32, rows: i32| {
+            (
+                16 + columns * 76 + (columns - 1) * 4,
+                28 + 16 + rows * 82 + (rows - 1) * 4,
+            )
+        };
         for (count, columns, rows) in [
             (0, 2, 1),
             (1, 2, 1),
@@ -627,8 +783,11 @@ mod tests {
             assert_eq!(sizes.full, size(columns, rows), "{count} items");
             assert_eq!(sizes.least, size(2, 1), "{count} items");
             // The zone laid out at that size has exactly those columns.
-            let content = layout::content_area(Rect::new(0, 0, sizes.full.0, sizes.full.1), false, &metrics);
-            let items: Vec<ItemId> = (0..count).map(|number| ItemId::new(number.to_string())).collect();
+            let content =
+                layout::content_area(Rect::new(0, 0, sizes.full.0, sizes.full.1), false, &metrics);
+            let items: Vec<ItemId> = (0..count)
+                .map(|number| ItemId::new(number.to_string()))
+                .collect();
             let laid = layout::lay_out(
                 crate::config::View::Grid,
                 DEFAULT_ICON_SIZE,
@@ -643,14 +802,24 @@ mod tests {
             }
         }
         // Never smaller than a zone may be.
-        let tiny = Metrics { least_width: 400, least_height: 300, ..metrics };
+        let tiny = Metrics {
+            least_width: 400,
+            least_height: 300,
+            ..metrics
+        };
         assert_eq!(size_for(1, 16, &tiny).full, (400, 300));
     }
 
     #[test]
     fn new_zones_stand_in_rows_from_the_top_left_and_keep_off_what_is_there() {
-        let one = Sizes { full: (300, 200), least: (172, 126) };
-        let tall = Sizes { full: (300, 400), least: (172, 126) };
+        let one = Sizes {
+            full: (300, 200),
+            least: (172, 126),
+        };
+        let tall = Sizes {
+            full: (300, 400),
+            least: (172, 126),
+        };
         let area = Rect::new(100, 50, 1000, 700);
         // (what it shows, gap, what is there, the sizes, where they go)
         type Case = (&'static str, i32, Vec<Rect>, Vec<Sizes>, Vec<Rect>);
@@ -704,7 +873,10 @@ mod tests {
             (
                 "a zone outside the room is in nobody's way",
                 8,
-                vec![Rect::new(2000, 50, 500, 500), Rect::new(100, -400, 500, 300)],
+                vec![
+                    Rect::new(2000, 50, 500, 500),
+                    Rect::new(100, -400, 500, 300),
+                ],
                 vec![one],
                 vec![Rect::new(108, 58, 300, 200)],
             ),
@@ -712,7 +884,11 @@ mod tests {
         for (name, gap, taken, sizes, expected) in cases {
             let placed = place(area, gap, &taken, &sizes);
             assert_eq!(placed, expected, "{name}");
-            assert_eq!(place(area, gap, &taken, &sizes), placed, "{name}: the same every time");
+            assert_eq!(
+                place(area, gap, &taken, &sizes),
+                placed,
+                "{name}: the same every time"
+            );
         }
     }
 
@@ -720,39 +896,71 @@ mod tests {
     fn every_new_zone_has_a_place_inside_the_room_whatever_the_room() {
         let metrics = Metrics::default();
         let counts = [1usize, 2, 3, 5, 8, 13, 21, 40, 4, 6];
-        let sizes: Vec<Sizes> = counts.iter().map(|count| size_for(*count, DEFAULT_ICON_SIZE, &metrics)).collect();
+        let sizes: Vec<Sizes> = counts
+            .iter()
+            .map(|count| size_for(*count, DEFAULT_ICON_SIZE, &metrics))
+            .collect();
         // (area, gap, taken, whether there is room for all)
         let rooms: Vec<(Rect, i32, Vec<Rect>, bool)> = vec![
             (Rect::new(0, 0, 3840, 2160), 8, vec![], true),
             (Rect::new(0, 40, 1920, 1040), 8, vec![], true),
-            (Rect::new(-1920, -200, 1920, 1080), 16, vec![Rect::new(-1900, -180, 320, 240)], true),
+            (
+                Rect::new(-1920, -200, 1920, 1080),
+                16,
+                vec![Rect::new(-1900, -180, 320, 240)],
+                true,
+            ),
             (
                 Rect::new(0, 40, 3840, 2120),
                 8,
-                vec![Rect::new(40, 80, 320, 240), Rect::new(900, 300, 400, 300), Rect::new(1500, 60, 300, 900)],
+                vec![
+                    Rect::new(40, 80, 320, 240),
+                    Rect::new(900, 300, 400, 300),
+                    Rect::new(1500, 60, 300, 900),
+                ],
                 true,
             ),
             // Zones in the way of nearly every row: no room for all.
             (
                 Rect::new(0, 40, 1920, 1040),
                 8,
-                vec![Rect::new(40, 80, 320, 240), Rect::new(900, 300, 400, 300), Rect::new(1500, 60, 300, 900)],
+                vec![
+                    Rect::new(40, 80, 320, 240),
+                    Rect::new(900, 300, 400, 300),
+                    Rect::new(1500, 60, 300, 900),
+                ],
                 false,
             ),
             (Rect::new(0, 0, 3000, 2000), 200, vec![], true),
             // No room for all: the rest is laid over what is there.
             (Rect::new(0, 0, 800, 600), 8, vec![], false),
-            (Rect::new(0, 0, 1920, 1080), 8, vec![Rect::new(0, 0, 1920, 1080)], false),
+            (
+                Rect::new(0, 0, 1920, 1080),
+                8,
+                vec![Rect::new(0, 0, 1920, 1080)],
+                false,
+            ),
             (Rect::new(10, 10, 100, 60), 8, vec![], false),
             (Rect::new(0, 0, 1, 1), 8, vec![], false),
             (Rect::new(0, 0, 1920, 1080), -5, vec![], true),
         ];
         for (area, gap, taken, room_for_all) in rooms {
             let placed = place(area, gap, &taken, &sizes);
-            assert_eq!(placed.len(), sizes.len(), "{area:?}: every zone has a place");
-            assert_eq!(place(area, gap, &taken, &sizes), placed, "{area:?}: the same every time");
+            assert_eq!(
+                placed.len(),
+                sizes.len(),
+                "{area:?}: every zone has a place"
+            );
+            assert_eq!(
+                place(area, gap, &taken, &sizes),
+                placed,
+                "{area:?}: the same every time"
+            );
             for rect in &placed {
-                assert!(rect.width >= 1 && rect.height >= 1 && snap::within(*rect, area), "{rect:?} in {area:?}");
+                assert!(
+                    rect.width >= 1 && rect.height >= 1 && snap::within(*rect, area),
+                    "{rect:?} in {area:?}"
+                );
             }
             if !room_for_all {
                 continue;
@@ -768,9 +976,16 @@ mod tests {
                     "{rect:?} keeps {gap} to the sides of {area:?}"
                 );
                 for other in taken.iter().chain(&placed[..index]) {
-                    assert!(!crowds(*rect, *other, gap), "{rect:?} is on or too near {other:?} in {area:?}");
+                    assert!(
+                        !crowds(*rect, *other, gap),
+                        "{rect:?} is on or too near {other:?} in {area:?}"
+                    );
                 }
-                assert_eq!((rect.width, rect.height), sizes[index].full, "as large as wanted, where there is room");
+                assert_eq!(
+                    (rect.width, rect.height),
+                    sizes[index].full,
+                    "as large as wanted, where there is room"
+                );
             }
         }
     }
@@ -809,11 +1024,31 @@ mod tests {
         assert_eq!(
             said,
             [
-                ("folders", "Folders", vec!["/desk/Archive", "/desk/Projects"], true),
-                ("documents", "Documents", vec!["/desk/notes.txt", "/desk/report.pdf"], true),
-                ("pictures", "Pictures", vec!["/desk/a.png", "/desk/b.png", "/desk/c.jpg"], true),
+                (
+                    "folders",
+                    "Folders",
+                    vec!["/desk/Archive", "/desk/Projects"],
+                    true
+                ),
+                (
+                    "documents",
+                    "Documents",
+                    vec!["/desk/notes.txt", "/desk/report.pdf"],
+                    true
+                ),
+                (
+                    "pictures",
+                    "Pictures",
+                    vec!["/desk/a.png", "/desk/b.png", "/desk/c.jpg"],
+                    true
+                ),
                 // (The rest has a zone, and no rule: it would match everything.)
-                ("other", "Other", vec!["/desk/data.xyz", "/desk/Makefile"], false),
+                (
+                    "other",
+                    "Other",
+                    vec!["/desk/data.xyz", "/desk/Makefile"],
+                    false
+                ),
             ]
         );
         // One song is too few for a zone; This PC is never sorted.
@@ -838,15 +1073,29 @@ mod tests {
         strict.auto.add_rules = false;
         let plan = planned(&strict, &items, &Placements::default(), Scope::Loose, &[]);
         assert_eq!(plan.zones.len(), 1);
-        assert_eq!((plan.zones[0].category.as_str(), plan.zones[0].rule), ("pictures", false));
+        assert_eq!(
+            (plan.zones[0].category.as_str(), plan.zones[0].rule),
+            ("pictures", false)
+        );
         assert_eq!(plan.left.len(), 7);
         // Nothing asked for means one: a zone for no item is never made.
         strict.auto.min_items = 0;
-        assert_eq!(planned(&strict, &items, &Placements::default(), Scope::Loose, &[]).zones.len(), 5);
+        assert_eq!(
+            planned(&strict, &items, &Placements::default(), Scope::Loose, &[])
+                .zones
+                .len(),
+            5
+        );
 
         // New zones keep off the ones that are there.
         let there = [Rect::new(0, 40, 600, 300)];
-        let plan = planned(&config, &items, &Placements::default(), Scope::Loose, &there);
+        let plan = planned(
+            &config,
+            &items,
+            &Placements::default(),
+            Scope::Loose,
+            &there,
+        );
         assert!(plan.zones.iter().all(|zone| !overlap(zone.rect, there[0])));
         // No types at all: nothing is planned, and everything is left.
         let mut none = config.clone();
@@ -858,12 +1107,25 @@ mod tests {
 
     #[test]
     fn a_plan_reuses_the_zone_of_a_type_and_leaves_what_is_sorted() {
-        let items = vec![file("a.png"), file("b.png"), file("c.png"), file("d.pdf"), file("e.pdf"), file("f.mp3")];
+        let items = vec![
+            file("a.png"),
+            file("b.png"),
+            file("c.png"),
+            file("d.pdf"),
+            file("e.pdf"),
+            file("f.mp3"),
+        ];
         let mut config = config();
         config.zones = vec![
-            ZoneDefinition { auto: Some("pictures".to_string()), ..ZoneDefinition::manual("pics", "My pictures") },
+            ZoneDefinition {
+                auto: Some("pictures".to_string()),
+                ..ZoneDefinition::manual("pics", "My pictures")
+            },
             ZoneDefinition::manual("inbox", "Inbox"),
-            ZoneDefinition { auto: Some("audio".to_string()), ..ZoneDefinition::manual("music", "Music") },
+            ZoneDefinition {
+                auto: Some("audio".to_string()),
+                ..ZoneDefinition::manual("music", "Music")
+            },
         ];
         let mut placements = Placements::default();
         placements.assign(&id("a.png"), &ZoneId::new("pics"), None, None);
@@ -891,7 +1153,10 @@ mod tests {
                 ("Music", Some("music"), vec!["/desk/f.mp3"]),
             ]
         );
-        assert!(plan.zones.iter().all(|zone| !zone.rule && zone.rect == Rect::new(1000, 500, 300, 200)));
+        assert!(plan
+            .zones
+            .iter()
+            .all(|zone| !zone.rule && zone.rect == Rect::new(1000, 500, 300, 200)));
         assert_eq!(plan.left, [id("e.pdf")], "one document alone gets no zone");
 
         // All: also what was sorted by hand; not what is in a zone made by type.
@@ -899,7 +1164,11 @@ mod tests {
         let pictures = &plan.zones[1];
         assert_eq!(plan.zones[0].title, "Documents");
         assert_eq!(plan.zones[0].items, [id("d.pdf"), id("e.pdf")]);
-        assert_eq!(pictures.items, [id("b.png"), id("c.png")], "a.png is in its type's zone already");
+        assert_eq!(
+            pictures.items,
+            [id("b.png"), id("c.png")],
+            "a.png is in its type's zone already"
+        );
         assert_eq!(plan.left, []);
 
         // Locks: a locked zone gives nothing and takes nothing.
@@ -925,12 +1194,17 @@ mod tests {
         let mut config = config();
         config.zones = vec![ZoneDefinition {
             auto: Some("pictures".to_string()),
-            kind: ZoneKind::Portal { directory: "/p".to_string() },
+            kind: ZoneKind::Portal {
+                directory: "/p".to_string(),
+            },
             ..ZoneDefinition::manual("pics", "Pictures")
         }];
         let plan = planned(&config, &items, &Placements::default(), Scope::Loose, &[]);
         assert_eq!(plan.zones.len(), 1);
-        assert_eq!(plan.zones[0].zone, None, "a portal takes nothing: a zone is made");
+        assert_eq!(
+            plan.zones[0].zone, None,
+            "a portal takes nothing: a zone is made"
+        );
     }
 
     #[test]
@@ -939,7 +1213,10 @@ mod tests {
         let plan = planned(&config(), &items, &Placements::default(), Scope::Loose, &[]);
         let text = serde_json::to_string(&plan).unwrap();
         assert_eq!(serde_json::from_str::<AutoPlan>(&text).unwrap(), plan);
-        assert!(!text.contains("\"zone\""), "a zone that is not there yet is not named");
+        assert!(
+            !text.contains("\"zone\""),
+            "a zone that is not there yet is not named"
+        );
         let empty = serde_json::to_value(AutoPlan::default()).unwrap();
         assert_eq!(empty, serde_json::json!({"zones": []}));
         let undo: AutoUndo = serde_json::from_str(
@@ -949,7 +1226,10 @@ mod tests {
                 "rules": [{"name": "Auto: Pictures"}]}"#,
         )
         .unwrap();
-        assert_eq!(undo.entries[0].before, Whereabouts::Loose { position: None });
+        assert_eq!(
+            undo.entries[0].before,
+            Whereabouts::Loose { position: None }
+        );
         let written = serde_json::to_value(&undo).unwrap();
         assert_eq!(written["later"], true, "a key of a newer version is kept");
         assert_eq!(serde_json::from_value::<AutoUndo>(written).unwrap(), undo);

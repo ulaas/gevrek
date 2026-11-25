@@ -36,7 +36,9 @@ use std::time::SystemTime;
 use windows::core::{Interface, HSTRING, PCWSTR};
 use windows::Win32::Foundation::FILETIME;
 use windows::Win32::Storage::FileSystem::{GetDriveTypeW, WIN32_FIND_DATAW};
-use windows::Win32::System::Com::{CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER, STGM_READ};
+use windows::Win32::System::Com::{
+    CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER, STGM_READ,
+};
 use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 
 /// How many files a list of recent ones holds at most.
@@ -52,12 +54,19 @@ impl Opened {
     /// When the file at `path` was last opened, if the shell wrote it
     /// down.
     pub fn at(&self, path: &str) -> Option<u64> {
-        self.0.read().unwrap_or_else(|poisoned| poisoned.into_inner()).get(&path.to_lowercase()).copied()
+        self.0
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&path.to_lowercase())
+            .copied()
     }
 
     /// Note an opening. The answer is whether that is news.
     fn note(&self, path: &str, when: u64) -> bool {
-        let mut known = self.0.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut known = self
+            .0
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         known.insert(path.to_lowercase(), when) != Some(when)
     }
 }
@@ -77,7 +86,9 @@ struct Link {
 /// 1970.
 pub fn seconds_of(time: FILETIME) -> Option<u64> {
     let ticks = (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
-    (ticks / 10_000_000).checked_sub(11_644_473_600).filter(|_| ticks != 0)
+    (ticks / 10_000_000)
+        .checked_sub(11_644_473_600)
+        .filter(|_| ticks != 0)
 }
 
 /// Read one shortcut as it is written. The shell is not asked to look
@@ -89,15 +100,21 @@ pub fn seconds_of(time: FILETIME) -> Option<u64> {
 /// Called on a thread that is set up for the shell's objects.
 unsafe fn read_link(file: &Path) -> Result<Option<Link>, ()> {
     let wide = HSTRING::from(file.as_os_str());
-    let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(|_| ())?;
+    let link: IShellLinkW =
+        CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(|_| ())?;
     let stored: IPersistFile = link.cast().map_err(|_| ())?;
-    stored.Load(PCWSTR(wide.as_ptr()), STGM_READ).map_err(|_| ())?;
+    stored
+        .Load(PCWSTR(wide.as_ptr()), STGM_READ)
+        .map_err(|_| ())?;
     let mut target = [0u16; 1024];
     let mut data = WIN32_FIND_DATAW::default();
     if link.GetPath(&mut target, &mut data, 0).is_err() {
         return Ok(None);
     }
-    let end = target.iter().position(|unit| *unit == 0).unwrap_or(target.len());
+    let end = target
+        .iter()
+        .position(|unit| *unit == 0)
+        .unwrap_or(target.len());
     let target = String::from_utf16_lossy(&target[..end]);
     if !super::facts::is_path(&target) {
         // (It leads to something that is no file: a place of the
@@ -132,16 +149,26 @@ pub fn far(path: &str) -> bool {
 /// The item a shortcut leads to, by what the shortcut itself says.
 fn item_of_link(link: &Link, types: &mut Types) -> Item {
     let name = gevrek_zones::paths::file_name(&link.target).to_string();
-    let extension = if link.folder { None } else { extension_of(&name) };
+    let extension = if link.folder {
+        None
+    } else {
+        extension_of(&name)
+    };
     Item {
         id: ItemId::new(link.target.clone()),
-        kind: if link.folder { ItemKind::Folder } else { ItemKind::File },
+        kind: if link.folder {
+            ItemKind::Folder
+        } else {
+            ItemKind::File
+        },
         path: Some(link.target.clone()),
         facts: ItemFacts {
             mime: if link.folder {
                 Some(super::facts::FOLDER_TYPE.to_string())
             } else {
-                extension.as_deref().and_then(|extension| types.of(extension))
+                extension
+                    .as_deref()
+                    .and_then(|extension| types.of(extension))
             },
             extension,
             size: (!link.folder).then_some(link.size),
@@ -189,7 +216,9 @@ impl Reader {
             .flatten()
             .filter_map(|entry| {
                 let path = entry.path();
-                let is_shortcut = path.extension().is_some_and(|ending| ending.eq_ignore_ascii_case("lnk"));
+                let is_shortcut = path
+                    .extension()
+                    .is_some_and(|ending| ending.eq_ignore_ascii_case("lnk"));
                 let written = entry.metadata().ok()?.modified().ok()?;
                 is_shortcut.then_some((path, written))
             })
@@ -197,7 +226,8 @@ impl Reader {
         // The newest first; of two written in the same moment, by name,
         // so that the order is always the same.
         shortcuts.sort_by(|one, other| other.1.cmp(&one.1).then_with(|| one.0.cmp(&other.0)));
-        self.links.retain(|file, _| shortcuts.iter().any(|(known, _)| known == file));
+        self.links
+            .retain(|file, _| shortcuts.iter().any(|(known, _)| known == file));
         let mut read = Read::default();
         let mut listed: Vec<String> = Vec::new();
         for (file, written) in shortcuts {
@@ -262,7 +292,8 @@ pub fn write_link(file: &Path, target: &str) -> bool {
     let wide = HSTRING::from(file.as_os_str());
     // SAFETY: the shell's objects are used on this thread alone.
     unsafe {
-        let Ok(link) = CoCreateInstance::<_, IShellLinkW>(&ShellLink, None, CLSCTX_INPROC_SERVER) else {
+        let Ok(link) = CoCreateInstance::<_, IShellLinkW>(&ShellLink, None, CLSCTX_INPROC_SERVER)
+        else {
             return false;
         };
         if link.SetPath(&HSTRING::from(target)).is_err() {
@@ -281,26 +312,41 @@ mod tests {
     use std::time::Duration;
 
     fn folder(name: &str) -> PathBuf {
-        let folder = std::env::temp_dir().join(format!("gevrek-zones-recent-{name}-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("gevrek-zones-recent-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(&folder).expect("a folder");
         PathBuf::from(
-            std::fs::canonicalize(&folder).expect("the folder").to_string_lossy().trim_start_matches("\\\\?\\"),
+            std::fs::canonicalize(&folder)
+                .expect("the folder")
+                .to_string_lossy()
+                .trim_start_matches("\\\\?\\"),
         )
     }
 
     /// Say that a shortcut was written at `seconds` since 1970.
     fn written(file: &Path, seconds: u64) {
         let time = SystemTime::UNIX_EPOCH + Duration::from_secs(seconds);
-        std::fs::File::options().write(true).open(file).expect("opened").set_modified(time).expect("a time");
+        std::fs::File::options()
+            .write(true)
+            .open(file)
+            .expect("opened")
+            .set_modified(time)
+            .expect("a time");
     }
 
     #[test]
     fn windows_times_become_seconds_since_1970() {
-        let time = |ticks: u64| FILETIME { dwLowDateTime: ticks as u32, dwHighDateTime: (ticks >> 32) as u32 };
+        let time = |ticks: u64| FILETIME {
+            dwLowDateTime: ticks as u32,
+            dwHighDateTime: (ticks >> 32) as u32,
+        };
         assert_eq!(seconds_of(time(0)), None);
         assert_eq!(seconds_of(time(116_444_736_000_000_000)), Some(0));
-        assert_eq!(seconds_of(time(116_444_736_000_000_000 + 1_700_000_000 * 10_000_000)), Some(1_700_000_000));
+        assert_eq!(
+            seconds_of(time(116_444_736_000_000_000 + 1_700_000_000 * 10_000_000)),
+            Some(1_700_000_000)
+        );
         assert_eq!(seconds_of(time(5)), None);
         assert!(far("\\\\server\\share\\a.txt"));
         assert!(!far(&std::env::temp_dir().to_string_lossy()));
@@ -341,7 +387,13 @@ mod tests {
         let seen: Vec<(&str, ItemKind, Option<u64>)> = read
             .items
             .iter()
-            .map(|item| (gevrek_zones::paths::file_name(item.id.as_str()), item.kind, item.facts.accessed))
+            .map(|item| {
+                (
+                    gevrek_zones::paths::file_name(item.id.as_str()),
+                    item.kind,
+                    item.facts.accessed,
+                )
+            })
             .collect();
         // The newest first; what is gone is not shown; each file once.
         assert_eq!(
@@ -372,7 +424,13 @@ mod tests {
         // that alone is news. No more than asked for are given.
         written(&recent.join("old.lnk"), 1_700_001_000);
         let then = reader.read(&recent, &opened, &mut types, 2);
-        assert_eq!(then.items.iter().map(|item| gevrek_zones::paths::file_name(item.id.as_str())).collect::<Vec<_>>(), ["old.txt", "new.png"]);
+        assert_eq!(
+            then.items
+                .iter()
+                .map(|item| gevrek_zones::paths::file_name(item.id.as_str()))
+                .collect::<Vec<_>>(),
+            ["old.txt", "new.png"]
+        );
         assert_eq!(then.opened_anew, [file("old.txt")]);
         assert_eq!(opened.at(&file("old.txt")), Some(1_700_001_000));
         let _ = std::fs::remove_dir_all(&root);
@@ -392,16 +450,31 @@ mod tests {
         std::fs::write(&target, b"x").expect("written");
         let link = recent.join("held.lnk");
         assert!(write_link(&link, &target.to_string_lossy()));
-        let written = std::fs::metadata(&link).and_then(|data| data.modified()).expect("a time");
+        let written = std::fs::metadata(&link)
+            .and_then(|data| data.modified())
+            .expect("a time");
 
-        let (opened, mut reader, mut types) = (Opened::default(), Reader::default(), Types::default());
-        let held = std::fs::File::options().read(true).share_mode(0).open(&link).expect("held");
+        let (opened, mut reader, mut types) =
+            (Opened::default(), Reader::default(), Types::default());
+        let held = std::fs::File::options()
+            .read(true)
+            .share_mode(0)
+            .open(&link)
+            .expect("held");
         assert_eq!(reader.read(&recent, &opened, &mut types, MOST).items, []);
         drop(held);
-        assert_eq!(std::fs::metadata(&link).and_then(|data| data.modified()).expect("a time"), written);
+        assert_eq!(
+            std::fs::metadata(&link)
+                .and_then(|data| data.modified())
+                .expect("a time"),
+            written
+        );
         let read = reader.read(&recent, &opened, &mut types, MOST);
         assert_eq!(
-            read.items.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(),
+            read.items
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
             [target.to_string_lossy().as_ref()]
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -426,7 +499,13 @@ mod tests {
         assert_eq!(item.facts.extension.as_deref(), Some("mkv"));
         assert_eq!(item.facts.size, Some(7_000_000_000));
         assert_eq!(item.facts.modified, Some(1_650_000_000));
-        let folder = item_of_link(&Link { folder: true, ..link }, &mut Types::default());
+        let folder = item_of_link(
+            &Link {
+                folder: true,
+                ..link
+            },
+            &mut Types::default(),
+        );
         assert_eq!(folder.kind, ItemKind::Folder);
         assert_eq!(folder.facts.size, None);
         assert_eq!(folder.facts.mime.as_deref(), Some("inode/directory"));
@@ -441,7 +520,12 @@ mod tests {
         let listed = std::fs::read_dir(&recent).expect("it can be listed");
         let shortcuts = listed
             .flatten()
-            .filter(|entry| entry.path().extension().is_some_and(|ending| ending.eq_ignore_ascii_case("lnk")))
+            .filter(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .is_some_and(|ending| ending.eq_ignore_ascii_case("lnk"))
+            })
             .count();
         println!("{} shortcuts in the Recent folder", shortcuts);
     }

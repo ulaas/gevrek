@@ -18,9 +18,9 @@ use crate::focus_manager::FocusManager;
 use crate::layouts::LayoutType;
 use crate::outputs::{MonitorHandle, Outputs};
 use crate::rules::RuleEngine;
+use crate::snap_zones::SnapZoneManager;
 use crate::spoil::{harder, lived, places, spoil, Chance};
 use crate::testing::fake_desktop::FakeDesktop;
-use crate::snap_zones::SnapZoneManager;
 use gevrek_model::config::Config;
 use gevrek_model::graph::NodeGraph;
 use std::sync::{Arc, Mutex};
@@ -65,7 +65,10 @@ fn taken_in(text: &str) {
     let written = serde_json::to_string(&config).expect("a configuration is written");
     let _ = Config::from_json(&written);
     let _ = crate::reload::ConfigDiff::between(&Config::new(), &config).steps();
-    let _ = config.desktop.clone().set_main_key(gevrek_model::settings::MainKey::Alt);
+    let _ = config
+        .desktop
+        .clone()
+        .set_main_key(gevrek_model::settings::MainKey::Alt);
 
     // It is laid over a desktop with windows on it.
     let (mut core, mut desktop) = desk();
@@ -122,7 +125,11 @@ fn no_configuration_from_outside_ends_the_program() {
             }
             let spoilt = document.to_string();
             if let Err(panic) = lived(move || taken_in(&spoilt)) {
-                ended.push(format!("{} with {}: {panic}", example.id, done.join(" and ")));
+                ended.push(format!(
+                    "{} with {}: {panic}",
+                    example.id,
+                    done.join(" and ")
+                ));
             }
         }
     }
@@ -132,7 +139,12 @@ fn no_configuration_from_outside_ends_the_program() {
         ended.is_empty(),
         "{} spoilt configurations ended the program:\n{}",
         ended.len(),
-        ended.iter().take(40).cloned().collect::<Vec<_>>().join("\n")
+        ended
+            .iter()
+            .take(40)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 
@@ -149,9 +161,7 @@ fn no_saved_session_from_outside_ends_the_program() {
     places(&whole, &mut Vec::new(), &mut all);
 
     let restored = |text: &str| {
-        let Ok(state) =
-            serde_json::from_str::<crate::persistence::WindowManagerState>(text)
-        else {
+        let Ok(state) = serde_json::from_str::<crate::persistence::WindowManagerState>(text) else {
             return;
         };
         let (mut core, mut desktop) = desk();
@@ -190,7 +200,12 @@ fn no_saved_session_from_outside_ends_the_program() {
         ended.is_empty(),
         "{} spoilt sessions ended the program:\n{}",
         ended.len(),
-        ended.iter().take(40).cloned().collect::<Vec<_>>().join("\n")
+        ended
+            .iter()
+            .take(40)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 
@@ -198,7 +213,9 @@ fn no_saved_session_from_outside_ends_the_program() {
 /// where they are declared, so that one that is added is here too.
 fn command_names() -> Vec<String> {
     let source = include_str!("../../model/src/command.rs");
-    let from = source.find("pub enum DispatchCommand").expect("the commands");
+    let from = source
+        .find("pub enum DispatchCommand")
+        .expect("the commands");
     let declared = &source[from..];
     let declared = &declared[..declared.find("\n}").expect("their end")];
     declared
@@ -372,6 +389,11 @@ fn no_command_from_outside_ends_the_program() {
         ended.is_empty(),
         "{} spoilt commands ended the program:\n{}",
         ended.len(),
-        ended.iter().take(40).cloned().collect::<Vec<_>>().join("\n")
+        ended
+            .iter()
+            .take(40)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }

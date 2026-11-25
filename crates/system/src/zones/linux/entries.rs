@@ -48,7 +48,11 @@ pub enum Entry {
         exec: String,
     },
     /// It leads to an address (`Type=Link`).
-    Link { name: String, icon: String, url: String },
+    Link {
+        name: String,
+        icon: String,
+        url: String,
+    },
 }
 
 impl Entry {
@@ -113,7 +117,11 @@ pub fn read(text: &str, path: &Path, locales: &[String]) -> Option<Entry> {
             let url = fields.plain("URL").filter(|url| !url.is_empty())?;
             let name = fields.localised("Name", locales);
             Some(Entry::Link {
-                name: if name.is_empty() { url.to_string() } else { name },
+                name: if name.is_empty() {
+                    url.to_string()
+                } else {
+                    name
+                },
                 icon: fields.plain("Icon").unwrap_or_default().to_string(),
                 url: url.to_string(),
             })
@@ -181,12 +189,16 @@ pub fn allow(places: &Places, uid: Option<u32>, path: &Path) -> std::io::Result<
     use std::io::{Error, ErrorKind};
     let real = std::fs::canonicalize(path)?;
     let data = std::fs::metadata(&real)?;
-    let text = text_of(&real).ok_or_else(|| Error::new(ErrorKind::InvalidData, "not a desktop entry"))?;
+    let text =
+        text_of(&real).ok_or_else(|| Error::new(ErrorKind::InvalidData, "not a desktop entry"))?;
     if read(&text, &real, &[]).is_none() {
         return Err(Error::new(ErrorKind::InvalidData, "not a desktop entry"));
     }
     if uid.is_none_or(|uid| data.uid() != uid) {
-        return Err(Error::new(ErrorKind::PermissionDenied, "the file is someone else's"));
+        return Err(Error::new(
+            ErrorKind::PermissionDenied,
+            "the file is someone else's",
+        ));
     }
     let mode = data.permissions().mode();
     let wanted = (mode | 0o100) & !0o022;
@@ -197,7 +209,10 @@ pub fn allow(places: &Places, uid: Option<u32>, path: &Path) -> std::io::Result<
     // what the file is now, with nobody else able to change it.
     let bytes = std::fs::read(&real)?;
     if bytes != text.as_bytes() {
-        return Err(Error::new(ErrorKind::InvalidData, "the file changed while it was read"));
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "the file changed while it was read",
+        ));
     }
     let record = record_of(places, &bytes);
     super::private_folder(&places.trusted_launchers())?;
@@ -249,7 +264,11 @@ mod tests {
         // Allowed: executable, nobody else may write, and it starts.
         set_mode(&path, 0o664);
         allow(&places, uid, &path).expect("allowed");
-        let mode = std::fs::metadata(&path).expect("there").permissions().mode() & 0o777;
+        let mode = std::fs::metadata(&path)
+            .expect("there")
+            .permissions()
+            .mode()
+            & 0o777;
         assert_eq!(mode, 0o744);
         match seen() {
             DesktopFile::Trusted(Entry::Application { app, exec }) => {
@@ -322,7 +341,10 @@ mod tests {
         let fake = desktop.join("applications");
         std::fs::create_dir_all(&fake).expect("a folder");
         std::fs::write(fake.join("x.desktop"), LAUNCHER).expect("written");
-        assert_eq!(look(&places, uid, &[], &fake.join("x.desktop")), DesktopFile::Untrusted);
+        assert_eq!(
+            look(&places, uid, &[], &fake.join("x.desktop")),
+            DesktopFile::Untrusted
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -338,13 +360,22 @@ mod tests {
                 url: "https://example.org/a".to_string()
             })
         );
-        assert_eq!(read("[Desktop Entry]\nType=Link\nName=No address\n", path, &[]), None);
-        assert_eq!(read("[Desktop Entry]\nType=Directory\nName=Folder\n", path, &[]), None);
+        assert_eq!(
+            read("[Desktop Entry]\nType=Link\nName=No address\n", path, &[]),
+            None
+        );
+        assert_eq!(
+            read("[Desktop Entry]\nType=Directory\nName=Folder\n", path, &[]),
+            None
+        );
         assert_eq!(read("just text", path, &[]), None);
         // An entry that hides itself from lists is still a launcher where
         // it lies.
         let hidden = format!("{LAUNCHER}NoDisplay=true\n");
-        assert!(matches!(read(&hidden, path, &[]), Some(Entry::Application { .. })));
+        assert!(matches!(
+            read(&hidden, path, &[]),
+            Some(Entry::Application { .. })
+        ));
         let root = crate::zones::linux::testing::folder("trust-none");
         let places = Places::under(&root);
         std::fs::write(root.join("notes.desktop"), "hello").expect("written");

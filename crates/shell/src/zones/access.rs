@@ -100,7 +100,10 @@ pub fn speak(zones: &mut Zones, ui: &mut egui::Ui, layout: &Layout, display: &Di
         // A zone that is drawn here, or this display's loose items.
         let (rect, items, clip, zone): (egui::Rect, &[ItemBox], egui::Rect, Option<&ZoneId>) =
             if let Some(id) = list.id.strip_prefix("zone:") {
-                let Some(shown) = layout.zones.iter().find(|zone| zone.zone.as_str() == id && zone.rect.intersects(desk.rect))
+                let Some(shown) = layout
+                    .zones
+                    .iter()
+                    .find(|zone| zone.zone.as_str() == id && zone.rect.intersects(desk.rect))
                 else {
                     continue;
                 };
@@ -110,11 +113,14 @@ pub fn speak(zones: &mut Zones, ui: &mut egui::Ui, layout: &Layout, display: &Di
             } else {
                 continue;
             };
-        let builder = egui::UiBuilder::new().id_salt(list.id.as_str()).max_rect(rect.translate(shift));
+        let builder = egui::UiBuilder::new()
+            .id_salt(list.id.as_str())
+            .max_rect(rect.translate(shift));
         ui.scope_builder(builder, |ui| {
             let id = ui.unique_id();
             ui.memory_mut(|memory| memory.interested_in_focus(id, ui.layer_id()));
-            ui.ctx().accesskit_node_builder(id, |node| say_list(node, list));
+            ui.ctx()
+                .accesskit_node_builder(id, |node| say_list(node, list));
             if let Some(zone) = zone {
                 ids.push((id.accesskit_id(), Spoken::Zone(zone.clone())));
             }
@@ -134,14 +140,26 @@ pub fn speak(zones: &mut Zones, ui: &mut egui::Ui, layout: &Layout, display: &Di
                         node.set_label(super::view::button_says(shown, placed.button).to_string());
                         node.add_action(Action::Click);
                     });
-                    ids.push((response.id.accesskit_id(), Spoken::Button(shown.zone.clone(), placed.button)));
+                    ids.push((
+                        response.id.accesskit_id(),
+                        Spoken::Button(shown.zone.clone(), placed.button),
+                    ));
                 }
             }
-            for (index, child) in list.children.iter().enumerate().filter(|(_, child)| !child.hidden) {
+            for (index, child) in list
+                .children
+                .iter()
+                .enumerate()
+                .filter(|(_, child)| !child.hidden)
+            {
                 // (In the order they are shown; looked up where that
                 // does not hold, as while a zone's items are changing.)
                 let fits = |shown: &&ItemBox| child.id.ends_with(shown.item.as_str());
-                let Some(shown) = items.get(index).filter(fits).or_else(|| items.iter().find(fits)) else {
+                let Some(shown) = items
+                    .get(index)
+                    .filter(fits)
+                    .or_else(|| items.iter().find(fits))
+                else {
                     continue;
                 };
                 // What is scrolled out of sight is not there to be pointed at.
@@ -153,7 +171,8 @@ pub fn speak(zones: &mut Zones, ui: &mut egui::Ui, layout: &Layout, display: &Di
                     egui::Id::unique(child.id.as_str()),
                     egui::Sense::focusable_noninteractive(),
                 );
-                ui.ctx().accesskit_node_builder(response.id, |node| say_item(node, child));
+                ui.ctx()
+                    .accesskit_node_builder(response.id, |node| say_item(node, child));
                 ids.push((response.id.accesskit_id(), Spoken::Item(shown.item.clone())));
                 if child.focused {
                     with_keyboard = Some(response.id);
@@ -165,7 +184,12 @@ pub fn speak(zones: &mut Zones, ui: &mut egui::Ui, layout: &Layout, display: &Di
     // themselves are read from the surface, so the toolkit is kept from
     // walking its own way among the nodes with them.
     if let (true, Some(id)) = (has_keyboard, with_keyboard) {
-        let all = egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true };
+        let all = egui::EventFilter {
+            tab: true,
+            horizontal_arrows: true,
+            vertical_arrows: true,
+            escape: true,
+        };
         ui.memory_mut(|memory| {
             if memory.focused() != Some(id) {
                 memory.request_focus(id);
@@ -175,7 +199,10 @@ pub fn speak(zones: &mut Zones, ui: &mut egui::Ui, layout: &Layout, display: &Di
     }
     zones.said = Some(said);
     zones.said_ids.retain(|(_, of), _| of != display);
-    zones.said_ids.extend(ids.into_iter().map(|(id, spoken)| ((id, display.clone()), spoken)));
+    zones.said_ids.extend(
+        ids.into_iter()
+            .map(|(id, spoken)| ((id, display.clone()), spoken)),
+    );
 }
 
 /// Do what the screen reader asked for by a node: go to it, open it, or
@@ -187,13 +214,19 @@ fn hear(zones: &mut Zones, ui: &egui::Ui, layout: &Layout) {
             .events
             .iter()
             .filter_map(|event| match event {
-                egui::Event::AccessKitActionRequest(request) => Some((request.target_node, request.action)),
+                egui::Event::AccessKitActionRequest(request) => {
+                    Some((request.target_node, request.action))
+                }
                 _ => None,
             })
             .collect()
     });
     for (target, action) in asked {
-        let spoken = zones.said_ids.iter().find(|((id, _), _)| *id == target).map(|(_, spoken)| spoken.clone());
+        let spoken = zones
+            .said_ids
+            .iter()
+            .find(|((id, _), _)| *id == target)
+            .map(|(_, spoken)| spoken.clone());
         let command = match (spoken, action) {
             (Some(Spoken::Button(zone, button)), Action::Click) => {
                 let acts = super::gesture::button_pressed(layout, &zone, button);
@@ -203,14 +236,25 @@ fn hear(zones: &mut Zones, ui: &egui::Ui, layout: &Layout) {
             (Some(Spoken::Item(item)), Action::Focus) => {
                 // Where the core walks (a zone that is shown), the
                 // keyboard goes to it; a loose item is the chosen one.
-                let went = zones.command(Command::FocusItem { item: Some(item.clone()) });
+                let went = zones.command(Command::FocusItem {
+                    item: Some(item.clone()),
+                });
                 if gevrek_zones::ipc::Answer::of(&went).ok {
                     continue;
                 }
-                Command::Select { items: vec![item], mode: gevrek_zones::focus::SelectMode::Replace }
+                Command::Select {
+                    items: vec![item],
+                    mode: gevrek_zones::focus::SelectMode::Replace,
+                }
             }
-            (Some(Spoken::Item(item)), Action::Click) => Command::Open { items: vec![item], with: None, in_place: true },
-            (Some(Spoken::Zone(zone)), Action::Focus | Action::Click) => Command::FocusZone { zone: Some(zone) },
+            (Some(Spoken::Item(item)), Action::Click) => Command::Open {
+                items: vec![item],
+                with: None,
+                in_place: true,
+            },
+            (Some(Spoken::Zone(zone)), Action::Focus | Action::Click) => {
+                Command::FocusZone { zone: Some(zone) }
+            }
             _ => continue,
         };
         zones.command(command);

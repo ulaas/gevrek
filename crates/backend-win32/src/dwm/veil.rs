@@ -53,7 +53,9 @@ struct Veiled {
 static VEILED: Mutex<Vec<Veiled>> = Mutex::new(Vec::new());
 
 fn veiled() -> std::sync::MutexGuard<'static, Vec<Veiled>> {
-    VEILED.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    VEILED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// The display with the keyboard is this one now.
@@ -129,7 +131,9 @@ pub unsafe fn window_opens(hwnd: HWND) {
     // (Refused for a window of a program with more rights: it is seen
     // where it opens, as before.)
     if cloak(hwnd, true) {
-        log::debug!("{hwnd:?} opens on another display than the keyboard's: not seen until it is placed");
+        log::debug!(
+            "{hwnd:?} opens on another display than the keyboard's: not seen until it is placed"
+        );
         veiled().push(Veiled {
             window: hwnd.0 as isize,
             since: Instant::now(),
@@ -152,7 +156,9 @@ unsafe fn cloak(hwnd: HWND, cloaked: bool) -> bool {
 /// Whether a window is cloaked here: to the window manager it is a
 /// window like any other (one that another cloaked is none of its).
 pub fn holds(hwnd: HWND) -> bool {
-    veiled().iter().any(|veiled| veiled.window == hwnd.0 as isize)
+    veiled()
+        .iter()
+        .any(|veiled| veiled.window == hwnd.0 as isize)
 }
 
 /// The window manager's loop takes what Windows told so far: the windows
@@ -225,23 +231,48 @@ mod tests {
         assert!(!is_veiled_as_it_opens(Opening { on: 1, ..APP }));
         assert!(!is_veiled_as_it_opens(Opening { keyboard: 0, ..APP }));
         // A menu or a hint, a dialog of another window, a child.
-        assert!(!is_veiled_as_it_opens(Opening { style: 0x8000_0000, ..APP }));
-        assert!(!is_veiled_as_it_opens(Opening { extended: WS_EX_TOOLWINDOW, ..APP }));
-        assert!(!is_veiled_as_it_opens(Opening { extended: WS_EX_NOACTIVATE, ..APP }));
+        assert!(!is_veiled_as_it_opens(Opening {
+            style: 0x8000_0000,
+            ..APP
+        }));
+        assert!(!is_veiled_as_it_opens(Opening {
+            extended: WS_EX_TOOLWINDOW,
+            ..APP
+        }));
+        assert!(!is_veiled_as_it_opens(Opening {
+            extended: WS_EX_NOACTIVATE,
+            ..APP
+        }));
         assert!(!is_veiled_as_it_opens(Opening { owned: true, ..APP }));
-        assert!(!is_veiled_as_it_opens(Opening { style: APP.style | WS_CHILD, ..APP }));
+        assert!(!is_veiled_as_it_opens(Opening {
+            style: APP.style | WS_CHILD,
+            ..APP
+        }));
         // Minimized, or cloaked by another (a virtual desktop).
-        assert!(!is_veiled_as_it_opens(Opening { minimized: true, ..APP }));
-        assert!(!is_veiled_as_it_opens(Opening { cloaked: true, ..APP }));
+        assert!(!is_veiled_as_it_opens(Opening {
+            minimized: true,
+            ..APP
+        }));
+        assert!(!is_veiled_as_it_opens(Opening {
+            cloaked: true,
+            ..APP
+        }));
         // A tab pulled out of its window.
-        assert!(!is_veiled_as_it_opens(Opening { button_down: true, ..APP }));
+        assert!(!is_veiled_as_it_opens(Opening {
+            button_down: true,
+            ..APP
+        }));
     }
 
     #[test]
     fn a_window_is_seen_when_the_pass_that_was_told_of_it_ends() {
         // (Windows that are none: nothing is asked of the system.)
         let before = veiled().len();
-        veiled().push(Veiled { window: -7, since: Instant::now(), taken: false });
+        veiled().push(Veiled {
+            window: -7,
+            since: Instant::now(),
+            taken: false,
+        });
         assert!(holds(HWND(-7isize as *mut _)));
         // The pass that ends had not taken what was told of it yet.
         pass_ended();
@@ -250,7 +281,11 @@ mod tests {
         pass_ended();
         assert!(!holds(HWND(-7isize as *mut _)));
         // One that was never taken is seen when the longest time is over.
-        veiled().push(Veiled { window: -8, since: Instant::now() - LONGEST, taken: false });
+        veiled().push(Veiled {
+            window: -8,
+            since: Instant::now() - LONGEST,
+            taken: false,
+        });
         pass_ended();
         assert!(!holds(HWND(-8isize as *mut _)));
         assert_eq!(veiled().len(), before);

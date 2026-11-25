@@ -109,7 +109,9 @@ impl Portal {
     /// Begin to watch the folder `path`. Returns at once; what is in the
     /// folder is told to `news` when it was read.
     pub fn open(path: &str, news: Arc<News>, how: Arc<How>) -> Self {
-        let location = Location::Directory { path: path.to_string() };
+        let location = Location::Directory {
+            path: path.to_string(),
+        };
         let seen: Shared = Arc::new(Mutex::new(Seen::new(location)));
         let inner = Arc::new(Inner {
             path: shell::plain(path),
@@ -169,11 +171,15 @@ impl Portal {
 
 impl Inner {
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn seen(&self) -> std::sync::MutexGuard<'_, Seen> {
-        self.seen.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.seen
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn ended(&self) -> bool {
@@ -189,7 +195,9 @@ impl Inner {
         };
         let mut state = self.state();
         state.folder = None;
-        let reach = Reach::Away { why: why.to_string() };
+        let reach = Reach::Away {
+            why: why.to_string(),
+        };
         if state.reach == reach || self.ended() {
             return;
         }
@@ -202,15 +210,23 @@ impl Inner {
     /// of it, read it and tell what is in it. The answer is the telling,
     /// to be kept.
     fn read(self: &Arc<Self>) -> Result<Folder, BackendError> {
-        let gone = || BackendError::NotFound { what: self.path.clone() };
+        let gone = || BackendError::NotFound {
+            what: self.path.clone(),
+        };
         if self.ended() || !(self.how.reach)(&self.path) {
             return Err(gone());
         }
         let weak = Arc::downgrade(self);
         let types = || Types::knowing(self.how.opened.clone());
-        let folder = watch::watch_into(&self.path, Arc::clone(&self.seen), Arc::clone(&self.news), types(), move || {
-            again(&weak);
-        })?;
+        let folder = watch::watch_into(
+            &self.path,
+            Arc::clone(&self.seen),
+            Arc::clone(&self.news),
+            types(),
+            move || {
+                again(&weak);
+            },
+        )?;
         // The telling begins before the reading, so nothing that happens
         // between the two is missed; and what changes while the reading
         // goes on is read once more at its end, since the listing may
@@ -239,7 +255,8 @@ impl Inner {
         // when woken by the telling.)
         self.state().reach = Reach::There;
         // (Told while what is known is held: see `watch_into`.)
-        self.news.tell(vec![BackendEvent::Listed { location, items }]);
+        self.news
+            .tell(vec![BackendEvent::Listed { location, items }]);
         Ok(folder)
     }
 
@@ -290,8 +307,15 @@ impl Inner {
                     // A folder is told as changed whenever something in
                     // it is; only its own coming, going and renaming
                     // count here.
-                    matches!(event.kind, EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(_)))
-                        && event.paths.iter().any(|path| same_path(&path.to_string_lossy(), &name))
+                    matches!(
+                        event.kind,
+                        EventKind::Create(_)
+                            | EventKind::Remove(_)
+                            | EventKind::Modify(ModifyKind::Name(_))
+                    ) && event
+                        .paths
+                        .iter()
+                        .any(|path| same_path(&path.to_string_lossy(), &name))
                 }
             };
             if ours {
@@ -303,7 +327,12 @@ impl Inner {
             Ok(watcher)
         });
         watching
-            .inspect_err(|error| log::debug!("zones: {} is not listened to for a folder in it to come back: {error}", anchor.display()))
+            .inspect_err(|error| {
+                log::debug!(
+                    "zones: {} is not listened to for a folder in it to come back: {error}",
+                    anchor.display()
+                )
+            })
             .ok()
     }
 }
@@ -330,37 +359,41 @@ fn attempt(inner: &Arc<Inner>) {
         state.opening = true;
     }
     let going = Arc::clone(inner);
-    let started = std::thread::Builder::new().name("gevrek-zones-portal".to_string()).spawn(move || loop {
-        let (answer, answered) = mpsc::channel();
-        let reader = Arc::clone(&going);
-        // The going itself is on a second thread, so that this one can
-        // say "it does not answer" while that one still waits.
-        let read = std::thread::Builder::new()
-            .name("gevrek-zones-portal-read".to_string())
-            .spawn(move || {
-                let _ = answer.send(reader.read());
-            });
-        let no_answer = || BackendError::Refused { what: format!("{}: no answer", going.path) };
-        let outcome = match read {
-            Err(_) => Err(no_answer()),
-            Ok(_) => match answered.recv_timeout(going.how.patience) {
-                Ok(outcome) => outcome,
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    going.away(&format!("{} does not answer", going.path));
-                    answered.recv().unwrap_or_else(|_| Err(no_answer()))
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => Err(no_answer()),
-            },
-        };
-        going.settle(outcome);
-        let mut state = going.state();
-        if state.again && !going.ended() {
-            state.again = false;
-            continue;
-        }
-        state.opening = false;
-        break;
-    });
+    let started = std::thread::Builder::new()
+        .name("gevrek-zones-portal".to_string())
+        .spawn(move || loop {
+            let (answer, answered) = mpsc::channel();
+            let reader = Arc::clone(&going);
+            // The going itself is on a second thread, so that this one can
+            // say "it does not answer" while that one still waits.
+            let read = std::thread::Builder::new()
+                .name("gevrek-zones-portal-read".to_string())
+                .spawn(move || {
+                    let _ = answer.send(reader.read());
+                });
+            let no_answer = || BackendError::Refused {
+                what: format!("{}: no answer", going.path),
+            };
+            let outcome = match read {
+                Err(_) => Err(no_answer()),
+                Ok(_) => match answered.recv_timeout(going.how.patience) {
+                    Ok(outcome) => outcome,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        going.away(&format!("{} does not answer", going.path));
+                        answered.recv().unwrap_or_else(|_| Err(no_answer()))
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => Err(no_answer()),
+                },
+            };
+            going.settle(outcome);
+            let mut state = going.state();
+            if state.again && !going.ended() {
+                state.again = false;
+                continue;
+            }
+            state.opening = false;
+            break;
+        });
     if started.is_err() {
         inner.state().opening = false;
         inner.away("no thread to read it on");
@@ -374,7 +407,8 @@ mod tests {
     use std::time::Instant;
 
     fn folder(name: &str) -> String {
-        let folder = std::env::temp_dir().join(format!("gevrek-zones-portal-{name}-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("gevrek-zones-portal-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(&folder).expect("a folder");
         std::fs::canonicalize(&folder)
@@ -394,7 +428,12 @@ mod tests {
     }
 
     /// Wait until `wanted` holds of what was told so far (kept in `all`).
-    fn until(news: &News, wakes: &mpsc::Receiver<()>, all: &mut Vec<BackendEvent>, wanted: impl Fn(&[BackendEvent]) -> bool) {
+    fn until(
+        news: &News,
+        wakes: &mpsc::Receiver<()>,
+        all: &mut Vec<BackendEvent>,
+        wanted: impl Fn(&[BackendEvent]) -> bool,
+    ) {
         let end = Instant::now() + Duration::from_secs(30);
         loop {
             all.extend(news.take());
@@ -418,7 +457,9 @@ mod tests {
     /// the last word was that the folder is away.
     fn last_listing(all: &[BackendEvent]) -> Option<Vec<String>> {
         all.iter().rev().find_map(|event| match event {
-            BackendEvent::Listed { items, .. } => Some(items.iter().map(|item| file_of(item).to_string()).collect()),
+            BackendEvent::Listed { items, .. } => {
+                Some(items.iter().map(|item| file_of(item).to_string()).collect())
+            }
             BackendEvent::ListingFailed { .. } => Some(Vec::new()),
             _ => None,
         })
@@ -444,7 +485,11 @@ mod tests {
         let asked = Instant::now();
         let portal = Portal::open(&root, Arc::clone(&news), how);
         // The caller is answered at once, whatever the folder does.
-        assert!(asked.elapsed() < Duration::from_millis(50), "{:?}", asked.elapsed());
+        assert!(
+            asked.elapsed() < Duration::from_millis(50),
+            "{:?}",
+            asked.elapsed()
+        );
         assert_eq!(portal.reach(), Reach::Opening);
         let mut all = Vec::new();
         until(&news, &wakes, &mut all, |_| portal.reach().is_away());
@@ -453,7 +498,9 @@ mod tests {
         // It answers after all (once for the folder, and again for each
         // folder above that is asked about).
         drop(let_through);
-        until(&news, &wakes, &mut all, |all| last_listing(all) == Some(vec!["a.txt".to_string()]));
+        until(&news, &wakes, &mut all, |all| {
+            last_listing(all) == Some(vec!["a.txt".to_string()])
+        });
         until(&news, &wakes, &mut all, |_| portal.reach() == Reach::There);
         drop(portal);
         let _ = std::fs::remove_dir_all(&root);
@@ -484,7 +531,9 @@ mod tests {
         // Renamed away: nothing is in it any more.
         all.clear();
         std::fs::rename(&shown, format!("{root}\\deep\\elsewhere")).expect("renamed");
-        until(&news, &wakes, &mut all, |all| portal.reach().is_away() && last_listing(all) == Some(Vec::new()));
+        until(&news, &wakes, &mut all, |all| {
+            portal.reach().is_away() && last_listing(all) == Some(Vec::new())
+        });
 
         // Another folder of that name, with other things in it.
         all.clear();
@@ -495,7 +544,14 @@ mod tests {
                 && (last_listing(all) == Some(vec!["b.txt".to_string()])
                     || all.iter().any(|event| matches!(event, BackendEvent::ItemAdded { item, .. } if file_of(item) == "b.txt")))
         });
-        let known: Vec<ItemId> = portal.seen.lock().expect("seen").items().into_iter().map(|item| item.id).collect();
+        let known: Vec<ItemId> = portal
+            .seen
+            .lock()
+            .expect("seen")
+            .items()
+            .into_iter()
+            .map(|item| item.id)
+            .collect();
         assert_eq!(known, [ItemId::new(format!("{shown}\\b.txt"))]);
 
         // Deleted with everything in it.
@@ -524,10 +580,19 @@ mod tests {
         }
         let (news, wakes) = news();
         let asked = Instant::now();
-        let portal = Portal::open(&root, Arc::clone(&news), Arc::new(How { patience: Duration::from_secs(60), ..How::default() }));
+        let portal = Portal::open(
+            &root,
+            Arc::clone(&news),
+            Arc::new(How {
+                patience: Duration::from_secs(60),
+                ..How::default()
+            }),
+        );
         let held = asked.elapsed();
         let mut all = Vec::new();
-        until(&news, &wakes, &mut all, |all| last_listing(all).is_some_and(|names| names.len() == 5000));
+        until(&news, &wakes, &mut all, |all| {
+            last_listing(all).is_some_and(|names| names.len() == 5000)
+        });
         let took = asked.elapsed();
         println!("5000 files: the caller was held {held:?}; listed after {took:?}");
         assert!(held < Duration::from_millis(100), "{held:?}");

@@ -48,7 +48,10 @@ impl std::fmt::Display for Part {
             Part::Messages => f.write_str("the messages of its other threads"),
             Part::CarryOut => f.write_str("opening and changing surfaces"),
             Part::Access => f.write_str("what screen readers asked"),
-            Part::Draw { surface, size: (width, height) } => {
+            Part::Draw {
+                surface,
+                size: (width, height),
+            } => {
                 write!(f, "drawing surface {surface} ({width}x{height})")
             }
             Part::Other(what) => f.write_str(what),
@@ -100,7 +103,11 @@ impl Watch {
 
     /// `part` begins.
     pub fn enter(&self, part: Part) {
-        *self.lock() = Some(Busy { part, since: Instant::now(), told: None });
+        *self.lock() = Some(Busy {
+            part,
+            since: Instant::now(),
+            told: None,
+        });
     }
 
     /// What began last is over.
@@ -110,7 +117,11 @@ impl Watch {
         };
         let took = busy.since.elapsed();
         if took >= SLOW {
-            log::warn!("the shell was busy with {} for {} ms", busy.part, took.as_millis());
+            log::warn!(
+                "the shell was busy with {} for {} ms",
+                busy.part,
+                took.as_millis()
+            );
         }
     }
 
@@ -123,7 +134,9 @@ impl Watch {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Option<Busy>> {
-        self.busy.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.busy
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
@@ -147,18 +160,41 @@ mod tests {
     #[test]
     fn a_part_that_goes_on_is_said_after_a_second_and_then_every_five() {
         let since = Instant::now();
-        let mut busy = Busy { part: Part::Events, since, told: None };
-        assert_eq!(still_busy(&mut busy, since + Duration::from_millis(900)), None);
+        let mut busy = Busy {
+            part: Part::Events,
+            since,
+            told: None,
+        };
+        assert_eq!(
+            still_busy(&mut busy, since + Duration::from_millis(900)),
+            None
+        );
         assert_eq!(still_busy(&mut busy, since + STUCK), Some(STUCK));
         assert_eq!(still_busy(&mut busy, since + Duration::from_secs(3)), None);
-        assert_eq!(still_busy(&mut busy, since + STUCK + STUCK_AGAIN), Some(STUCK + STUCK_AGAIN));
+        assert_eq!(
+            still_busy(&mut busy, since + STUCK + STUCK_AGAIN),
+            Some(STUCK + STUCK_AGAIN)
+        );
     }
 
     #[test]
     fn what_was_left_is_not_busy_any_more() {
         let watch = Watch::start();
-        watch.during(Part::Draw { surface: 3, size: (2560, 1440) }, || {});
+        watch.during(
+            Part::Draw {
+                surface: 3,
+                size: (2560, 1440),
+            },
+            || {},
+        );
         assert!(watch.lock().is_none());
-        assert_eq!(Part::Draw { surface: 3, size: (2560, 1440) }.to_string(), "drawing surface 3 (2560x1440)");
+        assert_eq!(
+            Part::Draw {
+                surface: 3,
+                size: (2560, 1440)
+            }
+            .to_string(),
+            "drawing surface 3 (2560x1440)"
+        );
     }
 }

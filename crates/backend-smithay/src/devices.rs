@@ -4,8 +4,8 @@
 //! session starts, when a device is plugged in, and when the
 //! configuration changes.
 
-use gevrek_host::wm::published::Published as _;
 use crate::state::State;
+use gevrek_host::wm::published::Published as _;
 use gevrek_model::input::{AccelProfile, InputConfig, PointerConfig, ScrollMethod, TouchpadConfig};
 use smithay::input::keyboard::XkbConfig;
 use smithay::reexports::input as libinput;

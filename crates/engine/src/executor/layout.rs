@@ -681,8 +681,11 @@ impl Executor {
             {
                 if let Some(workspace) = monitor_manager.get_focused_workspace_mut(monitor_handle) {
                     self.suppressed_windows.insert(handle);
-                    let laid_out =
-                        self.apply_workspace_layout_and_position(workspace, work_area, window_manager);
+                    let laid_out = self.apply_workspace_layout_and_position(
+                        workspace,
+                        work_area,
+                        window_manager,
+                    );
                     self.suppressed_windows.remove(&handle);
                     return laid_out;
                 }

@@ -110,7 +110,9 @@ impl MimeDatabase {
                 }
             }
         }
-        database.magic.sort_by_key(|magic| std::cmp::Reverse(magic.priority));
+        database
+            .magic
+            .sort_by_key(|magic| std::cmp::Reverse(magic.priority));
         database.extent = database
             .magic
             .iter()
@@ -196,7 +198,11 @@ impl MimeDatabase {
             }
             let rules = nest(&mut flat.into_iter().peekable(), 0);
             if !rules.is_empty() {
-                self.magic.push(Magic { priority, mime, rules });
+                self.magic.push(Magic {
+                    priority,
+                    mime,
+                    rules,
+                });
             }
         }
     }
@@ -217,7 +223,11 @@ impl MimeDatabase {
             return as_written;
         }
         let lower = name.to_lowercase();
-        self.best(|glob| glob.lower.as_ref().is_some_and(|pattern| fits(pattern, &lower)))
+        self.best(|glob| {
+            glob.lower
+                .as_ref()
+                .is_some_and(|pattern| fits(pattern, &lower))
+        })
     }
 
     /// Of the patterns that fit, the types of the heaviest and longest.
@@ -252,7 +262,12 @@ impl MimeDatabase {
     pub fn of_file(&self, path: &Path) -> String {
         let Ok(data) = std::fs::metadata(path) else {
             // (A link that leads nowhere is still there itself.)
-            return if path.symlink_metadata().is_ok() { "inode/symlink" } else { UNKNOWN }.to_string();
+            return if path.symlink_metadata().is_ok() {
+                "inode/symlink"
+            } else {
+                UNKNOWN
+            }
+            .to_string();
         };
         let kind = data.file_type();
         if kind.is_dir() {
@@ -273,13 +288,20 @@ impl MimeDatabase {
             }
             .to_string();
         }
-        let name = path.file_name().map(|name| name.to_string_lossy()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_default();
         let named = self.by_name(&name);
         if let [one] = named[..] {
             return one.to_string();
         }
         if data.len() == 0 {
-            return named.first().copied().unwrap_or("application/x-zerosize").to_string();
+            return named
+                .first()
+                .copied()
+                .unwrap_or("application/x-zerosize")
+                .to_string();
         }
         let start = start_of(path, self.extent.max(256));
         let sniffed = self.by_content(&start);
@@ -288,7 +310,10 @@ impl MimeDatabase {
             // where they point elsewhere, the name still counts for more.
             return sniffed
                 .and_then(|sniffed| {
-                    named.iter().find(|&&candidate| self.is_a(candidate, sniffed)).copied()
+                    named
+                        .iter()
+                        .find(|&&candidate| self.is_a(candidate, sniffed))
+                        .copied()
                 })
                 .unwrap_or(first)
                 .to_string();
@@ -303,7 +328,9 @@ impl MimeDatabase {
     /// Whether `mime` is `ancestor` or a kind of it.
     pub fn is_a(&self, mime: &str, ancestor: &str) -> bool {
         let ancestor = self.unaliased(ancestor);
-        self.with_ancestors(mime).iter().any(|kind| kind == ancestor)
+        self.with_ancestors(mime)
+            .iter()
+            .any(|kind| kind == ancestor)
     }
 
     /// A type and what it is a kind of, the nearest first: its parents by
@@ -362,8 +389,16 @@ impl MimeDatabase {
 impl Rule {
     /// How far into a file this test and those under it reach.
     fn extent(&self) -> usize {
-        let own = self.start.saturating_add(self.range).saturating_add(self.value.len());
-        self.children.iter().map(Rule::extent).max().unwrap_or(0).max(own)
+        let own = self
+            .start
+            .saturating_add(self.range)
+            .saturating_add(self.value.len());
+        self.children
+            .iter()
+            .map(Rule::extent)
+            .max()
+            .unwrap_or(0)
+            .max(own)
     }
 
     /// Whether the value is in the data at one of its places, and, where
@@ -428,13 +463,22 @@ fn read_rule(data: &[u8]) -> Option<(usize, Rule, &[u8])> {
             bytes.chunks_exact_mut(word).for_each(<[u8]>::reverse);
         }
     }
-    let rule = Rule { start, value, mask, range: range.max(1), children: Vec::new() };
+    let rule = Rule {
+        start,
+        value,
+        mask,
+        range: range.max(1),
+        children: Vec::new(),
+    };
     Some((indent, rule, rest))
 }
 
 /// The tests of a section as a tree: a line hangs under the last line
 /// that is less deep.
-fn nest(flat: &mut std::iter::Peekable<impl Iterator<Item = (usize, Rule)>>, depth: usize) -> Vec<Rule> {
+fn nest(
+    flat: &mut std::iter::Peekable<impl Iterator<Item = (usize, Rule)>>,
+    depth: usize,
+) -> Vec<Rule> {
     let mut rules: Vec<Rule> = Vec::new();
     while let Some(indent) = flat.peek().map(|(indent, _)| *indent) {
         if indent < depth {
@@ -479,7 +523,12 @@ fn fits_from(pattern: &[char], name: &[char]) -> bool {
         '*' => (0..=name.len()).any(|skipped| fits_from(rest, &name[skipped..])),
         '?' => !name.is_empty() && fits_from(rest, &name[1..]),
         '[' => {
-            let Some(close) = rest.iter().skip(1).position(|&letter| letter == ']').map(|at| at + 1) else {
+            let Some(close) = rest
+                .iter()
+                .skip(1)
+                .position(|&letter| letter == ']')
+                .map(|at| at + 1)
+            else {
                 // No closing bracket: the bracket is a letter.
                 return name.first() == Some(&'[') && fits_from(rest, &name[1..]);
             };
@@ -521,10 +570,9 @@ fn start_of(path: &Path, most: usize) -> Vec<u8> {
 /// 128 that text does not have (the specification's own last resort).
 fn looks_like_text(start: &[u8]) -> bool {
     !start.is_empty()
-        && start
-            .iter()
-            .take(128)
-            .all(|&byte| (byte >= 0x20 && byte != 0x7f) || matches!(byte, b'\t' | b'\n' | b'\r' | 0x0c | 0x1b))
+        && start.iter().take(128).all(|&byte| {
+            (byte >= 0x20 && byte != 0x7f) || matches!(byte, b'\t' | b'\n' | b'\r' | 0x0c | 0x1b)
+        })
 }
 
 #[cfg(test)]
@@ -551,7 +599,8 @@ pub(crate) mod tests {
     pub(crate) fn write_database(data: &Path) {
         let mime = data.join("mime");
         std::fs::create_dir_all(&mime).expect("a folder");
-        let write = |name: &str, text: &[u8]| std::fs::write(mime.join(name), text).expect("written");
+        let write =
+            |name: &str, text: &[u8]| std::fs::write(mime.join(name), text).expect("written");
         write(
             "globs2",
             b"# written by a test\n\
@@ -591,12 +640,18 @@ pub(crate) mod tests {
         // The 16-bit number 0x0102 as the machine keeps it.
         magic.extend(rule(0, 0, b"\x01\x02", b"~2"));
         write("magic", &magic);
-        write("aliases", b"text/x-python3 text/x-python\napplication/x-pdf application/pdf\n");
+        write(
+            "aliases",
+            b"text/x-python3 text/x-python\napplication/x-pdf application/pdf\n",
+        );
         write(
             "subclasses",
             b"application/x-compressed-tar application/gzip\ntext/x-python application/x-executable\n",
         );
-        write("generic-icons", b"text/x-python:text-x-script\napplication/pdf:x-office-document\n");
+        write(
+            "generic-icons",
+            b"text/x-python:text-x-script\napplication/pdf:x-office-document\n",
+        );
         write("icons", b"application/x-desktop:application-x-executable\n");
     }
 
@@ -640,18 +695,36 @@ pub(crate) mod tests {
     #[test]
     fn bytes_mean_a_type_where_a_test_and_one_under_it_hold() {
         let (root, database) = database();
-        assert_eq!(database.by_content(b"\x89PNG\r\n\x1a\n...."), Some("image/png"));
+        assert_eq!(
+            database.by_content(b"\x89PNG\r\n\x1a\n...."),
+            Some("image/png")
+        );
         // Anywhere in the first kilobyte.
-        assert_eq!(database.by_content(b"\n\n  %PDF-1.7"), Some("application/pdf"));
+        assert_eq!(
+            database.by_content(b"\n\n  %PDF-1.7"),
+            Some("application/pdf")
+        );
         // The upper test alone is not enough; one of the lower ones is.
-        assert_eq!(database.by_content(b"RIFF....WAVEfmt "), Some("application/x-riff-wave"));
-        assert_eq!(database.by_content(b"RIFF....wave"), Some("application/x-riff-wave"));
+        assert_eq!(
+            database.by_content(b"RIFF....WAVEfmt "),
+            Some("application/x-riff-wave")
+        );
+        assert_eq!(
+            database.by_content(b"RIFF....wave"),
+            Some("application/x-riff-wave")
+        );
         assert_eq!(database.by_content(b"RIFF....AVI "), None);
         // Under a mask only the bits it names count.
-        assert_eq!(database.by_content(b"zz\x1f\xff"), Some("application/x-masked"));
+        assert_eq!(
+            database.by_content(b"zz\x1f\xff"),
+            Some("application/x-masked")
+        );
         assert_eq!(database.by_content(b"zz\x2f\xff"), None);
         // A value of words is compared as the machine keeps words.
-        assert_eq!(database.by_content(&0x0102u16.to_ne_bytes()), Some("application/x-words"));
+        assert_eq!(
+            database.by_content(&0x0102u16.to_ne_bytes()),
+            Some("application/x-words")
+        );
         // The stronger test first.
         assert_eq!(database.by_content(b"% matlab code"), Some("text/x-matlab"));
         assert_eq!(database.by_content(b""), None);
@@ -668,24 +741,39 @@ pub(crate) mod tests {
         };
         assert_eq!(file("a.txt", b"hello"), "text/plain");
         // The name is believed even where the bytes say otherwise.
-        assert_eq!(file("really-a-picture.txt", b"\x89PNG\r\n\x1a\n"), "text/plain");
+        assert_eq!(
+            file("really-a-picture.txt", b"\x89PNG\r\n\x1a\n"),
+            "text/plain"
+        );
         // No ending: the bytes.
         assert_eq!(file("picture", b"\x89PNG\r\n\x1a\n"), "image/png");
         assert_eq!(file("words", b"just some words\n"), "text/plain");
-        assert_eq!(file("bytes", b"\x00\x01\x02\x03"), "application/octet-stream");
+        assert_eq!(
+            file("bytes", b"\x00\x01\x02\x03"),
+            "application/octet-stream"
+        );
         assert_eq!(file("empty", b""), "application/x-zerosize");
         // Two types for the name: the bytes choose, and the first stands
         // where they do not.
         assert_eq!(file("one.m", b"% matlab code"), "text/x-matlab");
-        assert_eq!(file("two.m", b"#import <Foundation/Foundation.h>"), "text/x-objcsrc");
+        assert_eq!(
+            file("two.m", b"#import <Foundation/Foundation.h>"),
+            "text/x-objcsrc"
+        );
         std::fs::create_dir_all(root.join("folder.txt")).expect("a folder");
-        assert_eq!(database.of_file(&root.join("folder.txt")), "inode/directory");
+        assert_eq!(
+            database.of_file(&root.join("folder.txt")),
+            "inode/directory"
+        );
         // A link is what it leads to; one that leads nowhere is a link.
         std::os::unix::fs::symlink(root.join("picture"), root.join("link")).expect("a link");
         assert_eq!(database.of_file(&root.join("link")), "image/png");
         std::os::unix::fs::symlink(root.join("gone"), root.join("broken")).expect("a link");
         assert_eq!(database.of_file(&root.join("broken")), "inode/symlink");
-        assert_eq!(database.of_file(&root.join("not-there")), "application/octet-stream");
+        assert_eq!(
+            database.of_file(&root.join("not-there")),
+            "application/octet-stream"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -702,14 +790,27 @@ pub(crate) mod tests {
         assert!(!database.is_a("application/gzip", "application/x-compressed-tar"));
         assert_eq!(
             database.icon_names("text/x-python"),
-            ["text-x-python", "text-x-script", "text-x-generic", "unknown"]
+            [
+                "text-x-python",
+                "text-x-script",
+                "text-x-generic",
+                "unknown"
+            ]
         );
         assert_eq!(
             database.icon_names("application/x-desktop"),
-            ["application-x-executable", "application-x-desktop", "application-x-generic", "unknown"]
+            [
+                "application-x-executable",
+                "application-x-desktop",
+                "application-x-generic",
+                "unknown"
+            ]
         );
         assert_eq!(database.icon_names("inode/directory")[0], "folder");
-        assert_eq!(database.icon_names("image/png"), ["image-png", "image-x-generic", "unknown"]);
+        assert_eq!(
+            database.icon_names("image/png"),
+            ["image-png", "image-x-generic", "unknown"]
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

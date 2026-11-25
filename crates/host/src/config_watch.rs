@@ -32,7 +32,11 @@ impl ConfigFileWatcher {
             "{} is {}watched for changes{}",
             path.display(),
             if enabled { "" } else { "not " },
-            if acknowledged.is_none() { " (it is not there yet)" } else { "" }
+            if acknowledged.is_none() {
+                " (it is not there yet)"
+            } else {
+                ""
+            }
         );
         Self {
             path,
@@ -41,7 +45,9 @@ impl ConfigFileWatcher {
             pending: None,
             // Allow the first poll immediately so a file changed between WM
             // start and watcher creation is noticed within one interval.
-            last_poll: Instant::now().checked_sub(POLL_INTERVAL).unwrap_or_else(Instant::now),
+            last_poll: Instant::now()
+                .checked_sub(POLL_INTERVAL)
+                .unwrap_or_else(Instant::now),
         }
     }
 
@@ -102,7 +108,11 @@ impl ConfigFileWatcher {
             log::debug!(
                 "{} was {} outside gevrek",
                 self.path.display(),
-                if current.is_some() { "changed" } else { "removed" }
+                if current.is_some() {
+                    "changed"
+                } else {
+                    "removed"
+                }
             );
             return true;
         }
@@ -136,7 +146,9 @@ mod tests {
     }
 
     fn poll_now(watcher: &mut ConfigFileWatcher) -> bool {
-        watcher.last_poll = Instant::now().checked_sub(POLL_INTERVAL).unwrap_or_else(Instant::now);
+        watcher.last_poll = Instant::now()
+            .checked_sub(POLL_INTERVAL)
+            .unwrap_or_else(Instant::now);
         watcher.poll()
     }
 
