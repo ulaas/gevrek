@@ -469,15 +469,18 @@ impl Launcher {
             .iter()
             .filter_map(|app| gevrek_system::apps::score(app, typed).map(|score| (score, app)))
             .collect();
-        apps.sort_by(|one, other| {
-            let with_use =
-                |(score, app): &(u32, &App)| *score + self.usage.count(&app.id).min(20) * 6;
-            with_use(other)
-                .cmp(&with_use(one))
-                .then_with(|| one.1.name.to_lowercase().cmp(&other.1.name.to_lowercase()))
+        // (Each one's place is worked out once, not for every pair that is
+        // held against each other; and a line is made only of those that
+        // can be shown, not of every application there is.)
+        apps.sort_by_cached_key(|(score, app)| {
+            (
+                std::cmp::Reverse(*score + self.usage.count(&app.id).min(20) * 6),
+                app.name.to_lowercase(),
+            )
         });
         let mut entries: Vec<Entry> = apps
             .into_iter()
+            .take(SHOWN)
             .map(|(_, app)| self.entry_of(app))
             .collect();
         // Open windows that answer what is typed: to switch to, after the

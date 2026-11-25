@@ -130,6 +130,9 @@ enum Message {
     Bluetooth(Option<gevrek_system::bluetooth::Bluetooth>),
     /// What is playing is another piece, or plays, or no longer.
     Playing(Option<crate::media::Playing>),
+    /// An application that was to be started beside the shell was not:
+    /// what to tell the person.
+    NotStarted(String),
     /// What the sound has (its devices, the programs that play) is other
     /// than it was: read beside the shell while the control centre is
     /// open.
@@ -535,6 +538,7 @@ pub fn run() -> anyhow::Result<()> {
                 control.redraw(*id);
             }
         }
+        Message::NotStarted(problem) => tell(&state, "Not started", &problem, -1, control),
         Message::Mixer(mixer) => {
             let mut state = state.borrow_mut();
             // (Not while a slider is held: the list must not move under it.)
@@ -553,10 +557,14 @@ pub fn run() -> anyhow::Result<()> {
             log::info!("{} applications read", apps.len());
             let mut state = state.borrow_mut();
             state.reading_apps = false;
-            state.apps = apps.clone();
-            if let Some((surface, launcher)) = state.launcher.as_mut() {
-                launcher.set_apps(apps);
-                control.redraw(*surface);
+            // (Read again each time the launcher opens, and nearly
+            // always the same: then nothing is put anew or drawn.)
+            if state.apps != apps {
+                state.apps = apps.clone();
+                if let Some((surface, launcher)) = state.launcher.as_mut() {
+                    launcher.set_apps(apps);
+                    control.redraw(*surface);
+                }
             }
         }
         Message::Icon => {
@@ -2440,13 +2448,12 @@ fn toggle_launcher(state: &Rc<RefCell<State>>, control: &mut Control) {
     let mut pictures: HashMap<String, egui::TextureHandle> = HashMap::new();
     let mut had_keyboard = false;
     let mut said = String::new();
-    let id = control.open(place, move |ui, control| {
+    let id = control.open(place, move |ui, _control| {
         let context = ui.ctx().clone();
         let mut held = shared.borrow_mut();
         let state = &mut *held;
         // What could not be done, where something could not: said as a
         // notification once the launcher is put away.
-        let mut problem: Option<String> = None;
         if !fonts {
             theme::install_fonts_for(&context, &state.settings, gevrek_ui::fonts::Area::Launcher);
             fonts = true;
@@ -2512,21 +2519,28 @@ fn toggle_launcher(state: &Rc<RefCell<State>>, control: &mut Control) {
             let elevated = asked.elevated;
             match (&entry.copy, app) {
                 // With an administrator's rights: Windows asks first.
+                // (Started beside the shell: Windows takes its time to
+                // find what a shortcut means, and waits for its question
+                // to be answered, and the panel and everything else the
+                // shell draws stood still for as long.)
                 (None, Some(app)) if elevated => {
-                    match gevrek_system::apps::start_elevated(app) {
-                        Ok(_) => log::info!("started {} as administrator", app.name),
-                        // (1223: the person said no to Windows' question.)
-                        Err(error) if error.raw_os_error() == Some(1223) => {
-                            log::info!("{} was not started: the question was answered with no", app.name)
+                    let (app, sender) = (app.clone(), state.sender.clone());
+                    std::thread::spawn(move || {
+                        match gevrek_system::apps::start_elevated(&app) {
+                            Ok(_) => log::info!("started {} as administrator", app.name),
+                            // (1223: the person said no to Windows' question.)
+                            Err(error) if error.raw_os_error() == Some(1223) => {
+                                log::info!("{} was not started: the question was answered with no", app.name)
+                            }
+                            Err(error) => {
+                                log::warn!("{} could not be started as administrator: {error}", app.name);
+                                sender.send(Message::NotStarted(format!(
+                                    "{} could not be started as administrator. An application from the Store cannot be.",
+                                    app.name
+                                )));
+                            }
                         }
-                        Err(error) => {
-                            log::warn!("{} could not be started as administrator: {error}", app.name);
-                            problem = Some(format!(
-                                "{} could not be started as administrator. An application from the Store cannot be.",
-                                app.name
-                            ));
-                        }
-                    }
+                    });
                 }
                 // A text that was copied before: on the clipboard again.
                 (Some(text), _) => {
@@ -2534,11 +2548,16 @@ fn toggle_launcher(state: &Rc<RefCell<State>>, control: &mut Control) {
                         clipboard.put(text);
                     }
                 }
-                (None, Some(app)) => match gevrek_system::apps::start(app) {
-                    Ok(Some(process)) => log::info!("started {} as process {process}", app.name),
-                    Ok(None) => log::info!("started {}", app.name),
-                    Err(error) => log::warn!("{} could not be started: {error}", app.name),
-                },
+                (None, Some(app)) => {
+                    let app = app.clone();
+                    std::thread::spawn(move || match gevrek_system::apps::start(&app) {
+                        Ok(Some(process)) => {
+                            log::info!("started {} as process {process}", app.name)
+                        }
+                        Ok(None) => log::info!("started {}", app.name),
+                        Err(error) => log::warn!("{} could not be started: {error}", app.name),
+                    });
+                }
                 (None, None) => state
                     .link
                     .send(Request::Dispatch(entry.command.to_string())),
@@ -2552,9 +2571,6 @@ fn toggle_launcher(state: &Rc<RefCell<State>>, control: &mut Control) {
         if close {
             state.launcher = None;
             drop(held);
-            if let Some(problem) = problem {
-                tell(&shared, "Not started", &problem, -1, control);
-            }
             return Flow::Close;
         }
         Flow::Continue

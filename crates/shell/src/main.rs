@@ -192,6 +192,9 @@ mod linux {
         Thumbs(Vec<crate::thumbs::Thumb>),
         /// The devices to play on, read again for the control centre.
         Mixer(gevrek_system::sound::Mixer),
+        /// An icon that was looked for is there (or there is none): what
+        /// shows icons is drawn again.
+        Icon,
         Wifi(Option<gevrek_system::wifi::Wifi>),
         /// The system is being asked for the wireless networks in reach
         /// (or no longer is).
@@ -295,6 +298,11 @@ mod linux {
         launcher: Option<(SurfaceId, Launcher)>,
         /// The window switcher, while it is up.
         switcher: Option<(SurfaceId, crate::switcher::Switcher)>,
+        /// The icons of applications, looked for on a thread of their
+        /// own and kept for as long as the shell runs: the launcher and
+        /// the switcher looked for theirs, and made pictures of them,
+        /// between two frames, each time they were opened.
+        icons: gevrek_system::icons::Cache,
         /// The windows in the order they last had the keyboard.
         used: crate::switcher::Used,
         /// The panel of each display, by the display's name, and what
@@ -516,6 +524,12 @@ mod linux {
             tray_items: Rc::new(Vec::new()),
             tray_wait: None,
             older_icons: None,
+            icons: {
+                let found = shell.sender();
+                gevrek_system::icons::Cache::new(move || {
+                    found.send(Message::Icon);
+                })
+            },
             tray_menu: None,
             tray_all: Vec::new(),
             tray_on_panel: crate::tray_choice::read_tray_choice(),
@@ -823,6 +837,15 @@ mod linux {
                             state.frost_scene = picture
                                 .map(|picture| (1_000_000 + asked, std::sync::Arc::new(picture)));
                             control.redraw_all();
+                        }
+                    }
+                    Message::Icon => {
+                        let state = listening.borrow();
+                        if let Some((id, _)) = &state.launcher {
+                            control.redraw(*id);
+                        }
+                        if let Some((id, _)) = &state.switcher {
+                            control.redraw(*id);
                         }
                     }
                     Message::Mixer(mixer) => {
@@ -4950,11 +4973,12 @@ mod linux {
         };
         let shared = Rc::clone(state);
         let mut fonts = false;
-        let mut icons_seen: std::collections::HashMap<String, Option<egui::TextureHandle>> =
+        let mut icons_seen: std::collections::HashMap<String, egui::TextureHandle> =
             Default::default();
         let id = control.open(place, move |ui, _| {
             let context = ui.ctx().clone();
             let mut state = shared.borrow_mut();
+            let state = &mut *state;
             if !fonts {
                 theme::install_fonts_for(
                     &context,
@@ -4969,24 +4993,24 @@ mod linux {
                 let Some((_, switcher)) = state.switcher.as_mut() else {
                     return Flow::Close;
                 };
+                let icons = &mut state.icons;
                 crate::switcher::draw(ui, &palette, switcher, &mut |context, class| {
                     // A window's class is usually its application's icon.
-                    icons_seen
-                        .entry(class.to_string())
-                        .or_insert_with(|| {
-                            let file = gevrek_system::icons::find(class, 64)?;
-                            let picture = gevrek_system::icons::load(&file, 64)?;
-                            let image = egui::ColorImage::from_rgba_unmultiplied(
-                                [picture.width as usize, picture.height as usize],
-                                &picture.pixels,
-                            );
-                            Some(context.load_texture(
-                                class.to_string(),
-                                image,
-                                egui::TextureOptions::LINEAR,
-                            ))
-                        })
-                        .clone()
+                    if let Some(picture) = icons_seen.get(class) {
+                        return Some(picture.clone());
+                    }
+                    let found = icons.get(class, 64)?;
+                    let image = egui::ColorImage::from_rgba_unmultiplied(
+                        [found.width as usize, found.height as usize],
+                        &found.pixels,
+                    );
+                    let picture = context.load_texture(
+                        class.to_string(),
+                        image,
+                        egui::TextureOptions::LINEAR,
+                    );
+                    icons_seen.insert(class.to_string(), picture.clone());
+                    Some(picture)
                 })
             };
             if let Some(window) = asked.go {
@@ -5198,12 +5222,13 @@ mod linux {
         let gamescope = crate::launcher::gamescope_is_there();
         let shared = Rc::clone(state);
         let mut fonts = false;
-        // The icons that were looked for, by name (`None`: there is none).
-        let mut icons_seen: std::collections::HashMap<String, Option<egui::TextureHandle>> =
+        // The icons this surface has as pictures of its own, by name.
+        let mut icons_seen: std::collections::HashMap<String, egui::TextureHandle> =
             Default::default();
         let id = control.open(place, move |ui, _| {
             let context = ui.ctx().clone();
             let mut state = shared.borrow_mut();
+            let state = &mut *state;
             if !fonts {
                 theme::install_fonts_for(
                     &context,
@@ -5227,24 +5252,25 @@ mod linux {
                         ""
                     }
                 );
+                let icons = &mut state.icons;
                 crate::launcher::draw(ui, &palette, launcher, &hint, &mut |context, entry| {
-                    // Its icon, looked for once.
-                    icons_seen
-                        .entry(entry.icon.clone())
-                        .or_insert_with(|| {
-                            let file = gevrek_system::icons::find(&entry.icon, 64)?;
-                            let picture = gevrek_system::icons::load(&file, 64)?;
-                            let image = egui::ColorImage::from_rgba_unmultiplied(
-                                [picture.width as usize, picture.height as usize],
-                                &picture.pixels,
-                            );
-                            Some(context.load_texture(
-                                entry.icon.clone(),
-                                image,
-                                egui::TextureOptions::LINEAR,
-                            ))
-                        })
-                        .clone()
+                    if let Some(picture) = icons_seen.get(&entry.icon) {
+                        return Some(picture.clone());
+                    }
+                    // Not there yet: the line shows a letter, and is
+                    // drawn again when the icon was found.
+                    let found = icons.get(&entry.icon, 64)?;
+                    let image = egui::ColorImage::from_rgba_unmultiplied(
+                        [found.width as usize, found.height as usize],
+                        &found.pixels,
+                    );
+                    let picture = context.load_texture(
+                        entry.icon.clone(),
+                        image,
+                        egui::TextureOptions::LINEAR,
+                    );
+                    icons_seen.insert(entry.icon.clone(), picture.clone());
+                    Some(picture)
                 })
             };
             let mut flow = if asked.close {

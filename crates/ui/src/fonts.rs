@@ -276,8 +276,24 @@ fn file(path: &Path) -> Option<&'static [u8]> {
     })
 }
 
-/// The font file fontconfig picks for `pattern`, if it's a TrueType/OpenType file.
+/// The font file fontconfig picks for `pattern`, if it's a TrueType/OpenType
+/// file. Asked once for the program's life: every surface that opens (a
+/// menu, a hint) installs its fonts, and each of them started `fc-match`
+/// twice for the answer the first one had got (on Windows, where there is
+/// none to start, it tried twice all the same).
 fn fc_match(pattern: &str) -> Option<String> {
+    type Cache = Mutex<HashMap<String, Option<String>>>;
+    static ASKED: OnceLock<Cache> = OnceLock::new();
+    let mut asked = ASKED.get_or_init(Default::default).lock().ok()?;
+    if let Some(known) = asked.get(pattern) {
+        return known.clone();
+    }
+    let found = fc_match_now(pattern);
+    asked.insert(pattern.to_string(), found.clone());
+    found
+}
+
+fn fc_match_now(pattern: &str) -> Option<String> {
     let out = std::process::Command::new("fc-match")
         .args(["-f", "%{file}", pattern])
         .output()

@@ -206,11 +206,12 @@ impl Executor {
         }
         log::info!("═══════════════════════════════════════════════════════════");
 
-        // Clear suppressions after startup to allow normal event processing
-        // Wait a bit for any pending events to settle
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        self.suppressed_windows.clear();
-        log::info!("Startup complete, cleared event suppressions");
+        // What the start moved is told back by the system as moved: each
+        // of those is taken for the start's own by its suppression, which
+        // goes with it or after a second (`move_suppression`). (The start
+        // used to stand still for half a second here, on the loop's own
+        // thread and before any key was bound, and let go of all of them.)
+        log::info!("Startup complete");
 
         Ok(())
     }
