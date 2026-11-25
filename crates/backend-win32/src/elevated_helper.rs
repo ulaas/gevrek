@@ -79,7 +79,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 /// What the two speak; a helper of another version is not used.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 /// The bits of a window's style gevrek changes: the title bar and its
 /// boxes, the frame to resize it by (taken away for fullscreen).
@@ -149,11 +149,31 @@ impl After {
     }
 }
 
+/// One window of [`Ask::PlaceMany`]: where it is put and how large.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Placed {
+    pub window: isize,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
 /// What the window manager asks of the helper.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Ask {
     Hello {
         version: u32,
+    },
+    /// `SetWindowPos` for several windows, each where it stands among the
+    /// others, with the same `flags`: the windows of one frame of a
+    /// motion, asked for at once. (Each used to be a question and an
+    /// answer of its own, sixty times a second.) One that cannot be
+    /// placed does not keep the others from it; the answer is the first
+    /// refusal.
+    PlaceMany {
+        places: Vec<Placed>,
+        flags: u32,
     },
     /// `SetWindowPos`.
     Place {
@@ -472,6 +492,29 @@ pub fn carry_out_on(desk: &mut impl Desk, ask: &Ask, hidden: &mut HashSet<isize>
             } else {
                 Answer::Refused(format!("this helper speaks version {VERSION}"))
             }
+        }
+        Ask::PlaceMany { ref places, flags } => {
+            // (Not among the others: `SWP_NOZORDER`, whatever was asked.)
+            const SWP_NOZORDER: u32 = 0x0004;
+            let flags = (flags & PLACE_FLAGS) | SWP_NOZORDER;
+            let mut refused = None;
+            for placed in places {
+                let done = desk.may_be_asked_of(placed.window).and_then(|()| {
+                    desk.place(
+                        placed.window,
+                        After::Top,
+                        placed.x,
+                        placed.y,
+                        placed.width,
+                        placed.height,
+                        flags,
+                    )
+                });
+                if let Err(why) = done {
+                    refused.get_or_insert(why);
+                }
+            }
+            done(refused.map_or(Ok(()), Err))
         }
         Ask::Place {
             window,
@@ -1420,6 +1463,25 @@ mod tests {
         };
         vec![
             Ask::Hello { version: VERSION },
+            Ask::PlaceMany {
+                places: vec![
+                    Placed {
+                        window: 10,
+                        x: -8,
+                        y: 0,
+                        width: 800,
+                        height: 600,
+                    },
+                    Placed {
+                        window: 20,
+                        x: 0,
+                        y: 0,
+                        width: 1,
+                        height: 1,
+                    },
+                ],
+                flags: 0x14,
+            },
             Ask::Place {
                 window: 10,
                 after: After::Below(20),

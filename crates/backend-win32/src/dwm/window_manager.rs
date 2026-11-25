@@ -603,6 +603,10 @@ impl Clone for OverviewShown {
 /// A rectangle of the desktop: its left, its top, how wide, how high.
 pub type Place = (i32, i32, i32, i32);
 
+/// How long the frame around a window is kept for the frames of a
+/// motion before Windows is asked again.
+const INSETS_KEPT_FOR: std::time::Duration = std::time::Duration::from_secs(1);
+
 #[derive(Clone)]
 pub struct WindowManager {
     windows: HashMap<WindowHandle, WindowInfo>,
@@ -657,6 +661,11 @@ pub struct WindowManager {
     border_hwnd_set: HashSet<WindowHandle>,            // O(1) lookup for "is this a border window?"
     /// Shadow, glow, gradient border and tint of the bordered windows.
     auras: RefCell<super::aura::Auras>,
+    /// The frames around the windows of the motion that is going on, as
+    /// Windows gave them at its start (`frame_offsets_in_motion`), and
+    /// whether a frame of a motion is being placed just now.
+    insets_kept: RefCell<HashMap<isize, ((i32, i32, i32, i32), Instant)>>,
+    insets_in_motion: std::cell::Cell<bool>,
     /// Stackbar windows keyed by the container's focused window handle.
     stackbar_windows: HashMap<WindowHandle, StackbarInfo>,
     /// O(1) lookup for "is this a stackbar window?" Kept separate from
@@ -887,6 +896,8 @@ impl WindowManager {
             border_windows: HashMap::new(),
             border_hwnd_set: HashSet::new(),
             auras: RefCell::new(Default::default()),
+            insets_kept: RefCell::new(HashMap::new()),
+            insets_in_motion: std::cell::Cell::new(false),
             stackbar_windows: HashMap::new(),
             stackbar_hwnd_set: HashSet::new(),
             stackbar_click_queue: Arc::new(Mutex::new(Vec::new())),
@@ -928,6 +939,8 @@ impl WindowManager {
             plain_frame: RefCell::new(HashSet::new()),
             border_hwnd_set: HashSet::new(),
             auras: RefCell::new(Default::default()),
+            insets_kept: RefCell::new(HashMap::new()),
+            insets_in_motion: std::cell::Cell::new(false),
             stackbar_windows: HashMap::new(),
             stackbar_hwnd_set: HashSet::new(),
             stackbar_click_queue: Arc::new(Mutex::new(Vec::new())),
@@ -1642,6 +1655,33 @@ impl WindowManager {
     /// or DPI-mixed DWM sample never shifts a tile by a huge bogus inset.
     fn get_window_frame_offsets(&self, hwnd: HWND) -> (i32, i32, i32, i32) {
         self.query_frame_insets(hwnd).unwrap_or((0, 0, 0, 0))
+    }
+
+    /// The same for a window that is being moved frame by frame: asked of
+    /// Windows once in a motion and kept for its other frames. (The frame
+    /// around a window is as wide wherever the window stands; it was asked
+    /// for, with two calls, for every window in every frame.) Outside a
+    /// motion nothing is kept, and what is kept is let go when the motion
+    /// ends and a second after it was asked at the latest.
+    fn frame_offsets_in_motion(&self, hwnd: HWND) -> (i32, i32, i32, i32) {
+        if !self.insets_in_motion.get() {
+            return self.get_window_frame_offsets(hwnd);
+        }
+        let key = hwnd.0 as isize;
+        let now = Instant::now();
+        if let Some((insets, asked)) = self.insets_kept.borrow().get(&key) {
+            if now.saturating_duration_since(*asked) < INSETS_KEPT_FOR {
+                return *insets;
+            }
+        }
+        match self.query_frame_insets(hwnd) {
+            Some(insets) => {
+                self.insets_kept.borrow_mut().insert(key, (insets, now));
+                insets
+            }
+            // (A sample that cannot be: not kept, asked again next frame.)
+            None => (0, 0, 0, 0),
+        }
     }
 
     /// Move and resize window in one operation (more efficient)
@@ -4209,6 +4249,12 @@ impl WindowManager {
     pub fn tick_runtime_animations(&mut self) -> Result<()> {
         let frame = self.animation_scheduler.tick(Instant::now());
         let close_windows = frame.close_windows;
+        if frame.rectangles.is_empty() {
+            // (No window moves: what was kept of their frames is let go.)
+            if !self.insets_kept.borrow().is_empty() {
+                self.insets_kept.borrow_mut().clear();
+            }
+        }
         if !frame.rectangles.is_empty() {
             gevrek_engine::counts::count(gevrek_engine::counts::Counted::MotionFrame);
             // A window coming in stays where it is: its picture moves.
@@ -4216,7 +4262,10 @@ impl WindowManager {
                 .rectangles
                 .iter()
                 .partition(|(handle, _)| self.stand_ins.has(*handle));
-            self.batch_move_resize(&moved)?;
+            self.insets_in_motion.set(true);
+            let batch = self.batch_move_resize(&moved);
+            self.insets_in_motion.set(false);
+            batch?;
             for (handle, rect) in pictured {
                 if let Some(part) = self.seen_part(handle.to_hwnd()) {
                     self.stand_ins.place(handle, rect, part);
@@ -4320,7 +4369,7 @@ impl WindowManager {
                 if !unsafe { IsWindow(hwnd) }.as_bool() {
                     return None;
                 }
-                let (left, top, right, bottom) = self.get_window_frame_offsets(hwnd);
+                let (left, top, right, bottom) = self.frame_offsets_in_motion(hwnd);
                 Some((
                     *handle,
                     hwnd,
@@ -4341,9 +4390,29 @@ impl WindowManager {
         // (And a window that was sent a move by post before, which it may
         // not have carried out yet, is sent this one by post as well: see
         // `move_must_be_posted`.)
+        // (The windows of elevated programs first, all of them in one
+        // question to the helper.)
+        let (helpers, targets): (Vec<_>, Vec<_>) = targets
+            .into_iter()
+            .partition(|target| super::reach::by_helper(target.1));
+        if !helpers.is_empty() {
+            let places: Vec<_> = helpers
+                .iter()
+                .map(|(_, hwnd, x, y, width, height)| (*hwnd, *x, *y, *width, *height))
+                .collect();
+            if let Err(error) = super::reach::place_many_by_helper(
+                &places,
+                SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
+            ) {
+                log::trace!(
+                    "the helper placed not all of {} windows: {error}",
+                    places.len()
+                );
+            }
+        }
         let (hung, targets): (Vec<_>, Vec<_>) = targets
             .into_iter()
-            .partition(|target| move_must_be_posted(target.1) || super::reach::by_helper(target.1));
+            .partition(|target| move_must_be_posted(target.1));
         for (handle, hwnd, x, y, width, height) in &hung {
             log::trace!(
                 "Window {} is not responding; positioning it asynchronously",
@@ -4360,7 +4429,7 @@ impl WindowManager {
                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
                 )
             };
-            if posted.is_ok() && !super::reach::by_helper(*hwnd) {
+            if posted.is_ok() {
                 note_posted_move(*hwnd, (*x, *y, *width, *height));
             }
         }

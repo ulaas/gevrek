@@ -6,7 +6,7 @@
 //! program's reach, and every window while no helper answers, is called
 //! as before.
 
-use crate::elevated_helper::{client, After, Answer, Ask};
+use crate::elevated_helper::{client, After, Answer, Ask, Placed};
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
     PostMessageW, SetWindowPos, ShowWindow, ShowWindowAsync, SET_WINDOW_POS_FLAGS, SHOW_WINDOW_CMD,
@@ -61,6 +61,31 @@ pub unsafe fn set_window_pos(
         }));
     }
     SetWindowPos(hwnd, after.unwrap_or_default(), x, y, width, height, flags)
+}
+
+/// `SetWindowPos` for several windows of elevated programs at once,
+/// none of them moved among the others: one question to the helper.
+/// (Only for windows that are the helper's: [`by_helper`].)
+pub fn place_many_by_helper(
+    places: &[(HWND, i32, i32, i32, i32)],
+    flags: SET_WINDOW_POS_FLAGS,
+) -> windows::core::Result<()> {
+    if places.is_empty() {
+        return Ok(());
+    }
+    answered(client::ask(&Ask::PlaceMany {
+        places: places
+            .iter()
+            .map(|(hwnd, x, y, width, height)| Placed {
+                window: hwnd.0 as isize,
+                x: *x,
+                y: *y,
+                width: *width,
+                height: *height,
+            })
+            .collect(),
+        flags: flags.0,
+    }))
 }
 
 fn show(hwnd: HWND, command: SHOW_WINDOW_CMD, posted: bool) {
