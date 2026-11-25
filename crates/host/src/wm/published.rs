@@ -50,8 +50,17 @@ pub trait Published: WmHost {
                 .monitor_data(parts.desktop, &parts.config.desktop)
         };
         self.adjust_published_monitors(&mut monitors);
-        let changes =
-            gevrek_engine::overlay_data::changes(&self.host().published_monitors, &monitors);
+        // (Against what was published last: it is in the slot.)
+        let before = self.host().overlay.as_ref().and_then(|slot| {
+            slot.lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone()
+        });
+        let changes = gevrek_engine::overlay_data::changes(
+            before.as_ref().map_or(&[][..], |data| &data.monitors),
+            &monitors,
+        );
+        drop(before);
         for (kind, fields) in changes {
             self.host().emit(kind, None, fields);
         }
@@ -75,7 +84,6 @@ pub trait Published: WmHost {
             })
             .unwrap_or_default();
         let parts = self.parts();
-        parts.host.published_monitors = monitors.clone();
         parts.host.last_published = std::time::Instant::now();
         let gestures = &parts.config.desktop.gestures;
         let data = OverlayData {
@@ -130,7 +138,7 @@ pub trait Published: WmHost {
         if let Some(overlay) = &parts.host.overlay {
             *overlay
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(data);
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(std::sync::Arc::new(data));
         }
         // Whoever shows the notices (the panel) hears that they are others
         // now and asks for the state, instead of at its next question.

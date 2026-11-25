@@ -21,8 +21,7 @@ mod wait;
 use crate::config::Config;
 use crate::dwm::HwndExt;
 use crate::dwm::{
-    FocusManager, MonitorManager, OverlayData, RuleEngine, SnapZoneManager, WindowManager,
-    WindowMonitor,
+    FocusManager, MonitorManager, RuleEngine, SnapZoneManager, WindowManager, WindowMonitor,
 };
 use crate::hotkey::{GestureEvent, Hotkey, HotkeyManager};
 use crate::node_editor::LogEntry;
@@ -283,7 +282,7 @@ pub struct RuntimeLines {
     pub log_entries: Arc<Mutex<Vec<LogEntry>>>,
     pub config_receiver: Receiver<config_store::ConfigRequest>,
     pub manual_command_receiver: Receiver<ManualCommand>,
-    pub debug_overlay_data: Option<Arc<Mutex<Option<OverlayData>>>>,
+    pub debug_overlay_data: Option<gevrek_host::wm::StateSlot>,
     pub log_broadcast: Option<gevrek_engine::executor::LogBroadcast>,
     pub node_event_broadcast: Option<gevrek_engine::executor::NodeEventBroadcast>,
 }
@@ -295,7 +294,7 @@ impl Runtime {
         pause_flag: Arc<Mutex<bool>>,
         log_entries: Arc<Mutex<Vec<LogEntry>>>,
         config_receiver: Receiver<config_store::ConfigRequest>,
-        debug_overlay_data: Option<Arc<Mutex<Option<OverlayData>>>>,
+        debug_overlay_data: Option<gevrek_host::wm::StateSlot>,
         log_broadcast: Option<gevrek_engine::executor::LogBroadcast>,
     ) -> Result<Self> {
         let (_manual_command_sender, manual_command_receiver) = std::sync::mpsc::channel();

@@ -673,8 +673,8 @@ mod linux {
                     while network_news.try_recv().is_ok() {
                         news = true;
                     }
-                    let network_due = news
-                        || network_read.is_none_or(|at| at.elapsed() >= network_every);
+                    let network_due =
+                        news || network_read.is_none_or(|at| at.elapsed() >= network_every);
                     let now = crate::panel::SystemView::read_with(
                         known.as_ref().filter(|_| !network_due),
                     );

@@ -96,6 +96,7 @@ impl TestHost {
             .lock()
             .unwrap()
             .clone()
+            .map(|data| (*data).clone())
             .expect("published")
     }
 }

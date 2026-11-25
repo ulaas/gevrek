@@ -433,7 +433,7 @@ pub struct WMServer {
     start_time: SystemTime,
     node_registry: NodeRegistry,
     working_graph: Arc<Mutex<gevrek_model::graph::NodeGraph>>,
-    overlay_data: Arc<Mutex<Option<gevrek_engine::overlay_data::OverlayData>>>,
+    overlay_data: gevrek_host::wm::StateSlot,
     /// What the backend this server runs in says it is and can do.
     backend: gevrek_host::backend_info::BackendInfo,
     /// Whether made-up input is accepted (a WM started for testing).
@@ -551,7 +551,7 @@ pub struct RuntimeLinks {
     pub manual_command_sender: std::sync::mpsc::Sender<ManualCommand>,
     pub execution_paused: Arc<Mutex<bool>>,
     pub stop_flag: Arc<Mutex<bool>>,
-    pub overlay_data: Arc<Mutex<Option<gevrek_engine::overlay_data::OverlayData>>>,
+    pub overlay_data: gevrek_host::wm::StateSlot,
     pub event_broadcaster: Arc<broadcast::Sender<ExecutionEvent>>,
     pub runtime_healthy: Arc<AtomicBool>,
     pub runtime_error: Arc<Mutex<Option<String>>>,
@@ -2092,7 +2092,7 @@ impl WMService for WMServer {
             .unwrap_or_default();
         let (workspaces, windows, monitors, active_workspace_id) = overlay_data
             .as_ref()
-            .map(overlay_state_to_proto)
+            .map(|data| overlay_state_to_proto(data))
             .unwrap_or_default();
 
         let (animation, appearance, shadow) = {

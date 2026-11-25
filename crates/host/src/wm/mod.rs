@@ -47,6 +47,12 @@ use gevrek_engine::executor::{
     NodeEventBroadcast, NodeExecutionEvent, RuntimeEventKind, RuntimeExtensionEvent,
 };
 use gevrek_engine::overlay_data::{MonitorData, OverlayData};
+
+/// Where the state the clients read is put, and read from: the one that
+/// was published last, shared. Whoever reads takes it as it is (a count
+/// more of who holds it, not a copy of every window's facts made while
+/// the loop waits to publish the next).
+pub type StateSlot = Arc<Mutex<Option<Arc<OverlayData>>>>;
 use gevrek_engine::Desktop;
 use gevrek_model::config::Config;
 use gevrek_model::ids::{OutputId, WindowId};
@@ -66,7 +72,7 @@ pub struct HostState {
     /// The configuration file, watched for edits made by hand.
     pub watcher: Option<ConfigFileWatcher>,
     /// Where the state is published for the server to hand out.
-    pub overlay: Option<Arc<Mutex<Option<OverlayData>>>>,
+    pub overlay: Option<StateSlot>,
     pub pause_flag: Option<Arc<Mutex<bool>>>,
     pub stop_flag: Option<Arc<Mutex<bool>>>,
     /// The stream of events subscribers hear.
@@ -83,7 +89,6 @@ pub struct HostState {
     /// reload builds workspaces anew and must not start it again.
     pub workspace_hooks_fired: HashSet<(OutputId, String)>,
     /// The outputs as last published, to tell subscribers what changed.
-    pub published_monitors: Vec<MonitorData>,
     /// The notices last told of, to tell when they are others.
     pub notices_told: Vec<gevrek_engine::overlay_data::Notice>,
     /// Something was told, or done, since the state was last published:
@@ -109,7 +114,6 @@ impl Default for HostState {
             active_submap: "default".to_string(),
             startup: StartupProcessManager::new(),
             workspace_hooks_fired: HashSet::new(),
-            published_monitors: Vec::new(),
             notices_told: Vec::new(),
             state_stale: Cell::new(false),
             last_published: std::time::Instant::now(),
@@ -200,7 +204,7 @@ pub struct HostLinks {
     pub config_publisher: ConfigPublisher,
     /// The configuration file, watched for edits made by hand.
     pub config_path: Option<std::path::PathBuf>,
-    pub overlay_data: Arc<Mutex<Option<OverlayData>>>,
+    pub overlay_data: StateSlot,
     pub pause_flag: Arc<Mutex<bool>>,
     pub stop_flag: Arc<Mutex<bool>>,
 }
