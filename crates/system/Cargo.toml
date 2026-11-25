@@ -78,6 +78,8 @@ windows = { workspace = true, features = [
     # (What was copied, for the launcher.)
     "Win32_System_DataExchange",
     "Win32_System_Memory",
+    # (How full the memory is, for the panel's module of the machine's load.)
+    "Win32_System_SystemInformation",
     # (A window's picture, for the window switcher.)
     "Win32_Storage_Xps",
     # (The zones: the clipboard and what is dragged, as the shell's menus

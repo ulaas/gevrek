@@ -69,6 +69,9 @@ mod polkit;
 mod portal;
 #[cfg(any(target_os = "linux", windows, target_os = "macos"))]
 mod power;
+// What the panel's later modules show, looked at beside the shell.
+#[cfg(any(target_os = "linux", windows, target_os = "macos"))]
+mod extras;
 #[cfg(target_os = "linux")]
 mod record;
 #[cfg(target_os = "linux")]
@@ -195,6 +198,11 @@ mod linux {
         /// An icon that was looked for is there (or there is none): what
         /// shows icons is drawn again.
         Icon,
+        /// What a panel's later modules show is another (`extras`).
+        Extra(crate::extras::News),
+        /// What is playing, as a panel shows it: one line of it, and
+        /// whether it plays now.
+        PanelPlaying(Option<(String, bool)>),
         Wifi(Option<gevrek_system::wifi::Wifi>),
         /// The system is being asked for the wireless networks in reach
         /// (or no longer is).
@@ -290,6 +298,10 @@ mod linux {
         /// What can be done with a window of the taskbar (the other
         /// button on its button), by the window.
         TaskActions(u64),
+        /// The panel's own menu (the other button on the panel, where
+        /// nothing stands): its settings, another edge, a panel more,
+        /// this one gone.
+        Panel,
     }
 
     /// What the surfaces share.
@@ -321,6 +333,19 @@ mod linux {
         /// keyboard's layout): a panel is drawn again when its own is
         /// another.
         panel_views: std::collections::HashMap<String, crate::panel::View>,
+        /// The panels a window lies on, by their keys, as of the last
+        /// state: one that is out of sight while it is covered goes by
+        /// this.
+        covered: std::collections::HashSet<String>,
+        /// What the panels' later modules show: how busy the machine is,
+        /// what is playing (for a panel), what each panel's own program
+        /// wrote (by the panel's id), and the thread that looks at them
+        /// while a panel shows them.
+        load: Option<gevrek_system::status::Load>,
+        panel_playing: Option<(String, bool)>,
+        custom: std::collections::HashMap<String, String>,
+        extras_watch: Option<crate::extras::Watch>,
+        extras_sender: Option<gevrek_shellkit::host::Sender<Message>>,
         panel_shows: Option<(usize, String, Option<crate::panel::KeyboardLayout>)>,
         /// The tray, while the shell is it; its icons; and the icon whose
         /// menu was asked of its program and is waited for: on which
@@ -530,6 +555,12 @@ mod linux {
             menu: None,
             bars: Vec::new(),
             panel_views: Default::default(),
+            covered: Default::default(),
+            load: None,
+            panel_playing: None,
+            custom: Default::default(),
+            extras_watch: None,
+            extras_sender: Some(shell.sender()),
             panel_shows: None,
             tray: None,
             tray_items: Rc::new(Vec::new()),
@@ -850,6 +881,33 @@ mod linux {
                             control.redraw_all();
                         }
                     }
+                    Message::Extra(news) => {
+                        let mut state = listening.borrow_mut();
+                        match news {
+                            crate::extras::News::Load(load) => state.load = load,
+                            crate::extras::News::Custom(panel, Some(line)) => {
+                                state.custom.insert(panel, line);
+                            }
+                            crate::extras::News::Custom(panel, None) => {
+                                state.custom.remove(&panel);
+                            }
+                            // What is playing, asked on the thread that
+                            // tells it, comes as a line (`watch_extras`).
+                            crate::extras::News::MediaDue => {}
+                        }
+                        for id in state.panels.values() {
+                            control.redraw(*id);
+                        }
+                    }
+                    Message::PanelPlaying(playing) => {
+                        let mut state = listening.borrow_mut();
+                        if state.panel_playing != playing {
+                            state.panel_playing = playing;
+                            for id in state.panels.values() {
+                                control.redraw(*id);
+                            }
+                        }
+                    }
                     Message::Icon => {
                         let state = listening.borrow();
                         if let Some((id, _)) = &state.launcher {
@@ -1153,6 +1211,7 @@ mod linux {
                         // manager says the desktop has it, comes first.)
                         state.accent = state.wallpaper_accent.unwrap_or(state.own_accent);
                         state.bars = config.desktop.shell.panels.clone();
+                        watch_extras(&mut state);
                         // The icons of older programs, carried over to the
                         // tray or no longer, as the configuration has it now.
                         let wanted = crate::tray::older_wanted(
@@ -1304,6 +1363,37 @@ mod linux {
                             }
                         }
                         state.panel_views = views;
+                        // (Where a window lies on a panel that hides
+                        // while it is covered: that panel looks.)
+                        let covered: std::collections::HashSet<String> = state
+                            .panels
+                            .keys()
+                            .filter(|key| {
+                                let display = crate::panel::key_display(key);
+                                let id = crate::panel::key_panel(key);
+                                crate::panel::monitor_of(&wm, display).is_some_and(
+                                    |(_, monitor)| {
+                                        crate::panel::places(&serde_json::json!({
+                                            "monitors": [monitor]
+                                        }))
+                                        .into_iter()
+                                        .any(
+                                            |(place, at)| {
+                                                crate::panel::key_panel(&place) == id
+                                                    && crate::panel::covered(&wm, display, at)
+                                            },
+                                        )
+                                    },
+                                )
+                            })
+                            .cloned()
+                            .collect();
+                        if covered != state.covered {
+                            state.covered = covered;
+                            for id in state.panels.values() {
+                                control.redraw(*id);
+                            }
+                        }
                         state.wm = Some(wm);
                         arisen
                     };
@@ -1376,6 +1466,48 @@ mod linux {
                 _ => {}
             }
         }
+    }
+
+    /// Look at what the panels' later modules show (the machine's load,
+    /// what is playing, what a panel's own program writes) for as long as
+    /// a panel shows it, beside the shell; started anew when the panels
+    /// want something else of it, and not at all while they want nothing.
+    fn watch_extras(state: &mut State) {
+        let wanted = crate::extras::Wanted::of(&state.bars);
+        if state
+            .extras_watch
+            .as_ref()
+            .map(|watch| watch.wanted())
+            .unwrap_or(&crate::extras::Wanted::default())
+            == &wanted
+        {
+            return;
+        }
+        state
+            .custom
+            .retain(|panel, _| wanted.custom.iter().any(|(id, _)| id == panel));
+        if !wanted.load {
+            state.load = None;
+        }
+        if !wanted.media {
+            state.panel_playing = None;
+        }
+        let Some(sender) = state.extras_sender.clone() else {
+            return;
+        };
+        let mut said: Option<Option<(String, bool)>> = None;
+        state.extras_watch = crate::extras::watch(wanted, move |news| {
+            if news == crate::extras::News::MediaDue {
+                // Asked here, beside the shell, and told when another.
+                let now = crate::media::playing().map(|playing| (playing.line(), playing.playing));
+                if said.as_ref() != Some(&now) {
+                    said = Some(now.clone());
+                    sender.send(Message::PanelPlaying(now));
+                }
+            } else {
+                sender.send(Message::Extra(news));
+            }
+        });
     }
 
     /// The display of this name, as a configuration can name it: with
@@ -1475,9 +1607,20 @@ mod linux {
             // as they were told to the compositor the last time.
             let mut hints = crate::panel::Hints::default();
             let mut reach: Vec<egui::Rect> = Vec::new();
+            // Whether it is out of sight, and what is soft behind it.
+            let mut hiding = crate::panel::Hiding::default();
+            let mut soft: Vec<gevrek_shellkit::look::BlurRegion> = Vec::new();
             let id = control.open(place, move |ui, control| {
                 draw_panel(
-                    &drawn, &own, ui, &mut fonts, &mut wheel, &mut hints, &mut reach, control,
+                    &drawn,
+                    &own,
+                    ui,
+                    &mut fonts,
+                    &mut wheel,
+                    &mut hints,
+                    &mut reach,
+                    (&mut hiding, &mut soft),
+                    control,
                 )
             });
             shared
@@ -1496,6 +1639,10 @@ mod linux {
         wheel: &mut crate::panel::Wheel,
         hints: &mut crate::panel::Hints<SurfaceId>,
         reach: &mut Vec<egui::Rect>,
+        (hiding, soft): (
+            &mut crate::panel::Hiding,
+            &mut Vec<gevrek_shellkit::look::BlurRegion>,
+        ),
         control: &mut Control,
     ) -> Flow {
         // (The display's name, and this panel's id there.)
@@ -1520,6 +1667,43 @@ mod linux {
         };
         let palette = state.settings.resolve(egui::Theme::Dark, state.accent);
         theme::apply(&context, &palette, &state.settings);
+        // A panel that is out of sight at times: in sight while the
+        // pointer is on it or a menu of a panel is open, and for a while
+        // after; out of sight, nothing is drawn, and the pointer reaches
+        // only a strip of its surface at the display's edge (what is
+        // under the rest gets its clicks).
+        {
+            let held = context.input(|input| input.pointer.has_pointer())
+                || state
+                    .menu
+                    .as_ref()
+                    .is_some_and(|(_, _, alive)| alive.strong_count() > 0);
+            let (in_sight, again) = hiding.step(
+                bar.hide,
+                state.covered.contains(panel_key),
+                held,
+                std::time::Instant::now(),
+            );
+            if let Some(again) = again {
+                context.request_repaint_after(again);
+            }
+            if !in_sight {
+                let strip = vec![crate::panel::hidden_reach(context.content_rect(), bar.edge)];
+                if *reach != strip {
+                    *reach = strip;
+                    if let Some(panel) = state.panels.get(panel_key) {
+                        control.reach(*panel, reach.clone());
+                        if !soft.is_empty() {
+                            soft.clear();
+                            control.set_blur_regions(*panel, &[]);
+                        }
+                    }
+                    log::debug!("the panel {:?} of {output} goes out of sight", bar.id);
+                }
+                crate::panel::draw_nothing(ui);
+                return Flow::Continue;
+            }
+        }
         let view = state
             .wm
             .as_ref()
@@ -1541,15 +1725,59 @@ mod linux {
                 tray: &state.tray_items,
                 system: &state.system,
                 keyboard: keyboard.as_ref(),
+                extras: &crate::panel::extras_of(
+                    state.load,
+                    state.panel_playing.clone(),
+                    &state.custom,
+                    &bar.id,
+                ),
             },
             Some(wheel),
         );
+        // What is playing was pressed; the panel's own words were; the
+        // middle button on a window's button closes the window.
+        if let Some(ask) = asked.media {
+            let what = match ask {
+                crate::panel::MediaAsk::PlayPause => crate::media::Ask::PlayPause,
+                crate::panel::MediaAsk::Next => crate::media::Ask::Next,
+            };
+            std::thread::spawn(move || {
+                crate::media::tell(what);
+            });
+        }
+        if asked.custom_pressed {
+            crate::extras::start(&bar.custom.on_press);
+        }
+        if let Some(window) = asked.close_window {
+            state
+                .link
+                .send(Request::Dispatch(crate::panel::close_window(window)));
+        }
         // The parts of the surface that are the panel: the pointer
         // reaches those, and what is under the rest gets its clicks.
         if !asked.reach.is_empty() && asked.reach != *reach {
             *reach = asked.reach.clone();
             if let Some(panel) = state.panels.get(panel_key) {
                 control.reach(*panel, reach.clone());
+            }
+        }
+        // What is behind the panel is shown soft, where it is to be and
+        // the compositor can do it (told when it is other parts).
+        if let Some(panel) = state.panels.get(panel_key) {
+            let wanted: Vec<gevrek_shellkit::look::BlurRegion> =
+                if bar.blur && bar.opacity < 255 && control.blur_available() {
+                    let radius = bar.corner_radius.min(100) as f32;
+                    asked
+                        .reach
+                        .iter()
+                        .map(|part| gevrek_shellkit::look::BlurRegion::new(*part, radius))
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+            if wanted != *soft {
+                control.set_blur_regions(*panel, &wanted);
+                *soft = wanted;
             }
         }
         // The word about what the pointer rests on, on a surface of its
@@ -1678,7 +1906,8 @@ mod linux {
             }))
             .or(asked
                 .task_actions
-                .map(|(anchor, window)| (Menu::TaskActions(window), anchor)));
+                .map(|(anchor, window)| (Menu::TaskActions(window), anchor)))
+            .or(asked.panel_menu.map(|anchor| (Menu::Panel, anchor)));
         // (The windows a button of the taskbar lists, as they are now.)
         let listed = asked
             .task_menu
@@ -1819,6 +2048,7 @@ mod linux {
                 open_notices(shared, panel, anchor, notices, Rc::clone(&alive), control)
             }
             Menu::Sound => open_sound_menu(shared, panel, anchor, Rc::clone(&alive), control),
+            Menu::Panel => open_panel_menu(shared, panel, anchor, &bar, Rc::clone(&alive), control),
             Menu::Windows(_) => {
                 if listed.is_empty() {
                     return Flow::Continue;
@@ -2202,6 +2432,58 @@ mod linux {
                 .and_then(|(_, command)| command.clone());
             if let Some(command) = command {
                 shared.link.send(Request::Dispatch(command));
+            }
+            Flow::Close
+        })
+    }
+
+    /// A panel's own menu: its settings, another edge, out of sight or
+    /// not, a panel more, and this one taken away. What changes the
+    /// panels is kept in the configuration.
+    fn open_panel_menu(
+        shared: &Rc<RefCell<State>>,
+        panel: SurfaceId,
+        anchor: egui::Rect,
+        bar: &gevrek_model::settings::PanelProfile,
+        alive: Rc<()>,
+        control: &mut Control,
+    ) -> SurfaceId {
+        let count = shared.borrow().bars.len();
+        let size = crate::panel::panel_menu_size(bar, count);
+        let state = Rc::clone(shared);
+        let own = bar.clone();
+        let mut fonts = false;
+        control.popup(panel, anchor, size, move |ui, _| {
+            let _held = &alive;
+            let context = ui.ctx().clone();
+            let shared = state.borrow();
+            if !fonts {
+                theme::install_fonts_for(&context, &shared.settings, gevrek_ui::fonts::Area::Panel);
+                fonts = true;
+            }
+            let palette = shared.settings.resolve(egui::Theme::Dark, shared.accent);
+            theme::apply(&context, &palette, &shared.settings);
+            // (Escape puts a menu away, as a press elsewhere does.)
+            if crate::panel::menu_escape(&context) {
+                return Flow::Close;
+            }
+            let Some(ask) = crate::panel::panel_menu(ui, &palette, &own, count) else {
+                return Flow::Continue;
+            };
+            if ask == crate::panel::PanelAsk::Settings {
+                crate::control::open_studio("bar");
+                return Flow::Close;
+            }
+            if let Some((config, revision)) = shared.running.clone() {
+                let mut changed = config;
+                if crate::panel::panel_asked(&mut changed, &own.id, ask) {
+                    log::info!("the panel {:?} is asked: {ask:?}", own.id);
+                    shared.link.send(Request::Apply {
+                        config: Box::new(changed),
+                        base_revision: revision,
+                        client_id: "gevrek-shell".to_string(),
+                    });
+                }
             }
             Flow::Close
         })

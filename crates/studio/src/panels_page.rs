@@ -10,9 +10,7 @@
 use crate::document::Document;
 use crate::form::Form;
 use egui::{RichText, Ui};
-use gevrek_model::settings::{
-    PanelAlign, PanelEdge, PanelFit, PanelModule, PanelProfile, PanelStyle, ShellConfig,
-};
+use gevrek_model::settings::{PanelProfile, ShellConfig};
 use gevrek_ui::{theme, widgets};
 use serde_json::Value;
 
@@ -23,67 +21,8 @@ pub const PANELS: &str = "/desktop/shell/panels";
 /// in the card above the form.
 const BY_DRAGGING: &[&str] = &["left", "centre", "right"];
 
-/// What a new panel can be made as.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Model {
-    /// A strip along the top with everything on it.
-    Bar,
-    /// A short one at the bottom, as wide as what it shows: the windows.
-    Dock,
-    /// A narrow one down the left side.
-    Rail,
-}
-
-impl Model {
-    pub const ALL: [Model; 3] = [Model::Bar, Model::Dock, Model::Rail];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Model::Bar => "A bar along the top",
-            Model::Dock => "A dock at the bottom",
-            Model::Rail => "A rail down the left side",
-        }
-    }
-
-    /// The panel it makes (its id is made one no other has when it is
-    /// added: `ShellConfig::add_panel`).
-    pub fn panel(self) -> PanelProfile {
-        match self {
-            Model::Bar => PanelProfile {
-                id: "bar".to_string(),
-                ..PanelProfile::default()
-            },
-            Model::Dock => PanelProfile {
-                id: "dock".to_string(),
-                edge: PanelEdge::Bottom,
-                style: PanelStyle::Bar,
-                fit: PanelFit::Content,
-                align: PanelAlign::Centre,
-                floating: true,
-                height: 46,
-                margin: 8,
-                corner_radius: 16,
-                left: vec![PanelModule::Launcher],
-                centre: vec![PanelModule::Taskbar],
-                right: Vec::new(),
-                task_width: 0,
-                tasks_of_all_workspaces: true,
-                ..PanelProfile::default()
-            },
-            Model::Rail => PanelProfile {
-                id: "rail".to_string(),
-                edge: PanelEdge::Left,
-                height: 40,
-                margin: 0,
-                corner_radius: 0,
-                left: vec![PanelModule::Launcher, PanelModule::Workspaces],
-                centre: Vec::new(),
-                right: vec![PanelModule::Sound, PanelModule::Battery, PanelModule::Clock],
-                ..PanelProfile::default()
-            },
-        }
-    }
-}
+/// What a new panel can be made as: the model's own.
+pub use gevrek_model::settings::PanelModel as Model;
 
 /// What the page changes about the list itself.
 #[derive(Debug, Clone, PartialEq)]

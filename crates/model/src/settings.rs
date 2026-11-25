@@ -621,6 +621,68 @@ pub enum PanelHide {
     Covered,
 }
 
+/// What a new panel can be made as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanelModel {
+    /// A strip along the top with everything on it.
+    Bar,
+    /// A short one at the bottom, as wide as what it shows: the windows.
+    Dock,
+    /// A narrow one down the left side.
+    Rail,
+}
+
+impl PanelModel {
+    pub const ALL: [PanelModel; 3] = [PanelModel::Bar, PanelModel::Dock, PanelModel::Rail];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            PanelModel::Bar => "A bar along the top",
+            PanelModel::Dock => "A dock at the bottom",
+            PanelModel::Rail => "A rail down the left side",
+        }
+    }
+
+    /// The panel it makes (its id is made one no other has when it is
+    /// added: `ShellConfig::add_panel`).
+    pub fn panel(self) -> PanelProfile {
+        match self {
+            PanelModel::Bar => PanelProfile {
+                id: "bar".to_string(),
+                ..PanelProfile::default()
+            },
+            PanelModel::Dock => PanelProfile {
+                id: "dock".to_string(),
+                edge: PanelEdge::Bottom,
+                style: PanelStyle::Bar,
+                fit: PanelFit::Content,
+                align: PanelAlign::Centre,
+                floating: true,
+                height: 46,
+                margin: 8,
+                corner_radius: 16,
+                left: vec![PanelModule::Launcher],
+                centre: vec![PanelModule::Taskbar],
+                right: Vec::new(),
+                task_width: 0,
+                tasks_of_all_workspaces: true,
+                ..PanelProfile::default()
+            },
+            PanelModel::Rail => PanelProfile {
+                id: "rail".to_string(),
+                edge: PanelEdge::Left,
+                height: 40,
+                margin: 0,
+                corner_radius: 0,
+                left: vec![PanelModule::Launcher, PanelModule::Workspaces],
+                centre: Vec::new(),
+                right: vec![PanelModule::Sound, PanelModule::Battery, PanelModule::Clock],
+                ..PanelProfile::default()
+            },
+        }
+    }
+}
+
 /// What the module `custom` of a panel says.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
@@ -840,9 +902,6 @@ pub struct PanelProfile {
     /// (`xembedsniproxy`), where that is installed and X11 programs can
     /// run; without it nothing is different.
     pub older_tray_icons: bool,
-    /// How many icons of the tray stand on the panel; the others are
-    /// behind one button, and listed on a press (0: all of them).
-    pub tray_shown: u32,
     /// What its module `custom` says.
     pub custom: CustomModule,
     /// Keys this version does not know: kept, and written back as they
@@ -864,7 +923,6 @@ impl Default for PanelProfile {
             hide: PanelHide::Never,
             blur: false,
             side_text: SideText::Rotated,
-            tray_shown: 0,
             custom: CustomModule::default(),
             edge: PanelEdge::Top,
             style: PanelStyle::Bar,
@@ -952,8 +1010,14 @@ impl PanelProfile {
         self.height.clamp(16, 200) as i32
     }
 
+    /// (None for one that is out of sight at times: it stands at the
+    /// display's very edge, where the pointer comes to bring it back.)
     pub fn gap(&self) -> i32 {
-        self.margin.min(100) as i32
+        if self.hide == PanelHide::Never {
+            self.margin.min(100) as i32
+        } else {
+            0
+        }
     }
 
     /// The module is somewhere on the panel.

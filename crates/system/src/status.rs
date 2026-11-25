@@ -737,3 +737,187 @@ mod tests {
         assert_eq!(parse_network(""), None);
     }
 }
+
+/// How busy the machine is: the processor over the time since it was
+/// last asked, and how full the memory is, both in percent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Load {
+    pub processor: u8,
+    pub memory: u8,
+}
+
+/// What the processor had done when it was last asked: the time it was
+/// idle and all of its time, in the system's own units.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Worked {
+    pub idle: u64,
+    pub all: u64,
+}
+
+/// The share of the time between two askings that the processor was
+/// busy, in percent. (Nothing went by, or the counts went back: 0.)
+pub fn busy_between(before: Worked, now: Worked) -> u8 {
+    let all = now.all.saturating_sub(before.all);
+    let idle = now.idle.saturating_sub(before.idle);
+    if all == 0 {
+        return 0;
+    }
+    (((all.saturating_sub(idle)) as f64 / all as f64) * 100.0)
+        .round()
+        .clamp(0.0, 100.0) as u8
+}
+
+/// The first line of `/proc/stat` as what the processor had done.
+pub fn parse_worked(stat: &str) -> Option<Worked> {
+    let line = stat.lines().find(|line| line.starts_with("cpu "))?;
+    let counts: Vec<u64> = line
+        .split_whitespace()
+        .skip(1)
+        .filter_map(|count| count.parse().ok())
+        .collect();
+    if counts.len() < 4 {
+        return None;
+    }
+    // (Idle, and waiting for a disk, which is idle too.)
+    let idle = counts[3] + counts.get(4).copied().unwrap_or(0);
+    Some(Worked {
+        idle,
+        all: counts.iter().sum(),
+    })
+}
+
+/// How full the memory is by `/proc/meminfo`, in percent.
+pub fn parse_memory(meminfo: &str) -> Option<u8> {
+    let of = |name: &str| -> Option<u64> {
+        meminfo
+            .lines()
+            .find(|line| line.starts_with(name))?
+            .split_whitespace()
+            .nth(1)?
+            .parse()
+            .ok()
+    };
+    let (total, free) = (of("MemTotal:")?, of("MemAvailable:")?);
+    if total == 0 {
+        return None;
+    }
+    Some(((total.saturating_sub(free)) as f64 / total as f64 * 100.0).round() as u8)
+}
+
+#[cfg(target_os = "linux")]
+fn worked_and_memory() -> Option<(Worked, u8)> {
+    let worked = parse_worked(&std::fs::read_to_string("/proc/stat").ok()?)?;
+    let memory = parse_memory(&std::fs::read_to_string("/proc/meminfo").ok()?)?;
+    Some((worked, memory))
+}
+
+#[cfg(windows)]
+fn worked_and_memory() -> Option<(Worked, u8)> {
+    use windows::Win32::Foundation::FILETIME;
+    use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    use windows::Win32::System::Threading::GetSystemTimes;
+    let whole =
+        |time: FILETIME| (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
+    let (mut idle, mut kernel, mut user) = (
+        FILETIME::default(),
+        FILETIME::default(),
+        FILETIME::default(),
+    );
+    // SAFETY: three places for what the call writes.
+    unsafe { GetSystemTimes(Some(&mut idle), Some(&mut kernel), Some(&mut user)) }.ok()?;
+    let mut memory = MEMORYSTATUSEX {
+        dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: the structure says how large it is.
+    unsafe { GlobalMemoryStatusEx(&mut memory) }.ok()?;
+    Some((
+        Worked {
+            idle: whole(idle),
+            // (The kernel's time has the idle time in it.)
+            all: whole(kernel) + whole(user),
+        },
+        memory.dwMemoryLoad.min(100) as u8,
+    ))
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+fn worked_and_memory() -> Option<(Worked, u8)> {
+    None
+}
+
+/// How busy the machine is now. `before` is what the processor had done
+/// when this was last asked (kept by whoever asks again and again): the
+/// first time there is nothing to hold against, and the processor is
+/// told as idle.
+pub fn load(before: &mut Option<Worked>) -> Option<Load> {
+    let (now, memory) = worked_and_memory()?;
+    let processor = before.map_or(0, |before| busy_between(before, now));
+    *before = Some(now);
+    Some(Load { processor, memory })
+}
+
+#[cfg(test)]
+mod load_tests {
+    use super::*;
+
+    #[test]
+    fn the_processor_is_as_busy_as_it_was_not_idle() {
+        let before = Worked {
+            idle: 800,
+            all: 1000,
+        };
+        assert_eq!(
+            busy_between(
+                before,
+                Worked {
+                    idle: 850,
+                    all: 1200
+                }
+            ),
+            75
+        );
+        assert_eq!(
+            busy_between(
+                before,
+                Worked {
+                    idle: 1000,
+                    all: 1200
+                }
+            ),
+            0
+        );
+        assert_eq!(busy_between(before, before), 0, "no time went by");
+        assert_eq!(
+            busy_between(before, Worked { idle: 0, all: 10 }),
+            0,
+            "the counts began anew"
+        );
+    }
+
+    #[test]
+    fn what_linux_writes_is_read() {
+        let stat = "cpu  100 0 50 800 50 0 0 0 0 0\ncpu0 1 2 3 4\n";
+        assert_eq!(
+            parse_worked(stat),
+            Some(Worked {
+                idle: 850,
+                all: 1000
+            })
+        );
+        assert_eq!(parse_worked("intr 1 2 3"), None);
+        let meminfo = "MemTotal:       16000000 kB\nMemFree:         1000000 kB\nMemAvailable:    4000000 kB\n";
+        assert_eq!(parse_memory(meminfo), Some(75));
+        assert_eq!(parse_memory("MemTotal: 0 kB\nMemAvailable: 0 kB\n"), None);
+    }
+
+    #[test]
+    fn the_first_asking_has_nothing_to_hold_against() {
+        let mut before = None;
+        if let Some(first) = load(&mut before) {
+            assert_eq!(first.processor, 0);
+            assert!(before.is_some());
+            assert!(first.memory <= 100);
+        }
+    }
+}

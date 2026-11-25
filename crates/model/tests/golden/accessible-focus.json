@@ -692,7 +692,6 @@
           "task_grouping": "when_full",
           "clock_format": "%a %d %b  %H:%M",
           "older_tray_icons": true,
-          "tray_shown": 0,
           "custom": {
             "text": "",
             "command": [],

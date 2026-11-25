@@ -961,9 +961,138 @@ pub fn geometry(bar: &PanelProfile) -> (PanelEdge, u32, u32, bool) {
     (
         bar.edge,
         bar.height.clamp(16, 200),
-        bar.margin.min(100),
-        bar.floating,
+        // (One that is out of sight at times stands at the display's
+        // very edge: the pointer comes there to bring it back.)
+        if bar.hide == gevrek_model::settings::PanelHide::Never {
+            bar.margin.min(100)
+        } else {
+            0
+        },
+        // Over the windows: no room is kept for it.
+        !bar.keeps_room(),
     )
+}
+
+/// How long a panel that is to be out of sight stays after the pointer
+/// left it (or the window that covers it came).
+pub const HIDE_AFTER: std::time::Duration = std::time::Duration::from_millis(700);
+
+/// How much of a panel that is out of sight is left at the display's
+/// edge for the pointer to come to, in points.
+pub const HIDDEN_STRIP: f32 = 3.0;
+
+/// Whether a panel that is out of sight at times is in sight now.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Hiding {
+    /// Since when nothing has held it in sight.
+    away_since: Option<std::time::Instant>,
+    /// It is out of sight.
+    pub hidden: bool,
+}
+
+impl Hiding {
+    /// One look: whether the panel is in sight, and when to look again
+    /// where that depends on the clock. `covered`: a window lies where it
+    /// stands. `held`: the pointer is over it, or a menu of its is open.
+    pub fn step(
+        &mut self,
+        hide: gevrek_model::settings::PanelHide,
+        covered: bool,
+        held: bool,
+        now: std::time::Instant,
+    ) -> (bool, Option<std::time::Duration>) {
+        use gevrek_model::settings::PanelHide;
+        let to_hide = match hide {
+            PanelHide::Never => false,
+            PanelHide::Always => true,
+            PanelHide::Covered => covered,
+        };
+        if !to_hide || held {
+            self.away_since = None;
+            self.hidden = false;
+            return (true, None);
+        }
+        if self.hidden {
+            return (false, None);
+        }
+        let since = *self.away_since.get_or_insert(now);
+        let gone = now.saturating_duration_since(since);
+        if gone >= HIDE_AFTER {
+            self.hidden = true;
+            (false, None)
+        } else {
+            (true, Some(HIDE_AFTER - gone))
+        }
+    }
+}
+
+/// The part of a hidden panel's surface that stays for the pointer to
+/// come to: a strip at the surface's outer edge (the display's).
+pub fn hidden_reach(whole: egui::Rect, edge: PanelEdge) -> egui::Rect {
+    match edge {
+        PanelEdge::Top => egui::Rect::from_min_max(
+            whole.min,
+            egui::pos2(whole.right(), whole.top() + HIDDEN_STRIP),
+        ),
+        PanelEdge::Bottom => egui::Rect::from_min_max(
+            egui::pos2(whole.left(), whole.bottom() - HIDDEN_STRIP),
+            whole.max,
+        ),
+        PanelEdge::Left => egui::Rect::from_min_max(
+            whole.min,
+            egui::pos2(whole.left() + HIDDEN_STRIP, whole.bottom()),
+        ),
+        PanelEdge::Right => egui::Rect::from_min_max(
+            egui::pos2(whole.right() - HIDDEN_STRIP, whole.top()),
+            whole.max,
+        ),
+    }
+}
+
+/// The same for a panel that is a window placed at `at` (the pixels of
+/// the screen): the strip of the screen its window is while it is out of
+/// sight, `strip` pixels thick at the panel's outer edge.
+pub fn hidden_place(at: Rect, edge: PanelEdge, strip: i32) -> Rect {
+    let (x, y, width, height) = at;
+    let strip = strip.max(1);
+    match edge {
+        PanelEdge::Top => (x, y, width, strip.min(height)),
+        PanelEdge::Bottom => (x, y + (height - strip).max(0), width, strip.min(height)),
+        PanelEdge::Left => (x, y, strip.min(width), height),
+        PanelEdge::Right => (x + (width - strip).max(0), y, strip.min(width), height),
+    }
+}
+
+/// Whether a window lies where a panel stands: one of the workspace its
+/// display shows, that is there to be seen, over the rectangle `at` (the
+/// pixels of the screen).
+pub fn covered(state: &Value, display: &str, at: Rect) -> bool {
+    let Some((_, monitor)) = displays(state)
+        .into_iter()
+        .find(|(name, _)| name == display)
+        .map(|(name, monitor)| (name, monitor))
+        .or_else(|| monitor_of(state, display).map(|(_, monitor)| (display.to_string(), monitor)))
+    else {
+        return false;
+    };
+    let (x, y, width, height) = at;
+    monitor["workspace"]["detailed_windows"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|window| !window["is_border_window"].as_bool().unwrap_or(false))
+        .filter(|window| !window["is_minimized"].as_bool().unwrap_or(false))
+        .filter_map(|window| rect_of(&window["position"], &window["size"]))
+        .any(|(left, top, wide, high)| {
+            left < x + width && x < left + wide && top < y + height && y < top + high
+        })
+}
+
+/// Nothing at all on a panel's surface: the panel is out of sight.
+pub fn draw_nothing(ui: &mut egui::Ui) {
+    egui::CentralPanel::default()
+        .frame(egui::Frame::NONE)
+        .show(ui, |_| {});
 }
 
 /// How large the surface of a hint is for its words, in points.
@@ -1224,6 +1353,29 @@ pub struct Shown<'a> {
     pub system: &'a SystemView,
     /// The keyboard layout in use, where the window manager tells it.
     pub keyboard: Option<&'a KeyboardLayout>,
+    /// What the later modules show (the machine's load, what is playing,
+    /// the panel's own words), as far as it is known.
+    pub extras: &'a Extras,
+}
+
+/// What a panel's later modules show. Each is `None` where there is
+/// nothing to say: its module then shows nothing.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Extras {
+    /// How busy the machine is.
+    pub load: Option<gevrek_system::status::Load>,
+    /// What is playing, in one line, and whether it plays now.
+    pub playing: Option<(String, bool)>,
+    /// What this panel's program wrote (its `custom`), where it has one
+    /// and it wrote something.
+    pub custom: Option<String>,
+}
+
+/// What the module of what is playing asks of the player.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaAsk {
+    PlayPause,
+    Next,
 }
 
 /// What the panel shows of the machine. Each is `None` where there is
@@ -1354,6 +1506,17 @@ pub struct Asked {
     /// The keyboard's layout was pressed: go to the next one (true) or
     /// the one before.
     pub keyboard: Option<bool>,
+    /// The other button was pressed on the panel itself, where nothing
+    /// stands: the panel's own menu, at this place.
+    pub panel_menu: Option<egui::Rect>,
+    /// What is playing was pressed: pause or go on, or the next piece.
+    pub media: Option<MediaAsk>,
+    /// The panel's own words were pressed (its `custom`, which has a
+    /// program to start then).
+    pub custom_pressed: bool,
+    /// The middle button was pressed on a window's button of the
+    /// taskbar: that window is to be closed.
+    pub close_window: Option<u64>,
     /// The parts of the panel's surface that are the panel: what the
     /// pointer reaches (the rest lets clicks through to what is under).
     pub reach: Vec<egui::Rect>,
@@ -1507,6 +1670,21 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
             if bar.style == PanelStyle::Bar {
                 ui.painter().rect_filled(strip, radius, background);
             }
+            // The panel itself, under what stands on it: the other button
+            // on it, where nothing stands, asks for the panel's own menu.
+            // (Before the modules: each of them is over it, and hears its
+            // own presses.)
+            let ground = ui.interact(
+                strip,
+                egui::Id::unique(("panel-ground", shown.output)),
+                egui::Sense::click(),
+            );
+            if ground.secondary_clicked() {
+                let at = ground
+                    .interact_pointer_pos()
+                    .unwrap_or_else(|| strip.center());
+                asked.panel_menu = Some(egui::Rect::from_center_size(at, egui::vec2(2.0, 2.0)));
+            }
             // The pieces of an island panel are painted behind what
             // stands on them, once that has its place.
             let islands: Vec<egui::layers::ShapeIdx> = (0..3)
@@ -1647,7 +1825,15 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                     .iter()
                     .chain(&bar.right)
                     .any(|module| *module == PanelModule::Taskbar);
-                let start_before: f32 = if tasks_elsewhere {
+                // (And to a title that runs down a side in the middle,
+                // which is as long as the room the ends leave it.)
+                let start_matters = tasks_elsewhere
+                    || (upright
+                        && bar
+                            .centre
+                            .iter()
+                            .any(|module| *module == PanelModule::Title));
+                let start_before: f32 = if start_matters {
                     context.data(|data| data.get_temp(start_id)).unwrap_or(0.0)
                 } else {
                     0.0
@@ -1687,7 +1873,7 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                     }
                 });
                 let start_now = groups[0].map_or(0.0, long);
-                if tasks_elsewhere && (start_now - start_before).abs() > 0.5 {
+                if start_matters && (start_now - start_before).abs() > 0.5 {
                     context.data_mut(|data| data.insert_temp(start_id, start_now));
                     context.request_repaint();
                 }
@@ -2728,7 +2914,10 @@ fn draw_module(
             } else {
                 bar.title_width as f32
             }
-            .min(ui.ctx().content_rect().height() * 0.4);
+            .min(ui.ctx().content_rect().height() * 0.4)
+            // (And by what its group may take: in the middle of a panel,
+            // what the ends leave it.)
+            .min(ink.room);
             if most < 48.0 {
                 return;
             }
@@ -2744,7 +2933,8 @@ fn draw_module(
                 words.size().x + 8.0
             } else {
                 most
-            };
+            }
+            .min(most);
             let (rect, _) = ui.allocate_exact_size(egui::vec2(across, long), egui::Sense::hover());
             paint_turned(
                 ui.painter(),
@@ -3109,13 +3299,93 @@ fn draw_module(
                 );
             }
         }
+        PanelModule::Load => {
+            if let Some(load) = shown.extras.load {
+                // The processor, and how full the memory is. (Upright and
+                // short: the processor alone.)
+                let said = if ink.short() {
+                    load.processor.to_string()
+                } else {
+                    format!("{}%  {}%", load.processor, load.memory)
+                };
+                let colour = if load.processor >= 90 || load.memory >= 90 {
+                    egui::Color32::from_rgb(240, 110, 90)
+                } else {
+                    text.gamma_multiply(0.8)
+                };
+                cell(ui, ink, &says(Sign::Font(icons::CPU), Some(&said), colour)).hint(format!(
+                    "The processor is {} % busy; the memory is {} % full.",
+                    load.processor, load.memory
+                ));
+            }
+        }
+        PanelModule::Media => {
+            if let Some((line, playing)) = &shown.extras.playing {
+                // What is on, cut to what a panel has room for; a press
+                // pauses it or lets it go on, the other button is the
+                // next piece.
+                let most = if upright { 28 } else { 36 };
+                let said: String = if line.chars().count() > most {
+                    line.chars()
+                        .take(most - 1)
+                        .chain(std::iter::once('…'))
+                        .collect()
+                } else {
+                    line.clone()
+                };
+                let button = cell(
+                    ui,
+                    ink,
+                    &Cell {
+                        sign: Sign::Font(if *playing { icons::PAUSE } else { icons::PLAY }),
+                        words: (!ink.short()).then_some(said.as_str()),
+                        colour: if *playing { text } else { quiet },
+                        fill: None,
+                        pressed: true,
+                    },
+                )
+                .hint(format!(
+                    "{line}. A press {}; right-click is the next piece.",
+                    if *playing {
+                        "pauses it"
+                    } else {
+                        "lets it go on"
+                    }
+                ));
+                if button.clicked() {
+                    asked.media = Some(MediaAsk::PlayPause);
+                }
+                if button.secondary_clicked() {
+                    asked.media = Some(MediaAsk::Next);
+                }
+            }
+        }
+        PanelModule::Custom => {
+            // What its program wrote, else its own words; nothing where
+            // there is neither.
+            let said = shown
+                .extras
+                .custom
+                .as_deref()
+                .unwrap_or(bar.custom.text.as_str())
+                .trim();
+            if !said.is_empty() {
+                let starts = !bar.custom.on_press.is_empty();
+                let button = cell(
+                    ui,
+                    ink,
+                    &Cell {
+                        pressed: starts,
+                        ..says(Sign::None, Some(said), text)
+                    },
+                );
+                if starts && button.clicked() {
+                    asked.custom_pressed = true;
+                }
+            }
+        }
         // Nothing to show now, or not known to this version.
-        PanelModule::Layout
-        | PanelModule::Title
-        | PanelModule::Media
-        | PanelModule::Load
-        | PanelModule::Custom
-        | PanelModule::Other(_) => {}
+        PanelModule::Layout | PanelModule::Title | PanelModule::Other(_) => {}
     }
 }
 
@@ -3271,6 +3541,28 @@ fn task_look(
 pub fn go_to_window(id: u64) -> String {
     serde_json::json!({"command": "focus_window", "selector": {"kind": "handle", "value": id}})
         .to_string()
+}
+
+/// The command that closes a window (the middle button on its button of
+/// the taskbar).
+pub fn close_window(id: u64) -> String {
+    serde_json::json!({"command": "close_window", "selector": {"kind": "handle", "value": id}})
+        .to_string()
+}
+
+/// What a panel's later modules show on this panel: what all panels
+/// show of it, and what this panel's own program wrote.
+pub fn extras_of(
+    load: Option<gevrek_system::status::Load>,
+    playing: Option<(String, bool)>,
+    custom: &std::collections::HashMap<String, String>,
+    panel: &str,
+) -> Extras {
+    Extras {
+        load,
+        playing,
+        custom: custom.get(panel).cloned(),
+    }
 }
 
 /// The taskbar: its own button (whose windows it has), and a button for
@@ -3628,6 +3920,10 @@ fn draw_tasks(ui: &mut egui::Ui, shown: &Shown, ink: &Ink, asked: &mut Asked) {
                     if response.clicked() && !button.has_keys {
                         asked.go = Some(button.chosen.id);
                     }
+                    // The middle button closes the window, as on a tab.
+                    if response.middle_clicked() {
+                        asked.close_window = Some(button.chosen.id);
+                    }
                     // The other button: the menu of what can be done with
                     // the window (`task_actions`).
                     if response.secondary_clicked() {
@@ -3892,6 +4188,195 @@ pub fn task_actions(
             }
         });
     chosen
+}
+
+/// What a panel's own menu can be asked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanelAsk {
+    /// Open the settings at the panels.
+    Settings,
+    /// Another panel, made as this model.
+    Add(gevrek_model::settings::PanelModel),
+    /// This panel at another edge of its displays.
+    Move(PanelEdge),
+    /// This panel out of sight until the pointer comes to its edge, or
+    /// always there.
+    Hide(bool),
+    /// This panel taken away.
+    Remove,
+}
+
+/// The lines of a panel's own menu, in their order: what each asks, its
+/// sign and its words, and whether it is on already (marked, and not
+/// to be chosen again).
+fn panel_lines(bar: &PanelProfile, panels: usize) -> Vec<(PanelAsk, &'static str, String, bool)> {
+    use gevrek_model::settings::{PanelHide, PanelModel};
+    let mut lines = vec![(
+        PanelAsk::Settings,
+        icons::SLIDERS_HORIZONTAL,
+        "Panel settings".to_string(),
+        false,
+    )];
+    for (edge, sign, words) in [
+        (PanelEdge::Top, icons::ARROW_UP, "Move to the top"),
+        (PanelEdge::Bottom, icons::ARROW_DOWN, "Move to the bottom"),
+        (PanelEdge::Left, icons::ARROW_LEFT, "Move to the left side"),
+        (
+            PanelEdge::Right,
+            icons::ARROW_RIGHT,
+            "Move to the right side",
+        ),
+    ] {
+        lines.push((
+            PanelAsk::Move(edge),
+            sign,
+            words.to_string(),
+            bar.edge == edge,
+        ));
+    }
+    let hidden = bar.hide == PanelHide::Always;
+    lines.push((
+        PanelAsk::Hide(!hidden),
+        icons::EYE_SLASH,
+        "Hide until the pointer comes to its edge".to_string(),
+        hidden,
+    ));
+    for model in PanelModel::ALL {
+        lines.push((
+            PanelAsk::Add(model),
+            icons::PLUS,
+            format!("Add: {}", model.label().to_lowercase()),
+            false,
+        ));
+    }
+    lines.push((
+        PanelAsk::Remove,
+        icons::TRASH,
+        if panels > 1 {
+            "Remove this panel".to_string()
+        } else {
+            "Remove this panel (the only one)".to_string()
+        },
+        false,
+    ));
+    lines
+}
+
+/// How large a panel's own menu is, in points.
+pub fn panel_menu_size(bar: &PanelProfile, panels: usize) -> egui::Vec2 {
+    egui::vec2(
+        340.0,
+        12.0 + (TRAY_LINE + 2.0) * panel_lines(bar, panels).len() as f32,
+    )
+}
+
+/// A panel's own menu (the other button on the panel, where nothing
+/// stands): its settings, another edge, out of sight or not, a panel
+/// more, and this one taken away. `panels`: how many there are. What was
+/// chosen, if anything was.
+pub fn panel_menu(
+    ui: &mut egui::Ui,
+    palette: &theme::Palette,
+    bar: &PanelProfile,
+    panels: usize,
+) -> Option<PanelAsk> {
+    let mut chosen = None;
+    egui::CentralPanel::default()
+        .frame(
+            egui::Frame::new()
+                .fill(palette.surface)
+                .inner_margin(egui::Margin::same(6)),
+        )
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
+            let lines = panel_lines(bar, panels);
+            // (The edge it is at is read, not pressed.)
+            let live = |index: usize| !matches!(lines[index], (PanelAsk::Move(_), _, _, true));
+            let (on, chose) = menu_keys(ui.ctx(), lines.len(), live, false);
+            let font = egui::FontId::proportional(13.0);
+            for (index, (ask, sign, words, marked)) in lines.iter().enumerate() {
+                let live = live(index);
+                let (line, response) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), TRAY_LINE),
+                    if live {
+                        egui::Sense::click()
+                    } else {
+                        egui::Sense::hover()
+                    },
+                );
+                if live && response.hovered() {
+                    ui.painter()
+                        .rect_filled(line, 6, palette.text.gamma_multiply(0.10));
+                }
+                if on == Some(index) {
+                    menu_mark(ui, line, palette);
+                }
+                let ink = if live { palette.text } else { palette.muted };
+                if *marked {
+                    ui.painter().text(
+                        egui::pos2(line.left() + 17.0, line.center().y),
+                        egui::Align2::CENTER_CENTER,
+                        icons::CHECK,
+                        font.clone(),
+                        palette.accent,
+                    );
+                }
+                ui.painter().text(
+                    egui::pos2(line.left() + 39.0, line.center().y),
+                    egui::Align2::CENTER_CENTER,
+                    *sign,
+                    font.clone(),
+                    ink,
+                );
+                ui.painter().text(
+                    egui::pos2(line.left() + 56.0, line.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    words,
+                    font.clone(),
+                    ink,
+                );
+                if live && (response.clicked() || (chose && on == Some(index))) {
+                    chosen = Some(*ask);
+                }
+            }
+        });
+    chosen
+}
+
+/// Carry out what a panel's own menu was asked, on a configuration:
+/// whether it is another configuration now. (`Settings` changes none: it
+/// opens the settings.)
+pub fn panel_asked(config: &mut gevrek_model::config::Config, panel: &str, ask: PanelAsk) -> bool {
+    use gevrek_model::settings::PanelHide;
+    let shell = &mut config.desktop.shell;
+    match ask {
+        PanelAsk::Settings => false,
+        PanelAsk::Add(model) => {
+            shell.add_panel(model.panel());
+            true
+        }
+        PanelAsk::Remove => shell.remove_panel(panel),
+        PanelAsk::Move(edge) => match shell.panel_of_mut(panel) {
+            Some(own) if own.edge != edge => {
+                own.edge = edge;
+                true
+            }
+            _ => false,
+        },
+        PanelAsk::Hide(hide) => match shell.panel_of_mut(panel) {
+            Some(own) => {
+                let wanted = if hide {
+                    PanelHide::Always
+                } else {
+                    PanelHide::Never
+                };
+                let other = own.hide != wanted;
+                own.hide = wanted;
+                other
+            }
+            None => false,
+        },
+    }
 }
 
 /// How large the menu of devices to play on is, in points.
@@ -5187,6 +5672,7 @@ mod tests {
                         tray: &[],
                         system: &system,
                         keyboard: None,
+                        extras: &Extras::default(),
                     },
                     Some(&mut wheel),
                 );
@@ -5251,6 +5737,353 @@ mod tests {
     /// its end do not lie on each other, however many windows the
     /// taskbar has (they did: the taskbar went on under the clock); and
     /// what is at the end is in its order from the top.
+    #[test]
+    fn a_panel_goes_out_of_sight_a_while_after_nothing_holds_it() {
+        use gevrek_model::settings::PanelHide;
+        let start = std::time::Instant::now();
+        let after = |millis: u64| start + std::time::Duration::from_millis(millis);
+        // Never: always in sight, whatever lies on it.
+        let mut never = Hiding::default();
+        assert_eq!(
+            never.step(PanelHide::Never, true, false, start),
+            (true, None)
+        );
+        // Always: in sight for a while, then gone, and back while the
+        // pointer is on it or a menu of its is open.
+        let mut hiding = Hiding::default();
+        let (shown, again) = hiding.step(PanelHide::Always, false, false, start);
+        assert!(shown);
+        assert_eq!(again, Some(HIDE_AFTER));
+        let (shown, again) = hiding.step(PanelHide::Always, false, false, after(300));
+        assert!(shown && again == Some(HIDE_AFTER - std::time::Duration::from_millis(300)));
+        assert_eq!(
+            hiding.step(PanelHide::Always, false, false, after(700)),
+            (false, None)
+        );
+        assert!(hiding.hidden);
+        assert_eq!(
+            hiding.step(PanelHide::Always, false, true, after(900)),
+            (true, None)
+        );
+        assert!(!hiding.hidden);
+        // (The while begins anew when it is let go.)
+        let (shown, _) = hiding.step(PanelHide::Always, false, false, after(1000));
+        assert!(shown);
+        let (shown, _) = hiding.step(PanelHide::Always, false, false, after(1600));
+        assert!(shown);
+        assert_eq!(
+            hiding.step(PanelHide::Always, false, false, after(1700)),
+            (false, None)
+        );
+        // While covered only: in sight when nothing lies on it.
+        let mut covered_only = Hiding::default();
+        assert_eq!(
+            covered_only.step(PanelHide::Covered, false, false, start),
+            (true, None)
+        );
+        let (shown, again) = covered_only.step(PanelHide::Covered, true, false, after(10));
+        assert!(shown && again.is_some());
+        assert_eq!(
+            covered_only.step(PanelHide::Covered, true, false, after(800)),
+            (false, None)
+        );
+        assert_eq!(
+            covered_only.step(PanelHide::Covered, false, false, after(900)),
+            (true, None)
+        );
+    }
+
+    #[test]
+    fn what_is_left_of_a_hidden_panel_is_a_strip_at_its_displays_edge() {
+        let whole = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 36.0));
+        assert_eq!(
+            hidden_reach(whole, PanelEdge::Top),
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 3.0))
+        );
+        assert_eq!(hidden_reach(whole, PanelEdge::Bottom).top(), 33.0);
+        let side = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(40.0, 900.0));
+        assert_eq!(hidden_reach(side, PanelEdge::Left).width(), 3.0);
+        assert_eq!(hidden_reach(side, PanelEdge::Right).left(), 37.0);
+        // A window's place, in the pixels of the screen.
+        assert_eq!(
+            hidden_place((100, 0, 800, 36), PanelEdge::Top, 3),
+            (100, 0, 800, 3)
+        );
+        assert_eq!(
+            hidden_place((100, 1044, 800, 36), PanelEdge::Bottom, 3),
+            (100, 1077, 800, 3)
+        );
+        assert_eq!(
+            hidden_place((0, 0, 40, 900), PanelEdge::Left, 3),
+            (0, 0, 3, 900)
+        );
+        assert_eq!(
+            hidden_place((1880, 0, 40, 900), PanelEdge::Right, 3),
+            (1917, 0, 3, 900)
+        );
+        // A panel that hides stands at the display's edge and keeps no room.
+        let mut bar = PanelProfile::default();
+        assert_eq!(geometry(&bar), (PanelEdge::Top, 36, 6, false));
+        bar.hide = gevrek_model::settings::PanelHide::Always;
+        assert_eq!(geometry(&bar), (PanelEdge::Top, 36, 0, true));
+    }
+
+    #[test]
+    fn a_panel_is_covered_by_a_window_that_lies_where_it_stands() {
+        let window = |x: f64, y: f64, minimized: bool, border: bool| {
+            json!({
+                "window_id": 1, "position": {"x": x, "y": y},
+                "size": {"width": 600, "height": 400},
+                "is_minimized": minimized, "is_border_window": border
+            })
+        };
+        let state = |windows: Vec<Value>| json!({"monitors": [{"name": "Monitor A", "workspace": {"detailed_windows": windows}}]});
+        let bar = (0, 0, 1920, 36);
+        assert!(!covered(&state(vec![]), "Monitor A", bar));
+        assert!(!covered(
+            &state(vec![window(100.0, 40.0, false, false)]),
+            "Monitor A",
+            bar
+        ));
+        assert!(covered(
+            &state(vec![window(100.0, 20.0, false, false)]),
+            "Monitor A",
+            bar
+        ));
+        // Not by one that is minimized, nor by a border, nor on another display.
+        assert!(!covered(
+            &state(vec![window(100.0, 20.0, true, false)]),
+            "Monitor A",
+            bar
+        ));
+        assert!(!covered(
+            &state(vec![window(100.0, 20.0, false, true)]),
+            "Monitor A",
+            bar
+        ));
+        assert!(!covered(
+            &state(vec![window(100.0, 20.0, false, false)]),
+            "Monitor B",
+            bar
+        ));
+    }
+
+    #[test]
+    fn the_command_that_closes_a_window_is_one_the_model_reads() {
+        use gevrek_model::command::{DispatchCommand, WindowSelector};
+        let command: DispatchCommand = serde_json::from_str(&close_window(42)).expect("a command");
+        assert_eq!(
+            command,
+            DispatchCommand::CloseWindow {
+                selector: WindowSelector::Handle(42)
+            }
+        );
+    }
+
+    #[test]
+    fn the_later_modules_show_what_is_known_and_nothing_where_nothing_is() {
+        use gevrek_model::settings::{CustomModule, PanelStyle};
+        let view = view(&windows_state(), "Monitor ACM2702 (1)").expect("the display");
+        let system = SystemView::default();
+        // (Each module on a piece of its own: which of them are there.)
+        let drawn = |bar: &PanelProfile, extras: &Extras| -> (usize, Asked) {
+            let context = egui::Context::default();
+            let mut asked = Asked::default();
+            for _ in 0..4 {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1200.0, 36.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut output = context.run_ui(input, |ui| {
+                    asked = draw(
+                        ui,
+                        &Shown {
+                            bar,
+                            view: &view,
+                            accent: egui::Color32::from_rgb(64, 224, 208),
+                            quiet: false,
+                            notices: 0,
+                            mode: "",
+                            recording: false,
+                            sharing: false,
+                            output: "Monitor ACM2702 (1)",
+                            tray: &[],
+                            system: &system,
+                            keyboard: None,
+                            extras,
+                        },
+                        None,
+                    );
+                });
+                output.textures_delta.clear();
+            }
+            (asked.reach.len(), asked)
+        };
+        let mut bar = PanelProfile {
+            style: PanelStyle::Islands,
+            left: vec![PanelModule::Load],
+            centre: vec![PanelModule::Media],
+            right: vec![PanelModule::Custom],
+            ..Default::default()
+        };
+        // Nothing known, and no words of its own: nothing stands there.
+        assert_eq!(drawn(&bar, &Extras::default()).0, 0);
+        // Its own words stand without anything being known.
+        bar.custom = CustomModule {
+            text: "hello".to_string(),
+            ..CustomModule::default()
+        };
+        assert_eq!(drawn(&bar, &Extras::default()).0, 1);
+        // All three, and what a program wrote in place of the words.
+        let extras = Extras {
+            load: Some(gevrek_system::status::Load {
+                processor: 12,
+                memory: 48,
+            }),
+            playing: Some(("A piece — by someone".to_string(), true)),
+            custom: Some("21 °C".to_string()),
+        };
+        let (pieces, asked) = drawn(&bar, &extras);
+        assert_eq!(pieces, 3);
+        assert!(asked.media.is_none() && !asked.custom_pressed);
+    }
+
+    #[test]
+    fn a_panels_own_menu_changes_the_configuration_as_it_is_asked() {
+        use gevrek_model::settings::{PanelHide, PanelModel};
+        let mut config = gevrek_model::config::Config::default();
+        // Its settings change nothing: they are opened.
+        assert!(!panel_asked(&mut config, "main", PanelAsk::Settings));
+        // Another edge; the same edge is no change.
+        assert!(panel_asked(
+            &mut config,
+            "main",
+            PanelAsk::Move(PanelEdge::Left)
+        ));
+        assert!(!panel_asked(
+            &mut config,
+            "main",
+            PanelAsk::Move(PanelEdge::Left)
+        ));
+        assert_eq!(config.desktop.shell.panels[0].edge, PanelEdge::Left);
+        // Out of sight, and back.
+        assert!(panel_asked(&mut config, "MAIN", PanelAsk::Hide(true)));
+        assert_eq!(config.desktop.shell.panels[0].hide, PanelHide::Always);
+        assert_eq!(config.desktop.shell.panels[0].reserved(), 0);
+        assert!(!panel_asked(&mut config, "main", PanelAsk::Hide(true)));
+        assert!(panel_asked(&mut config, "main", PanelAsk::Hide(false)));
+        // A panel more, with an id of its own; and taken away again.
+        assert!(panel_asked(
+            &mut config,
+            "main",
+            PanelAsk::Add(PanelModel::Dock)
+        ));
+        assert!(panel_asked(
+            &mut config,
+            "main",
+            PanelAsk::Add(PanelModel::Dock)
+        ));
+        let ids: Vec<&str> = config
+            .desktop
+            .shell
+            .panels
+            .iter()
+            .map(|panel| panel.id.as_str())
+            .collect();
+        assert_eq!(ids, ["main", "dock", "dock-2"]);
+        assert!(config.validate().is_empty(), "{:?}", config.validate());
+        assert!(panel_asked(&mut config, "dock", PanelAsk::Remove));
+        assert!(!panel_asked(&mut config, "dock", PanelAsk::Remove));
+        assert!(!panel_asked(
+            &mut config,
+            "no such",
+            PanelAsk::Move(PanelEdge::Top)
+        ));
+        assert_eq!(config.desktop.shell.panels.len(), 2);
+        // The menu has a line for each, and the edge it is at is marked.
+        let bar = &config.desktop.shell.panels[0];
+        let lines = panel_lines(bar, 2);
+        assert_eq!(lines.len(), 10);
+        let marked: Vec<PanelAsk> = lines
+            .iter()
+            .filter(|line| line.3)
+            .map(|line| line.0)
+            .collect();
+        assert_eq!(marked, [PanelAsk::Move(PanelEdge::Left)]);
+        assert!(panel_menu_size(bar, 2).y > 200.0);
+    }
+
+    #[test]
+    fn the_other_button_on_the_panel_itself_asks_for_its_menu() {
+        let bar = PanelProfile {
+            left: vec![PanelModule::Launcher],
+            centre: Vec::new(),
+            right: vec![PanelModule::Power],
+            ..Default::default()
+        };
+        let view = view(&windows_state(), "Monitor ACM2702 (1)").expect("the display");
+        let context = egui::Context::default();
+        let system = SystemView::default();
+        let size = egui::vec2(1200.0, 36.0);
+        // The other button, pressed and let go at `at`.
+        let pressed_at = |at: egui::Pos2| -> Asked {
+            let mut asked = Asked::default();
+            for step in 0..4 {
+                let events = match step {
+                    0 => vec![egui::Event::PointerMoved(at)],
+                    1 | 2 => vec![egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Secondary,
+                        pressed: step == 1,
+                        modifiers: Default::default(),
+                    }],
+                    _ => Vec::new(),
+                };
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    events,
+                    ..Default::default()
+                };
+                let mut found = Asked::default();
+                let mut output = context.run_ui(input, |ui| {
+                    found = draw(
+                        ui,
+                        &Shown {
+                            bar: &bar,
+                            view: &view,
+                            accent: egui::Color32::from_rgb(64, 224, 208),
+                            quiet: false,
+                            notices: 0,
+                            mode: "",
+                            recording: false,
+                            sharing: false,
+                            output: "Monitor ACM2702 (1)",
+                            tray: &[],
+                            system: &system,
+                            keyboard: None,
+                            extras: &Extras::default(),
+                        },
+                        None,
+                    );
+                });
+                output.textures_delta.clear();
+                if found.panel_menu.is_some() || found.pressed.is_some() {
+                    asked = found;
+                }
+            }
+            asked
+        };
+        // In the middle, where nothing stands: the panel's own menu.
+        let middle = pressed_at(egui::pos2(600.0, 18.0));
+        assert!(middle.panel_menu.is_some());
+        // On the launcher's button: not the panel's menu.
+        let on_button = pressed_at(egui::pos2(24.0, 18.0));
+        assert!(on_button.panel_menu.is_none());
+    }
+
     #[test]
     fn down_a_side_words_are_turned_kept_short_or_left_out() {
         use gevrek_model::settings::{PanelEdge, PanelStyle, SideText};
@@ -5394,6 +6227,7 @@ mod tests {
                         tray: &[],
                         system: &system,
                         keyboard: None,
+                        extras: &Extras::default(),
                     },
                     None,
                 )
@@ -5555,6 +6389,7 @@ mod tests {
                         tray: &[],
                         system: &system,
                         keyboard: None,
+                        extras: &Extras::default(),
                     },
                     None,
                 );
@@ -5918,6 +6753,31 @@ mod tests {
         if let Some(height) = said("GEVREK_LOOK_HEIGHT").and_then(|text| text.parse().ok()) {
             bar.height = height;
         }
+        // (`GEVREK_LOOK_EXTRAS=1`: the later modules too, with something
+        // to show.)
+        let extras = Extras {
+            load: Some(gevrek_system::status::Load {
+                processor: 12,
+                memory: 48,
+            }),
+            playing: Some(("Gymnopédie No. 1 — Erik Satie".to_string(), true)),
+            custom: Some("21 °C".to_string()),
+        };
+        if said("GEVREK_LOOK_EXTRAS").is_some() {
+            bar.left = vec![
+                PanelModule::Launcher,
+                PanelModule::Workspaces,
+                PanelModule::Separator,
+                PanelModule::Media,
+            ];
+            bar.right = vec![
+                PanelModule::Custom,
+                PanelModule::Load,
+                PanelModule::Separator,
+                PanelModule::Sound,
+                PanelModule::Clock,
+            ];
+        }
         // (`GEVREK_LOOK_TEXT=stacked` or `signs`: how words are written
         // down a side.)
         bar.side_text = match said("GEVREK_LOOK_TEXT").as_deref() {
@@ -6021,6 +6881,7 @@ mod tests {
                         tray: &[],
                         system: &system,
                         keyboard: Some(&keyboard),
+                        extras: &extras,
                     },
                     None,
                 );
