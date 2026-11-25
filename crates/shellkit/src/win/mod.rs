@@ -560,6 +560,7 @@ impl<M: 'static> Shell<M> {
             surfaces: Vec::new(),
             spares: Default::default(),
             gpu: None,
+            gpu_coming: None,
             instance: wgpu::Instance::new(descriptor),
             see_through,
             module: module.into(),
@@ -653,6 +654,9 @@ impl<M: 'static> Shell<M> {
     ) -> anyhow::Result<Timings> {
         let mut known: Option<Vec<String>> = None;
         self.host.displays_changed = true;
+        if self.host.gpu.is_none() && self.host.surfaces.is_empty() {
+            self.host.gpu_coming = Some(gpu_ahead(self.host.instance.clone()));
+        }
         loop {
             if std::mem::take(&mut self.host.displays_changed) {
                 // Whatever changed, every surface finds its place again;
@@ -1429,6 +1433,44 @@ impl Drop for Window {
 }
 
 /// The graphics device every surface draws with.
+/// Make the graphics device beside the shell, from its start on: the
+/// first surface that opens takes it. (It was made when the first surface
+/// opened, on the thread that draws, after the shell had waited for the
+/// window manager with nothing to do.) Nothing is sent where no adapter
+/// or no device is to be had: the first surface then asks itself, for
+/// the surface it has, and says what is wrong.
+fn gpu_ahead(instance: wgpu::Instance) -> std::sync::mpsc::Receiver<Gpu> {
+    let (made, coming) = std::sync::mpsc::channel();
+    let started = std::thread::Builder::new()
+        .name("gevrek-shell-gpu".to_string())
+        .spawn(move || {
+            let Ok(adapter) = pollster::block_on(
+                instance.request_adapter(&wgpu::RequestAdapterOptions::default()),
+            ) else {
+                return;
+            };
+            // (A panel draws little, and is there all day: memory is set
+            // aside in small pieces.)
+            let Ok((device, queue)) =
+                pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                    memory_hints: wgpu::MemoryHints::MemoryUsage,
+                    ..Default::default()
+                }))
+            else {
+                return;
+            };
+            let _ = made.send(Gpu {
+                device,
+                queue,
+                adapter,
+            });
+        });
+    if let Err(error) = started {
+        log::debug!("the graphics device is made when the first surface opens: {error}");
+    }
+    coming
+}
+
 struct Gpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -1655,6 +1697,8 @@ struct Host {
     /// (dropped before the device, as the surfaces are).
     spares: crate::spare::Spares,
     gpu: Option<Gpu>,
+    /// The device on its way, made beside the shell (`gpu_ahead`).
+    gpu_coming: Option<std::sync::mpsc::Receiver<Gpu>>,
     instance: wgpu::Instance,
     /// Surfaces are layers of the desktop's compositor: what is not
     /// drawn on is seen through.
@@ -2236,6 +2280,29 @@ impl Host {
                 })
         }
         .context("a graphics surface")?;
+        // The device that was made beside the shell since its start,
+        // where it draws on this surface: waited for if it is still on
+        // its way (it would be made here otherwise, which takes as long).
+        if self.gpu.is_none() {
+            if let Some(gpu) = self
+                .gpu_coming
+                .take()
+                .and_then(|coming| coming.recv().ok())
+                .filter(|gpu| gpu.adapter.is_surface_supported(&target))
+            {
+                let info = gpu.adapter.get_info();
+                log::debug!(
+                    "drawing with {} ({:?}, {:?}), made ahead",
+                    info.name,
+                    info.backend,
+                    info.device_type
+                );
+                gpu.device.on_uncaptured_error(std::sync::Arc::new(|error| {
+                    log::warn!("the graphics device: {error}");
+                }));
+                self.gpu = Some(gpu);
+            }
+        }
         if self.gpu.is_none() {
             let adapter =
                 pollster::block_on(self.instance.request_adapter(&wgpu::RequestAdapterOptions {

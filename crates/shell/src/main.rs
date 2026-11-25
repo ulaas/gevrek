@@ -345,6 +345,9 @@ mod linux {
         /// The order the person put the taskbar's buttons in, by window
         /// (kept while the shell runs).
         task_order: Vec<u64>,
+        /// The panel whose modules are being placed on the panel itself,
+        /// by its id.
+        arranging: Option<String>,
         /// The pictures taken of windows for the hints of their buttons,
         /// each with a number that is another for another picture; and
         /// the hint that is open, to be drawn again when its picture came.
@@ -571,6 +574,7 @@ mod linux {
             panel_views: Default::default(),
             covered: Default::default(),
             task_order: Vec::new(),
+            arranging: None,
             previews: Default::default(),
             previews_taken: 0,
             task_hint: std::cell::Cell::new(None),
@@ -1764,9 +1768,29 @@ mod linux {
                     &bar.id,
                 ),
                 slide: hiding.slide(std::time::Instant::now()),
+                editing: state.arranging.as_deref() == Some(bar.id.as_str()),
             },
             Some(wheel),
         );
+        // A module was taken and put down elsewhere on the panel: kept
+        // in the configuration.
+        if let (Some((from, to)), Some((config, revision))) =
+            (asked.module_moved, state.running.clone())
+        {
+            let mut changed = config;
+            let moved = changed
+                .desktop
+                .shell
+                .panel_of_mut(&bar.id)
+                .is_some_and(|own| own.move_module(from, to));
+            if moved {
+                state.link.send(Request::Apply {
+                    config: Box::new(changed),
+                    base_revision: revision,
+                    client_id: "gevrek-shell".to_string(),
+                });
+            }
+        }
         // What is playing was pressed; the panel's own words were; the
         // middle button on a window's button closes the window.
         crate::panel::carry_out(&asked, &bar, |command| {
@@ -2577,7 +2601,7 @@ mod linux {
         let state = Rc::clone(shared);
         let own = bar.clone();
         let mut fonts = false;
-        control.popup(panel, anchor, size, move |ui, _| {
+        control.popup(panel, anchor, size, move |ui, control| {
             let _held = &alive;
             let context = ui.ctx().clone();
             let shared = state.borrow();
@@ -2591,11 +2615,21 @@ mod linux {
             if crate::panel::menu_escape(&context) {
                 return Flow::Close;
             }
-            let Some(ask) = crate::panel::panel_menu(ui, &palette, &own, count) else {
+            let arranging = shared.arranging.as_deref() == Some(own.id.as_str());
+            let Some(ask) = crate::panel::panel_menu(ui, &palette, &own, count, arranging) else {
                 return Flow::Continue;
             };
             if ask == crate::panel::PanelAsk::Settings {
                 crate::control::open_studio("bar");
+                return Flow::Close;
+            }
+            if let crate::panel::PanelAsk::Arrange(on) = ask {
+                drop(shared);
+                let mut shared = state.borrow_mut();
+                shared.arranging = on.then(|| own.id.clone());
+                for id in shared.panels.values() {
+                    control.redraw(*id);
+                }
                 return Flow::Close;
             }
             if let Some((config, revision)) = shared.running.clone() {

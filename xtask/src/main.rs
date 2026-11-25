@@ -1185,17 +1185,146 @@ fn deb(programs: &Path, work: &Path, out: &Path, name: &str, arch: &str) -> Resu
     Ok(file)
 }
 
+/// A case of a bench may take a tenth longer than when its time was
+/// kept, and no more.
+const BENCH_MAY_GROW: f64 = 0.10;
+/// (And a case that takes a few billionths of a second is not held to a
+/// tenth of that: the clock's grain is as large.)
+const BENCH_GRAIN_NS: u128 = 20;
+
+/// What a bench wrote (`GEVREK_BENCH_OUT`): a case and its nanoseconds on
+/// each line. A case told twice counts as its last.
+fn bench_times(text: &str) -> Vec<(String, u128)> {
+    let mut times: Vec<(String, u128)> = Vec::new();
+    for line in text.lines() {
+        let Some((name, nanos)) = line.rsplit_once('\t') else {
+            continue;
+        };
+        let Ok(nanos) = nanos.trim().parse::<u128>() else {
+            continue;
+        };
+        match times.iter_mut().find(|(known, _)| known == name) {
+            Some(known) => known.1 = nanos,
+            None => times.push((name.to_string(), nanos)),
+        }
+    }
+    times
+}
+
+/// The cases that take more than a tenth longer than when their times
+/// were kept: each with its time then and now. (A case that is new, or
+/// gone, is none of them.)
+fn bench_grown(kept: &[(String, u128)], now: &[(String, u128)]) -> Vec<(String, u128, u128)> {
+    now.iter()
+        .filter_map(|(name, now)| {
+            let (_, kept) = kept.iter().find(|(known, _)| known == name)?;
+            let may = (*kept as f64 * (1.0 + BENCH_MAY_GROW)).ceil() as u128;
+            (*now > may && *now > kept + BENCH_GRAIN_NS).then(|| (name.clone(), *kept, *now))
+        })
+        .collect()
+}
+
+/// `cargo xtask bench`: run the benches and hold their times against
+/// those that were kept; fail where a case takes more than a tenth
+/// longer. `--keep`: these times are the ones to hold against from here
+/// on. The times are this machine's (they lie in the build's folder, and
+/// are not the repository's): kept before a change and held against
+/// after it.
+fn bench(arguments: &[String]) -> Result<()> {
+    let keep = arguments.iter().any(|argument| argument == "--keep");
+    let folder = target_dir().join("bench");
+    std::fs::create_dir_all(&folder)?;
+    let (now_file, kept_file) = (folder.join("now.tsv"), folder.join("kept.tsv"));
+    let _ = std::fs::remove_file(&now_file);
+    for (step, package, name, features) in [
+        (
+            "the engine's bench",
+            "gevrek-engine",
+            "engine",
+            Some("test-support"),
+        ),
+        ("the server's bench", "gevrek-server", "state", None),
+    ] {
+        let mut command = cargo();
+        command.args(["bench", "-p", package, "--bench", name]);
+        if let Some(features) = features {
+            command.args(["--features", features]);
+        }
+        command.env("GEVREK_BENCH_OUT", &now_file);
+        run(step, &mut command)?;
+    }
+    let now =
+        bench_times(&std::fs::read_to_string(&now_file).context("the benches wrote no times")?);
+    if now.is_empty() {
+        bail!("the benches wrote no times");
+    }
+    if keep {
+        std::fs::copy(&now_file, &kept_file)?;
+        println!("== {} times kept in {}", now.len(), kept_file.display());
+        return Ok(());
+    }
+    let Ok(kept) = std::fs::read_to_string(&kept_file) else {
+        bail!(
+            "no times were kept on this machine to hold these against: `cargo xtask bench --keep` before a change, `cargo xtask bench` after it"
+        );
+    };
+    let grown = bench_grown(&bench_times(&kept), &now);
+    if grown.is_empty() {
+        println!(
+            "== no case of {} takes a tenth longer than when its time was kept",
+            now.len()
+        );
+        return Ok(());
+    }
+    for (name, kept, now) in &grown {
+        println!(
+            "{name}: {now} ns, {kept} ns when kept ({:+.0} %)",
+            (*now as f64 / *kept as f64 - 1.0) * 100.0
+        );
+    }
+    bail!(
+        "{} case(s) take more than a tenth longer than when their times were kept",
+        grown.len()
+    )
+}
+
+#[cfg(test)]
+mod bench_tests {
+    use super::*;
+
+    #[test]
+    fn a_case_that_takes_a_tenth_longer_is_found_and_no_other() {
+        let kept =
+            bench_times("layout/bsp/50\t763\nstate/copied\t7500\ntiny\t5\ngone\t100\nnot a line\n");
+        assert_eq!(kept.len(), 4);
+        let now = bench_times(
+            "layout/bsp/50\t830\nstate/copied\t8300\ntiny\t9\nnew\t1000000\nlayout/bsp/50\t835\n",
+        );
+        // (Told twice: its last.)
+        assert_eq!(now[0], ("layout/bsp/50".to_string(), 835));
+        // 835 is within a tenth of 763; 8300 is more than a tenth over
+        // 7500; a case of five billionths is not held to a tenth; one
+        // that is new has nothing to be held against.
+        assert_eq!(
+            bench_grown(&kept, &now),
+            [("state/copied".to_string(), 7500, 8300)]
+        );
+        assert!(bench_grown(&kept, &kept).is_empty());
+    }
+}
+
 fn main() -> Result<()> {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     match arguments.first().map(String::as_str) {
         Some("check") => check(),
+        Some("bench") => bench(&arguments[1..]),
         Some("package") => package(&arguments[1..]),
         Some("install") => install(&arguments[1..]),
         Some("uninstall") => uninstall(&arguments[1..]),
         Some("rpm") => rpm(&arguments[1..]),
         Some("dist") => dist(&arguments[1..]),
         _ => {
-            println!("cargo xtask check | install [--prefix <dir>] [--debug] | uninstall [--prefix <dir>] | rpm [--debug] | package [--debug] | dist [zip|setup|tar|deb|rpm ...] [--debug]");
+            println!("cargo xtask check | bench [--keep] | install [--prefix <dir>] [--debug] | uninstall [--prefix <dir>] | rpm [--debug] | package [--debug] | dist [zip|setup|tar|deb|rpm ...] [--debug]");
             Ok(())
         }
     }

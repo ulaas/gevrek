@@ -965,6 +965,42 @@ impl Default for PanelProfile {
 }
 
 impl PanelProfile {
+    /// Take the module at one place (a side: 0 the left, 1 the middle, 2
+    /// the right; and its place there) and put it down at another: before
+    /// what stands at that place, or at the side's end where the place is
+    /// past it. Whether anything stands elsewhere now.
+    pub fn move_module(&mut self, from: (usize, usize), to: (usize, usize)) -> bool {
+        if from.0 > 2 || to.0 > 2 {
+            return false;
+        }
+        let before = (self.left.clone(), self.centre.clone(), self.right.clone());
+        let module = {
+            let side = self.side_mut(from.0);
+            if from.1 >= side.len() {
+                return false;
+            }
+            side.remove(from.1)
+        };
+        // (Taken out of the same side before the place it goes to: that
+        // place is one nearer now.)
+        let mut at = to.1;
+        if from.0 == to.0 && from.1 < at {
+            at -= 1;
+        }
+        let side = self.side_mut(to.0);
+        let at = at.min(side.len());
+        side.insert(at, module);
+        before != (self.left.clone(), self.centre.clone(), self.right.clone())
+    }
+
+    fn side_mut(&mut self, side: usize) -> &mut Vec<PanelModule> {
+        match side {
+            0 => &mut self.left,
+            1 => &mut self.centre,
+            _ => &mut self.right,
+        }
+    }
+
     /// Whether this is the panel of that id (upper and lower case are
     /// the same).
     pub fn is(&self, id: &str) -> bool {
@@ -4513,6 +4549,40 @@ mod tests {
         let written = serde_json::to_value(&read).unwrap();
         assert_eq!(written["osd"]["volume"], false);
         assert_eq!(written["osd"]["later"], 1);
+    }
+
+    #[test]
+    fn a_module_is_taken_from_one_place_of_a_panel_and_put_down_at_another() {
+        use PanelModule::{Clock, Launcher, Layout, Sound, Title, Workspaces};
+        let panel = || PanelProfile {
+            left: vec![Launcher, Workspaces, Layout, Title],
+            centre: Vec::new(),
+            right: vec![Sound, Clock],
+            ..Default::default()
+        };
+        // Within its side: before the one it is put down on.
+        let mut moved = panel();
+        assert!(moved.move_module((0, 3), (0, 1)));
+        assert_eq!(moved.left, [Launcher, Title, Workspaces, Layout]);
+        let mut moved = panel();
+        assert!(moved.move_module((0, 0), (0, 3)));
+        assert_eq!(moved.left, [Workspaces, Layout, Launcher, Title]);
+        // To another side, and to a side's end.
+        let mut moved = panel();
+        assert!(moved.move_module((0, 3), (1, 0)));
+        assert_eq!(moved.centre, [Title]);
+        assert_eq!(moved.left.len(), 3);
+        assert!(moved.move_module((2, 0), (0, 99)));
+        assert_eq!(moved.left, [Launcher, Workspaces, Layout, Sound]);
+        assert_eq!(moved.right, [Clock]);
+        // Put down where it stands, or taken from where nothing is:
+        // nothing stands elsewhere.
+        let mut same = panel();
+        assert!(!same.move_module((0, 1), (0, 1)));
+        assert!(!same.move_module((0, 1), (0, 2)));
+        assert!(!same.move_module((1, 0), (0, 0)));
+        assert!(!same.move_module((3, 0), (0, 0)));
+        assert_eq!(same, panel());
     }
 
     #[test]

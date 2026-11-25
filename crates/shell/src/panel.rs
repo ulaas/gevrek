@@ -1565,6 +1565,10 @@ pub struct Shown<'a> {
     /// How far the panel has slid out of sight: 0 in its place, 1 all
     /// the way out towards its edge of the display.
     pub slide: f32,
+    /// What stands on the panel is being put in other places: each
+    /// module is a piece to take and put down, and none does what it
+    /// does otherwise.
+    pub editing: bool,
 }
 
 /// What a panel's later modules show. Each is `None` where there is
@@ -1718,6 +1722,13 @@ pub struct Asked {
     /// The other button was pressed on the panel itself, where nothing
     /// stands: the panel's own menu, at this place.
     pub panel_menu: Option<egui::Rect>,
+    /// A module was taken and put down elsewhere while the panel's
+    /// modules are being placed: from where (its side: 0 the left, 1 the
+    /// middle, 2 the right; and its place there) to where.
+    pub module_moved: Option<((usize, usize), (usize, usize))>,
+    /// Where each module stands (its side, its place there), noted while
+    /// the modules are being placed.
+    pub pieces: Vec<(usize, usize, egui::Rect)>,
     /// The clock was pressed: open, or put away, the month's calendar
     /// next to this rectangle.
     pub calendar: Option<egui::Rect>,
@@ -1904,13 +1915,36 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                 if modules.is_empty() && !marks {
                     return None;
                 }
+                // (While the modules are being placed, where each one
+                // stands is noted: its side and its place there.)
+                let side = if std::ptr::eq(modules, bar.left.as_slice()) {
+                    0
+                } else if std::ptr::eq(modules, bar.centre.as_slice()) {
+                    1
+                } else {
+                    2
+                };
+                let one = |ui: &mut egui::Ui, index: usize, asked: &mut Asked| {
+                    let module = &modules[index];
+                    if !shown.editing {
+                        draw_module(ui, module, shown, ink, asked);
+                        return;
+                    }
+                    let stood = ui
+                        .scope(|ui| draw_module(ui, module, shown, ink, asked))
+                        .response
+                        .rect;
+                    if long(stood) > 0.5 {
+                        asked.pieces.push((side, index, stood));
+                    }
+                };
                 let rect = ui
                     .scope(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(spacing, spacing);
                         if reversed {
                             // The last one stands at the edge.
-                            for module in modules.iter().rev() {
-                                draw_module(ui, module, shown, ink, asked);
+                            for index in (0..modules.len()).rev() {
+                                one(ui, index, asked);
                             }
                             if marks {
                                 draw_marks(ui, shown, ink, asked);
@@ -1919,8 +1953,8 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                             if marks {
                                 draw_marks(ui, shown, ink, asked);
                             }
-                            for module in modules {
-                                draw_module(ui, module, shown, ink, asked);
+                            for index in 0..modules.len() {
+                                one(ui, index, asked);
                             }
                         }
                     })
@@ -2262,6 +2296,73 @@ pub fn draw(ui: &mut egui::Ui, shown: &Shown, wheel: Option<&mut Wheel>) -> Aske
                         note_tasks(1, groups[1].map_or(0.0, long));
                     });
                 }
+            }
+            // The modules are being placed: each is a piece, with a line
+            // around it, that is taken and put down on another's place
+            // (it stands before that one then) or on the panel beside
+            // them (at the end of the side that part of the panel is).
+            // What a module does otherwise it does not do meanwhile: the
+            // pieces lie over the modules and hear the presses.
+            if shown.editing {
+                let pieces = std::mem::take(&mut asked.pieces);
+                let mut let_go: Option<((usize, usize), egui::Pos2)> = None;
+                for (side, index, stood) in &pieces {
+                    let piece = ui.interact(
+                        stood.expand(1.0),
+                        egui::Id::unique(("panel-piece", shown.output, *side, *index)),
+                        egui::Sense::click_and_drag(),
+                    );
+                    let taken = piece.dragged();
+                    ui.painter().rect_stroke(
+                        stood.expand(1.0),
+                        7.0,
+                        egui::Stroke::new(
+                            if taken || piece.hovered() { 1.5 } else { 1.0 },
+                            if taken {
+                                ink.accent
+                            } else {
+                                ink.accent.gamma_multiply(0.55)
+                            },
+                        ),
+                        egui::StrokeKind::Outside,
+                    );
+                    if taken {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    } else if piece.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                    }
+                    if piece.drag_stopped() {
+                        if let Some(at) = ui.ctx().pointer_interact_pos() {
+                            let_go = Some(((*side, *index), at));
+                        }
+                    }
+                }
+                if let Some((from, at)) = let_go {
+                    let onto = pieces
+                        .iter()
+                        .find(|(side, index, stood)| (*side, *index) != from && stood.contains(at))
+                        .map(|(side, index, _)| (*side, *index));
+                    // (Beside the pieces: by the third of the panel it is.)
+                    let beside = strip.contains(at).then(|| {
+                        let part = if upright {
+                            (at.y - strip.top()) / strip.height().max(1.0)
+                        } else {
+                            (at.x - strip.left()) / strip.width().max(1.0)
+                        };
+                        let side = if part < 1.0 / 3.0 {
+                            0
+                        } else if part < 2.0 / 3.0 {
+                            1
+                        } else {
+                            2
+                        };
+                        (side, usize::MAX)
+                    });
+                    if let Some(to) = onto.or(beside) {
+                        asked.module_moved = Some((from, to));
+                    }
+                }
+                asked.pieces = pieces;
             }
             // What the pointer reaches: the strip, or the pieces.
             asked.reach = match bar.style {
@@ -4807,19 +4908,34 @@ pub enum PanelAsk {
     Hide(bool),
     /// This panel taken away.
     Remove,
+    /// What stands on this panel placed by taking and putting down, on
+    /// the panel itself; or done with that.
+    Arrange(bool),
 }
 
 /// The lines of a panel's own menu, in their order: what each asks, its
 /// sign and its words, and whether it is on already (marked, and not
 /// to be chosen again).
-fn panel_lines(bar: &PanelProfile, panels: usize) -> Vec<(PanelAsk, &'static str, String, bool)> {
+fn panel_lines(
+    bar: &PanelProfile,
+    panels: usize,
+    arranging: bool,
+) -> Vec<(PanelAsk, &'static str, String, bool)> {
     use gevrek_model::settings::{PanelHide, PanelModel};
-    let mut lines = vec![(
-        PanelAsk::Settings,
-        icons::SLIDERS_HORIZONTAL,
-        "Panel settings".to_string(),
-        false,
-    )];
+    let mut lines = vec![
+        (
+            PanelAsk::Settings,
+            icons::SLIDERS_HORIZONTAL,
+            "Panel settings".to_string(),
+            false,
+        ),
+        (
+            PanelAsk::Arrange(!arranging),
+            icons::HAND_GRABBING,
+            "Move what stands on it".to_string(),
+            arranging,
+        ),
+    ];
     for (edge, sign, words) in [
         (PanelEdge::Top, icons::ARROW_UP, "Move to the top"),
         (PanelEdge::Bottom, icons::ARROW_DOWN, "Move to the bottom"),
@@ -4869,7 +4985,7 @@ fn panel_lines(bar: &PanelProfile, panels: usize) -> Vec<(PanelAsk, &'static str
 pub fn panel_menu_size(bar: &PanelProfile, panels: usize) -> egui::Vec2 {
     egui::vec2(
         340.0,
-        12.0 + (TRAY_LINE + 2.0) * panel_lines(bar, panels).len() as f32,
+        12.0 + (TRAY_LINE + 2.0) * panel_lines(bar, panels, false).len() as f32,
     )
 }
 
@@ -4882,6 +4998,7 @@ pub fn panel_menu(
     palette: &theme::Palette,
     bar: &PanelProfile,
     panels: usize,
+    arranging: bool,
 ) -> Option<PanelAsk> {
     let mut chosen = None;
     egui::CentralPanel::default()
@@ -4892,7 +5009,7 @@ pub fn panel_menu(
         )
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
-            let lines = panel_lines(bar, panels);
+            let lines = panel_lines(bar, panels, arranging);
             // (The edge it is at is read, not pressed.)
             let live = |index: usize| !matches!(lines[index], (PanelAsk::Move(_), _, _, true));
             let (on, chose) = menu_keys(ui.ctx(), lines.len(), live, false);
@@ -4953,7 +5070,9 @@ pub fn panel_asked(config: &mut gevrek_model::config::Config, panel: &str, ask: 
     use gevrek_model::settings::PanelHide;
     let shell = &mut config.desktop.shell;
     match ask {
-        PanelAsk::Settings => false,
+        // (Neither is the configuration's: one opens the settings, the
+        // other is how the panel is drawn for a while.)
+        PanelAsk::Settings | PanelAsk::Arrange(_) => false,
         PanelAsk::Add(model) => {
             shell.add_panel(model.panel());
             true
@@ -6277,6 +6396,7 @@ mod tests {
                         keyboard: None,
                         extras: &Extras::default(),
                         slide: 0.0,
+                        editing: false,
                     },
                     Some(&mut wheel),
                 );
@@ -6710,6 +6830,7 @@ mod tests {
                             keyboard: None,
                             extras,
                             slide: 0.0,
+                            editing: false,
                         },
                         None,
                     );
@@ -6745,6 +6866,120 @@ mod tests {
         let (pieces, asked) = drawn(&bar, &extras);
         assert_eq!(pieces, 3);
         assert!(asked.media.is_none() && !asked.custom_pressed);
+    }
+
+    #[test]
+    fn while_the_modules_are_placed_each_is_a_piece_and_does_nothing_else() {
+        let bar = PanelProfile {
+            left: vec![PanelModule::Launcher, PanelModule::Workspaces],
+            centre: Vec::new(),
+            right: vec![PanelModule::Sound, PanelModule::Power],
+            ..Default::default()
+        };
+        let view = view(&windows_state(), "Monitor ACM2702 (1)").expect("the display");
+        let system = SystemView {
+            volume: Some((40, false)),
+            ..SystemView::default()
+        };
+        let size = egui::vec2(1200.0, 36.0);
+        // The frames of a pointer's way: over `from`, down, to `to`, up.
+        let drawn = |editing: bool, way: Option<(egui::Pos2, egui::Pos2)>| -> Asked {
+            let context = egui::Context::default();
+            let mut found = Asked::default();
+            let steps: Vec<Vec<egui::Event>> = match way {
+                None => vec![Vec::new(), Vec::new()],
+                Some((from, to)) => {
+                    let button = |pos: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    };
+                    vec![
+                        Vec::new(),
+                        vec![egui::Event::PointerMoved(from)],
+                        vec![button(from, true)],
+                        vec![egui::Event::PointerMoved(from + (to - from) * 0.5)],
+                        vec![egui::Event::PointerMoved(to)],
+                        vec![button(to, false)],
+                        Vec::new(),
+                    ]
+                }
+            };
+            for events in steps {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    events,
+                    ..Default::default()
+                };
+                let mut asked = Asked::default();
+                let mut output = context.run_ui(input, |ui| {
+                    asked = draw(
+                        ui,
+                        &Shown {
+                            bar: &bar,
+                            view: &view,
+                            accent: egui::Color32::from_rgb(64, 224, 208),
+                            quiet: false,
+                            notices: 0,
+                            mode: "",
+                            recording: false,
+                            sharing: false,
+                            output: "Monitor ACM2702 (1)",
+                            tray: &[],
+                            system: &system,
+                            keyboard: None,
+                            extras: &Extras::default(),
+                            slide: 0.0,
+                            editing,
+                        },
+                        None,
+                    );
+                });
+                output.textures_delta.clear();
+                if asked.module_moved.is_some() || asked.pressed.is_some() {
+                    found.module_moved = asked.module_moved.or(found.module_moved);
+                    found.pressed = asked.pressed.or(found.pressed);
+                }
+                found.pieces = asked.pieces;
+            }
+            found
+        };
+        // Not being placed: no pieces are noted.
+        assert!(drawn(false, None).pieces.is_empty());
+        // Being placed: a piece for each module that stands there.
+        let pieces = drawn(true, None).pieces;
+        let places: Vec<(usize, usize)> = pieces
+            .iter()
+            .map(|(side, index, _)| (*side, *index))
+            .collect();
+        assert_eq!(places.len(), 4, "{places:?}");
+        assert!(
+            places.contains(&(0, 0)) && places.contains(&(2, 1)),
+            "{places:?}"
+        );
+        let at = |side: usize, index: usize| {
+            pieces
+                .iter()
+                .find(|piece| (piece.0, piece.1) == (side, index))
+                .map(|piece| piece.2.center())
+                .expect("the piece")
+        };
+        // The power button taken and put down on the workspaces: it is
+        // to stand before them, and nothing was pressed.
+        let moved = drawn(true, Some((at(2, 1), at(0, 1))));
+        assert_eq!(moved.module_moved, Some(((2, 1), (0, 1))));
+        assert_eq!(moved.pressed, None);
+        // Put down on the panel beside the pieces, in its middle third:
+        // at the end of the middle.
+        let beside = drawn(true, Some((at(0, 0), egui::pos2(600.0, 18.0))));
+        assert_eq!(beside.module_moved, Some(((0, 0), (1, usize::MAX))));
+        // A press on a piece does not do what its module does.
+        let pressed = drawn(true, Some((at(0, 0), at(0, 0))));
+        assert_eq!(pressed.pressed, None);
+        // Not being placed, the same press opens the launcher.
+        let pressed = drawn(false, Some((at(0, 0), at(0, 0))));
+        assert_eq!(pressed.pressed, Some(PanelModule::Launcher));
     }
 
     #[test]
@@ -6827,9 +7062,14 @@ mod tests {
         ));
         assert_eq!(config.desktop.shell.panels.len(), 2);
         // The menu has a line for each, and the edge it is at is marked.
+        assert!(!panel_asked(&mut config, "main", PanelAsk::Arrange(true)));
         let bar = &config.desktop.shell.panels[0];
-        let lines = panel_lines(bar, 2);
-        assert_eq!(lines.len(), 10);
+        let lines = panel_lines(bar, 2, false);
+        assert_eq!(lines.len(), 11);
+        // (Marked while the modules are being placed, and a press ends it.)
+        let arranging = panel_lines(bar, 2, true);
+        assert_eq!(arranging[1].0, PanelAsk::Arrange(false));
+        assert!(arranging[1].3);
         let marked: Vec<PanelAsk> = lines
             .iter()
             .filter(|line| line.3)
@@ -6889,6 +7129,7 @@ mod tests {
                             keyboard: None,
                             extras: &Extras::default(),
                             slide: 0.0,
+                            editing: false,
                         },
                         None,
                     );
@@ -7053,6 +7294,7 @@ mod tests {
                         keyboard: None,
                         extras: &Extras::default(),
                         slide: 0.0,
+                        editing: false,
                     },
                     None,
                 )
@@ -7216,6 +7458,7 @@ mod tests {
                         keyboard: None,
                         extras: &Extras::default(),
                         slide: 0.0,
+                        editing: false,
                     },
                     None,
                 );
@@ -7709,6 +7952,7 @@ mod tests {
                         keyboard: Some(&keyboard),
                         extras: &extras,
                         slide: 0.0,
+                        editing: false,
                     },
                     None,
                 );

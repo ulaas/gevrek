@@ -238,6 +238,9 @@ struct State {
     /// The order the person put the taskbar's buttons in, by window
     /// (kept while the shell runs).
     task_order: Vec<u64>,
+    /// The panel whose modules are being placed on the panel itself, by
+    /// its id.
+    arranging: Option<String>,
     /// The hint of a window's button that is open, to be drawn again when
     /// the window's picture has been taken.
     task_hint: std::cell::Cell<Option<SurfaceId>>,
@@ -411,6 +414,7 @@ pub fn run() -> anyhow::Result<()> {
         notes_surface: None,
         told: HashSet::new(),
         task_order: Vec::new(),
+        arranging: None,
         task_hint: std::cell::Cell::new(None),
         overview_used: false,
         covered: HashSet::new(),
@@ -3225,6 +3229,7 @@ fn draw_panel(
                 &panel_id,
             ),
             slide: hiding.slide(std::time::Instant::now()),
+            editing: state.arranging.as_deref() == Some(panel_id.as_str()),
         },
         Some(wheel),
     );
@@ -3396,6 +3401,26 @@ fn draw_panel(
             apply_configuration(state, changed);
         }
         redraw_panels(state, control);
+    }
+    // A module was taken and put down elsewhere on the panel: kept in the
+    // configuration.
+    if let Some((from, to)) = asked.module_moved {
+        let mut state = shared.borrow_mut();
+        let state = &mut *state;
+        if let Some(mut changed) = state.config.clone() {
+            let moved = changed
+                .desktop
+                .shell
+                .panel_of_mut(&panel_id)
+                .is_some_and(|own| own.move_module(from, to));
+            if moved {
+                // (At once here; the configuration that comes back says
+                // the same.)
+                state.bars = changed.desktop.shell.panels.clone();
+                apply_configuration(state, changed);
+                redraw_panels(state, control);
+            }
+        }
     }
     // A button of the taskbar was put down on another's place: the order
     // is the person's from here on, on every panel.
@@ -3624,14 +3649,21 @@ fn draw_panel(
             };
             let line = Rc::clone(shared);
             let size = panel::panel_menu_size(&own, count);
-            control.popup(surface, anchor, size, move |ui, _| {
+            control.popup(surface, anchor, size, move |ui, control| {
                 let _held = &held;
                 let palette = themed(ui, &mut fonts);
-                let Some(ask) = panel::panel_menu(ui, &palette, &own, count) else {
+                let arranging = line.borrow().arranging.as_deref() == Some(own.id.as_str());
+                let Some(ask) = panel::panel_menu(ui, &palette, &own, count, arranging) else {
                     return Flow::Continue;
                 };
                 if ask == panel::PanelAsk::Settings {
                     crate::control::open_studio("bar");
+                    return Flow::Close;
+                }
+                if let panel::PanelAsk::Arrange(on) = ask {
+                    let mut state = line.borrow_mut();
+                    state.arranging = on.then(|| own.id.clone());
+                    redraw_panels(&state, control);
                     return Flow::Close;
                 }
                 // Kept in the configuration: the window manager keeps
