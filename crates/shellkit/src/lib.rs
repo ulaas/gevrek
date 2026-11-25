@@ -30,6 +30,7 @@
 //! out of pictures taken of the screen (`exclude_from_capture`).
 
 pub mod dnd;
+pub mod frames;
 #[cfg(target_os = "linux")]
 pub mod layer;
 pub mod look;

@@ -533,6 +533,7 @@ impl<M: 'static> Shell<M> {
             started,
             timings: Timings::default(),
             total_ms: 0.0,
+            frames: crate::frames::Frames::new(Instant::now()),
             control: Control::default(),
             connection,
         };
@@ -618,6 +619,8 @@ impl<M: 'static> Shell<M> {
             self.event_loop
                 .dispatch(wait, &mut self.host)
                 .context("the event loop")?;
+            self.host.frames.pass();
+            self.host.frames.tell(Instant::now());
             use crate::stall::Part;
             let waiting: Vec<M> = std::mem::take(&mut *self.messages.borrow_mut());
             if !waiting.is_empty() {
@@ -820,6 +823,8 @@ struct Host {
     started: Instant,
     timings: Timings,
     total_ms: f64,
+    /// The passes and frames of the last half minute, for the log.
+    frames: crate::frames::Frames,
     /// What handlers asked for and is not carried out yet.
     control: Control,
     // Dropped last: everything above lives on it.
@@ -1577,6 +1582,7 @@ impl Host {
         }
         self.timings.frames += 1;
         self.total_ms += took;
+        self.frames.frame(took);
         self.timings.worst_ms = self.timings.worst_ms.max(took);
     }
 }

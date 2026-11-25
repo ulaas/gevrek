@@ -571,6 +571,7 @@ impl<M: 'static> Shell<M> {
             started,
             timings: Timings::default(),
             total_ms: 0.0,
+            frames: crate::frames::Frames::new(Instant::now()),
             control: Control::default(),
             ole: None,
             double_click: double_click_setting(),
@@ -702,6 +703,8 @@ impl<M: 'static> Shell<M> {
             };
             unsafe {
                 MsgWaitForMultipleObjectsEx(None, wait, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+                self.host.frames.pass();
+                self.host.frames.tell(Instant::now());
                 self.watch.enter(crate::stall::Part::Events);
                 let mut message = MSG::default();
                 while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
@@ -1665,6 +1668,8 @@ struct Host {
     started: Instant,
     timings: Timings,
     total_ms: f64,
+    /// The passes and frames of the last half minute, for the log.
+    frames: crate::frames::Frames,
     /// What handlers asked for and is not carried out yet.
     control: Control,
     /// Drag and drop on this thread, from the first surface that asks
@@ -3008,6 +3013,7 @@ impl Host {
         }
         self.timings.frames += 1;
         self.total_ms += took;
+        self.frames.frame(took);
         self.timings.worst_ms = self.timings.worst_ms.max(took);
     }
 }

@@ -1757,6 +1757,9 @@ impl WMService for WMServer {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         *paused = true;
+        drop(paused);
+        // (The loop reads the flag at its next pass: now.)
+        gevrek_host::wake::now();
 
         Ok(Response::new(StatusResponse {
             success: true,
@@ -1774,6 +1777,8 @@ impl WMService for WMServer {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         *paused = false;
+        drop(paused);
+        gevrek_host::wake::now();
 
         Ok(Response::new(StatusResponse {
             success: true,
@@ -2507,10 +2512,12 @@ impl WMService for WMServer {
             tokio::spawn(async move {
                 tokio::time::sleep(delay).await;
                 *stop_flag.lock().unwrap_or_else(|p| p.into_inner()) = true;
+                gevrek_host::wake::now();
                 log::info!("Shutdown delay elapsed; stop flag set");
             });
         } else {
             *stop_flag.lock().unwrap_or_else(|p| p.into_inner()) = true;
+            gevrek_host::wake::now();
             log::info!("Stop flag set");
         }
 
@@ -2764,7 +2771,9 @@ pub async fn serve_on(
             {
                 break;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            // (The flag is set from several places that know nothing
+            // of this runtime, so it is looked at: five times a second.)
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         }
         let _ = told.send(true);
     };

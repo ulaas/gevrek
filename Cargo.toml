@@ -165,3 +165,11 @@ embed-resource = "3"
 opt-level = 3
 lto = true
 codegen-units = 1
+
+# The release build with the names a profiler reads (`cargo build
+# --profile profiling`): what is measured is what is shipped, and a
+# sampled stack says which function it was in.
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = false

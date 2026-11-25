@@ -1267,6 +1267,7 @@ impl WindowManager {
     /// runtime says it once, when the window opens.
     pub fn ignore_reason(&self, handle: WindowHandle) -> Option<IgnoreReason> {
         use windows::Win32::UI::WindowsAndMessaging::GetClassNameW;
+        gevrek_engine::counts::count(gevrek_engine::counts::Counted::IgnoreAsked);
 
         // CRITICAL: Always check for Gevrek internal windows FIRST, before any other logic
         // This ensures our own windows are NEVER managed, even if rules haven't been set up yet
@@ -4209,6 +4210,7 @@ impl WindowManager {
         let frame = self.animation_scheduler.tick(Instant::now());
         let close_windows = frame.close_windows;
         if !frame.rectangles.is_empty() {
+            gevrek_engine::counts::count(gevrek_engine::counts::Counted::MotionFrame);
             // A window coming in stays where it is: its picture moves.
             let (pictured, moved): (Vec<_>, Vec<_>) = frame
                 .rectangles

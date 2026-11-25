@@ -577,6 +577,8 @@ impl Runtime {
         log::info!("Entering main event loop");
         let mut iteration = 0u64;
         let mut last_overlay_update = std::time::Instant::now();
+        // What the state has that only looking finds, as of the last look.
+        let mut looked_before: Option<u64> = None;
         let mut last_fps_update = std::time::Instant::now();
         let mut iterations_since_fps_update = 0u64;
         let mut last_ffm_window: Option<crate::dwm::WindowHandle> = None;
@@ -674,7 +676,9 @@ impl Runtime {
                 // gevrek went on.)
                 crate::dwm::veil::events_taken();
                 crate::dwm::veil::pass_ended();
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                // (For work, not for a fixed time: going on, or a
+                // configuration, is carried out when it is asked.)
+                wait::for_work(wait::IDLE_INTERVAL, wait::IDLE_INTERVAL);
                 continue;
             }
 
@@ -696,10 +700,22 @@ impl Runtime {
                 last_fps_update = std::time::Instant::now();
             }
 
-            // Send overlay data every second
+            // The state is told when something was told or done (see
+            // `state_stale` below). What is only seen by looking (a
+            // notice, a started program that ended, the touchpad) is
+            // looked at once a second, which costs next to nothing, and
+            // the state is put together when that is other than it was;
+            // and now and then whatever happened, for what nothing says.
+            // (It used to be put together every second, with every
+            // window asked about anew, on a desktop where nothing moved.)
             if last_overlay_update.elapsed() >= std::time::Duration::from_secs(1) {
-                self.publish_state(None);
                 last_overlay_update = std::time::Instant::now();
+                let looked = self.looked_at();
+                let other = looked_before != Some(looked);
+                looked_before = Some(looked);
+                if other || self.host.last_published.elapsed() >= wait::STATE_AT_THE_LATEST {
+                    self.publish_state(None);
+                }
             }
 
             self.apply_configuration_changes();
@@ -1413,6 +1429,11 @@ impl Runtime {
                     }
                     if let Some(summary) = summary {
                         log::debug!(target: pass_times::LOG, "the last half minute: {summary}");
+                        log::debug!(
+                            target: pass_times::LOG,
+                            "counted in it: {}",
+                            gevrek_engine::counts::taken_in_words()
+                        );
                     }
                 }
             }
@@ -2701,5 +2722,19 @@ mod appearance_tests {
             .collect::<std::collections::HashSet<_>>();
         assert_eq!(names.len(), kinds.len());
         assert!(names.iter().all(|name| name.contains('.')));
+    }
+}
+
+impl Runtime {
+    /// What the published state has that no event tells of, as one
+    /// number: another number, another state. (Not the passes a second:
+    /// they are never the same twice, and no reason to tell anybody.)
+    fn looked_at(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut system = gevrek_host::wm::WmHost::system_state(self);
+        system.event_loop_fps = 0.0;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        format!("{system:?}{:?}", self.host.startup.states()).hash(&mut hasher);
+        hasher.finish()
     }
 }

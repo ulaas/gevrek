@@ -173,6 +173,7 @@ impl gevrek_engine::contract::WindowQueries for WindowManager {
     }
 
     fn windows(&self) -> Vec<gevrek_model::window::WindowInfo> {
+        gevrek_engine::counts::count(gevrek_engine::counts::Counted::WindowsListed);
         self.get_all_windows()
     }
 

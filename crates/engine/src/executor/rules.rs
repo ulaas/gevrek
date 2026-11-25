@@ -668,6 +668,7 @@ impl Executor {
         workspace_index: Option<usize>,
         scope: RuleResolutionScope,
     ) -> RuleResolution {
+        crate::counts::count(crate::counts::Counted::RulesResolved);
         let Some(mut window) = window_manager.rule_facts(handle) else {
             return RuleResolution::default();
         };

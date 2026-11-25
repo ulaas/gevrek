@@ -42,6 +42,7 @@ pub trait Published: WmHost {
         if self.host().overlay.is_none() {
             return;
         }
+        gevrek_engine::counts::count(gevrek_engine::counts::Counted::StatePublished);
         let (mut monitors, total_windows) = {
             let parts = self.parts();
             parts

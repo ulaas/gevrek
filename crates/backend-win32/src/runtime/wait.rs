@@ -22,12 +22,16 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 /// The longest an idle loop waits before it looks around on its own.
-pub const IDLE_INTERVAL: Duration = Duration::from_millis(100);
+pub const IDLE_INTERVAL: Duration = Duration::from_millis(250);
 
 /// How long after the last work the loop keeps passing once a frame: what
 /// follows work (a window settling into its place, a layout still to be
 /// made) is often seen by looking, not announced.
 pub const SETTLE: Duration = Duration::from_millis(500);
+
+/// The state the clients read is put together at least this often,
+/// whatever happened: for what changes without anything saying so.
+pub const STATE_AT_THE_LATEST: Duration = Duration::from_secs(10);
 
 /// What a pass found, as far as the next wait depends on it.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]

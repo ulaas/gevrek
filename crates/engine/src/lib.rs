@@ -16,6 +16,7 @@ pub mod constraints;
 pub mod container;
 pub mod contract;
 pub mod core;
+pub mod counts;
 pub mod decoration;
 pub mod decoration_render;
 pub mod event_coalescing;

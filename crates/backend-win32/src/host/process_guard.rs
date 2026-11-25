@@ -54,6 +54,8 @@ fn request_stop() {
     if let Some(flag) = STOP_FLAG.get() {
         *flag.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
     }
+    // (The loop reads the flag at its next pass: now.)
+    gevrek_host::wake::now();
 }
 
 fn restore_now(reason: &str) {

@@ -232,6 +232,12 @@ impl GestureRecognizer {
         events
     }
 
+    /// Fingers are on their way: [`GestureRecognizer::tick`] has
+    /// something to give up on when they fall silent.
+    pub fn is_active(&self) -> bool {
+        self.active.is_some()
+    }
+
     pub fn tick(&mut self, timestamp_ms: u64) -> Option<GestureEvent> {
         let timed_out = self.active.as_ref().is_some_and(|active| {
             timestamp_ms.saturating_sub(active.last_frame_ms) >= u64::from(self.idle_timeout_ms)

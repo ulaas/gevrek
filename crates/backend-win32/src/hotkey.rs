@@ -134,13 +134,17 @@ impl HotkeyManager {
         validate_hotkey(&hotkey)?;
         self.control_sender
             .send(ControlMessage::Register(hotkey, id))
-            .map_err(|error| format!("Failed to send input registration: {error}"))
+            .map_err(|error| format!("Failed to send input registration: {error}"))?;
+        wake_input_thread();
+        Ok(())
     }
 
     pub fn unregister(&self, id: i32) -> Result<(), String> {
         self.control_sender
             .send(ControlMessage::Unregister(id))
-            .map_err(|error| format!("Failed to send input unregistration: {error}"))
+            .map_err(|error| format!("Failed to send input unregistration: {error}"))?;
+        wake_input_thread();
+        Ok(())
     }
 
     pub fn poll_events(&self) -> Vec<HotkeyEvent> {
@@ -163,7 +167,9 @@ impl HotkeyManager {
                 idle_timeout_ms,
                 axis_lock_ratio,
             })
-            .map_err(|error| format!("Failed to configure gestures: {error}"))
+            .map_err(|error| format!("Failed to configure gestures: {error}"))?;
+        wake_input_thread();
+        Ok(())
     }
 
     pub fn poll_gesture_events(&self) -> Vec<GestureEvent> {
@@ -185,6 +191,7 @@ impl HotkeyManager {
 impl Drop for HotkeyManager {
     fn drop(&mut self) {
         let _ = self.control_sender.send(ControlMessage::Shutdown);
+        wake_input_thread();
     }
 }
 
@@ -232,7 +239,60 @@ static FORGET_HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// The keys and buttons that are held are not known any more.
 pub fn forget_what_is_held() {
     FORGET_HELD.store(true, std::sync::atomic::Ordering::Release);
+    wake_input_thread();
     crate::windows_key::cancel_drag();
+}
+
+/// The input thread, while it runs (0: none): it sleeps until a key, a
+/// button or a finger is heard of, and is woken by this for what another
+/// thread has for it.
+static INPUT_THREAD: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// A hook put something into the input thread's channel. (A hook is
+/// called from inside the thread's look at its messages, and that look
+/// does not say that it called one: this does.)
+static INPUT_HEARD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Something waits for the input thread that is no key: it looks now.
+fn wake_input_thread() {
+    let thread = INPUT_THREAD.load(std::sync::atomic::Ordering::Acquire);
+    if thread != 0 {
+        // SAFETY: a message without content to a thread by its number; a
+        // thread that is gone is an error that is left.
+        unsafe {
+            let _ = windows::Win32::UI::WindowsAndMessaging::PostThreadMessageW(
+                thread,
+                windows::Win32::UI::WindowsAndMessaging::WM_NULL,
+                windows::Win32::Foundation::WPARAM(0),
+                windows::Win32::Foundation::LPARAM(0),
+            );
+        }
+    }
+}
+
+/// While a key or a button is held, or fingers are on the touchpad, the
+/// input thread looks this often: a long press is told when it is due,
+/// and fingers that fell silent are given up on.
+const INPUT_LOOK_WHILE_HELD: Duration = Duration::from_millis(4);
+/// With nothing held it sleeps until it is woken, but never longer than
+/// this: a wake that went missing costs so much and no more.
+const INPUT_LOOK_AT_REST: Duration = Duration::from_secs(1);
+
+/// How long the input thread waits for a message, in milliseconds.
+/// `more`: its last look took messages in, so what they brought is still
+/// to be handled. `held`: a key, a button or fingers are being followed.
+/// `until_renewal`: when the hooks are next put in anew.
+fn input_wait(more: bool, held: bool, until_renewal: Duration) -> u32 {
+    if more {
+        0
+    } else if held {
+        INPUT_LOOK_WHILE_HELD.as_millis() as u32
+    } else {
+        until_renewal
+            .min(INPUT_LOOK_AT_REST)
+            .as_millis()
+            .max(1) as u32
+    }
 }
 
 /// Whether a press that is told while its key or button already counts
@@ -975,6 +1035,11 @@ fn run_input_loop(
     use crate::input_watch::{part, Part};
     let mut running = true;
     let mut hooks_renewed = Instant::now();
+    // (From here on another thread can wake this one.)
+    INPUT_THREAD.store(
+        unsafe { windows::Win32::System::Threading::GetCurrentThreadId() },
+        std::sync::atomic::Ordering::Release,
+    );
     while running {
         // What is held is not known any more: forgotten, here and in the
         // hooks, and the hooks are put in anew.
@@ -1186,9 +1251,14 @@ fn run_input_loop(
         }
 
         part(Part::Messages);
+        // (The hooks are called from inside this look: what they heard
+        // is in the channels after it, and is handled by the next pass
+        // before the thread sleeps.)
+        let mut more = false;
         unsafe {
             let mut message = MSG::default();
             while PeekMessageW(&mut message, HWND::default(), 0, 0, PM_REMOVE).as_bool() {
+                more = true;
                 if message.message == WM_QUIT {
                     running = false;
                     break;
@@ -1197,18 +1267,28 @@ fn run_input_loop(
                 DispatchMessageW(&message);
             }
         }
-        // Wait for a message, at most as long as the pass used to sleep.
-        // The hooks of this thread are called only while it waits for or
-        // takes messages: asleep, every key and every movement of the
-        // mouse, of every program, waited for it to wake.
+        // Wait for a message. The hooks of this thread are called only
+        // while it waits for or takes messages (never while it sleeps
+        // otherwise: every key and every movement of the mouse, of every
+        // program, would wait for it to wake). With nothing held there is
+        // nothing to look at until a message comes: it used to wake 250
+        // times a second for nothing.
         part(Part::Waiting);
+        let more = more || INPUT_HEARD.swap(false, std::sync::atomic::Ordering::AcqRel);
+        let held = !pressed.is_empty() || gesture_recognizer.is_active();
+        let wait = input_wait(
+            more,
+            held,
+            HOOKS_RENEWED_EVERY.saturating_sub(hooks_renewed.elapsed()),
+        );
         unsafe {
             use windows::Win32::UI::WindowsAndMessaging::{
                 MsgWaitForMultipleObjectsEx, MWMO_INPUTAVAILABLE, QS_ALLINPUT,
             };
-            MsgWaitForMultipleObjectsEx(None, 4, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            MsgWaitForMultipleObjectsEx(None, wait, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
         }
     }
+    INPUT_THREAD.store(0, std::sync::atomic::Ordering::Release);
 
     let _ = unsafe { UnhookWindowsHookEx(mouse_hook) };
     let _ = unsafe { UnhookWindowsHookEx(keyboard_hook) };
@@ -1374,6 +1454,7 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
             context.consumed_inputs.remove(&identity)
         };
         let _ = context.raw_sender.send(raw.clone());
+        INPUT_HEARD.store(true, std::sync::atomic::Ordering::Release);
         consume
     };
     if consume && down {
@@ -1535,6 +1616,7 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPA
             context.consumed_inputs.remove(&identity)
         };
         let _ = context.raw_sender.send(raw.clone());
+        INPUT_HEARD.store(true, std::sync::atomic::Ordering::Release);
         consume
     };
     if consume && down {
@@ -1560,6 +1642,23 @@ fn current_modifiers() -> (bool, bool, bool, bool) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_input_thread_sleeps_while_nothing_is_held() {
+        use super::{input_wait, HOOKS_RENEWED_EVERY};
+        use std::time::Duration;
+        // What its look brought is handled before it sleeps.
+        assert_eq!(input_wait(true, false, HOOKS_RENEWED_EVERY), 0);
+        assert_eq!(input_wait(true, true, HOOKS_RENEWED_EVERY), 0);
+        // A held key is looked at often: its long press comes when due.
+        assert_eq!(input_wait(false, true, HOOKS_RENEWED_EVERY), 4);
+        // Nothing held: until it is woken, a second at the most.
+        assert_eq!(input_wait(false, false, HOOKS_RENEWED_EVERY), 1000);
+        // The hooks are renewed when their time has come, and it does
+        // not go round without sleeping when that is now.
+        assert_eq!(input_wait(false, false, Duration::from_millis(300)), 300);
+        assert_eq!(input_wait(false, false, Duration::ZERO), 1);
+    }
+
     use super::*;
 
     #[test]
