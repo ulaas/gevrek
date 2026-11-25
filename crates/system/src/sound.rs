@@ -719,6 +719,9 @@ mod core_audio {
 /// heard, each known by the number of its process.
 #[cfg(windows)]
 pub fn mixer() -> Mixer {
+    // (Asked from a thread beside the shell's too: that one may use the
+    // system's objects while this lives.)
+    let _com = crate::com::Com::new();
     let mixer = Mixer {
         outputs: outputs(),
         inputs: inputs(),

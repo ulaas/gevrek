@@ -219,6 +219,45 @@ pub fn network_of(adapters: &[Adapter]) -> Option<Network> {
     }
 }
 
+/// Tell when the network may be another: `changed` is called (from a
+/// thread of its own) each time NetworkManager says something happened.
+/// `false` where nothing can be listened to (no `nmcli`): the network is
+/// then looked at by the clock.
+///
+/// `nmcli monitor` runs for as long as the shell does and writes a line
+/// for each change; it ends with the shell (its pipe closes).
+#[cfg(target_os = "linux")]
+pub fn watch_network(changed: impl Fn() + Send + 'static) -> bool {
+    use std::io::BufRead;
+    let child = std::process::Command::new("nmcli")
+        .arg("monitor")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let Ok(mut child) = child else {
+        return false;
+    };
+    let Some(said) = child.stdout.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return false;
+    };
+    let spawned = std::thread::Builder::new()
+        .name("gevrek-network-watch".to_string())
+        .spawn(move || {
+            for line in std::io::BufReader::new(said).lines() {
+                if line.is_err() {
+                    break;
+                }
+                changed();
+            }
+            let _ = child.wait();
+            log::debug!("nothing tells of the network any more: it is looked at by the clock");
+        });
+    spawned.is_ok()
+}
+
 /// The network the machine is on; `None` when nothing can say.
 #[cfg(target_os = "linux")]
 pub fn network() -> Option<Network> {

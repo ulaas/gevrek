@@ -24,6 +24,12 @@ pub const STUCK: Duration = Duration::from_secs(1);
 /// And again after each of these.
 pub const STUCK_AGAIN: Duration = Duration::from_secs(5);
 
+/// While something is going on, the watching thread looks this often.
+const LOOK: Duration = Duration::from_millis(500);
+/// With nothing going on it sleeps until something begins, and this long
+/// at the most.
+const REST: Duration = Duration::from_secs(30);
+
 /// A part of the shell's pass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Part {
@@ -70,16 +76,23 @@ struct Busy {
 #[derive(Clone)]
 pub struct Watch {
     busy: Arc<Mutex<Option<Busy>>>,
+    /// The watching thread sleeps until something begins (a shell at rest
+    /// is busy with nothing, and nothing is to be watched): whoever
+    /// begins something wakes it.
+    asleep: Arc<std::sync::atomic::AtomicBool>,
+    watcher: Option<std::thread::Thread>,
 }
 
 impl Watch {
     /// A watch with its thread, which ends with the last clone.
     pub fn start() -> Self {
         let busy: Arc<Mutex<Option<Busy>>> = Arc::new(Mutex::new(None));
+        let asleep = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let watched = Arc::downgrade(&busy);
+        let sleeping = Arc::clone(&asleep);
         let spawned = std::thread::Builder::new().name("gevrek-shell-watch".to_string()).spawn(move || {
             while let Some(busy) = watched.upgrade() {
-                {
+                let at_rest = {
                     let mut busy = busy.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                     if let Some(busy) = busy.as_mut() {
                         if let Some(long) = still_busy(busy, Instant::now()) {
@@ -90,15 +103,37 @@ impl Watch {
                             );
                         }
                     }
-                }
+                    // (Said under the lock: whoever begins something
+                    // after this sees it, and wakes the thread.)
+                    if busy.is_none() {
+                        sleeping.store(true, std::sync::atomic::Ordering::Release);
+                    }
+                    busy.is_none()
+                };
                 drop(busy);
-                std::thread::sleep(Duration::from_millis(200));
+                if at_rest {
+                    // Until something begins; and looked at now and then
+                    // all the same, so that the thread ends with its
+                    // shell. (It woke five times a second for the life
+                    // of the shell.)
+                    std::thread::park_timeout(REST);
+                } else {
+                    std::thread::sleep(LOOK);
+                }
             }
         });
-        if let Err(error) = spawned {
-            log::warn!("nothing watches whether the shell is stuck: {error}");
+        let watcher = match spawned {
+            Ok(thread) => Some(thread.thread().clone()),
+            Err(error) => {
+                log::warn!("nothing watches whether the shell is stuck: {error}");
+                None
+            }
+        };
+        Self {
+            busy,
+            asleep,
+            watcher,
         }
-        Self { busy }
     }
 
     /// `part` begins.
@@ -108,6 +143,11 @@ impl Watch {
             since: Instant::now(),
             told: None,
         });
+        if self.asleep.swap(false, std::sync::atomic::Ordering::AcqRel) {
+            if let Some(watcher) = &self.watcher {
+                watcher.unpark();
+            }
+        }
     }
 
     /// What began last is over.

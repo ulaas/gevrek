@@ -130,6 +130,10 @@ enum Message {
     Bluetooth(Option<gevrek_system::bluetooth::Bluetooth>),
     /// What is playing is another piece, or plays, or no longer.
     Playing(Option<crate::media::Playing>),
+    /// What the sound has (its devices, the programs that play) is other
+    /// than it was: read beside the shell while the control centre is
+    /// open.
+    Mixer(gevrek_system::sound::Mixer),
     /// The zones of the desktop have something to do: their backend has
     /// news, or their state is due to be written.
     Zones,
@@ -487,6 +491,7 @@ pub fn run() -> anyhow::Result<()> {
                 state.system.battery = battery;
                 state.system.brightness = brightness;
                 redraw_panels(&state, control);
+                redraw_control_centre(&state, control);
             }
             // Nor have Windows' own settings for movement and contrast.
             if follow_look(&mut state) {
@@ -498,6 +503,7 @@ pub fn run() -> anyhow::Result<()> {
             if network != state.system.network {
                 state.system.network = network;
                 redraw_panels(&state, control);
+                redraw_control_centre(&state, control);
             }
         }
         Message::Wifi(wifi) => {
@@ -527,6 +533,16 @@ pub fn run() -> anyhow::Result<()> {
             state.playing = playing;
             if let Some((id, ..)) = &state.control_centre {
                 control.redraw(*id);
+            }
+        }
+        Message::Mixer(mixer) => {
+            let mut state = state.borrow_mut();
+            // (Not while a slider is held: the list must not move under it.)
+            if let Some((id, held, kept)) = state.control_centre.as_mut() {
+                if held.stream.is_none() && *kept != mixer {
+                    *kept = mixer;
+                    control.redraw(*id);
+                }
             }
         }
         Message::Launcher => toggle_launcher(&state, control),
@@ -1311,6 +1327,14 @@ fn follow_look(state: &mut State) -> bool {
     changed
 }
 
+/// The control centre, where it is open, is drawn again: something it
+/// shows is another. (It does not draw itself by the clock.)
+fn redraw_control_centre(state: &State, control: &mut Control) {
+    if let Some((id, ..)) = &state.control_centre {
+        control.redraw(*id);
+    }
+}
+
 /// Every panel is drawn again (what they all show is another).
 fn redraw_panels(state: &State, control: &mut Control) {
     for one in state.panels.values() {
@@ -1351,6 +1375,7 @@ fn heard(state: &Rc<RefCell<State>>, level: SoundLevel, control: &mut Control) {
         if state.system.volume != volume {
             state.system.volume = volume;
             redraw_panels(&state, control);
+            redraw_control_centre(&state, control);
         }
         changed && state.show_volume
     };
@@ -1617,7 +1642,6 @@ fn toggle_control(state: &Rc<RefCell<State>>, control: &mut Control) {
     };
     let shared = Rc::clone(state);
     let mut fonts = false;
-    let mut read_at = Instant::now();
     // What is playing is asked beside the shell, once a second for as
     // long as the control centre is open (its drawing holds `open`; when
     // it is put away, nobody does, and the asking ends).
@@ -1630,12 +1654,26 @@ fn toggle_control(state: &Rc<RefCell<State>>, control: &mut Control) {
         let mut said = state.borrow().playing.clone();
         std::thread::spawn(move || {
             let mut first = true;
+            // What the sound has is read here too, every third second,
+            // and told when it is other than it was. (It was read by the
+            // thread that draws, between two frames, and the control
+            // centre drew itself four times a second to come by it.)
+            let mut mixer: Option<gevrek_system::sound::Mixer> = None;
+            let mut round = 0u32;
             while still_open.upgrade().is_some() {
                 let now = crate::media::playing(said.as_ref());
                 if first || now != said {
                     said = now.clone();
                     sender.send(Message::Playing(now));
                 }
+                if round % 3 == 2 {
+                    let read = gevrek_system::sound::mixer();
+                    if mixer.as_ref() != Some(&read) {
+                        mixer = Some(read.clone());
+                        sender.send(Message::Mixer(read));
+                    }
+                }
+                round = round.wrapping_add(1);
                 first = false;
                 std::thread::sleep(Duration::from_millis(1000));
             }
@@ -1644,16 +1682,6 @@ fn toggle_control(state: &Rc<RefCell<State>>, control: &mut Control) {
     let id = control.open(place, move |ui, control| {
         let _open = &open;
         let context = ui.ctx().clone();
-        // (Not while a slider is held: the list must not move under it.)
-        if read_at.elapsed() >= Duration::from_secs(3) {
-            read_at = Instant::now();
-            let mut state = shared.borrow_mut();
-            if let Some((_, held, kept)) = state.control_centre.as_mut() {
-                if held.stream.is_none() {
-                    *kept = gevrek_system::sound::mixer();
-                }
-            }
-        }
         let asked = {
             let mut state = shared.borrow_mut();
             let state = &mut *state;
@@ -1744,7 +1772,6 @@ fn toggle_control(state: &Rc<RefCell<State>>, control: &mut Control) {
                     if let Some((_, _, kept)) = shared.borrow_mut().control_centre.as_mut() {
                         *kept = mixer;
                     }
-                    read_at = Instant::now();
                 }
                 Ask::Brightness(step) => {
                     if let Some(now) = gevrek_system::brightness::change(step) {
@@ -1872,7 +1899,8 @@ fn toggle_control(state: &Rc<RefCell<State>>, control: &mut Control) {
             shared.borrow_mut().control_centre = None;
             return Flow::Close;
         }
-        context.request_repaint_after(Duration::from_millis(250));
+        // (Drawn again when something it shows is another: each of
+        // those comes as a message. Nothing is drawn by the clock.)
         Flow::Continue
     });
     // (What the sound has is asked of the system as it opens.)

@@ -1174,11 +1174,21 @@ pub struct SystemView {
 impl SystemView {
     /// What there is to say now.
     pub fn read() -> Self {
+        Self::read_with(None)
+    }
+
+    /// What there is to say now; the network as `kept` has it where one
+    /// is given (asking for it costs the start of a program on Linux, so
+    /// whoever asks often asks for it only when it may be another).
+    pub fn read_with(kept: Option<&SystemView>) -> Self {
         Self {
             volume: gevrek_system::sound::level(gevrek_system::sound::Device::Speaker)
                 .map(|level| (level.percent, level.muted)),
             battery: gevrek_system::status::battery(),
-            network: gevrek_system::status::network(),
+            network: match kept {
+                Some(kept) => kept.network.clone(),
+                None => gevrek_system::status::network(),
+            },
             brightness: gevrek_system::brightness::read().map(|now| now.percent()),
         }
     }

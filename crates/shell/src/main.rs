@@ -651,15 +651,48 @@ mod linux {
         // of a program), and told when something is another than it was.
         if !args.no_panel {
             let system_sender = shell.sender();
+            // (The network is asked of a program that has to be started:
+            // only when NetworkManager says that something happened, and
+            // once a minute for what it did not say. It was asked every
+            // three seconds for the life of the shell.)
+            let (network_changed, network_news) = std::sync::mpsc::channel::<()>();
+            let told = gevrek_system::status::watch_network(move || {
+                let _ = network_changed.send(());
+            });
             std::thread::spawn(move || {
-                let mut known = None;
+                let network_every = if told {
+                    std::time::Duration::from_secs(60)
+                } else {
+                    std::time::Duration::from_secs(3)
+                };
+                let mut known: Option<crate::panel::SystemView> = None;
+                let mut network_read: Option<std::time::Instant> = None;
                 loop {
-                    let now = crate::panel::SystemView::read();
+                    // (A burst of lines is one change.)
+                    let mut news = false;
+                    while network_news.try_recv().is_ok() {
+                        news = true;
+                    }
+                    let network_due = news
+                        || network_read.is_none_or(|at| at.elapsed() >= network_every);
+                    let now = crate::panel::SystemView::read_with(
+                        known.as_ref().filter(|_| !network_due),
+                    );
+                    if network_due {
+                        network_read = Some(std::time::Instant::now());
+                    }
                     if known.as_ref() != Some(&now) {
                         known = Some(now.clone());
                         system_sender.send(Message::System(now));
                     }
-                    std::thread::sleep(std::time::Duration::from_secs(3));
+                    // The rest (the sound, the battery, the brightness)
+                    // costs no program: every three seconds, or at once
+                    // when the network has news.
+                    let _ = network_news.recv_timeout(std::time::Duration::from_secs(3));
+                    if told {
+                        // (What it says comes a moment before it is so.)
+                        std::thread::sleep(std::time::Duration::from_millis(150));
+                    }
                 }
             });
         }
