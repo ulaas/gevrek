@@ -476,6 +476,33 @@ mod tests {
     }
 
     #[test]
+    fn what_is_there_and_cannot_be_read_is_not_gone_to_without_end() {
+        // Something that is there and is no folder to read (a file stands
+        // in for a folder the person may not list): there each time it is
+        // looked at, away each time it is gone to.
+        let root = folder("unread");
+        let path = format!("{root}\\not-a-folder");
+        std::fs::write(&path, b"x").expect("written");
+        let (news, _wakes) = news();
+        let looked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = Arc::clone(&looked);
+        let how = Arc::new(How {
+            patience: Duration::from_millis(200),
+            reach: Box::new(move |path| {
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Path::new(path).exists()
+            }),
+            opened: Default::default(),
+        });
+        let _portal = Portal::open(&path, Arc::clone(&news), how);
+        std::thread::sleep(Duration::from_millis(1200));
+        // Gone to, looked at once more, and left: a handful of looks. (It
+        // went round for as long as the portal was there: thousands.)
+        let looks = looked.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(looks < 40, "{looks} looks at something that cannot be read");
+    }
+
+    #[test]
     fn a_folder_that_does_not_answer_is_told_as_away_and_shown_when_it_does() {
         let root = folder("slow");
         std::fs::write(format!("{root}\\a.txt"), b"a").expect("written");

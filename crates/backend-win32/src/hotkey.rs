@@ -1744,6 +1744,12 @@ mod helper_tests {
         ));
         // Silent for long and then down again: it had been let go.
         assert!(is_a_new_press(BindingDevice::Keyboard, HELD_KEY_SILENCE));
+        // A button of the mouse can be asked whether it is down, by the
+        // name a binding has for it; the wheel is no button.
+        for button in ["LEFT", "right", "MIDDLE", "X1", "X2"] {
+            assert!(mouse_button_is_down(button).is_some(), "{button}");
+        }
+        assert_eq!(mouse_button_is_down("WHEEL_UP"), None);
         // A button of the mouse does not repeat at all.
         assert!(is_a_new_press(
             BindingDevice::Mouse,

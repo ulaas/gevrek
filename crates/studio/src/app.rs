@@ -480,6 +480,13 @@ impl Studio {
 
     fn take_in(&mut self) {
         for event in self.link.poll() {
+            self.heard(event);
+        }
+    }
+
+    /// One thing the window manager's line said.
+    fn heard(&mut self, event: Event) {
+        {
             match event {
                 Event::Connected(peer) => {
                     log::debug!(
@@ -3304,6 +3311,83 @@ fn raw_layout(text: &str, colours: &RawColours, font: egui::FontId) -> egui::tex
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A studio of a window manager that is not there (nothing answers at
+    /// its address): what the line would say is said to it by the test.
+    fn studio_without_a_window_manager() -> Studio {
+        Studio::new(
+            &egui::Context::default(),
+            Options {
+                source: Source::WindowManager("gevrek-studio-test-nobody".to_string()),
+                page: Page::Overview,
+                appearance: std::path::PathBuf::from(
+                    "/nonexistent/gevrek-studio-test/appearance.json",
+                ),
+                script: Vec::new(),
+            },
+        )
+    }
+
+    fn history_size(studio: &mut Studio, size: u64) {
+        studio
+            .document
+            .edit("/desktop/focus/history_size", |value| {
+                *value = serde_json::json!(size)
+            });
+        studio.follow_edits();
+    }
+
+    #[test]
+    fn what_was_changed_before_the_window_manager_answered_is_kept_as_a_draft() {
+        let mut studio = studio_without_a_window_manager();
+        history_size(&mut studio, 31);
+        // The window manager's first word of what it runs: the change is
+        // still here, as a draft on what runs. (It was replaced.)
+        studio.heard(Event::Configuration(Box::default(), 5));
+        assert_eq!(
+            studio
+                .document
+                .config()
+                .map(|config| config.desktop.focus.history_size),
+            Some(31)
+        );
+        assert!(studio.dirty());
+        // Without a change of one's own, what runs is simply shown.
+        let mut studio = studio_without_a_window_manager();
+        let mut runs = Config::default();
+        runs.desktop.focus.history_size = 44;
+        studio.heard(Event::Configuration(Box::new(runs), 5));
+        assert_eq!(
+            studio
+                .document
+                .config()
+                .map(|config| config.desktop.focus.history_size),
+            Some(44)
+        );
+        assert!(!studio.dirty());
+    }
+
+    #[test]
+    fn nothing_is_applied_while_it_is_not_known_what_runs() {
+        let mut studio = studio_without_a_window_manager();
+        studio.heard(Event::Configuration(Box::default(), 5));
+        history_size(&mut studio, 31);
+        // The line came back and what runs could not be read: the
+        // revision that was known means nothing any more.
+        studio.session.as_mut().expect("a session").revision_lost();
+        studio.heard(Event::Log {
+            level: gevrek_link::Level::Error,
+            message: format!("{}no answer", gevrek_link::FETCH_FAILED),
+            timestamp_ms: 0,
+        });
+        assert!(studio.revision_unknown);
+        studio.apply();
+        assert!(!studio.applying, "sent with no revision to lay it on");
+        // What runs is heard of again: known, and no longer held back
+        // for that.
+        studio.heard(Event::Configuration(Box::default(), 9));
+        assert!(!studio.revision_unknown);
+    }
 
     #[test]
     fn the_windows_edges_make_it_larger_and_smaller() {

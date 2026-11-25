@@ -612,6 +612,33 @@ mod tests {
     use std::sync::mpsc::{channel, Receiver, Sender};
     use std::sync::Mutex;
 
+    #[test]
+    fn a_program_started_for_a_thread_that_ends_is_not_ended_with_it() {
+        // Asked for from a thread that ends at once, as the thread of a
+        // connection does: the program is the keeper's, asks to be ended
+        // when its parent goes, and lives on. (Started by that thread
+        // itself it was told to end as the thread did.)
+        let started = std::thread::spawn(|| {
+            let mut command = Command::new("sh");
+            command.args(["-c", "sleep 0.4; exit 7"]);
+            // SAFETY: only a call that is safe between fork and exec.
+            unsafe {
+                use std::os::unix::process::CommandExt;
+                command.pre_exec(|| {
+                    libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                    Ok(())
+                });
+            }
+            started_by_the_keeper(command)
+        })
+        .join()
+        .expect("the thread that asked");
+        let mut child = started.expect("started");
+        // It ran to its own end, with its own answer, and was not ended
+        // by a signal.
+        assert_eq!(child.wait().expect("waited for").code(), Some(7));
+    }
+
     /// What a machine was asked to do.
     #[derive(Debug, Clone, PartialEq)]
     enum Did {

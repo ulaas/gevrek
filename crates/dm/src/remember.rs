@@ -148,6 +148,11 @@ pub fn picture_ending(file: &Path) -> Option<String> {
     PICTURES.contains(&ending.as_str()).then_some(ending)
 }
 
+/// Whether a path is a folder itself, and no link to one.
+fn is_a_folder_of_its_own(folder: &Path) -> bool {
+    std::fs::symlink_metadata(folder).is_ok_and(|folder| folder.is_dir())
+}
+
 /// Keep what the person's configuration says for the login, in the
 /// greeter's folder (which is the greeter's: `owner`). What cannot be
 /// read is left as it was kept before.
@@ -188,7 +193,7 @@ pub fn keep(reader: &Reader, home: &Path, greeter_home: &Path, owner: (u32, u32)
     // as root. (Only the files' own names were looked at: a link put where
     // the folder is would have had root make the greeter's files wherever
     // it pointed.)
-    if !std::fs::symlink_metadata(&folder).is_ok_and(|folder| folder.is_dir()) {
+    if !is_a_folder_of_its_own(&folder) {
         log::warn!(
             "the login keeps nothing of {}: {} is no folder of its own",
             reader.name,
@@ -385,6 +390,22 @@ mod tests {
         );
         assert_eq!(picture_ending(Path::new("/etc/shadow")), None);
         assert_eq!(picture_ending(Path::new("/a/b.svg")), None);
+    }
+
+    #[test]
+    fn nothing_is_written_through_a_folder_that_is_a_link() {
+        let root = std::env::temp_dir().join(format!("gevrek-dm-folder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let real = root.join("real");
+        std::fs::create_dir_all(&real).expect("a folder");
+        assert!(is_a_folder_of_its_own(&real));
+        // A link to a folder is not one, wherever it points; nor is what
+        // is not there.
+        let link = root.join("remembered");
+        std::os::unix::fs::symlink(&real, &link).expect("a link");
+        assert!(!is_a_folder_of_its_own(&link));
+        assert!(!is_a_folder_of_its_own(&root.join("none")));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
