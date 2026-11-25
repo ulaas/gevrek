@@ -80,6 +80,9 @@ PAM
     install -Dm644 resources/dm/pam-gevrek-greeter "$pkgdir/etc/pam.d/gevrek-greeter"
     install -Dm644 resources/dm/sysusers.conf "$pkgdir/usr/lib/sysusers.d/gevrek-dm.conf"
     install -Dm644 resources/dm/tmpfiles.conf "$pkgdir/usr/lib/tmpfiles.d/gevrek-dm.conf"
+    # (For a machine that has SELinux on, which Arch does not have by
+    # itself: `semodule -i` it, as scripts/install-dm.sh does.)
+    install -Dm644 resources/dm/gevrek-dm.cil "$pkgdir/usr/share/selinux/packages/gevrek-dm.cil"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/gevrek-git/LICENSE"
     install -Dm644 docs/LINUX.md "$pkgdir/usr/share/doc/gevrek-git/LINUX.md"
 }

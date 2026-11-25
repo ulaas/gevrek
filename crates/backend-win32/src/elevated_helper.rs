@@ -537,6 +537,15 @@ pub fn carry_out_on(desk: &mut impl Desk, ask: &Ask, hidden: &mut HashSet<isize>
                     "{attribute} is nothing gevrek tells the compositor"
                 ));
             }
+            // (13: cloaked. Remembered, to be undone when the asker goes.)
+            if attribute == 13 {
+                let mut cloaked = cloaked();
+                if value != 0 {
+                    cloaked.insert(window);
+                } else {
+                    cloaked.remove(&window);
+                }
+            }
             desk.dwm(window, attribute, value)
         })),
         Ask::Input {
@@ -565,6 +574,14 @@ pub fn carry_out_on(desk: &mut impl Desk, ask: &Ask, hidden: &mut HashSet<isize>
 /// Whether the helper's hooks run (the helper's own side).
 static HEARS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// The windows cloaked on the asker's behalf.
+fn cloaked() -> std::sync::MutexGuard<'static, HashSet<isize>> {
+    static SET: std::sync::OnceLock<std::sync::Mutex<HashSet<isize>>> = std::sync::OnceLock::new();
+    SET.get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Show again every window that was hidden on the asker's behalf.
 pub fn show_hidden(hidden: &mut HashSet<isize>) -> usize {
     show_hidden_on(&mut TheDesk, hidden)
@@ -578,6 +595,16 @@ pub fn show_hidden_on(desk: &mut impl Desk, hidden: &mut HashSet<isize>) -> usiz
         if desk.is_there(window) {
             // (8: SW_SHOWNA, as it is and without the keyboard.)
             desk.show(window, 8, true);
+            shown += 1;
+        }
+    }
+    // And every window that was cloaked is seen again. (Only what was
+    // hidden was shown: a window of an elevated program that was cloaked
+    // when the window manager went stayed unseen until its program was
+    // started again, and the window manager itself may not uncloak it.)
+    let uncloak: Vec<isize> = cloaked().drain().collect();
+    for window in uncloak {
+        if desk.is_there(window) && desk.dwm(window, 13, 0).is_ok() {
             shown += 1;
         }
     }
@@ -675,7 +702,7 @@ pub mod server {
     }
 
     /// The file of a running program.
-    fn image_of(process: u32) -> Option<std::path::PathBuf> {
+    pub(super) fn image_of(process: u32) -> Option<std::path::PathBuf> {
         // SAFETY: the handle is closed below; the buffer is ours.
         unsafe {
             let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process).ok()?;
@@ -857,11 +884,26 @@ pub mod server {
                 Err(error) => log::warn!("{error}: gevrek's keys do nothing over elevated windows"),
             }
         }
-        let (file, process) = wait_for_other_end(asked_pipe)?;
-        anyhow::ensure!(
-            (serve.may_ask)(process),
-            "process {process} opened the helper's pipe and may not ask"
-        );
+        // Whoever opens the pipe and may not ask is let go of, and the
+        // helper waits again. (It ended with the first one that opened
+        // its pipe, whoever that was: any program of the person's could
+        // end it by opening the pipe, and no elevated window was managed
+        // until gevrek was started again.)
+        let mut made = Some(asked_pipe);
+        let (file, process) = loop {
+            let waiting = match made.take() {
+                Some(waiting) => waiting,
+                None => make_pipe(pipe, also)?,
+            };
+            let (file, process) = wait_for_other_end(waiting)?;
+            if (serve.may_ask)(process) {
+                break (file, process);
+            }
+            log::warn!(
+                "process {process} opened the helper's pipe and may not ask: it is let go of"
+            );
+            drop(file);
+        };
         // The second pipe: opened by the same program, told what is heard.
         // (A handle is a number: carried to the thread as one.)
         let heard_pipe = heard_pipe.0 as isize;
@@ -994,6 +1036,40 @@ pub mod client {
         tell_table();
     }
 
+    /// Whether the program at the other end of the pipe is gevrek's
+    /// helper: the copy kept where only an administrator can write, or the
+    /// one beside this window manager.
+    #[cfg(not(test))]
+    fn served_by_the_helper(pipe: &std::fs::File) -> bool {
+        use std::os::windows::io::AsRawHandle;
+        let mut process = 0u32;
+        // SAFETY: the handle is the open pipe's, and the number is ours.
+        let asked = unsafe {
+            windows::Win32::System::Pipes::GetNamedPipeServerProcessId(
+                windows::Win32::Foundation::HANDLE(pipe.as_raw_handle()),
+                &mut process,
+            )
+        };
+        if asked.is_err() {
+            return false;
+        }
+        let Some(theirs) = super::server::image_of(process) else {
+            return false;
+        };
+        let whole = |path: &std::path::Path| {
+            std::fs::canonicalize(path)
+                .unwrap_or_else(|_| path.to_path_buf())
+                .to_string_lossy()
+                .to_lowercase()
+        };
+        let beside = std::env::current_exe()
+            .ok()
+            .map(|own| own.with_file_name("gevrek-elevated.exe"));
+        let theirs = whole(&theirs);
+        theirs == whole(&crate::elevated::kept_helper())
+            || beside.is_some_and(|beside| theirs == whole(&beside))
+    }
+
     /// Whether a helper answers.
     pub fn connected() -> bool {
         line().is_some()
@@ -1061,6 +1137,19 @@ pub mod client {
             else {
                 return false;
             };
+            // What answers there is the helper, and not whoever made a
+            // pipe of that name first: a pipe's name is the machine's, and
+            // the window manager told whatever served it every key it
+            // listens for, and ran what it sent back as keys pressed.
+            #[cfg(not(test))]
+            if !served_by_the_helper(&file) {
+                static SAID: std::sync::atomic::AtomicBool =
+                    std::sync::atomic::AtomicBool::new(false);
+                if !SAID.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    log::warn!("what serves {pipe} is not gevrek's helper: it is not spoken to");
+                }
+                return false;
+            }
             let Ok(writer) = file.try_clone() else {
                 return false;
             };
@@ -1479,6 +1568,21 @@ mod tests {
         assert_eq!(show_hidden_on(&mut desk, &mut hidden), 1);
         assert_eq!(desk.did, [Did::Show(10, 8, true)]);
         assert!(hidden.is_empty());
+
+        // What was cloaked is seen again too; what the asker uncloaked
+        // itself is left alone.
+        let cloak = |window, value| Ask::Dwm {
+            window,
+            attribute: 13,
+            value,
+        };
+        let mut desk = Written::with(&[40, 50]);
+        for ask in [cloak(40, 1), cloak(50, 1), cloak(50, 0)] {
+            assert_eq!(carry_out_on(&mut desk, &ask, &mut hidden), Answer::Done);
+        }
+        desk.did.clear();
+        assert_eq!(show_hidden_on(&mut desk, &mut hidden), 1);
+        assert_eq!(desk.did, [Did::Dwm(40, 13, 0)]);
 
         // And over the line: the asker goes after hiding, with no word.
         let mut desk = Written::with(&[10, 20]);

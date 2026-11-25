@@ -598,9 +598,14 @@ impl XWaylandShellHandler for State {
 
 impl XwmHandler for State {
     fn xwm_state(&mut self, _xwm: XwmId) -> &mut X11Wm {
+        // (The one that ended is kept for what still asks for it: a
+        // copy from an X11 program that was under way when Xwayland
+        // ended asks once more, and there was nothing to answer with
+        // but the end of the compositor.)
         self.xwm
             .as_mut()
-            .expect("X11 events only come from a started WM")
+            .or(self.xwm_gone.as_mut())
+            .expect("X11 events only come from a WM that was started")
     }
 
     fn new_window(&mut self, _xwm: XwmId, _window: X11Surface) {}
@@ -986,7 +991,7 @@ impl XwmHandler for State {
     fn disconnected(&mut self, _xwm: XwmId) {
         log::warn!("Xwayland ended");
         self.x_drag = XDrag::default();
-        self.xwm = None;
+        self.xwm_gone = self.xwm.take();
         self.x_display = None;
         self.x_client = None;
         std::env::remove_var("DISPLAY");

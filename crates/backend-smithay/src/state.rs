@@ -171,6 +171,10 @@ pub struct State {
     pub(crate) lock_surfaces: Vec<(MonitorHandle, smithay::wayland::session_lock::LockSurface)>,
     /// The lock of the program that locked the session: no other
     /// locks or unlocks it while that one lives.
+    /// The buttons made-up pointers hold, each with its pointer.
+    pub(crate) virtual_buttons: Vec<(smithay::reexports::wayland_server::backend::ObjectId, u32)>,
+    /// When a lock screen was last started.
+    pub(crate) locker_started: Option<std::time::Instant>,
     pub(crate) locker: Option<
         smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
     >,
@@ -200,6 +204,8 @@ pub struct State {
     pub xwayland_shell_state: smithay::wayland::xwayland_shell::XWaylandShellState,
     /// The X11 window manager side, once Xwayland is ready.
     pub xwm: Option<smithay::xwayland::X11Wm>,
+    /// The window manager of an Xwayland that ended (`xwm_state`).
+    pub xwm_gone: Option<smithay::xwayland::X11Wm>,
     pub x_display: Option<u32>,
     /// Xwayland as a client, and the scale it was last told X11 programs
     /// draw at (`tell_x11_scale`).
@@ -728,6 +734,8 @@ impl State {
             locked: false,
             lock_surfaces: Vec::new(),
             locker: None,
+            locker_started: None,
+            virtual_buttons: Vec::new(),
             idle_notifier: None,
             syncobj_state: None,
             // Small protocols programs look for: touchpad gestures passed
@@ -790,6 +798,7 @@ impl State {
                 &display,
             ),
             xwm: None,
+            xwm_gone: None,
             x_display: None,
             x_client: None,
             x_scale: 1.0,
@@ -1734,6 +1743,13 @@ impl State {
                 .current()
                 .geometry
         });
+        // No further than what the window draws: a program may declare
+        // any frame it likes. (One declared far larger than its picture
+        // was the window under the pointer everywhere, and nothing
+        // beneath it could be reached.) A frame that lies off what is
+        // drawn altogether is no frame: the whole surface is.
+        let drawn = smithay::desktop::utils::bbox_from_surface_tree(&surface, (0, 0));
+        let geometry = geometry.and_then(|geometry| geometry.intersection(drawn));
         window.geometry_offset =
             geometry.map_or((0, 0), |geometry| (geometry.loc.x, geometry.loc.y));
         let size = buffer_size.map(|size| geometry.map_or(size, |geometry| geometry.size));

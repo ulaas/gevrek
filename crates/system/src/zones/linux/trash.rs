@@ -210,7 +210,10 @@ impl Trash {
             let kept = can.join("files").join(&kept_as);
             let moved = std::io::Write::write_all(&mut file, note.as_bytes())
                 .and_then(|()| file.sync_all())
-                .and_then(|()| std::fs::rename(original, &kept));
+                // (Only where no file of that name lies in the can: one
+                // without a note, left by another program, was written
+                // over.)
+                .and_then(|()| super::files::rename_new(original, &kept));
             return match moved {
                 Ok(()) => Ok(Trashed { info, file: kept }),
                 Err(error) => {

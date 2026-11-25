@@ -677,6 +677,23 @@ impl Studio {
 
     fn remote_configuration(&mut self, config: Config, revision: u64) {
         match &mut self.session {
+            // The first word of what runs. What was changed here before
+            // it came (the studio was opened with no window manager, and
+            // something was set) is kept, as a draft on what runs: Apply
+            // sends it. (It was replaced by what runs, with its Undo, and
+            // nothing said so.)
+            None if self.document.can_undo() => {
+                let mut session = Session::new(self.client_id.clone(), config, revision);
+                if let Some(mine) = self.document.config() {
+                    session.set_draft(mine.clone());
+                }
+                self.session = Some(session);
+                self.live = false;
+                self.toast(
+                    Tone::Note,
+                    "The window manager answers. What you changed here is kept as a draft: Apply sends it.",
+                );
+            }
             None => {
                 self.document.replace(&config);
                 self.session = Some(Session::new(self.client_id.clone(), config, revision));
@@ -684,6 +701,17 @@ impl Studio {
             }
             Some(session) => match session.remote_fetched(config, revision) {
                 Fetched::UpToDate => {}
+                // What is written here is not read as a configuration (in
+                // the middle of an edit of the text): it is no draft the
+                // session knows of, and it is the person's all the same.
+                // Left as it is. (It was replaced, with its Undo.)
+                Fetched::FastForwarded if self.document.error().is_some() => {
+                    self.live = false;
+                    self.toast(
+                        Tone::Warn,
+                        "The configuration was changed elsewhere. What is written here is not read as one, and was left as it is.",
+                    );
+                }
                 Fetched::FastForwarded => {
                     let config = session.config().clone();
                     self.document.replace(&config);

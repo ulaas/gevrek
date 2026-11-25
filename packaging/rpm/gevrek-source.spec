@@ -104,10 +104,27 @@ install -D -m 0644 resources/dm/pam-gevrek-dm %{buildroot}%{_sysconfdir}/pam.d/g
 install -D -m 0644 resources/dm/pam-gevrek-greeter %{buildroot}%{_sysconfdir}/pam.d/gevrek-greeter
 install -D -m 0644 resources/dm/sysusers.conf %{buildroot}%{_sysusersdir}/gevrek-dm.conf
 install -D -m 0644 resources/dm/tmpfiles.conf %{buildroot}%{_tmpfilesdir}/gevrek-dm.conf
+# The SELinux module that labels gevrek-dm as a display manager (without it
+# the daemon runs as a service nobody confines, and the session keeps that
+# label): put where the policy's packages lie, and installed below.
+install -D -m 0644 resources/dm/gevrek-dm.cil %{buildroot}%{_datadir}/selinux/packages/gevrek-dm.cil
 # gevrek's boot splash (resources/plymouth/README.md). Installed, not made
 # the one in use: `plymouth-set-default-theme gevrek -R` does that.
 install -d %{buildroot}%{_datadir}/plymouth/themes/gevrek
 install -m 0644 resources/plymouth/gevrek/gevrek.plymouth resources/plymouth/gevrek/*.png %{buildroot}%{_datadir}/plymouth/themes/gevrek/
+
+%post
+# Where SELinux is on. A machine without it is as it was.
+if command -v semodule >/dev/null 2>&1 && command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
+    semodule -i %{_datadir}/selinux/packages/gevrek-dm.cil || :
+    restorecon -R %{_bindir}/gevrek-dm %{_bindir}/gevrek-lock %{_sysconfdir}/pam.d/gevrek-dm \n        %{_sysconfdir}/pam.d/gevrek-greeter %{_unitdir}/gevrek-dm.service 2>/dev/null || :
+fi
+
+%postun
+# Taken away for good (not an update): the module goes with it.
+if [ "$1" -eq 0 ] && command -v semodule >/dev/null 2>&1; then
+    semodule -r gevrek-dm >/dev/null 2>&1 || :
+fi
 
 %files
 %license LICENSE
@@ -133,6 +150,7 @@ install -m 0644 resources/plymouth/gevrek/gevrek.plymouth resources/plymouth/gev
 %{_unitdir}/gevrek-dm.service
 %{_sysusersdir}/gevrek-dm.conf
 %{_tmpfilesdir}/gevrek-dm.conf
+%{_datadir}/selinux/packages/gevrek-dm.cil
 %config(noreplace) %{_sysconfdir}/pam.d/gevrek-dm
 %dir %{_datadir}/plymouth
 %dir %{_datadir}/plymouth/themes

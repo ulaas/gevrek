@@ -170,6 +170,7 @@ extern "C" {
     pub fn AXUIElementGetPid(element: AXUIElementRef, pid: *mut i32) -> AXError;
     pub fn AXValueCreate(kind: u32, value: *const c_void) -> AXValueRef;
     pub fn AXValueGetValue(value: AXValueRef, kind: u32, out: *mut c_void) -> bool;
+    pub fn AXValueGetTypeID() -> usize;
     pub fn AXObserverCreate(
         pid: i32,
         callback: AXObserverCallback,

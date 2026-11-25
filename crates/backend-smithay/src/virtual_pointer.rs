@@ -16,6 +16,7 @@ use smithay::reexports::wayland_protocols_wlr::virtual_pointer::v1::server::{
     zwlr_virtual_pointer_v1::{self, ZwlrVirtualPointerV1},
 };
 use smithay::reexports::wayland_server::protocol::wl_pointer;
+use smithay::reexports::wayland_server::Resource as _;
 use smithay::reexports::wayland_server::{
     Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, WEnum,
 };
@@ -219,7 +220,7 @@ impl Dispatch<ZwlrVirtualPointerV1, Made> for State {
     fn request(
         state: &mut Self,
         _client: &Client,
-        _: &ZwlrVirtualPointerV1,
+        pointer: &ZwlrVirtualPointerV1,
         request: zwlr_virtual_pointer_v1::Request,
         made: &Made,
         _display: &DisplayHandle,
@@ -256,6 +257,15 @@ impl Dispatch<ZwlrVirtualPointerV1, Made> for State {
                 state: pressed,
             } => {
                 let pressed = pressed == WEnum::Value(wl_pointer::ButtonState::Pressed);
+                // Which buttons this pointer holds: let go of when it
+                // goes (`destroyed`).
+                let id = pointer.id();
+                state
+                    .virtual_buttons
+                    .retain(|held| *held != (id.clone(), button));
+                if pressed {
+                    state.virtual_buttons.push((id, button));
+                }
                 state.pointer_button(button, pressed, time);
             }
             Request::Axis { time, axis, value } => {
@@ -275,7 +285,10 @@ impl Dispatch<ZwlrVirtualPointerV1, Made> for State {
                 if let Some(index) = index_of(axis) {
                     turning(&|turn| {
                         turn.amount[index] += value;
-                        turn.notches[index] += discrete * 120;
+                        // (Never past what a number holds: the program
+                        // says how many.)
+                        turn.notches[index] =
+                            turn.notches[index].saturating_add(discrete.saturating_mul(120));
                         turn.time = time;
                     });
                 }
@@ -307,6 +320,29 @@ impl Dispatch<ZwlrVirtualPointerV1, Made> for State {
                 state.virtual_pointer_turn(turn);
             }
             _ => {}
+        }
+    }
+
+    /// The pointer is gone (its program ended, or let go of it): the
+    /// buttons it held are let go. (They stayed held: the keyboard's
+    /// window was pinned and a drag went on until a real button was
+    /// pressed and let go.)
+    fn destroyed(
+        state: &mut Self,
+        _client: smithay::reexports::wayland_server::backend::ClientId,
+        pointer: &ZwlrVirtualPointerV1,
+        _made: &Made,
+    ) {
+        let id = pointer.id();
+        let held: Vec<u32> = state
+            .virtual_buttons
+            .iter()
+            .filter(|(of, _)| *of == id)
+            .map(|(_, button)| *button)
+            .collect();
+        state.virtual_buttons.retain(|(of, _)| *of != id);
+        for button in held {
+            state.pointer_button(button, false, 0);
         }
     }
 }

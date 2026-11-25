@@ -161,6 +161,36 @@ pub fn bind_local(instance: &str) -> std::io::Result<LocalIncoming> {
             );
         }
     }
+    // One window manager at a time looks at the socket and takes it:
+    // a lock beside it, held for as long as this program runs. (Two
+    // that started together each found the other's socket unanswered
+    // yet, and the second took the first one's away.)
+    {
+        static HELD: std::sync::Mutex<Vec<(std::path::PathBuf, std::fs::File)>> =
+            std::sync::Mutex::new(Vec::new());
+        let beside = path.with_extension("lock");
+        let mut held = HELD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !held.iter().any(|(known, _)| *known == beside) {
+            let lock = std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .open(&beside)?;
+            match lock.try_lock() {
+                Ok(()) => held.push((beside, lock)),
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::AddrInUse,
+                        format!("another gevrek is starting on {}", path.display()),
+                    ));
+                }
+                // (A file system that cannot lock: as before, without.)
+                Err(std::fs::TryLockError::Error(error)) => {
+                    log::debug!("{} is not locked: {error}", beside.display());
+                }
+            }
+        }
+    }
     if path.exists() {
         if std::os::unix::net::UnixStream::connect(&path).is_ok() {
             return Err(std::io::Error::new(

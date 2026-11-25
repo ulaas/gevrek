@@ -585,6 +585,9 @@ async fn a_graph_push_from_a_stale_revision_is_refused() {
     let running: Config =
         serde_json::from_str(&bob.get_configuration().await.unwrap().json).unwrap();
     assert_eq!(running.node_graph.nodes.len(), 1);
+    // Nor is the graph that was turned away the working graph: that is
+    // still Alice's.
+    assert_eq!(bob.get_working_graph().await.unwrap().node_count, 1);
 
     // From the current revision, or unconditionally, it goes through.
     let retry = bob

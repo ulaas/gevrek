@@ -662,14 +662,38 @@ impl State {
         }
     }
 
+    /// A key or a button was pressed on a locked session: where its lock
+    /// screen is gone (it ended by a fault), another is started, so that
+    /// the person can unlock. Not more often than every few seconds: the
+    /// one just started needs a moment to say it is there. (The session
+    /// stayed locked for good, to be ended from another console.)
+    pub(crate) fn revive_locker(&mut self) {
+        use smithay::reexports::wayland_server::Resource;
+        if !self.locked || self.locker.as_ref().is_some_and(|locker| locker.is_alive()) {
+            return;
+        }
+        let lately = self
+            .locker_started
+            .is_some_and(|started| started.elapsed() < std::time::Duration::from_secs(4));
+        if !lately {
+            log::warn!("the lock screen is gone while the session is locked: another is started");
+            self.start_locker();
+        }
+    }
+
     /// Lock the screen: start the program that does it. The one the
     /// configuration names, else gevrek's own when it is installed, else
     /// the first lock program found. Until gevrek has its own this is how
     /// the `lock` action locks.
     pub(crate) fn start_locker(&mut self) {
-        if self.locked {
+        // Locked, by a lock screen that lives: nothing to start. One
+        // that ended by a fault has left the session locked with nothing
+        // to unlock it: another is started in its place (`revive_locker`).
+        use smithay::reexports::wayland_server::Resource;
+        if self.locked && self.locker.as_ref().is_some_and(|locker| locker.is_alive()) {
             return;
         }
+        self.locker_started = Some(std::time::Instant::now());
         let beside = std::env::current_exe()
             .ok()
             .and_then(|path| path.parent().map(|folder| folder.join("gevrek-lock")))

@@ -240,9 +240,14 @@ mod windows_main {
         // windows hidden on purpose: this one must not show them (the
         // journal is the same file) before it finds out, further down,
         // that the place is taken.
-        if let gevrek_protocol::Endpoint::Local(instance) =
-            gevrek_protocol::Endpoint::parse(&args.address)
+        // (Whatever address this one listens on: the journal is the
+        // instance's, and one that was given a network address showed
+        // the windows the running one of the same instance had hidden.)
         {
+            let instance = match gevrek_protocol::Endpoint::parse(&args.address) {
+                gevrek_protocol::Endpoint::Local(instance) => instance,
+                _ => gevrek_model::paths::instance(),
+            };
             let pipe = gevrek_protocol::endpoint::pipe_name(&instance);
             // (Busy counts as there: 231 is ERROR_PIPE_BUSY.)
             let answered = match tokio::net::windows::named_pipe::ClientOptions::new().open(&pipe) {

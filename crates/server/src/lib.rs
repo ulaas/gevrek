@@ -442,6 +442,10 @@ pub struct WMServer {
     zones: Arc<zones::ZonesHub>,
 }
 
+/// (Stopping, pausing and going on are not refused while locked, and are
+/// meant not to be: `gevrek stop` from another console is the way out of
+/// a session whose lock screen has ended by a fault.)
+///
 /// While the session is locked nobody sees what a command does, and the
 /// person at the keyboard may not be the user: only what the keys of a
 /// locked keyboard may do is carried out (sound, brightness, media, the
@@ -752,7 +756,18 @@ async fn forward_events(
     sender: tokio::sync::mpsc::Sender<Result<ExecutionEvent, Status>>,
 ) {
     loop {
-        let event = match receiver.recv().await {
+        // (Heard at once when the subscriber goes: it was noticed only
+        // with the next event, and on a still desktop every command
+        // line that had listened left its task and its place in the
+        // queue behind until something happened.)
+        let heard = tokio::select! {
+            heard = receiver.recv() => heard,
+            _ = sender.closed() => {
+                log::debug!("an event subscriber left");
+                return;
+            }
+        };
+        let event = match heard {
             Ok(event) => event,
             Err(broadcast::error::RecvError::Lagged(count)) => {
                 log::warn!("an event subscriber fell behind: {count} events were dropped for it");
@@ -1524,20 +1539,14 @@ impl WMService for WMServer {
                 .clone()
         } else {
             log::debug!(
-                "a graph was pushed: {} nodes, {} connections; it is the working graph now",
+                "a graph was pushed: {} nodes, {} connections",
                 proto_graph.node_count,
                 proto_graph.connection_count
             );
 
-            let core_graph = gevrek_protocol::conversions::proto_to_node_graph(&proto_graph)
-                .map_err(|e| Status::invalid_argument(format!("Failed to convert graph: {}", e)))?;
-
-            // Update working graph
-            {
-                let mut working = self.working_graph.lock().unwrap_or_else(|p| p.into_inner());
-                *working = core_graph.clone();
-            }
-            core_graph
+            // (It is the working graph once it was taken: see below.)
+            gevrek_protocol::conversions::proto_to_node_graph(&proto_graph)
+                .map_err(|e| Status::invalid_argument(format!("Failed to convert graph: {}", e)))?
         };
 
         let node_count = core_graph.nodes.len() as u32;
@@ -1595,6 +1604,10 @@ impl WMService for WMServer {
             revision
         };
         log::info!("the pushed graph was saved and applied as revision {revision}");
+        // The working graph is the one that runs now. (It was replaced
+        // before the push could be refused: a graph made from an older
+        // revision, turned away, was the working graph all the same.)
+        *self.working_graph.lock().unwrap_or_else(|p| p.into_inner()) = core_graph.clone();
 
         // Broadcast graph update event
         let event = ExecutionEvent {

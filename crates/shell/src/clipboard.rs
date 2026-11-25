@@ -107,6 +107,10 @@ impl History {
         if let Some(folder) = path.parent() {
             let _ = std::fs::create_dir_all(folder);
         }
+        // Written beside and put in its place: whole, or as it was. (It
+        // was written over where it lay: a shell ended in the middle left
+        // half a file, and the history was empty at the next start.)
+        let beside = path.with_extension("json.new");
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create(true).truncate(true);
         #[cfg(unix)]
@@ -114,16 +118,22 @@ impl History {
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
-        match options.open(path) {
-            Ok(mut file) => {
-                if let Err(error) = file.write_all(text.as_bytes()) {
-                    log::debug!(
-                        "the clipboard's texts are not kept: {}: {error}",
-                        path.display()
-                    );
-                }
+        let written = options
+            .open(&beside)
+            .and_then(|mut file| {
+                file.write_all(text.as_bytes())
+                    .and_then(|()| file.sync_all())
+            })
+            .and_then(|()| std::fs::rename(&beside, path));
+        match written {
+            Ok(()) => {}
+            Err(error) => {
+                let _ = std::fs::remove_file(&beside);
+                log::debug!(
+                    "the clipboard's texts are not kept: {}: {error}",
+                    path.display()
+                );
             }
-            Err(error) => log::debug!("the clipboard's texts are not kept: {error}"),
         }
     }
 }
@@ -198,6 +208,9 @@ struct Keeper {
     read: calloop::channel::Sender<Arrived>,
     /// The clipboard was announced empty and nothing has come since.
     empty: bool,
+    /// What was copied last is not kept (a secret, a kind that is not
+    /// read): when it goes, nothing is put in its place.
+    kept_back: bool,
     /// The same for the selection.
     selected_empty: bool,
     /// To look again a moment after it was announced empty.
@@ -244,6 +257,7 @@ pub fn start() -> anyhow::Result<Clipboard> {
                 last_selected: None,
                 read,
                 empty: false,
+                kept_back: false,
                 selected_empty: false,
                 timers: event_loop.handle(),
                 handle: handle.clone(),
@@ -432,11 +446,21 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for Keeper {
                     source.destroy();
                 }
                 match kind_to_read(&kinds) {
-                    Some(kind) => keeper.read_offer(&offer, kind, false, connection),
+                    Some(kind) => {
+                        keeper.kept_back = false;
+                        keeper.read_offer(&offer, kind, false, connection)
+                    }
                     // Nothing that is kept (a secret, a kind this program
                     // does not know): what was copied before is not put
-                    // back in its place when it goes.
-                    None => keeper.last = None,
+                    // back in its place when it goes. (It was: with
+                    // nothing remembered as copied last, the newest text
+                    // of the history was offered, and the text copied
+                    // before a password came back when the password was
+                    // cleared.)
+                    None => {
+                        keeper.last = None;
+                        keeper.kept_back = true;
+                    }
                 }
                 offer.destroy();
             }
@@ -450,7 +474,7 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for Keeper {
                 let timer =
                     calloop::timer::Timer::from_duration(std::time::Duration::from_millis(250));
                 let _ = keeper.timers.insert_source(timer, |_, _, keeper| {
-                    if keeper.empty && keeper.own.is_none() {
+                    if keeper.empty && keeper.own.is_none() && !keeper.kept_back {
                         let last = keeper.last.clone().or_else(|| {
                             keeper
                                 .history

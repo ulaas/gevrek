@@ -1586,6 +1586,11 @@ impl Runtime {
             }
             false
         };
+        // A helper that was there and is gone is asked for once more
+        // (it ended, and none was started again until gevrek was).
+        if had && !has && wanted {
+            self.elevated_helper_asked = false;
+        }
         if has == had {
             return;
         }

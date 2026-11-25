@@ -257,19 +257,29 @@ impl Element {
         let mut rect = CGRect::default();
         let position = self.attribute("AXPosition")?;
         let size = self.attribute("AXSize")?;
-        // SAFETY: AXPosition holds an AXValue of a CGPoint, AXSize one of a
-        // CGSize; each is written into a value of that type.
-        unsafe {
-            ffi::AXValueGetValue(
-                position.as_ptr(),
-                ffi::kAXValueCGPointType,
-                &mut rect.origin as *mut CGPoint as *mut c_void,
-            );
-            ffi::AXValueGetValue(
-                size.as_ptr(),
-                ffi::kAXValueCGSizeType,
-                &mut rect.size as *mut CGSize as *mut c_void,
-            );
+        // What a program answers with is looked at before it is read: it
+        // is to be an AXValue, of a point and of a size. (Whatever came
+        // was read as one, and a value of another kind left the window
+        // at nought by nought, as if that were its place.)
+        // SAFETY: both are valid objects; each is read as an AXValue only
+        // once it is known to be one, into a value of the type it says.
+        let read = unsafe {
+            let kind = ffi::AXValueGetTypeID();
+            ffi::CFGetTypeID(position.as_ptr()) == kind
+                && ffi::CFGetTypeID(size.as_ptr()) == kind
+                && ffi::AXValueGetValue(
+                    position.as_ptr(),
+                    ffi::kAXValueCGPointType,
+                    &mut rect.origin as *mut CGPoint as *mut c_void,
+                )
+                && ffi::AXValueGetValue(
+                    size.as_ptr(),
+                    ffi::kAXValueCGSizeType,
+                    &mut rect.size as *mut CGSize as *mut c_void,
+                )
+        };
+        if !read {
+            return Err(AxError::NO_VALUE);
         }
         Ok(rect_of(rect))
     }

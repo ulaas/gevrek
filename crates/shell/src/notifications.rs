@@ -732,22 +732,21 @@ pub fn height(stack: &Stack) -> u32 {
     shown * (NOTE_HEIGHT + 8) + if stack.waiting() > 0 { 22 } else { 0 }
 }
 
-/// Draw the cards of what is shown, one under the other. The one that
-/// was pressed, if one was: its number, and the key of what was chosen
-/// on it (`default` for a press on a card that offers that, nothing for
-/// a press that only puts it away).
 /// A notification's picture as something to draw, made once for each
 /// picture (kept with the drawing's own memory, by the notification's
-/// number and which picture it was made of).
+/// number and the picture it was made of). The picture is kept with it:
+/// which picture it is, is told by where it lies in memory, and a
+/// picture that is let go of gives its place to the next one. (A
+/// notification that was replaced with another picture showed the old
+/// one.)
 fn texture_of(ui: &egui::Ui, note: &Notification) -> Option<egui::TextureHandle> {
     let pixels = note.picture.as_ref()?;
     let key = egui::Id::unique(("note-picture", note.id));
-    let address = std::sync::Arc::as_ptr(pixels) as usize;
     let known = ui
         .ctx()
-        .data(|data| data.get_temp::<(usize, egui::TextureHandle)>(key));
+        .data(|data| data.get_temp::<(std::sync::Arc<Pixels>, egui::TextureHandle)>(key));
     if let Some((made_of, texture)) = known {
-        if made_of == address {
+        if std::sync::Arc::ptr_eq(&made_of, pixels) {
             return Some(texture);
         }
     }
@@ -760,13 +759,17 @@ fn texture_of(ui: &egui::Ui, note: &Notification) -> Option<egui::TextureHandle>
         egui::TextureOptions::LINEAR,
     );
     ui.ctx()
-        .data_mut(|data| data.insert_temp(key, (address, texture.clone())));
+        .data_mut(|data| data.insert_temp(key, (std::sync::Arc::clone(pixels), texture.clone())));
     Some(texture)
 }
 
 /// How large a notification's picture is drawn (its longer side).
 const PICTURE_DRAWN: f32 = 40.0;
 
+/// Draw the cards of what is shown, one under the other. The one that
+/// was pressed, if one was: its number, and the key of what was chosen
+/// on it (`default` for a press on a card that offers that, nothing for
+/// a press that only puts it away).
 pub fn draw_cards(
     ui: &mut egui::Ui,
     palette: &gevrek_ui::theme::Palette,

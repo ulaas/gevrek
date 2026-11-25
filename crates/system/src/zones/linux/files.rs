@@ -223,6 +223,53 @@ pub fn copy_told(from: &Path, folder: &Path, tick: Tick<'_>) -> std::io::Result<
     arrive(from, folder, &name.to_string_lossy(), tick)
 }
 
+/// Give `from` the name `to`, where nothing has that name: the system
+/// does both in one step, so that what appears there in the same moment
+/// is never written over (`AlreadyExists` then). (A look first and a
+/// rename after it wrote over a file that came between the two.) Where
+/// the file system cannot do it in one step, by the look and the rename.
+pub fn rename_new(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = |path: &Path| {
+        std::ffi::CString::new(path.as_os_str().as_bytes())
+            .map_err(|_| Error::new(ErrorKind::InvalidInput, "a name with a nought in it"))
+    };
+    let (old, new) = (c(from)?, c(to)?);
+    // SAFETY: both are strings that end, and live until the call is over.
+    #[cfg(target_os = "linux")]
+    let done = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            old.as_ptr(),
+            libc::AT_FDCWD,
+            new.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    // SAFETY: as above.
+    #[cfg(target_os = "macos")]
+    let done = unsafe { libc::renamex_np(old.as_ptr(), new.as_ptr(), libc::RENAME_EXCL) };
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let done = {
+        let _ = (&old, &new);
+        -1
+    };
+    if done == 0 {
+        return Ok(());
+    }
+    let error = Error::last_os_error();
+    match error.raw_os_error() {
+        // (A file system, or a system, that has no such step.)
+        Some(libc::ENOSYS) | Some(libc::EINVAL) | Some(libc::ENOTSUP) => {
+            if to.symlink_metadata().is_ok() {
+                return Err(Error::new(ErrorKind::AlreadyExists, "the name is taken"));
+            }
+            std::fs::rename(from, to)
+        }
+        _ => Err(error),
+    }
+}
+
 /// Take away what a copy that failed left: only ever something this
 /// module just made.
 fn remove_tree(path: &Path) -> std::io::Result<()> {
@@ -255,14 +302,44 @@ pub fn move_into_told(from: &Path, folder: &Path, tick: Tick<'_>) -> std::io::Re
         // It is there already.
         return Ok(from.to_path_buf());
     }
-    let to = free_name(folder, &name.to_string_lossy())?;
-    match std::fs::rename(from, &to) {
+    // (A name that is taken in the same moment: the next free one.)
+    let mut renamed = Err(Error::new(ErrorKind::AlreadyExists, "no free name"));
+    let mut to = PathBuf::new();
+    for _ in 0..16 {
+        to = free_name(folder, &name.to_string_lossy())?;
+        renamed = rename_new(from, &to);
+        if !matches!(&renamed, Err(error) if error.kind() == ErrorKind::AlreadyExists) {
+            break;
+        }
+    }
+    match renamed {
         Ok(()) => Ok(to),
         Err(error) if error.kind() == ErrorKind::CrossesDevices => {
             // Whole at the other end first, and only then taken away
             // here: called off or failed, it is where it was.
+            let single = !std::fs::symlink_metadata(from)?.is_dir();
             let to = arrive(from, folder, &name.to_string_lossy(), tick)?;
-            remove_tree(from)?;
+            if let Err(error) = remove_tree(from) {
+                // It cannot be taken away where it was (a place that is
+                // only read): one file is then not moved at all, and the
+                // copy just made goes, so that it is in one place, as
+                // before. (The copy stayed, the move was told as failed,
+                // and each new try left one more.) Of a folder some may
+                // be gone already: its copy is the whole one now, and
+                // stays.
+                if single {
+                    if let Err(left) = remove_tree(&to) {
+                        log::debug!("zones: a copy is left at {}: {left}", to.display());
+                    }
+                } else {
+                    log::warn!(
+                        "zones: {} was copied to {} and could not be taken away where it was: {error}",
+                        from.display(),
+                        to.display()
+                    );
+                }
+                return Err(error);
+            }
             Ok(to)
         }
         Err(error) => Err(error),
@@ -293,7 +370,13 @@ pub fn rename(path: &Path, new_name: &str) -> std::io::Result<PathBuf> {
     if to.symlink_metadata().is_ok() {
         return Err(Error::new(ErrorKind::AlreadyExists, "the name is taken"));
     }
-    std::fs::rename(path, &to)?;
+    rename_new(path, &to).map_err(|error| {
+        if error.kind() == ErrorKind::AlreadyExists {
+            Error::new(ErrorKind::AlreadyExists, "the name is taken")
+        } else {
+            error
+        }
+    })?;
     Ok(to)
 }
 
@@ -324,6 +407,24 @@ pub fn new_folder(parent: &Path, name: &str) -> std::io::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rename_never_writes_over_what_is_there() {
+        let root = crate::zones::linux::testing::folder("rename-new");
+        let (one, other) = (root.join("one.txt"), root.join("other.txt"));
+        std::fs::write(&one, "one").expect("written");
+        std::fs::write(&other, "other").expect("written");
+        // Taken: refused, and both are as they were.
+        let refused = rename_new(&one, &other).expect_err("the name is taken");
+        assert_eq!(refused.kind(), ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read_to_string(&one).expect("read"), "one");
+        assert_eq!(std::fs::read_to_string(&other).expect("read"), "other");
+        // Free: renamed.
+        let free = root.join("free.txt");
+        rename_new(&one, &free).expect("renamed");
+        assert!(!one.exists());
+        assert_eq!(std::fs::read_to_string(&free).expect("read"), "one");
+    }
 
     #[test]
     fn a_name_is_split_before_its_ending() {

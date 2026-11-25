@@ -22,6 +22,8 @@ serde_json = { workspace = true }
 # Linux: the sound server, spoken to in its own protocol (PulseAudio's,
 # which PipeWire serves too), with no library of C.
 [target.'cfg(target_os = "linux")'.dependencies]
+# A rename that never writes over what is there (zones/linux/files.rs).
+libc = "0.2"
 pulseaudio = "0.3"
 # What changes in the folders zones show: the kernel tells (inotify),
 # nothing is looked at again and again.
@@ -33,6 +35,7 @@ jiff = { workspace = true }
 # own, and need what they need on Linux; the folders are watched by macOS's
 # FSEvents.
 [target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 jiff = { workspace = true }
 # The keys of what plays and of the sound, which only AppKit makes

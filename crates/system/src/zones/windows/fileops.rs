@@ -326,8 +326,12 @@ impl FileOperations {
                         self.recycled().insert(path.to_lowercase(), lies_at);
                     }
                     // (Done, and the shell named nothing it made: the
-                    // file is gone for good, with the person's yes.)
-                    Err(BackendError::Unsupported) => {}
+                    // file is gone for good, with the person's yes.
+                    // Remembered as that, with no place in the bin: there
+                    // is nothing to put back.)
+                    Err(BackendError::Unsupported) => {
+                        self.recycled().insert(path.to_lowercase(), String::new());
+                    }
                     Err(error) => return Err(error),
                 }
                 Ok(FileOperation::Restore { path })
@@ -339,6 +343,10 @@ impl FileOperations {
                     .to_string();
                 let remembered = self.recycled().remove(&path.to_lowercase());
                 let lies_at = match remembered {
+                    // Deleted for good: not in the bin. (The bin was looked
+                    // through all the same, and an older file thrown away
+                    // from the same place was put back in its stead.)
+                    Some(lies_at) if lies_at.is_empty() => return Err(missing(&path)),
                     Some(lies_at) if std::path::Path::new(&lies_at).exists() => lies_at,
                     _ => in_recycle_bin(&path).ok_or_else(|| missing(&path))?,
                 };

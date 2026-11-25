@@ -676,6 +676,28 @@ impl MacRuntime {
         for id in gone {
             self.window_went(id);
         }
+        // A window that is known and not watched (its program was busy
+        // when it opened) is asked to be watched again: until it is, its
+        // moves, its sizes and its title go unheard. (It was asked once,
+        // and never again.)
+        let unwatched: Vec<(i32, crate::ax::Element)> = self
+            .desktop
+            .windows
+            .iter()
+            .filter(|(id, window)| {
+                self.observers.get(&window.app.pid).is_some_and(|observer| {
+                    !observer.watched().any(|watched| handle_of(watched) == **id)
+                })
+            })
+            .map(|(_, window)| (window.app.pid, window.element.clone()))
+            .collect();
+        for (pid, element) in unwatched {
+            if let Some(observer) = self.observers.get_mut(&pid) {
+                if let Err(error) = observer.watch_window(&element) {
+                    log::trace!("a window of process {pid} is still not watched: {error}");
+                }
+            }
+        }
         let unknown: Vec<i32> = all
             .iter()
             .filter(|window| {

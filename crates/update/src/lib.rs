@@ -389,6 +389,28 @@ fn staged_folder(folder: &Path) -> PathBuf {
     folder.join("staged")
 }
 
+/// The update's folder for this program alone, for as long as what is
+/// given back lives. An error where another program has it.
+fn alone_in(folder: &Path) -> Result<std::fs::File> {
+    std::fs::create_dir_all(folder)?;
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(folder.join("busy.lock"))?;
+    match lock.try_lock() {
+        Ok(()) => Ok(lock),
+        Err(std::fs::TryLockError::WouldBlock) => Err(anyhow!(
+            "another gevrek is getting an update ready: try again in a moment"
+        )),
+        // (A file system that cannot lock: as before, without one.)
+        Err(std::fs::TryLockError::Error(error)) => {
+            log::debug!("the update's folder is not locked: {error}");
+            Ok(lock)
+        }
+    }
+}
+
 /// The update that is staged and complete: its version and the folder of
 /// its programs.
 pub fn staged(folder: &Path) -> Option<(String, PathBuf)> {
@@ -425,6 +447,11 @@ pub fn stage(source: &Source, release: &Release, folder: &Path) -> Result<PathBu
         .sums
         .as_ref()
         .ok_or_else(|| anyhow!("release {} has no {SUMS}", release.version))?;
+    // One at a time: the look in the background after a start and an
+    // update asked for by hand use the same folders, and each began by
+    // emptying them under the other. Held until this is done; let go
+    // of by the system if the program ends before.
+    let _alone = alone_in(folder)?;
     let work = folder.join("download");
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work)?;
@@ -681,6 +708,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(&folder).unwrap();
         folder
+    }
+
+    #[test]
+    fn one_update_at_a_time_has_the_folder() {
+        let folder = folder("alone");
+        let first = alone_in(&folder).expect("the folder is free");
+        // While one has it, another is told so and touches nothing.
+        let second = alone_in(&folder).expect_err("the folder is taken");
+        assert!(second.to_string().contains("another gevrek"), "{second}");
+        // Let go of (also by a program that ended): free again.
+        drop(first);
+        alone_in(&folder).expect("free again");
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     /// A folder with the four programs, each holding `words`.

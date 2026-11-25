@@ -170,9 +170,16 @@ impl Observer {
 
     /// Ask for each notification on the element; how many it took.
     fn add(&self, element: &Element, names: &[&str], refcon: *mut c_void) -> usize {
+        // A program that does not answer in time is not asked for the
+        // rest: each would wait as long again, on the thread that hears
+        // the keys. (-25204: it could not be completed.)
+        let mut unanswered = false;
         names
             .iter()
             .filter(|name| {
+                if unanswered {
+                    return false;
+                }
                 let name = Cf::string(name);
                 // SAFETY: a valid observer, element and name; refcon points
                 // into a box this observer keeps until the registration is
@@ -185,6 +192,7 @@ impl Observer {
                         refcon,
                     )
                 };
+                unanswered = code == -25204;
                 // (Already registered counts as taken.)
                 code == 0 || code == -25209
             })

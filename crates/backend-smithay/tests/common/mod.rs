@@ -15,6 +15,9 @@ use wayland_client::protocol::{
     wl_buffer, wl_compositor, wl_keyboard, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle, WEnum};
+use wayland_protocols::ext::session_lock::v1::client::{
+    ext_session_lock_manager_v1, ext_session_lock_v1,
+};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
@@ -71,6 +74,30 @@ impl Harness {
             "the client bound wl_compositor, wl_shm and xdg_wm_base"
         );
         index
+    }
+
+    /// A client asks to lock the session. What it was told: locked, or
+    /// finished (refused).
+    pub fn lock(&mut self, client: usize) -> Option<bool> {
+        let handle = self.clients[client].queue.handle();
+        let app = &mut self.clients[client].app;
+        app.lock_told = None;
+        app.lock = Some(
+            app.lock_manager
+                .as_ref()
+                .expect("the lock manager")
+                .lock(&handle, ()),
+        );
+        self.pump();
+        self.clients[client].app.lock_told
+    }
+
+    /// The client that locked unlocks.
+    pub fn unlock(&mut self, client: usize) {
+        if let Some(lock) = self.clients[client].app.lock.take() {
+            lock.unlock_and_destroy();
+        }
+        self.pump();
     }
 
     /// Let the clients and the compositor talk until nothing is left to say.
@@ -217,6 +244,11 @@ pub struct ClientApp {
     pub wm_base: Option<xdg_wm_base::XdgWmBase>,
     pub seat: Option<wl_seat::WlSeat>,
     pub layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
+    pub lock_manager: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
+    /// The lock this client asked for, and what it was told of it:
+    /// `Some(true)` locked, `Some(false)` finished (refused, or over).
+    pub lock: Option<ext_session_lock_v1::ExtSessionLockV1>,
+    pub lock_told: Option<bool>,
     /// Every global the compositor announced, by interface name.
     pub globals: Vec<String>,
     /// The bars this client put up: surface, layer surface, height, and
@@ -411,6 +443,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for ClientApp {
                 "zwlr_layer_shell_v1" => {
                     state.layer_shell = Some(registry.bind(name, version.min(4), handle, ()));
                 }
+                "ext_session_lock_manager_v1" => {
+                    state.lock_manager = Some(registry.bind(name, 1, handle, ()));
+                }
                 "wl_compositor" => {
                     state.compositor = Some(registry.bind(name, version.min(4), handle, ()));
                 }
@@ -425,6 +460,35 @@ impl Dispatch<wl_registry::WlRegistry, ()> for ClientApp {
                 }
                 _ => {}
             }
+        }
+    }
+}
+
+impl Dispatch<ext_session_lock_manager_v1::ExtSessionLockManagerV1, ()> for ClientApp {
+    fn event(
+        _: &mut Self,
+        _: &ext_session_lock_manager_v1::ExtSessionLockManagerV1,
+        _: ext_session_lock_manager_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ext_session_lock_v1::ExtSessionLockV1, ()> for ClientApp {
+    fn event(
+        state: &mut Self,
+        _: &ext_session_lock_v1::ExtSessionLockV1,
+        event: ext_session_lock_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            ext_session_lock_v1::Event::Locked => state.lock_told = Some(true),
+            ext_session_lock_v1::Event::Finished => state.lock_told = Some(false),
+            _ => {}
         }
     }
 }

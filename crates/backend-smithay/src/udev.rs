@@ -1102,6 +1102,9 @@ fn draw_once(hardware: &mut Hardware, state: &mut State, from_timer: bool) -> (b
             }
         }
         state.desktop.needs_redraw = false;
+        // (No frame is owed to a display that is off: the timer that
+        // waits for one went on every few milliseconds.)
+        state.frames_owed = false;
         return (animating, false);
     }
     for surface in hardware.surfaces.iter_mut().filter(|surface| surface.off) {

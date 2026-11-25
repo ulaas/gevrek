@@ -1275,58 +1275,66 @@ written without a desktop (the ones marked * have none):
 - **Tidy.** Nineteen functions nothing calls are gone; `thiserror` and
   two more dependencies no crate uses; the workspace's unused `authors`.
 
-Found and left, each wanting more than a pass (and most of them a
-desktop to be seen on):
+A second round the same day took most of what the first had left:
 
-- [ ] **L** A toplevel's declared geometry is used unclamped
-      (`state.rs`, `set_window_geometry`).
-- [ ] **L** The RPM and the Arch package install gevrek-dm without its
-      SELinux module; the packages do not ship `gevrek-previous.service`.
-- [ ] **L** Xwayland that dies in the middle of a paste can end the
-      compositor (`xwm_state` expects a window manager that is gone).
-- [ ] **L** A virtual pointer that goes with a button held leaves it
-      held; `discrete * 120` runs over.
-- [ ] **L** ext-image-copy-capture sessions do not say a new size.
-- [ ] **L** Displays off: the frame timer goes on, and a picture asked
-      for then never comes.
-- [ ] **L** A lock screen that ends by a fault leaves the session locked
-      with nothing to start it again.
-- [ ] **any** Two update processes at once share their folders with no
-      lock (`gevrek-update`); the updater knows only x64.
-- [ ] **L, M** Two window managers starting together can each take the
-      other's socket away (`bind_local`).
-- [ ] **any** `Shutdown`, `PauseExecution` and `ResumeExecution` are not
-      refused while the session is locked (meant, or not?).
-- [ ] **any** A pushed graph replaces the draft before the push can be
-      refused (`server`, `push_graph`).
-- [ ] **any** Resizing by an edge, and the gaps around a layout, do not
-      follow a layout that is mirrored or turned (`workspace.rs`).
-- [ ] **W** The elevated helper: its pipe is written to from the thread
-      that hears the keys; the window manager does not check who serves
-      the pipe's name; its task's XML lies in `%TEMP%` on its way; it
-      does not undo cloaks; it serves one connection ever; a release
-      that lands over an elevated window is never told.
-- [ ] **W** A second `gevrek-wm` on a TCP address shows the running
-      one's hidden windows.
+- **Engine.** An edge or an axis is resized as it is seen in a layout
+  that is mirrored or turned, and a turned layout keeps its gaps.
+- **Server, updates, sockets.** A subscriber that leaves is noticed at
+  once*. A graph that is turned away is not the working graph. One
+  update at a time has the update's folder. One window manager at a
+  time looks at an instance's socket and takes it*. Stopping, pausing
+  and going on while locked are meant (the way out of a session whose
+  lock screen ended), and say so.
+- **Linux.** A window's frame goes no further than what it draws*. A
+  made-up pointer that goes lets go of its buttons, and its notches do
+  not run over*. No frame is owed to a display that is off*. Xwayland
+  that ended is still answered for*. A lock screen that ended by a
+  fault is started again at the next key or button*; who may lock and
+  unlock is tried by real clients (`tests/lock.rs`). The source RPM
+  and the Arch package carry the display manager's SELinux module, and
+  the RPM installs it*.
+- **Windows.** A second window manager of an instance is turned away
+  whatever address it listens on*. The helper waits again after a
+  program that may not ask*, is asked for once more when it is lost*,
+  uncloaks what it cloaked, and is spoken to only where gevrek's own
+  helper serves the pipe*. A delete that was for good puts no older
+  file back.
+- **Zones' files (Linux, macOS).** A rename is made only where nothing
+  has the name, in one step (`rename_new`), for moves, renames and the
+  trash. One file that cannot be taken away where it was is not left
+  twice.
+- **Shell.** A notification's picture is told by the picture, not by
+  where it lay*. A secret that is cleared brings no older text back*,
+  and the clipboard's history is written whole or not at all*.
+- **Studio.** What was changed before the window manager answered is
+  kept as a draft*; a text that is not read as a configuration is not
+  replaced*.
+- **macOS** (type-checked, not run). A window that could not be watched
+  is asked again; a program that does not answer is not asked six
+  times over; a frame is read only from a value that is one.
+
+Found and left: each wants a desktop to be written against, not only to
+be seen on.
+
+- [ ] **L** ext-image-copy-capture sessions do not say a new size when
+      what they show changes it.
+- [ ] **L** The display manager's worker dies with the thread that
+      started it (`PR_SET_PDEATHSIG`); what it remembers of a person is
+      written through a folder the greeter's account could make a link.
+- [ ] **W** The elevated helper: the table of keys is written to its
+      pipe from the thread that hears the keys, and the helper changes
+      a window that does not answer without a time limit; its task's
+      XML lies in `%TEMP%` on its way to `schtasks`; a release that
+      lands over an elevated window is never told, and a mouse button
+      held then stays held.
 - [ ] **W** A border cut at a display's edge is whole again after its
-      next update.
-- [ ] **L** A move across file systems that cannot delete its source
-      leaves a second copy; "never writes over anything" rests on a look
-      before a rename.
-- [ ] **W** A delete that was for good is said to be undoable. A folder
-      that cannot be listed is gone to again and again (the Windows half).
-- [ ] **L** After a secret was copied and cleared, the text from before
-      it is on the clipboard again. The clipboard's history is written
-      in place, under its lock.
-- [ ] **any** A replaced notification can keep its old picture (the
-      cache goes by an address).
-- [ ] **any** Studio: a configuration from the window manager replaces
-      an edited document without a word where there is no session yet;
-      after a reconnect the next Apply can be unconditional; a trial's
-      going back is not tried again when it is refused.
-- [ ] **M** A window whose observer could not be set up is never
-      watched again; a program that hangs as it starts holds the loop
-      up; `frame()` trusts the kind of value it is given.
+      next update (the scrolling layout, the classic border).
+- [ ] **W** A folder that cannot be listed may be gone to again and
+      again (the Windows half of the portal; not confirmed).
+- [ ] **any** Studio: after a reconnect whose fetch failed, the next
+      Apply can be unconditional; a trial's going back is not tried
+      again when it is refused.
+- [ ] **W** The updater knows only x64.
 
 - [x] **any** CI: the test
       `zones::draw::...everything_of_the_desktop_is_painted...` failed now

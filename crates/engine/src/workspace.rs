@@ -799,6 +799,68 @@ impl Workspace {
         delta_px: i32,
         work_area: Rect,
     ) -> bool {
+        // The edge as the layout has it, before it is mirrored and
+        // turned for the display. (The edge was taken as it is seen: in
+        // a mirrored main-and-stack the edge between the two could not
+        // be moved from the main window, and its outer edge moved it.)
+        let direction = self.edge_as_laid(direction);
+        let work_area = self.area_as_laid(work_area);
+        self.resize_laid_edge(container_idx, direction, delta_px, work_area)
+    }
+
+    /// Whether the layout is turned a quarter (its columns are seen as
+    /// rows).
+    fn turned_a_quarter(&self) -> bool {
+        self.layout_rotation % 2 == 1
+    }
+
+    /// The work area as the layout is worked out in it: as high as it
+    /// is wide where the layout is turned a quarter.
+    fn area_as_laid(&self, work_area: Rect) -> Rect {
+        if self.turned_a_quarter() {
+            Rect::new(work_area.x, work_area.y, work_area.height, work_area.width)
+        } else {
+            work_area
+        }
+    }
+
+    /// An edge that is seen, as the layout has it: the mirroring undone
+    /// first (it is done last), then the turn.
+    fn edge_as_laid(&self, seen: EdgeDirection) -> EdgeDirection {
+        use EdgeDirection::{Down, Left, Right, Up};
+        let unmirrored = match seen {
+            Left if self.layout_flip_horizontal => Right,
+            Right if self.layout_flip_horizontal => Left,
+            Up if self.layout_flip_vertical => Down,
+            Down if self.layout_flip_vertical => Up,
+            other => other,
+        };
+        // (A quarter turn puts the layout's left at the top and its
+        // top at the right: `rotate_layout_rect`.)
+        match (self.layout_rotation % 4, unmirrored) {
+            (1, Right) => Up,
+            (1, Down) => Right,
+            (1, Left) => Down,
+            (1, Up) => Left,
+            (2, Right) => Left,
+            (2, Left) => Right,
+            (2, Up) => Down,
+            (2, Down) => Up,
+            (3, Right) => Down,
+            (3, Down) => Left,
+            (3, Left) => Up,
+            (3, Up) => Right,
+            (_, other) => other,
+        }
+    }
+
+    fn resize_laid_edge(
+        &mut self,
+        container_idx: usize,
+        direction: EdgeDirection,
+        delta_px: i32,
+        work_area: Rect,
+    ) -> bool {
         match self.layout {
             LayoutType::BSP => {
                 let padded = work_area.with_padding(self.outer_gaps());
@@ -874,6 +936,23 @@ impl Workspace {
     /// delta grows the container. Returns `false`
     /// when nothing along the axis is adjustable.
     pub fn resize_container_axis(
+        &mut self,
+        container_idx: usize,
+        axis: LayoutAxis,
+        delta_px: i32,
+        work_area: Rect,
+    ) -> bool {
+        // Wider, as it is seen, is higher in a layout turned a quarter.
+        let axis = match axis {
+            LayoutAxis::Horizontal if self.turned_a_quarter() => LayoutAxis::Vertical,
+            LayoutAxis::Vertical if self.turned_a_quarter() => LayoutAxis::Horizontal,
+            other => other,
+        };
+        let work_area = self.area_as_laid(work_area);
+        self.resize_laid_axis(container_idx, axis, delta_px, work_area)
+    }
+
+    fn resize_laid_axis(
         &mut self,
         container_idx: usize,
         axis: LayoutAxis,
@@ -1693,10 +1772,15 @@ impl Workspace {
             config,
         );
 
+        // Turned and mirrored within the room the tiles have (the work
+        // area less the gaps around it), so that the gaps around stay
+        // what they are. (Within the whole work area a quarter turn made
+        // the gap at the sides that of the top's share of the height: on
+        // a wide display, wider at the sides than above and below.)
+        let room = work_area.with_padding(self.outer_gaps());
         if self.layout_rotation != 0 {
             for container in &mut active_containers {
-                container.rect =
-                    rotate_layout_rect(container.rect, work_area, self.layout_rotation);
+                container.rect = rotate_layout_rect(container.rect, room, self.layout_rotation);
             }
         }
 
@@ -1706,7 +1790,7 @@ impl Workspace {
             for container in &mut active_containers {
                 container.rect = flip_layout_rect(
                     container.rect,
-                    work_area,
+                    room,
                     self.layout_flip_horizontal,
                     self.layout_flip_vertical,
                 );
@@ -2487,6 +2571,64 @@ mod tests {
         assert!(workspace.resize_container_edge(0, EdgeDirection::Right, 50, work_area));
         assert!((workspace.master_ratio - 0.55).abs() < 1e-6);
         assert!(!workspace.resize_container_edge(0, EdgeDirection::Left, 50, work_area));
+    }
+
+    #[test]
+    fn an_edge_is_resized_as_it_is_seen_in_a_mirrored_or_turned_layout() {
+        let mut workspace = Workspace::new(0, "Master".to_string());
+        workspace.padding = Padding::default();
+        workspace.layout = LayoutType::MasterStack;
+        workspace.master_ratio = 0.5;
+        for handle in [1, 2].map(WindowHandle) {
+            workspace.add_window(handle, true);
+        }
+        let work_area = Rect::new(0, 0, 1000, 1000);
+        // Mirrored: the main window is seen at the right, and the edge
+        // between the two is its left one.
+        workspace.layout_flip_horizontal = true;
+        assert!(workspace.resize_container_edge(0, EdgeDirection::Left, 100, work_area));
+        assert!((workspace.master_ratio - 0.6).abs() < 1e-6);
+        assert!(!workspace.resize_container_edge(0, EdgeDirection::Right, 100, work_area));
+        // Turned a quarter: the main window is seen at the top, the edge
+        // between the two is its lower one, and higher is more of it.
+        workspace.layout_flip_horizontal = false;
+        workspace.layout_rotation = 1;
+        workspace.master_ratio = 0.5;
+        assert!(workspace.resize_container_edge(0, EdgeDirection::Down, 100, work_area));
+        assert!((workspace.master_ratio - 0.6).abs() < 1e-6);
+        assert!(workspace.resize_container_axis(0, LayoutAxis::Vertical, 100, work_area));
+        assert!((workspace.master_ratio - 0.7).abs() < 1e-6);
+        assert!(!workspace.resize_container_axis(0, LayoutAxis::Horizontal, 100, work_area));
+    }
+
+    #[test]
+    fn a_layout_turned_a_quarter_keeps_the_gaps_around_it() {
+        let mut workspace = Workspace::new(0, "Columns".to_string());
+        workspace.layout = LayoutType::Columns;
+        workspace.padding = Padding::new(10, 10, 10, 10);
+        workspace.container_padding = Padding::default();
+        for handle in [1, 2].map(WindowHandle) {
+            workspace.add_window(handle, true);
+        }
+        workspace.layout_rotation = 1;
+        // A wide display: within the whole of it the ten pixels at the
+        // top became twenty at the side.
+        let work_area = Rect::new(0, 0, 2000, 1000);
+        workspace.apply_layout(work_area);
+        let rects: Vec<Rect> = workspace
+            .containers
+            .iter()
+            .map(|container| container.rect)
+            .collect();
+        let left = rects.iter().map(|rect| rect.x).min().unwrap();
+        let top = rects.iter().map(|rect| rect.y).min().unwrap();
+        let right = rects.iter().map(|rect| rect.x + rect.width).max().unwrap();
+        let bottom = rects.iter().map(|rect| rect.y + rect.height).max().unwrap();
+        assert_eq!(
+            (left, top, 2000 - right, 1000 - bottom),
+            (10, 10, 10, 10),
+            "{rects:?}"
+        );
     }
 
     #[test]

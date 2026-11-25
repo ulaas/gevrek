@@ -384,6 +384,7 @@ impl State {
         // the lock screen's.
         if self.locked {
             if pressed {
+                self.revive_locker();
                 self.focus_lock_surface();
             }
             if let Some(pointer) = self.seat.get_pointer() {
@@ -1057,6 +1058,8 @@ impl State {
                             if !pressed {
                                 state.release_held(code.raw());
                                 state.suppressed_keys.remove(&code.raw());
+                            } else if state.locked {
+                                state.revive_locker();
                             }
                             return FilterResult::Forward;
                         }
