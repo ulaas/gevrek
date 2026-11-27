@@ -728,6 +728,41 @@ mod linux {
             .map(String::as_str)
     }
 
+    /// Where the top of what is shown is, for it to stand in the middle
+    /// of an area from top to bottom: it is `tall`, and the first
+    /// `blank_above` of that is room nothing is seen in, which is not
+    /// counted. What is taller than the area begins at the area's top.
+    pub fn top_of_middle(area_top: f32, area_tall: f32, tall: f32, blank_above: f32) -> f32 {
+        let seen = (tall - blank_above).max(0.0);
+        (area_top + (area_tall - seen) / 2.0 - blank_above).max(area_top - blank_above)
+    }
+
+    /// Move what was drawn in a layer between two marks, by whole
+    /// pixels: what was laid out before its size was known is shown
+    /// where it belongs in this very frame. (The next frame lays it out
+    /// there, and is asked for: a press goes by where a thing was laid out.)
+    fn moved(
+        context: &egui::Context,
+        layer: egui::LayerId,
+        first: egui::layers::ShapeIdx,
+        last: egui::layers::ShapeIdx,
+        by: egui::Vec2,
+    ) {
+        let pixels = context.pixels_per_point();
+        let by = egui::vec2(
+            (by.x * pixels).round() / pixels,
+            (by.y * pixels).round() / pixels,
+        );
+        context.graphics_mut(|drawn| {
+            drawn.entry(layer).transform_range(
+                first,
+                last,
+                egui::emath::TSTransform::from_translation(by),
+            )
+        });
+        context.request_repaint();
+    }
+
     fn draw(state: &mut State, ui: &mut egui::Ui, fonts: &mut bool, layout_in_use: u32) {
         let context = ui.ctx().clone();
         if !*fonts {
@@ -805,13 +840,40 @@ mod linux {
                 }
                 vignette(ui.painter(), area);
                 let checking = state.status == Status::Checking;
-                ui.vertical_centered(|ui| {
-                    ui.add_space((ui.available_height() * 0.15).max(16.0));
-                    ui.label(
-                        egui::RichText::new(now.strftime("%H:%M").to_string())
-                            .size(104.0)
-                            .color(palette.text),
-                    );
+                // All of it stands in the middle of the display, across
+                // and down. How tall it is is known once it was laid out:
+                // it is kept, and what was drawn for another height is
+                // moved to its place before the frame is shown (the first
+                // frame, and one whose words changed).
+                let tall_key = egui::Id::unique("gevrek lock: how tall what is shown is");
+                let wide_key = egui::Id::unique("gevrek lock: how wide the row under the card is");
+                let tall_known = context.data(|data| data.get_temp::<f32>(tall_key));
+                let wide_known = context.data(|data| data.get_temp::<f32>(wide_key));
+                // (The clock's line has room above its numbers that
+                // nothing is seen in: what is seen is put in the middle.)
+                let clock = ui.painter().layout_no_wrap(
+                    now.strftime("%H:%M").to_string(),
+                    egui::FontId::proportional(104.0),
+                    palette.text,
+                );
+                let blank_above = (clock.mesh_bounds.top() - clock.rect.top()).max(0.0);
+                // (Not known yet, it is laid out from the top, where it
+                // has all the room there is.)
+                let top = tall_known.map_or(area.top(), |tall| {
+                    top_of_middle(area.top(), area.height(), tall, blank_above)
+                });
+                let place = egui::Rect::from_min_max(
+                    egui::pos2(area.left(), top),
+                    egui::pos2(area.right(), area.bottom().max(top)),
+                );
+                let layer = ui.layer_id();
+                let first_drawn = ui.painter().add(egui::Shape::Noop);
+                let shown = ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(place)
+                        .layout(egui::Layout::top_down(egui::Align::Center)),
+                    |ui| {
+                    ui.label(clock);
                     ui.label(
                         egui::RichText::new(now.strftime("%A, %-d %B").to_string())
                             .size(20.0)
@@ -842,17 +904,21 @@ mod linux {
                                 });
                         },
                     );
-                    ui.add_space(24.0);
                     // Under the card: the keyboard's layout, and (at the
                     // login) switching the machine off and starting it again.
                     let layout = layout_shown(&state.layouts, layout_in_use).map(str::to_string);
                     let things = usize::from(layout.is_some()) + if state.greeter { 2 } else { 0 };
                     if things > 0 {
+                        ui.add_space(24.0);
                         let wide = things as f32 * 44.0
                             + (things.saturating_sub(1)) as f32 * 12.0
                             + if layout.is_some() { 34.0 } else { 0.0 };
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(wide, 44.0),
+                        // (As wide as it was found to be: the layout's
+                        // name is of no known width before it is drawn.)
+                        let given = wide_known.unwrap_or(wide);
+                        let row_first = ui.painter().add(egui::Shape::Noop);
+                        let row = ui.allocate_ui_with_layout(
+                            egui::vec2(given, 44.0),
                             egui::Layout::left_to_right(egui::Align::Center),
                             |ui| {
                                 ui.spacing_mut().item_spacing.x = 12.0;
@@ -907,8 +973,24 @@ mod linux {
                                 }
                             },
                         );
+                        let wide = row.response.rect.width();
+                        if (given - wide).abs() > 0.5 {
+                            log::debug!("the row under the card is {wide} wide, not {given}");
+                            context.data_mut(|data| data.insert_temp(wide_key, wide));
+                            let row_last = ui.painter().add(egui::Shape::Noop);
+                            moved(&context, layer, row_first, row_last, egui::vec2((given - wide) / 2.0, 0.0));
+                        }
                     }
-                });
+                    },
+                );
+                let tall = shown.response.rect.height();
+                if tall_known.is_none_or(|known| (known - tall).abs() > 0.5) {
+                    log::debug!("what is shown is {tall} tall, not {tall_known:?}");
+                    context.data_mut(|data| data.insert_temp(tall_key, tall));
+                    let last_drawn = ui.painter().add(egui::Shape::Noop);
+                    let right = top_of_middle(area.top(), area.height(), tall, blank_above);
+                    moved(&context, layer, first_drawn, last_drawn, egui::vec2(0.0, right - top));
+                }
             });
         if next_layout {
             next_keyboard_layout();
@@ -1030,6 +1112,9 @@ mod linux {
             *submit = true;
         }
         ui.add_space(12.0);
+        // (The line is as tall whatever it says: the card, and with it
+        // all that is shown, does not move when the words change.)
+        let line_top = ui.cursor().top();
         match &state.status {
             Status::Checking => {
                 ui.label(egui::RichText::new("Checking…").color(palette.muted));
@@ -1049,7 +1134,14 @@ mod linux {
                 );
             }
         }
+        let used = ui.cursor().top() - line_top;
+        if used < STATUS_LINE {
+            ui.add_space(STATUS_LINE - used);
+        }
     }
+
+    /// How tall the card's last line is, at the least.
+    const STATUS_LINE: f32 = 24.0;
 
     /// Ask the compositor the login runs in for the next keyboard layout
     /// (it is this program's parent, there for nothing else, and takes
@@ -1110,6 +1202,109 @@ mod linux {
             assert_eq!(dot_left(200.0, 0, 0), 200.0);
             // Between the second and the third after two presses of Left.
             assert_eq!(dot_left(200.0, 4, 2), 200.0);
+        }
+
+        #[test]
+        fn what_is_shown_stands_in_the_middle_from_top_to_bottom() {
+            // As much room above as below.
+            assert_eq!(top_of_middle(0.0, 1080.0, 480.0, 0.0), 300.0);
+            assert_eq!(top_of_middle(40.0, 1000.0, 400.0, 0.0), 340.0);
+            // Room nothing is seen in is not counted: what is seen,
+            // 20 below the top, has 310 above it and 310 below.
+            let top = top_of_middle(0.0, 1080.0, 480.0, 20.0);
+            assert_eq!(top + 20.0, 310.0);
+            assert_eq!(1080.0 - (top + 480.0), 310.0);
+            // What is taller than the area begins at its top.
+            assert_eq!(top_of_middle(0.0, 300.0, 480.0, 0.0), 0.0);
+        }
+
+        /// What is seen of a frame of the lock or the login on a display
+        /// of this size, as one area: the words, the card, the fields and
+        /// the buttons (and not what covers the display, the soft shadow
+        /// under the card, or gevrek's mark in the corner).
+        fn seen(greeter: bool, layouts: &[&str], display: egui::Vec2) -> Vec<egui::Rect> {
+            let (check, _kept) = std::sync::mpsc::channel();
+            let mut state = State {
+                password: String::new(),
+                status: Status::Waiting,
+                user: if greeter {
+                    String::new()
+                } else {
+                    "ada".to_string()
+                },
+                settings: gevrek_ui::Settings::default(),
+                accent: egui::Color32::from_rgb(0x4c, 0x9a, 0xff),
+                check,
+                unlocked: false,
+                greeter,
+                wallpaper: None,
+                wallpaper_since: None,
+                accent_of_wallpaper: false,
+                layouts: layouts.iter().map(|layout| layout.to_string()).collect(),
+                tell_shown: None,
+            };
+            let context = egui::Context::default();
+            let mut fonts = false;
+            let mut frames = Vec::new();
+            // (The first frame, which is shown as it is, and two after it.)
+            for frame in 0..3 {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, display)),
+                    time: Some(f64::from(frame)),
+                    ..Default::default()
+                };
+                let mut output = context.run_ui(input, |ui| draw(&mut state, ui, &mut fonts, 0));
+                // (Nothing is drawn here: the pictures are not wanted.)
+                output.textures_delta.clear();
+                let mut area = egui::Rect::NOTHING;
+                let mut shapes: Vec<&egui::Shape> =
+                    output.shapes.iter().map(|clipped| &clipped.shape).collect();
+                while let Some(shape) = shapes.pop() {
+                    let part = match shape {
+                        egui::Shape::Vec(several) => {
+                            shapes.extend(several);
+                            continue;
+                        }
+                        egui::Shape::Text(_) => shape.visual_bounding_rect(),
+                        egui::Shape::Rect(rect) if rect.blur_width == 0.0 => rect.rect,
+                        _ => continue,
+                    };
+                    if part.is_positive() && part.width() < display.x && part.height() < display.y {
+                        area = area.union(part);
+                    }
+                }
+                frames.push(area);
+            }
+            frames
+        }
+
+        #[test]
+        fn the_login_and_the_lock_stand_in_the_middle_of_the_display() {
+            for display in [
+                egui::vec2(1920.0, 1080.0),
+                egui::vec2(2560.0, 1440.0),
+                egui::vec2(1366.0, 768.0),
+            ] {
+                for greeter in [true, false] {
+                    for layouts in [&["US", "TR"][..], &["US"][..], &[][..]] {
+                        for (frame, area) in seen(greeter, layouts, display).into_iter().enumerate()
+                        {
+                            let left = area.left();
+                            let right = display.x - area.right();
+                            let above = area.top();
+                            let below = display.y - area.bottom();
+                            assert!(
+                            (left - right).abs() <= 1.0,
+                            "frame {frame}, greeter {greeter}, {layouts:?}, {display:?}: {left} to the left and {right} to the right"
+                        );
+                            assert!(
+                            (above - below).abs() <= 1.0,
+                            "frame {frame}, greeter {greeter}, {layouts:?}, {display:?}: {above} above and {below} below"
+                        );
+                        }
+                    }
+                }
+            }
         }
 
         #[test]
