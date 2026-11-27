@@ -1892,7 +1892,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "anyhow",
  "clap",
@@ -1926,11 +1926,11 @@ dependencies = [
 
 [[package]]
 name = "gevrek-build"
-version = "0.7.7"
+version = "0.7.8"
 
 [[package]]
 name = "gevrek-dm"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "anyhow",
  "bindgen 0.69.5",
@@ -1946,7 +1946,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-engine"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "anyhow",
  "gevrek-model",
@@ -1959,7 +1959,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-host"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "anyhow",
  "gevrek-engine",
@@ -1974,7 +1974,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-link"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "gevrek-model",
  "gevrek-protocol",
@@ -1988,7 +1988,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-lock"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "anyhow",
  "bindgen 0.69.5",
@@ -2008,7 +2008,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-logging"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "env_logger",
  "gevrek-build",
@@ -2019,7 +2019,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-macos"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "anyhow",
  "gevrek-engine",
@@ -2038,7 +2038,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-model"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "anyhow",
  "dirs",
@@ -2051,7 +2051,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-protocol"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "anyhow",
  "gevrek-engine",
@@ -2072,7 +2072,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-schema"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "gevrek-model",
  "schemars",
@@ -2081,7 +2081,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-server"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "anyhow",
  "gevrek-build",
@@ -2101,7 +2101,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-shell"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -2137,7 +2137,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-shellkit"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "accesskit_macos",
  "accesskit_unix",
@@ -2164,7 +2164,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-smithay"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -2193,7 +2193,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-studio"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "anyhow",
  "clap",
@@ -2225,7 +2225,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-system"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "block2 0.6.2",
  "dirs",
@@ -2252,7 +2252,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-testclient"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "gbm",
  "libc",
@@ -2265,7 +2265,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-tutorial"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "gevrek-model",
  "log",
@@ -2275,7 +2275,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-ui"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "csscolorparser",
  "eframe",
@@ -2290,7 +2290,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-update"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "anyhow",
  "log",
@@ -2301,7 +2301,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-win32"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "anyhow",
  "dirs",
@@ -2321,7 +2321,7 @@ dependencies = [
 
 [[package]]
 name = "gevrek-zones"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "gevrek-model",
  "log",
@@ -6712,7 +6712,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "anyhow",
 ]
