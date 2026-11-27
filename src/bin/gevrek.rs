@@ -3033,7 +3033,7 @@ fn elevated_helper(address: &str, action: &str) -> Result<()> {
                 "the task \"{task}\" is not there after ten seconds: it was not registered"
             );
             println!(
-                "The task \"{task}\" is registered, and the helper kept at {}. From the next start of the window manager on the helper is started by it, without a question. After gevrek is updated, do this again: the helper that is kept is the one of this version.",
+                "The task \"{task}\" is registered, and the helper kept at {}. From the next start of the window manager on the helper is started by it, without a question. The helper that is kept is the one of this version: the setup program, install.ps1 and `gevrek update` register it anew when they update; after an update gevrek made by itself when it started, do this again.",
                 gevrek_win32::elevated::kept_helper().display()
             );
         }
@@ -4333,6 +4333,48 @@ async fn update_behind(address: &str) -> Result<()> {
     Ok(())
 }
 
+/// After `gevrek update` put a newer release in place: where the helper
+/// for the windows of administrator programs is registered (the setup
+/// program's checkbox, `install.ps1 -ElevatedHelper` or `gevrek elevated
+/// install`), it is registered anew by the new build, as the setup program
+/// and `install.ps1` do when they update. What was chosen at the install
+/// is so kept: the copy the task starts (where only an administrator can
+/// write) is the one of the new version, and not one that no longer speaks
+/// as the window manager does. Windows asks for an administrator. Where
+/// the task is not registered nothing is done, and nothing is asked.
+///
+/// Whatever comes of it, gevrek is updated: what went wrong is said, and
+/// how to do it by hand.
+#[cfg(windows)]
+fn keep_elevated_helper(install: &std::path::Path, address: &str) {
+    let instance = match gevrek_protocol::Endpoint::parse(address) {
+        gevrek_protocol::Endpoint::Local(instance) => instance,
+        gevrek_protocol::Endpoint::Tcp(_) => gevrek_model::paths::instance(),
+    };
+    if !gevrek_win32::elevated::helper_task_is_registered(&instance) {
+        return;
+    }
+    println!(
+        "The helper for administrator windows is registered: it is registered anew, for this version (Windows asks for an administrator)."
+    );
+    let gevrek = install.join("gevrek.exe");
+    let done = Command::new(&gevrek)
+        .args(["--address", address, "elevated", "install"])
+        .stdout(Stdio::null())
+        .status();
+    match done {
+        Ok(status) if status.success() => {
+            println!("The helper for administrator windows is the one of this version now.")
+        }
+        _ => println!(
+            "The helper was not registered anew: the one kept from before is still the one that is started, and windows of administrator programs may be left alone. Later: gevrek elevated install"
+        ),
+    }
+}
+
+#[cfg(not(windows))]
+fn keep_elevated_helper(_install: &std::path::Path, _address: &str) {}
+
 /// `gevrek update` and `gevrek update --check`.
 async fn update_now(address: &str, check_only: bool) -> Result<()> {
     let folder = update_folder();
@@ -4413,6 +4455,8 @@ async fn update_now(address: &str, check_only: bool) -> Result<()> {
             "(The build before is in {}.)",
             install.join("previous").display()
         );
+        // While nothing of gevrek runs: a helper that runs holds its file.
+        keep_elevated_helper(&install, address);
     }
     if was_running {
         // By the program that is in place now: the new one, or, if the

@@ -32,9 +32,11 @@ asks for an administrator):
     gevrek elevated remove      take it away again
 
 A copy of the helper is then kept in %ProgramFiles%\gevrek, where only an
-administrator can write. install.ps1 and the setup program bring it to
-their version; after `gevrek update` it is the older one until
-`gevrek elevated install` is run again. Removing gevrek removes it.
+administrator can write. install.ps1, the setup program and
+`gevrek update` bring it to their version (Windows asks for an
+administrator again); after an update gevrek made by itself when it
+started it is the older one until `gevrek elevated install` is run again.
+Removing gevrek removes it.
 
 To update:
 
