@@ -3033,7 +3033,7 @@ fn elevated_helper(address: &str, action: &str) -> Result<()> {
                 "the task \"{task}\" is not there after ten seconds: it was not registered"
             );
             println!(
-                "The task \"{task}\" is registered, and the helper kept at {}. From the next start of the window manager on the helper is started by it, without a question. The helper that is kept is the one of this version: the setup program, install.ps1 and `gevrek update` register it anew when they update; after an update gevrek made by itself when it started, do this again.",
+                "The task \"{task}\" is registered, and the helper kept at {}. From the next start of the window manager on the helper is started by it, without a question. The helper that is kept is the one of this version: the setup program, install.ps1 and gevrek's own update register it anew when they update (Windows asks for an administrator then).",
                 gevrek_win32::elevated::kept_helper().display()
             );
         }
@@ -4151,7 +4151,11 @@ fn updated_from_note() -> PathBuf {
 /// nothing of gevrek runs, and the new build is started in this one's
 /// stead. `None`: there was nothing to do, or it could not be done, and
 /// this build starts as always. An update never keeps gevrek from starting.
-fn start_updated(components: &[Component], foreground: bool) -> Option<std::process::ExitStatus> {
+fn start_updated(
+    components: &[Component],
+    foreground: bool,
+    address: &str,
+) -> Option<std::process::ExitStatus> {
     if foreground || !components.contains(&Component::Wm) {
         return None;
     }
@@ -4187,6 +4191,10 @@ fn start_updated(components: &[Component], foreground: bool) -> Option<std::proc
     }
     gevrek_update::unstage(&folder);
     gevrek_update::note_installed_version(&version);
+    // Now, while nothing of gevrek runs: the window manager that is
+    // started next asks for the helper by its task, and gets the one of
+    // its own version.
+    keep_elevated_helper(&install, address);
     if let Err(error) = std::fs::write(updated_from_note(), gevrek_update::current()) {
         log::debug!(
             "{} was not written, so the update is not told: {error}",
@@ -4333,7 +4341,8 @@ async fn update_behind(address: &str) -> Result<()> {
     Ok(())
 }
 
-/// After `gevrek update` put a newer release in place: where the helper
+/// After an update put a newer release in place (`gevrek update`, or the
+/// one gevrek makes by itself when it starts): where the helper
 /// for the windows of administrator programs is registered (the setup
 /// program's checkbox, `install.ps1 -ElevatedHelper` or `gevrek elevated
 /// install`), it is registered anew by the new build, as the setup program
@@ -4507,7 +4516,7 @@ async fn run() -> Result<()> {
 
             // A newer release that is ready is installed first, and starts
             // in this build's stead.
-            if let Some(status) = start_updated(&components, foreground) {
+            if let Some(status) = start_updated(&components, foreground, &cli.address) {
                 std::process::exit(status.code().unwrap_or(1));
             }
 
