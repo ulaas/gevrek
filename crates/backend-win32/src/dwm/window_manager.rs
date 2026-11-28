@@ -638,6 +638,9 @@ pub struct WindowManager {
     /// The windows whose shadow and glow are left out while they slide
     /// with their workspace (`workspace_slides_without_shadows`).
     effects_resting: HashSet<WindowHandle>,
+    /// The windows gevrek has asked to be shown again that Windows does
+    /// not call visible yet (`borders_come_into_sight`).
+    coming_into_sight: HashSet<WindowHandle>,
     /// The overview of a workspace's windows, while it is shown.
     overview: OverviewShown,
     /// The windows of an overview that is over, whose pictures are on
@@ -896,6 +899,7 @@ impl WindowManager {
             going_out: GoingOut::default(),
             pictures_going: HashMap::new(),
             effects_resting: HashSet::new(),
+            coming_into_sight: HashSet::new(),
             overview: OverviewShown::default(),
             overview_leaving: HashSet::new(),
             hidden_with_owner: RefCell::new(HashMap::new()),
@@ -941,6 +945,7 @@ impl WindowManager {
             going_out: GoingOut::default(),
             pictures_going: HashMap::new(),
             effects_resting: HashSet::new(),
+            coming_into_sight: HashSet::new(),
             overview: OverviewShown::default(),
             overview_leaving: HashSet::new(),
             hidden_with_owner: RefCell::new(HashMap::new()),
@@ -1143,6 +1148,7 @@ impl WindowManager {
         self.initial_window_metadata.remove(&handle);
         self.identities.borrow_mut().remove(&handle);
         self.hidden_places.borrow_mut().remove(&handle);
+        self.coming_into_sight.remove(&handle);
     }
 
     /// Remove registry entries whose window no longer exists (a destroy
@@ -2208,6 +2214,43 @@ impl WindowManager {
         }
     }
 
+    /// The borders of the windows that were shown again and are there now.
+    ///
+    /// A window is shown by a message it answers when it gets to it, and
+    /// until then Windows calls it hidden. Its border, asked for in that
+    /// moment (`show_window`, the layout, the first step of its way in),
+    /// was left hidden, and nothing showed it once the window was there:
+    /// that a window gevrek knows is shown is no news to anybody. After a
+    /// change of workspace the windows were without borders, but the one
+    /// with the keyboard (its border is drawn anew for its colour), until
+    /// each had had the keyboard once.
+    fn borders_come_into_sight(&mut self) {
+        if self.coming_into_sight.is_empty() {
+            return;
+        }
+        let waiting: Vec<WindowHandle> = self.coming_into_sight.iter().copied().collect();
+        for handle in waiting {
+            let hwnd = handle.to_hwnd();
+            // SAFETY: plain questions about a window that may be gone.
+            let (exists, shown) =
+                unsafe { (IsWindow(hwnd).as_bool(), IsWindowVisible(hwnd).as_bool()) };
+            if exists && !shown {
+                continue;
+            }
+            self.coming_into_sight.remove(&handle);
+            // (One on its way is given its border with its next step, and
+            // the borders are put away for an overview.)
+            if !exists
+                || self.animation_scheduler.rect_target(handle).is_some()
+                || self.overview_holds(handle)
+                || self.overview_leaving.contains(&handle)
+            {
+                continue;
+            }
+            let _ = self.show_border(handle);
+        }
+    }
+
     /// Whether gevrek has hidden this window, or has asked for it to be
     /// and Windows has not done so yet. A window is hidden by a message it
     /// answers when it gets to it, and until then Windows still calls it
@@ -2229,6 +2272,7 @@ impl WindowManager {
 
     /// Hide a window (for workspace switching)
     pub fn hide_window(&mut self, handle: WindowHandle) -> Result<()> {
+        self.coming_into_sight.remove(&handle);
         unsafe {
             let hwnd = handle.to_hwnd();
             if IsWindow(hwnd).as_bool() {
@@ -2310,6 +2354,10 @@ impl WindowManager {
                 // Also show border if it exists
                 self.show_border(handle)?;
                 self.show_stackbar(handle);
+                // (Not there yet: its border comes when it is.)
+                if !IsWindowVisible(hwnd).as_bool() {
+                    self.coming_into_sight.insert(handle);
+                }
 
                 log::trace!("Showed window: {:?}", handle);
             }
@@ -4394,6 +4442,7 @@ impl WindowManager {
         self.finish_going_out(now);
         self.settle_stand_ins();
         self.settle_resting_effects();
+        self.borders_come_into_sight();
         self.tick_window_overview();
         Ok(())
     }
@@ -8980,6 +9029,97 @@ mod exit_animation_tests {
 
         window_manager.show_window(window).unwrap();
         messages_are_heard();
+        unsafe {
+            let _ = DestroyWindow(HWND(window.0 as _));
+        }
+    }
+
+    /// A window shown again is there when it gets to the message, not
+    /// when it is asked for: its border, left hidden meanwhile, is shown
+    /// when the window is there. (It stayed hidden until the window had
+    /// had the keyboard once.)
+    #[test]
+    fn a_border_comes_back_when_its_window_is_there_again() {
+        let _alone = crate::runtime::test_support::alone_with_the_journal();
+        let mut window_manager = WindowManager::new();
+        window_manager.set_animation_profile(workspace_slide_profile(false, false));
+        // (A program's own window, as only such a one has a border.)
+        let window = {
+            use windows::Win32::UI::WindowsAndMessaging::{
+                WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+            };
+            let hwnd = unsafe {
+                CreateWindowExW(
+                    WS_EX_TOOLWINDOW | WS_EX_APPWINDOW,
+                    windows::core::w!("STATIC"),
+                    windows::core::w!("gevrek border test window"),
+                    WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                    -30000,
+                    -30000,
+                    600,
+                    400,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            }
+            .expect("create shown test window");
+            WindowHandle(hwnd.0 as isize)
+        };
+        let home = Rect::new(-30000, -30000, 600, 400);
+        window_manager.batch_move_resize(&[(window, home)]).unwrap();
+        let look = gevrek_engine::workspace::BorderLook {
+            enabled: true,
+            width: 4,
+            offset: 0,
+            style: gevrek_model::graph::BorderStyle::Square,
+            active_color: (64, 224, 208),
+            inactive_color: (128, 128, 128),
+            active_alpha: 255,
+            inactive_alpha: 255,
+            floating: false,
+        };
+        window_manager
+            .decorate_window_at(window, home, &look, false)
+            .unwrap();
+        let border = window_manager.border_windows[&window].border_hwnd;
+        assert!(is_shown(border));
+
+        window_manager.hide_window(window).unwrap();
+        messages_are_heard();
+        assert!(!is_shown(window) && !is_shown(border));
+
+        // Asked for, and not there yet: so its border is not either,
+        // whoever places it meanwhile.
+        window_manager.show_window(window).unwrap();
+        let _ = window_manager.update_border_position_explicit(
+            window,
+            home.x,
+            home.y,
+            home.width,
+            home.height,
+        );
+        window_manager.tick_runtime_animations().unwrap();
+        assert!(!is_shown(window) && !is_shown(border));
+
+        messages_are_heard();
+        assert!(is_shown(window));
+        window_manager.tick_runtime_animations().unwrap();
+        assert!(is_shown(border), "the border is back with its window");
+        assert!(window_manager.coming_into_sight.is_empty());
+
+        // One hidden again before it was there has none to come.
+        window_manager.hide_window(window).unwrap();
+        messages_are_heard();
+        window_manager.show_window(window).unwrap();
+        window_manager.hide_window(window).unwrap();
+        messages_are_heard();
+        window_manager.tick_runtime_animations().unwrap();
+        assert!(!is_shown(border));
+        assert!(window_manager.coming_into_sight.is_empty());
+
+        let _ = window_manager.remove_border(window);
         unsafe {
             let _ = DestroyWindow(HWND(window.0 as _));
         }
