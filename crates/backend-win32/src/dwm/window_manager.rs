@@ -3475,9 +3475,14 @@ impl WindowManager {
         for handle in self.stand_ins.handles() {
             let hwnd = handle.to_hwnd();
             // SAFETY: plain questions about a window that may be gone.
+            // (One that gevrek has asked to be shown and that is not there
+            // yet is as good as shown: it is shown by a message it answers
+            // when it gets to it. Taken as hidden, a window that came in
+            // with its workspace lost its picture at the first step, and
+            // was there all at once instead of coming in.)
             let shown = unsafe {
                 IsWindow(hwnd).as_bool()
-                    && IsWindowVisible(hwnd).as_bool()
+                    && (IsWindowVisible(hwnd).as_bool() || self.coming_into_sight.contains(&handle))
                     && !IsIconic(hwnd).as_bool()
             };
             // A window that went out with its workspace as a picture is
@@ -9031,6 +9036,54 @@ mod exit_animation_tests {
         messages_are_heard();
         unsafe {
             let _ = DestroyWindow(HWND(window.0 as _));
+        }
+    }
+
+    /// A window that comes in with its workspace as a picture is shown by
+    /// a message it answers when it gets to it: its picture stays until
+    /// then, and comes in. (It was put away at the first step, the window
+    /// being "hidden", and the window was there all at once.)
+    #[test]
+    fn a_picture_comes_in_though_its_window_is_not_there_yet() {
+        let _alone = crate::runtime::test_support::alone_with_the_journal();
+        let mut window_manager = WindowManager::new();
+        window_manager.set_animation_profile(workspace_slide_profile(true, false));
+        let coming = shown_window_out_of_sight();
+        let tile = Rect::new(-30000, -29000, 500, 300);
+        window_manager.batch_move_resize(&[(coming, tile)]).unwrap();
+        window_manager.hide_window(coming).unwrap();
+        messages_are_heard();
+        assert!(!is_shown(coming));
+
+        assert!(window_manager
+            .begin_workspace_transition(&[(coming, tile)], 800, 0)
+            .unwrap());
+        window_manager.show_window(coming).unwrap();
+        assert!(!is_shown(coming));
+        let came_from = window_manager.stand_ins.rect(coming).unwrap();
+
+        std::thread::sleep(Duration::from_millis(30));
+        window_manager.tick_runtime_animations().unwrap();
+        // Not there yet, and its picture is on its way all the same.
+        assert!(!is_shown(coming));
+        assert!(window_manager.stand_ins.has(coming));
+        assert_ne!(window_manager.stand_ins.rect(coming).unwrap(), came_from);
+
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while window_manager.active_animation_count() > 0 && Instant::now() < deadline {
+            window_manager.tick_runtime_animations().unwrap();
+            messages_are_heard();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        window_manager.tick_runtime_animations().unwrap();
+        // Over: the window is seen itself, in its place.
+        assert!(is_shown(coming));
+        assert!(!window_manager.stand_ins.has(coming));
+        assert_eq!(layered_alpha(coming), None);
+        assert_eq!(window_manager.get_window_rect(coming).unwrap(), tile);
+        assert!(window_manager.coming_into_sight.is_empty());
+        unsafe {
+            let _ = DestroyWindow(HWND(coming.0 as _));
         }
     }
 
